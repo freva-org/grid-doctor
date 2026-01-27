@@ -2,12 +2,13 @@
 grid-doctor: Convert lat/lon xarray datasets to HEALPix pyramids and save to S3.
 """
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Tuple
 
 import healpy as hp
 import numpy as np
 import s3fs
 import xarray as xr
+from scipy.interpolate import griddata
 
 
 def get_latlon_resolution(ds: xr.Dataset) -> float:
@@ -16,20 +17,233 @@ def get_latlon_resolution(ds: xr.Dataset) -> float:
     Parameters
     ----------
     ds:
-        Dataset with 'lat' and 'lon' coordinates.
+        Dataset with lat/lon coordinates (regular or curvilinear).
 
     Returns
     -------
     float:
-        Minimum resolution (finest grid spacing) in degrees.
+        Approximate resolution (grid spacing) in degrees.
     """
-    lat = ds["lat"].values
-    lon = ds["lon"].values
+    # Try to get lat/lon - could be 1D coordinates or 2D arrays
+    lat, lon = _get_latlon_arrays(ds)
 
-    lat_res = np.abs(np.diff(lat)).min()
-    lon_res = np.abs(np.diff(lon)).min()
+    if lat.ndim == 1:
+        lat_res = np.abs(np.diff(lat)).min()
+        lon_res = np.abs(np.diff(lon)).min()
+    else:
+        # For 2D grids, estimate resolution from neighboring cells
+        lat_res = np.abs(np.diff(lat, axis=0)).mean()
+        lon_res = np.abs(np.diff(lon, axis=1)).mean()
 
     return float(min(lat_res, lon_res))
+
+
+def _get_latlon_arrays(ds: xr.Dataset) -> Tuple[np.ndarray, np.ndarray]:
+    """Extract latitude and longitude arrays from dataset.
+
+    Handles both regular grids (1D lat/lon) and curvilinear grids (2D lat/lon).
+    Supports various naming conventions (lat/lon, latitude/longitude, XLAT/XLONG,
+    nav_lat/nav_lon, lat_rho/lon_rho, etc.)
+
+    Parameters
+    ----------
+    ds:
+        Dataset with lat/lon coordinates.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]:
+        (latitude, longitude) arrays.
+    """
+    # Common latitude coordinate names
+    lat_names = [
+        "lat",
+        "latitude",
+        "LAT",
+        "LATITUDE",
+        "Latitude",
+        "XLAT",
+        "XLAT_M",
+        "XLAT_U",
+        "XLAT_V",  # WRF
+        "nav_lat",
+        "nav_lat_rho",  # NEMO
+        "lat_rho",
+        "lat_u",
+        "lat_v",
+        "lat_psi",  # ROMS
+        "gridlat_0",
+        "g0_lat_0",  # GRIB
+        "yt_ocean",
+        "yu_ocean",  # MOM
+        "geolat",
+        "geolat_t",
+        "geolat_c",  # GFDL
+    ]
+
+    # Common longitude coordinate names
+    lon_names = [
+        "lon",
+        "longitude",
+        "LON",
+        "LONGITUDE",
+        "Longitude",
+        "XLONG",
+        "XLONG_M",
+        "XLONG_U",
+        "XLONG_V",  # WRF
+        "nav_lon",
+        "nav_lon_rho",  # NEMO
+        "lon_rho",
+        "lon_u",
+        "lon_v",
+        "lon_psi",  # ROMS
+        "gridlon_0",
+        "g0_lon_0",  # GRIB
+        "xt_ocean",
+        "xu_ocean",  # MOM
+        "geolon",
+        "geolon_t",
+        "geolon_c",  # GFDL
+    ]
+
+    lat = None
+    lon = None
+
+    # Search in coordinates
+    for name in lat_names:
+        if name in ds.coords:
+            lat = ds[name].values
+            break
+
+    for name in lon_names:
+        if name in ds.coords:
+            lon = ds[name].values
+            break
+
+    # If not found in coords, search in data variables (some models store lat/lon as variables)
+    if lat is None:
+        for name in lat_names:
+            if name in ds.data_vars:
+                lat = ds[name].values
+                break
+
+    if lon is None:
+        for name in lon_names:
+            if name in ds.data_vars:
+                lon = ds[name].values
+                break
+
+    if lat is None or lon is None:
+        available = list(ds.coords) + list(ds.data_vars)
+        raise ValueError(
+            f"Could not find lat/lon coordinates in dataset. "
+            f"Searched for latitude names: {lat_names[:5]}... "
+            f"and longitude names: {lon_names[:5]}... "
+            f"Available coords/vars: {available}"
+        )
+
+    return lat, lon
+
+
+def _get_spatial_dims(ds: xr.Dataset) -> Tuple[str, str]:
+    """Identify the spatial dimension names in the dataset.
+
+    Parameters
+    ----------
+    ds:
+        Dataset to inspect.
+
+    Returns
+    -------
+    Tuple[str, str]:
+        (y_dim, x_dim) dimension names.
+    """
+    # Common y dimension names (in priority order)
+    y_candidates = [
+        "rlat",
+        "lat",
+        "latitude",
+        "y",
+        "j",
+        "nj",
+        "south_north",
+        "south_north_stag",  # WRF
+        "eta_rho",
+        "eta_u",
+        "eta_v",
+        "eta_psi",  # ROMS
+        "yh",
+        "yq",  # MOM
+        "nj",
+        "njp1",
+    ]
+
+    # Common x dimension names (in priority order)
+    x_candidates = [
+        "rlon",
+        "lon",
+        "longitude",
+        "x",
+        "i",
+        "ni",
+        "west_east",
+        "west_east_stag",  # WRF
+        "xi_rho",
+        "xi_u",
+        "xi_v",
+        "xi_psi",  # ROMS
+        "xh",
+        "xq",  # MOM
+        "ni",
+        "nip1",
+    ]
+
+    y_dim = None
+    x_dim = None
+
+    # First pass: exact match
+    for dim in ds.dims:
+        dim_lower = dim.lower()
+        if y_dim is None and dim_lower in [c.lower() for c in y_candidates]:
+            y_dim = dim
+        elif x_dim is None and dim_lower in [c.lower() for c in x_candidates]:
+            x_dim = dim
+
+    # Second pass: partial match (e.g., "lat" in "gridlat_0")
+    if y_dim is None or x_dim is None:
+        for dim in ds.dims:
+            dim_lower = dim.lower()
+            if y_dim is None and any(
+                c in dim_lower for c in ["lat", "south", "eta", "nj", "yh"]
+            ):
+                y_dim = dim
+            elif x_dim is None and any(
+                c in dim_lower for c in ["lon", "west", "east", "xi", "ni", "xh"]
+            ):
+                x_dim = dim
+
+    # Third pass: if we have 2D lat/lon coords, infer dims from them
+    if y_dim is None or x_dim is None:
+        lat, lon = _get_latlon_arrays(ds)
+        if lat.ndim == 2:
+            # Get dimension names from a 2D coordinate
+            for coord_name in ds.coords:
+                coord = ds[coord_name]
+                if coord.ndim == 2 and coord.shape == lat.shape:
+                    dims = coord.dims
+                    if len(dims) == 2:
+                        y_dim, x_dim = dims[0], dims[1]
+                        break
+
+    if y_dim is None or x_dim is None:
+        raise ValueError(
+            f"Could not identify spatial dimensions. Found dims: {list(ds.dims)}. "
+            f"Expected y-dimensions like: {y_candidates[:5]}... "
+            f"and x-dimensions like: {x_candidates[:5]}..."
+        )
+
+    return y_dim, x_dim
 
 
 def resolution_to_healpix_level(resolution_deg: float) -> int:
@@ -57,12 +271,12 @@ def regrid_to_healpix(
     nest: bool = True,
     method: Literal["nearest", "linear"] = "nearest",
 ) -> xr.Dataset:
-    """Regrid lat/lon dataset to HEALPix using healpy.
+    """Regrid lat/lon dataset to HEALPix using healpy and scipy.
 
     Parameters
     ----------
     ds:
-        Input dataset with lat/lon coordinates.
+        Input dataset with lat/lon coordinates (regular or curvilinear).
     level:
         HEALPix level (nside = 2^level).
     nest:
@@ -79,41 +293,104 @@ def regrid_to_healpix(
     npix = hp.nside2npix(nside)
 
     # Get HEALPix pixel center coordinates
-    # pix2ang returns (theta, phi) where theta is colatitude [0, pi] and phi is longitude [0, 2pi]
     hp_theta, hp_phi = hp.pix2ang(nside, np.arange(npix), nest=nest)
     hp_lat = 90.0 - np.degrees(hp_theta)  # Convert colatitude to latitude
-    hp_lon = np.degrees(hp_phi)  # Convert to degrees
+    hp_lon = np.degrees(hp_phi)  # Convert to degrees [0, 360)
 
-    # Adjust longitude to match input dataset convention
-    # If input uses [-180, 180], adjust HEALPix longitudes accordingly
-    lon_vals = ds["lon"].values
-    if lon_vals.min() < 0:
-        hp_lon = np.where(hp_lon > 180, hp_lon - 360, hp_lon)
+    # Get source lat/lon
+    src_lat, src_lon = _get_latlon_arrays(ds)
 
-    # Create DataArrays for interpolation targets
-    target_lat = xr.DataArray(hp_lat, dims=["cell"])
-    target_lon = xr.DataArray(hp_lon, dims=["cell"])
+    # Get spatial dimension names
+    y_dim, x_dim = _get_spatial_dims(ds)
 
-    # Regrid each variable using xarray's interp
+    # Ensure lat/lon are 2D for interpolation
+    if src_lat.ndim == 1:
+        src_lon_2d, src_lat_2d = np.meshgrid(src_lon, src_lat)
+    else:
+        src_lat_2d = src_lat
+        src_lon_2d = src_lon
+
+    # Normalize longitudes to [0, 360) for consistent interpolation
+    src_lon_2d = src_lon_2d % 360
+    hp_lon = hp_lon % 360
+
+    # Flatten source coordinates for scipy.griddata
+    src_points = np.column_stack([src_lat_2d.ravel(), src_lon_2d.ravel()])
+    target_points = np.column_stack([hp_lat, hp_lon])
+
+    # Regrid each variable
     regridded_vars = {}
     for var in ds.data_vars:
         da = ds[var]
 
-        # Check if variable has lat/lon dimensions
-        if "lat" not in da.dims or "lon" not in da.dims:
-            regridded_vars[var] = da
+        # Check if variable has spatial dimensions
+        if y_dim not in da.dims or x_dim not in da.dims:
+            # Skip non-spatial variables (don't include them)
             continue
 
-        # Interpolate to HEALPix pixel centers
-        regridded = da.interp(
-            lat=target_lat,
-            lon=target_lon,
-            method=method,
-        )
-        regridded_vars[var] = regridded
+        # Get non-spatial dimensions
+        other_dims = [d for d in da.dims if d not in (y_dim, x_dim)]
 
-    # Build output dataset
-    ds_hp = xr.Dataset(regridded_vars, attrs=ds.attrs.copy())
+        # Load data if dask array
+        data = da.values
+
+        # Get axis positions for spatial dims
+        y_axis = da.dims.index(y_dim)
+        x_axis = da.dims.index(x_dim)
+
+        # Move spatial dims to the end
+        axes_to_move = sorted([y_axis, x_axis])
+        data = np.moveaxis(data, axes_to_move, [-2, -1])
+
+        # Reshape to (batch, y, x)
+        batch_shape = data.shape[:-2]
+        n_batch = int(np.prod(batch_shape)) if batch_shape else 1
+        data_flat = data.reshape(n_batch, data.shape[-2], data.shape[-1])
+
+        # Interpolate each batch
+        regridded_flat = []
+        for i in range(n_batch):
+            src_values = data_flat[i].ravel()
+
+            # Handle NaN values - griddata doesn't like them
+            valid_mask = ~np.isnan(src_values)
+            if valid_mask.sum() == 0:
+                # All NaN, return NaN array
+                regridded_flat.append(np.full(npix, np.nan))
+            else:
+                regridded = griddata(
+                    src_points[valid_mask],
+                    src_values[valid_mask],
+                    target_points,
+                    method=method,
+                    fill_value=np.nan,
+                )
+                regridded_flat.append(regridded)
+
+        regridded_data = np.stack(regridded_flat, axis=0)
+
+        # Reshape back: (other_dims..., cell)
+        if batch_shape:
+            regridded_data = regridded_data.reshape(*batch_shape, npix)
+        else:
+            regridded_data = regridded_data.squeeze(axis=0)
+
+        # Create new DataArray with cell dimension
+        new_dims = list(other_dims) + ["cell"]
+        new_coords = {d: ds.coords[d] for d in other_dims if d in ds.coords}
+
+        regridded_vars[var] = xr.DataArray(
+            regridded_data,
+            dims=new_dims,
+            coords=new_coords,
+            attrs=da.attrs,
+        )
+
+    # Build output dataset (only regridded variables)
+    ds_hp = xr.Dataset(regridded_vars)
+
+    # Copy relevant global attributes
+    ds_hp.attrs = {k: v for k, v in ds.attrs.items()}
 
     # Add HEALPix coordinates
     ds_hp = ds_hp.assign_coords(

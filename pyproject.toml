@@ -4,8 +4,8 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "grid-doctor"
-version = "0.1.0"
 description = "Convert lat/lon xarray datasets to HEALPix pyramids and save to S3. Your lat/lon data goes to rehab and comes out HEALed."
+dynamic = ["version"]
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [

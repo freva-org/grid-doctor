@@ -45,26 +45,24 @@ libary and the `helpers` function within this repository.
 An minimal example looks like this:
 
 ```python
-
 import xarray as xr
 
 from data_portal_worker.aggregator import DatasetAggregator
 from data_portal_worker.rechunker import ChunkOptimizer
-
 from grid_doctor import latlon_to_healpix_pyramid, save_pyramid_to_s3
+
+agg = DatasetAggregator()
+opt = ChunkOptimizer()
 
 dset1 = xr.open_mfdataset("<path-to-file>", parallel=True, chunks="auto")
 dset2 = xr.open_mfdataset("<path-to-file>", parallel=True, chunks="auto")
 
-healpix_pyramid = latlon_to_healpix_pyramid(dset)
-agg = DatasetAggregator()
-opt = ChunkOptimizer()
 # The DatasetAggregator is able to combine non aggregatable data to into
 # groups. This should be avoided though - try to aggregate into a single
 # dataset.
 dset_aggregated = agg.aggregate([dset1, dset2])["root"]
-heal_pix_pyramid = latlon_to_healpix_pyramid(dset_aggregated)
-chunked_heal_pix = {k: opt.apply(d) for k, v in healpix_pyramid.items()}
+healpix_pyramid = latlon_to_healpix_pyramid(dset_aggregated)
+chunked_heal_pix = {k: opt.apply(d) for k, d in healpix_pyramid.items()}
 save_pyramid_to_s3(chunked_heal_pi, "s3://<bucket>/<path>.zarr",
                   s3_option={"https://s3.eu-dkrz-1.dkrz.cloud",
                              "key": os.getenv("S3_KEY"),
