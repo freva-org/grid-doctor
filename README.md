@@ -1,4 +1,4 @@
-# Grid docker HEALs your Grids
+# Grid doctor HEALs your Grids
 
 > [!NOTE]
 > This is a scripting solution for a proof of concept. An operational ready
