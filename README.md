@@ -71,6 +71,8 @@ save_pyramid_to_s3(chunked_heal_pi, "s3://<bucket>/<path>.zarr",
                              "serect": os.getenv("S3_SECRET")})
 
 ```
+> [!DANGER]
+> DO NOT commit s3 keys or secrets to this repository. Use env variables.
 
 More fine grained settings options for ``DatasetAggregator`` and ``ChunkOptimizer``
 classes can be found in the
