@@ -42,9 +42,10 @@ dependencies = [
     "healpy",
     "zarr",
     "s3fs",
+    "scipy",
     "fsspec",
     "dask[array]",
-    "data-portal-worker @ git+https://github.com/freva-org/freva-nextgen.git@zarr-aggregation#subdirectory=freva-data-portal-worker",
+    "data-portal-worker @ git+https://github.com/freva-org/freva-nextgen.git#subdirectory=freva-data-portal-worker",
 ]
 
 [project.optional-dependencies]

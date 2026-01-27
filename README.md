@@ -74,8 +74,8 @@ save_pyramid_to_s3(chunked_heal_pi, "s3://<bucket>/<path>.zarr",
 
 More fine grained settings options for ``DatasetAggregator`` and ``ChunkOptimizer``
 classes can be found in the
-[DatasetAggregator](https://github.com/freva-org/freva-nextgen/blob/zarr-aggregation/freva-data-portal-worker/src/data_portal_worker/aggregator.py)
-and the [ChunkOptimizer](https://github.com/freva-org/freva-nextgen/blob/zarr-aggregation/freva-data-portal-worker/src/data_portal_worker/rechunker.py)
+[DatasetAggregator](https://github.com/freva-org/freva-nextgen/blob/main/freva-data-portal-worker/src/data_portal_worker/aggregator.py)
+and the [ChunkOptimizer](https://github.com/freva-org/freva-nextgen/blob/main/freva-data-portal-worker/src/data_portal_worker/rechunker.py)
 source code.
 
 > [!IMPORTANT]
