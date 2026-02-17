@@ -318,79 +318,50 @@ def regrid_to_healpix(
     src_points = np.column_stack([src_lat_2d.ravel(), src_lon_2d.ravel()])
     target_points = np.column_stack([hp_lat, hp_lon])
 
-    # Regrid each variable
+    # Regrid whole dataset
+    # Get axis positions for spatial dims
+    # Move spatial dims to the end
+    def regrid_core(src_2d, src_points, target_points, method, npix):
+        src_values = src_2d.ravel()
+        valid_mask = ~np.isnan(src_values)
+
+        if valid_mask.sum() == 0:
+            return np.full(npix, np.nan, dtype=src_2d.dtype)
+
+        return griddata(
+            src_points[valid_mask],
+            src_values[valid_mask],
+            target_points,
+            method=method,
+            fill_value=np.nan,
+        )
+
     regridded_vars = {}
     for var in ds.data_vars:
-        da = ds[var]
-
-        # Check if variable has spatial dimensions
-        if y_dim not in da.dims or x_dim not in da.dims:
-            # Skip non-spatial variables (don't include them)
-            continue
-
-        # Get non-spatial dimensions
-        other_dims = [d for d in da.dims if d not in (y_dim, x_dim)]
-
-        # Load data if dask array
-        data = da.values
-
-        # Get axis positions for spatial dims
-        y_axis = da.dims.index(y_dim)
-        x_axis = da.dims.index(x_dim)
-
-        # Move spatial dims to the end
-        axes_to_move = sorted([y_axis, x_axis])
-        data = np.moveaxis(data, axes_to_move, [-2, -1])
-
-        # Reshape to (batch, y, x)
-        batch_shape = data.shape[:-2]
-        n_batch = int(np.prod(batch_shape)) if batch_shape else 1
-        data_flat = data.reshape(n_batch, data.shape[-2], data.shape[-1])
-
-        # Interpolate each batch
-        regridded_flat = []
-        for i in range(n_batch):
-            src_values = data_flat[i].ravel()
-
-            # Handle NaN values - griddata doesn't like them
-            valid_mask = ~np.isnan(src_values)
-            if valid_mask.sum() == 0:
-                # All NaN, return NaN array
-                regridded_flat.append(np.full(npix, np.nan))
-            else:
-                regridded = griddata(
-                    src_points[valid_mask],
-                    src_values[valid_mask],
-                    target_points,
-                    method=method,
-                    fill_value=np.nan,
-                )
-                regridded_flat.append(regridded)
-
-        regridded_data = np.stack(regridded_flat, axis=0)
-
-        # Reshape back: (other_dims..., cell)
-        if batch_shape:
-            regridded_data = regridded_data.reshape(*batch_shape, npix)
-        else:
-            regridded_data = regridded_data.squeeze(axis=0)
-
-        # Create new DataArray with cell dimension
-        new_dims = list(other_dims) + ["cell"]
-        new_coords = {d: ds.coords[d] for d in other_dims if d in ds.coords}
-
-        regridded_vars[var] = xr.DataArray(
-            regridded_data,
-            dims=new_dims,
-            coords=new_coords,
-            attrs=da.attrs,
+        regridded_vars[var] = xr.apply_ufunc(
+            regrid_core,
+            ds[var],
+            input_core_dims=[[y_dim, x_dim]],
+            output_core_dims=[["cell"]],
+            kwargs=dict(
+                src_points=src_points,
+                target_points=target_points,
+                method=method,
+                npix=npix,
+            ),
+            vectorize=True,
+            dask="parallelized",
+            output_dtypes=ds[var].dtype,
+            dask_gufunc_kwargs={
+                "output_sizes": {"cell": npix},
+            },
         )
 
     # Build output dataset (only regridded variables)
     ds_hp = xr.Dataset(regridded_vars)
 
     # Copy relevant global attributes
-    ds_hp.attrs = {k: v for k, v in ds.attrs.items()}
+    ds_hp.attrs |= ds.attrs
 
     # Add HEALPix coordinates
     ds_hp = ds_hp.assign_coords(
