@@ -336,7 +336,11 @@ def regrid_to_healpix(
     regridded_vars = {}
     # Regrid each variable individually
     # since they might have different dtypes
-    for var in ds.data_vars:
+    for var, da in ds.data_vars.items():
+        if not {y_dim, x_dim}.issubset(da.dims):
+            print(f"Skipping regridding for {var} ({y_dim,x_dim}) not in its dimensions")
+            continue
+
         regridded_vars[var] = xr.apply_ufunc(
             regrid_core,
             ds[var],
