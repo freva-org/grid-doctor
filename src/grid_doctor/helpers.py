@@ -2,7 +2,7 @@
 grid-doctor: Convert lat/lon xarray datasets to HEALPix pyramids and save to S3.
 """
 
-from typing import Any, Literal, Optional, Tuple
+from typing import Any, Literal, Optional, Tuple, Union
 
 import healpy as hp
 import numpy as np
@@ -542,7 +542,9 @@ def save_pyramid_to_s3(
     pyramid: dict[int, xr.Dataset],
     s3_path: str,
     s3_options: dict[str, Any],
-    mode: Literal["a", "w"] = "a",
+    mode: Literal["a", "w", "r+"] = "a",
+    compute: bool = True,
+    region: Union[Literal["auto"], dict[str, slice]] = "auto",
 ) -> None:
     """Save HEALPix pyramid to S3 as Zarr stores.
 
@@ -566,7 +568,25 @@ def save_pyramid_to_s3(
         print(f"Saving level {level} to {level_path}")
 
         store = s3fs.S3Map(root=level_path, s3=fs)
-        ds.to_zarr(store, mode=mode)
+
+        if region == "auto":
+            ds.to_zarr(store, mode=mode, compute=compute)
+        else:
+            to_drop = (
+                set(
+                    n
+                    for n, v in ds.data_vars.items()
+                    if region.keys().isdisjoint(v.dims)
+                )
+                | set(ds.dims)
+                | set(ds.coords)
+            )
+            ds.drop_vars(to_drop, errors="warn").isel(region).to_zarr(
+                store, mode=mode, compute=compute, region=region
+            )
+
+        if mode == "w" and not compute:
+            ds[list(ds.coords)].to_zarr(store, mode="r+")
 
     print(f"Pyramid saved to {s3_path}")
 
