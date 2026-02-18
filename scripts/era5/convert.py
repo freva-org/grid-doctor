@@ -9,7 +9,7 @@ from glob import glob
 from itertools import chain
 from os import getenv
 
-from grid_doctor import cached_open_dataset
+from grid_doctor import cached_open_dataset, save_pyramid_to_s3, latlon_to_healpix_pyramid
 
 from typing import Iterable
 
@@ -53,14 +53,13 @@ class Era5Layout():
             yield files_chain, f"{self.store_url}/{iso_freq}"
 
 def convert(init=False, region={'time': slice(0,96)}):
+    import zarr
+    zarr.config.set(default_zarr_format=2)
     opts = {
-            'zarr_format': 2,
-            'storage_options': {
-                "endpoint_url":"https://s3.eu-dkrz-1.dkrz.cloud",
-                "key": getenv("S3_KEY"), 
-                "secret": getenv("S3_SECRET"),
-                }
-            }
+        "endpoint_url":"https://s3.eu-dkrz-1.dkrz.cloud",
+        "key": getenv("S3_KEY"), 
+        "secret": getenv("S3_SECRET"),
+    }
 
     for files_chain, dst_url in Era5Layout('s3://icdc/healpix/era5/'):
         files = list(files_chain)
@@ -73,18 +72,12 @@ def convert(init=False, region={'time': slice(0,96)}):
         logging.debug("%s", ds)
 
         logging.info("Converting to healpix")
-        ds_hp = ds.pipe(regrid).chunk({'time':48})
+        ds_hp = latlon_to_healpix_pyramid(ds.chunk({'time':48}))
         logging.debug("%s", ds)
         
         if init:
             logging.info("Initializing store %s", dst_url)
-            ds_hp.to_zarr(dst_url,
-                    mode = 'w',
-                    compute=False,
-                    **opts)
-            ds_hp[['lat','lon']].to_zarr(dst_url,
-                    mode = 'r+',
-                    **opts)
+            save_pyramid_to_s3(ds_hp, dst_url, mode='w',compute=False, s3_options=opts)
 
         else:
             region={
@@ -93,11 +86,12 @@ def convert(init=False, region={'time': slice(0,96)}):
                     }
 
             logging.info("Writting to existing store on region: %s", str(region))
-            ds_hp.drop_vars(set(ds.dims)& set(ds.coords)).drop_vars(['crs', 'cell']).isel(region).to_zarr(dst_url,
-                    mode = 'r+',
-                    region = region,
-                    **opts,
-                    )
+            save_pyramid_to_s3(ds_hp, dst_url, mode='r+', region=region, s3_options=opts)
+            #ds_hp.drop_vars(set(ds.dims)& set(ds.coords)).drop_vars(['crs', 'cell']).isel(region).to_zarr(dst_url,
+            #        mode = 'r+',
+            #        region = region,
+            #        **opts,
+            #        )
 
 
 def main():

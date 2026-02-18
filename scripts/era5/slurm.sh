@@ -7,7 +7,7 @@ cat << EOF
 #! /bin/bash
 #SBATCH --mem=100GB
 #SBATCH --partition=shared
-#SBATCH --time=00:20:00
+#SBATCH --time=1-00:00:00
 
 srun python3 scripts/era5/convert.py --slice-size=\$1
 EOF
