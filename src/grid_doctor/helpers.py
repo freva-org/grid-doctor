@@ -318,9 +318,6 @@ def regrid_to_healpix(
     src_points = np.column_stack([src_lat_2d.ravel(), src_lon_2d.ravel()])
     target_points = np.column_stack([hp_lat, hp_lon])
 
-    # Regrid whole dataset
-    # Get axis positions for spatial dims
-    # Move spatial dims to the end
     def regrid_core(src_2d, src_points, target_points, method, npix):
         src_values = src_2d.ravel()
         valid_mask = ~np.isnan(src_values)
@@ -337,6 +334,8 @@ def regrid_to_healpix(
         )
 
     regridded_vars = {}
+    # Regrid each variable individually
+    # since they might have different dtypes
     for var in ds.data_vars:
         regridded_vars[var] = xr.apply_ufunc(
             regrid_core,
