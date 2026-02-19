@@ -338,7 +338,9 @@ def regrid_to_healpix(
     # since they might have different dtypes
     for var, da in ds.data_vars.items():
         if not {y_dim, x_dim}.issubset(da.dims):
-            print(f"Skipping regridding for {var} ({y_dim,x_dim}) not in its dimensions")
+            print(
+                f"Skipping regridding for {var} ({y_dim, x_dim}) not in its dimensions"
+            )
             continue
 
         regridded_vars[var] = xr.apply_ufunc(
@@ -437,42 +439,33 @@ def coarsen_healpix(ds: xr.Dataset, target_level: int) -> xr.Dataset:
             coarsened_vars[var] = da
             continue
 
-        other_dims = [d for d in da.dims if d != "cell"]
+        da = da.chunk({"cell": -1})
 
-        if not other_dims:
-            # Simple 1D case
-            coarse_data = hp.ud_grade(
-                da.values,
+
+        def _ud_grade(x):
+            return hp.ud_grade(
+                x,
                 target_nside,
                 order_in="NESTED" if is_nested else "RING",
                 order_out="NESTED" if is_nested else "RING",
             )
-            coarsened_vars[var] = xr.DataArray(
-                coarse_data, dims=["cell"], attrs=da.attrs
-            )
-        else:
-            # Multi-dimensional: iterate over other dimensions
-            da_stacked = da.stack(other=other_dims)
-            coarse_maps = []
 
-            for i in range(da_stacked.sizes["other"]):
-                coarse_map = hp.ud_grade(
-                    da_stacked.isel(other=i).values,
-                    target_nside,
-                    order_in="NESTED" if is_nested else "RING",
-                    order_out="NESTED" if is_nested else "RING",
-                )
-                coarse_maps.append(coarse_map)
+        coarse_da = xr.apply_ufunc(
+            _ud_grade,
+            da,
+            input_core_dims=[["cell"]],
+            output_core_dims=[["cell"]],
+            exclude_dims={"cell"},
+            output_dtypes=[da.dtype],
+            dask_gufunc_kwargs={
+                "output_sizes": {"cell": npix_target},
+            },
+            vectorize=True,
+            dask="parallelized",
+            keep_attrs=True,
+        )
 
-            coarse_stacked = xr.DataArray(
-                np.stack(coarse_maps, axis=-1),
-                dims=["cell", "other"],
-                coords={"other": da_stacked.coords["other"]},
-            ).unstack("other")
-
-            coarsened_vars[var] = coarse_stacked.transpose(*da.dims).assign_attrs(
-                da.attrs
-            )
+        coarsened_vars[var] = coarse_da
 
     # Build output dataset
     ds_coarse = xr.Dataset(coarsened_vars, attrs=ds.attrs.copy())
