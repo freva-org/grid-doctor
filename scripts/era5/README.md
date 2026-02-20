@@ -30,6 +30,7 @@ For each time frequency:
  - Else:
    - Launch jobs that write slices of the dataset (potencially in parallel)
 
+### Execution
 
 `scripts/era5/slum.sh` prints the commands that launch the 2 jobs. The first to initialize the dataset, the second to schedule all the tasks that will populate it. For this readon the **first should succeed before the second is triggered**
 
