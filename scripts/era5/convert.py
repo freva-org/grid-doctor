@@ -87,6 +87,14 @@ def convert(init=False, region={"time": slice(0, 96)}):
         ds = cached_open_dataset(files, engine="h5netcdf", parallel=False)
         logging.debug("%s", ds)
 
+        if region["time"].start > ds.time.size:
+            logging.warning(
+                "Region (%s) not overlapping with dataset (%s), skipping!",
+                region,
+                {"time": slice(0, ds.time.size)},
+            )
+            continue
+
         logging.info("Converting to healpix")
         ds_hp = latlon_to_healpix_pyramid(ds.chunk({"time": 48}))
         logging.debug("%s", ds)
