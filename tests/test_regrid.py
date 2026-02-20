@@ -35,9 +35,34 @@ def test_regrid_to_healpix(test_ds):
     ids=["regular", "curvilinear", "era5"],
     indirect=True,
 )
-def test_latlon_to_healpix_pyramid(test_ds):
-    hp_p = latlon_to_healpix_pyramid(test_ds)
+@pytest.mark.parametrize(
+    "method",
+    ["nearest", "linear", "conservative"],
+    ids=["nearest", "linear", "conservative"],
+)
+def test_latlon_to_healpix_pyramid_lazy(test_ds, method):
+    hp_p = latlon_to_healpix_pyramid(test_ds, method=method)
     for level, hp_ds in hp_p.items():
         assert all((hp_ds.attrs[k] == v for k, v in test_ds.attrs.items()))
         ## ensure all variables are dask.array.Array / lazy
         assert all((isinstance(v.data, DaskArray) for v in hp_ds.data_vars.values()))
+
+
+@pytest.mark.parametrize(
+    "test_ds",
+    ["regular", "curvilinear", "era5"],
+    ids=["regular", "curvilinear", "era5"],
+    indirect=True,
+)
+@pytest.mark.parametrize(
+    "method",
+    ["nearest", "linear", "conservative"],
+    ids=["nearest", "linear", "conservative"],
+)
+def test_latlon_to_healpix_pyramid_global_mean(test_ds, method):
+    hp_p = latlon_to_healpix_pyramid(test_ds, method=method)
+
+    _, hp_ds = hp_p.popitem()
+
+    for name, var in hp_ds.data_vars.items():
+        meam = var.isel(time=0).mean().compute()
