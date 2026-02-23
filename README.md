@@ -40,7 +40,7 @@ Then add your script solution into `scripts/<yourname>/convert.py`.
 
 Please make use of the installed
 [data-portal](https://github.com/freva-org/freva-nextgen/tree/main/freva-data-portal-worker)
-libary and the `helpers` function within this repository.
+library and the `helpers` function within this repository.
 
 An minimal example looks like this:
 
@@ -79,7 +79,7 @@ and the [ChunkOptimizer](https://github.com/freva-org/freva-nextgen/blob/main/fr
 source code.
 
 > [!IMPORTANT]
-> The example usage notebook is for demo purpose only. Pleas do not submit a
+> The example usage notebook is for demo purpose only. Please do not submit a
 > jupyter notebook as your solution.
 >
 >

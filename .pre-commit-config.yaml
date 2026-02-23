@@ -2,13 +2,6 @@
 # Please run `pre-commit run --all-files` when adding or changing entries.
 
 repos:
-  - repo: https://github.com/asottile/pyupgrade
-    rev: v3.19.1
-    hooks:
-      - id: pyupgrade
-        args:
-          - "--py310-plus"
-
   - repo: local
     hooks:
       - id: ruff
@@ -43,7 +36,6 @@ repos:
       - id: mypy
         name: mypy
         entry: mypy
-        args: [--no-incremental]
         language: system
         stages: [pre-commit]
         types: [python]

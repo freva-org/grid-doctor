@@ -448,9 +448,7 @@ def coarsen_healpix(ds: xr.Dataset, target_level: int) -> xr.Dataset:
     is_nested = order in ("nested", "nest")
 
     # Get new pixel coordinates
-    hp_theta, hp_phi = hp.pix2ang(
-        target_nside, np.arange(npix_target), nest=is_nested
-    )
+    hp_theta, hp_phi = hp.pix2ang(target_nside, np.arange(npix_target), nest=is_nested)
     hp_lat = 90 - np.degrees(hp_theta)
     hp_lon = np.degrees(hp_phi)
 
@@ -561,10 +559,7 @@ def create_healpix_pyramid(
     # Coarsen down to min_level
     current_ds = ds_hp
     for level in range(max_level - 1, min_level - 1, -1):
-        print(
-            f"Coarsening to level {level} "
-            f"(NSIDE={2**level}, npix={12 * 4**level})"
-        )
+        print(f"Coarsening to level {level} (NSIDE={2**level}, npix={12 * 4**level})")
         current_ds = coarsen_healpix(current_ds, level)
         pyramid[level] = current_ds
 
