@@ -95,10 +95,23 @@ comfortable with submitting PR's you can file an issue report
 ### Contributing
 
 This repository uses pre-commit to maintain the code quality and handle issues related to coding standards etc.
-Hence please install pre-commit in your environment. As of now, the checks are done with 'codespell', 'mypy', 
-'ruff' , so please install those in your environment. Once you create your branch or clone the repository, please
-run 'pre-commit install' so that the hooks are created. From then onwards any commit you attempt to the repository, 
+Hence please install pre-commit in your environment.
+```console
+   pip install pre-commit
+```
+As of now, the checks are done with 'codespell', 'mypy', 'ruff'. Please install those in your environment.
+Once you create your branch or clone the repository, please run
+```console
+   pre-commit install
+```
+so that the hooks are created. From then onwards any commit you attempt to the repository, 
 will first trigger the 'pre-commit' checks and it will throw errors, which needs to be rectified before the commit 
 can happen.
-On the other hand one can also trigger 'pre-commit' manually using 'pre-commit run --all-files'.
-Also to run a specific tool , for example 'codespell' , use 'pre-commit run codespell --all-files'.
+On the other hand one can also trigger 'pre-commit' manually using 
+```console
+   pre-commit run --all-files
+```
+Also to run a specific tool , for example 'codespell' , use 
+```console
+   pre-commit run codespell --all-files
+```
