@@ -100,6 +100,10 @@ Hence please install pre-commit in your environment.
    pip install pre-commit
 ```
 As of now, the checks are done with 'codespell', 'mypy', 'ruff'. Please install those in your environment.
+```console
+   pip install mypy ruff codespell
+```
+
 Once you create your branch or clone the repository, please run
 ```console
    pre-commit install
