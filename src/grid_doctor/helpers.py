@@ -2,7 +2,7 @@
 grid-doctor: Convert lat/lon xarray datasets to HEALPix pyramids and save to S3.
 """
 
-from typing import Any, Literal, Optional, Tuple
+from typing import Any, Literal, Optional, Tuple, Union
 
 import healpy as hp
 import numpy as np
@@ -314,24 +314,72 @@ def regrid_to_healpix(
     src_lon_2d = src_lon_2d % 360
     hp_lon = hp_lon % 360
 
-    # Flatten source coordinates for scipy.griddata
-    src_points = np.column_stack([src_lat_2d.ravel(), src_lon_2d.ravel()])
-    target_points = np.column_stack([hp_lat, hp_lon])
+    if method == "conservative":
+        # Compute cell areas
+        lat_bnds = ds["lat_bnds"].values
+        lon_bnds = ds["lon_bnds"].values % 360
+        if lat_bnds.ndim == 2 and lon_bnds.ndim == 2:
+            lat1 = np.deg2rad(lat_bnds[:, 0])
+            lat2 = np.deg2rad(lat_bnds[:, 1])
+            lon1 = np.deg2rad(lon_bnds[:, 0])
+            lon2 = np.deg2rad(lon_bnds[:, 1])
+            cell_area = np.abs(
+                (np.sin(lat2) - np.sin(lat1))[:, None] * (lon2 - lon1)[None, :]
+            )
+        else:
+            lat1 = np.deg2rad(lat_bnds[..., 0])
+            lat2 = np.deg2rad(lat_bnds[..., 1])
+            lon1 = np.deg2rad(lon_bnds[..., 0])
+            lon2 = np.deg2rad(lon_bnds[..., 1])
+            cell_area = np.abs((lon2 - lon1) * (np.sin(lat2) - np.sin(lat1)))
 
-    def regrid_core(src_2d, src_points, target_points, method, npix):
-        src_values = src_2d.ravel()
-        valid_mask = ~np.isnan(src_values)
+        theta = np.deg2rad(90.0 - src_lat_2d.ravel())
+        phi = np.deg2rad(src_lon_2d.ravel())
+        pix_index = hp.ang2pix(nside, theta, phi, nest=nest)
+        flat_area = cell_area.ravel()
 
-        if valid_mask.sum() == 0:
-            return np.full(npix, np.nan, dtype=src_2d.dtype)
+        def regrid_conservative_func(da):
+            values = da.ravel()
+            valid = ~np.isnan(values)
+            if valid.sum() == 0:
+                return np.full(npix, np.nan, dtype=da.dtype)
 
-        return griddata(
-            src_points[valid_mask],
-            src_values[valid_mask],
-            target_points,
-            method=method,
-            fill_value=np.nan,
-        )
+            weighted_sum = np.bincount(
+                pix_index[valid],
+                weights=values[valid] * flat_area[valid],
+                minlength=npix,
+            )
+            area_sum = np.bincount(
+                pix_index[valid],
+                weights=flat_area[valid],
+                minlength=npix,
+            )
+            out = weighted_sum / area_sum
+            out[area_sum == 0] = np.nan
+            return out
+
+        regrid_core = regrid_conservative_func
+    else:
+        # Flatten source coordinates for scipy.griddata
+        src_points = np.column_stack([src_lat_2d.ravel(), src_lon_2d.ravel()])
+        target_points = np.column_stack([hp_lat, hp_lon])
+
+        def regrid_interpolate_func(src_2d):
+            src_values = src_2d.ravel()
+            valid_mask = ~np.isnan(src_values)
+
+            if valid_mask.sum() == 0:
+                return np.full(npix, np.nan, dtype=src_2d.dtype)
+
+            return griddata(
+                src_points[valid_mask],
+                src_values[valid_mask],
+                target_points,
+                method=method,
+                fill_value=np.nan,
+            )
+
+        regrid_core = regrid_interpolate_func
 
     regridded_vars = {}
     # Regrid each variable individually
@@ -348,12 +396,6 @@ def regrid_to_healpix(
             ds[var],
             input_core_dims=[[y_dim, x_dim]],
             output_core_dims=[["cell"]],
-            kwargs=dict(
-                src_points=src_points,
-                target_points=target_points,
-                method=method,
-                npix=npix,
-            ),
             vectorize=True,
             dask="parallelized",
             output_dtypes=ds[var].dtype,
@@ -498,6 +540,7 @@ def create_healpix_pyramid(
     ds: xr.Dataset,
     max_level: int,
     min_level: int = 0,
+    **kwargs,
 ) -> dict[int, xr.Dataset]:
     """Create HEALPix pyramid from max_level down to min_level.
 
@@ -522,7 +565,7 @@ def create_healpix_pyramid(
         f"Regridding to HEALPix level {max_level} "
         f"(NSIDE={2**max_level}, npix={12 * 4**max_level})"
     )
-    ds_hp = regrid_to_healpix(ds, max_level)
+    ds_hp = regrid_to_healpix(ds, max_level, **kwargs)
     pyramid[max_level] = ds_hp
 
     # Coarsen down to min_level
@@ -542,7 +585,9 @@ def save_pyramid_to_s3(
     pyramid: dict[int, xr.Dataset],
     s3_path: str,
     s3_options: dict[str, Any],
-    mode: Literal["a", "w"] = "a",
+    mode: Literal["a", "w", "r+"] = "a",
+    compute: bool = True,
+    region: Union[Literal["auto"], dict[str, slice]] = "auto",
 ) -> None:
     """Save HEALPix pyramid to S3 as Zarr stores.
 
@@ -566,7 +611,25 @@ def save_pyramid_to_s3(
         print(f"Saving level {level} to {level_path}")
 
         store = s3fs.S3Map(root=level_path, s3=fs)
-        ds.to_zarr(store, mode=mode)
+
+        if region == "auto":
+            ds.to_zarr(store, mode=mode, compute=compute)
+        else:
+            to_drop = (
+                set(
+                    n
+                    for n, v in ds.data_vars.items()
+                    if region.keys().isdisjoint(v.dims)
+                )
+                | set(ds.dims)
+                | set(ds.coords)
+            )
+            ds.drop_vars(to_drop, errors="warn").isel(region).to_zarr(
+                store, mode=mode, compute=compute, region=region
+            )
+
+        if mode == "w" and not compute:
+            ds[list(ds.coords)].to_zarr(store, mode="r+")
 
     print(f"Pyramid saved to {s3_path}")
 
@@ -575,6 +638,7 @@ def latlon_to_healpix_pyramid(
     ds: xr.Dataset,
     min_level: int = 0,
     max_level: Optional[int] = None,
+    method: Literal["nearest", "linear", "conservative"] = "nearest",
 ) -> dict[int, xr.Dataset]:
     """Full pipeline: lat/lon dataset -> HEALPix pyramid.
 
