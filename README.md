@@ -108,7 +108,7 @@ Once you create your branch or clone the repository, please run
 ```console
    pre-commit install
 ```
-so that the hooks are created. From then onwards any commit you attempt to the repository, 
+in that directory, so that the hooks are created. From then onwards any commit you attempt to the repository, 
 will first trigger the 'pre-commit' checks and it will throw errors, which needs to be rectified before the commit 
 can happen.
 On the other hand one can also trigger 'pre-commit' manually using 
