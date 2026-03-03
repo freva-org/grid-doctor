@@ -618,6 +618,7 @@ def save_pyramid_to_s3(
     mode
         Write mode: 'w' to overwrite, 'a' to append.
     """
+    s3_path = s3_path.rstrip('/')
     s3_options = s3_options or {}
 
     fs = s3fs.S3FileSystem(**s3_options)
