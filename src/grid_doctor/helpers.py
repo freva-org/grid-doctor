@@ -9,6 +9,7 @@ import numpy as np
 import s3fs
 import xarray as xr
 from scipy.interpolate import griddata
+from scipy.spatial import cKDTree
 
 
 def get_latlon_resolution(ds: xr.Dataset) -> float:
@@ -270,6 +271,7 @@ def regrid_to_healpix(
     level: int,
     nest: bool = True,
     method: Literal["nearest", "linear"] = "nearest",
+    keep_nans: Optional[bool] = False,
 ) -> xr.Dataset:
     """Regrid lat/lon dataset to HEALPix using healpy and scipy.
 
@@ -371,13 +373,20 @@ def regrid_to_healpix(
             if valid_mask.sum() == 0:
                 return np.full(npix, np.nan, dtype=src_2d.dtype)
 
-            return griddata(
+            interp = griddata(
                 src_points[valid_mask],
                 src_values[valid_mask],
                 target_points,
                 method=method,
                 fill_value=np.nan,
             )
+
+            if keep_nans:
+                tree = cKDTree(src_points)
+                _, idx = tree.query(target_points, k=1)  # find nearest source index for each target
+                interp[np.isnan(src_values[idx])] = np.nan
+
+            return interp
 
         regrid_core = regrid_interpolate_func
 
@@ -398,7 +407,7 @@ def regrid_to_healpix(
             output_core_dims=[["cell"]],
             vectorize=True,
             dask="parallelized",
-            output_dtypes=ds[var].dtype,
+            output_dtypes=[ds[var].dtype],
             dask_gufunc_kwargs={
                 "output_sizes": {"cell": npix},
             },
@@ -485,12 +494,19 @@ def coarsen_healpix(ds: xr.Dataset, target_level: int) -> xr.Dataset:
 
 
         def _ud_grade(x):
-            return hp.ud_grade(
+            downgraded = hp.ud_grade(
                 x,
                 target_nside,
                 order_in="NESTED" if is_nested else "RING",
                 order_out="NESTED" if is_nested else "RING",
+                pess=True,
+                dtype=x.dtype,
             )
+            # It could be that unseen pixels exist (-1.65e30) so we must overwrite them as NaN
+            # https://healpy.readthedocs.io/en/latest/tutorial.html#Visualization
+            downgraded[downgraded == hp.UNSEEN] = np.nan
+            return downgraded
+
 
         coarse_da = xr.apply_ufunc(
             _ud_grade,
@@ -639,6 +655,7 @@ def latlon_to_healpix_pyramid(
     min_level: int = 0,
     max_level: Optional[int] = None,
     method: Literal["nearest", "linear", "conservative"] = "nearest",
+    keep_nans: Optional[bool] = False,
 ) -> dict[int, xr.Dataset]:
     """Full pipeline: lat/lon dataset -> HEALPix pyramid.
 
@@ -666,4 +683,4 @@ def latlon_to_healpix_pyramid(
     print(f"Selected max HEALPix level: {max_level} (NSIDE={2**max_level})")
 
     # Step 3: Create pyramid
-    return create_healpix_pyramid(ds, max_level, min_level)
+    return create_healpix_pyramid(ds, max_level, min_level, method=method, keep_nans=keep_nans)
