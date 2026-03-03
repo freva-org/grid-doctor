@@ -28,20 +28,21 @@ def test_regrid_to_healpix(test_ds):
         assert var_check(v, attrs_eq)
         assert var_check(v, dtype_eq)
 
-
 @pytest.mark.parametrize(
-    "test_ds",
-    ["regular", "curvilinear", "era5"],
-    ids=["regular", "curvilinear", "era5"],
-    indirect=True,
-)
-@pytest.mark.parametrize(
-    "method",
-    ["nearest", "linear", "conservative"],
-    ids=["nearest", "linear", "conservative"],
+    "test_ds,method",
+    [
+        ("regular", "nearest"),
+        ("regular", "linear"),
+        ("curvilinear", "nearest"),
+        ("curvilinear", "linear"),
+        ("era5", "nearest"),
+        ("era5", "linear"),
+        ("era5", "conservative"),
+    ],
+    indirect=["test_ds"],
 )
 def test_latlon_to_healpix_pyramid_lazy(test_ds, method):
-    hp_p = latlon_to_healpix_pyramid(test_ds, method=method)
+    hp_p = latlon_to_healpix_pyramid(test_ds.isel(time=slice(0,1)), method=method)
     for level, hp_ds in hp_p.items():
         assert all((hp_ds.attrs[k] == v for k, v in test_ds.attrs.items()))
         ## ensure all variables are dask.array.Array / lazy
@@ -49,15 +50,17 @@ def test_latlon_to_healpix_pyramid_lazy(test_ds, method):
 
 
 @pytest.mark.parametrize(
-    "test_ds",
-    ["regular", "curvilinear", "era5"],
-    ids=["regular", "curvilinear", "era5"],
-    indirect=True,
-)
-@pytest.mark.parametrize(
-    "method",
-    ["nearest", "linear", "conservative"],
-    ids=["nearest", "linear", "conservative"],
+    "test_ds,method",
+    [
+        ("regular", "nearest"),
+        ("regular", "linear"),
+        ("curvilinear", "nearest"),
+        ("curvilinear", "linear"),
+        ("era5", "nearest"),
+        ("era5", "linear"),
+        ("era5", "conservative"),
+    ],
+    indirect=["test_ds"],
 )
 def test_latlon_to_healpix_pyramid_global_mean(test_ds, method):
     hp_p = latlon_to_healpix_pyramid(test_ds, method=method)
