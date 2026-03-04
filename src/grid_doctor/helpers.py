@@ -10,7 +10,7 @@ import s3fs
 import xarray as xr
 from scipy.interpolate import griddata
 from scipy.spatial import cKDTree
-
+import logging
 
 def get_latlon_resolution(ds: xr.Dataset) -> float:
     """Calculate spatial resolution of a lat/lon dataset in degrees.
@@ -317,23 +317,26 @@ def regrid_to_healpix(
     hp_lon = hp_lon % 360
 
     if method == "conservative":
-        # Compute cell areas
-        lat_bnds = ds["lat_bnds"].values
-        lon_bnds = ds["lon_bnds"].values % 360
-        if lat_bnds.ndim == 2 and lon_bnds.ndim == 2:
-            lat1 = np.deg2rad(lat_bnds[:, 0])
-            lat2 = np.deg2rad(lat_bnds[:, 1])
-            lon1 = np.deg2rad(lon_bnds[:, 0])
-            lon2 = np.deg2rad(lon_bnds[:, 1])
-            cell_area = np.abs(
-                (np.sin(lat2) - np.sin(lat1))[:, None] * (lon2 - lon1)[None, :]
-            )
-        else:
-            lat1 = np.deg2rad(lat_bnds[..., 0])
-            lat2 = np.deg2rad(lat_bnds[..., 1])
-            lon1 = np.deg2rad(lon_bnds[..., 0])
-            lon2 = np.deg2rad(lon_bnds[..., 1])
-            cell_area = np.abs((lon2 - lon1) * (np.sin(lat2) - np.sin(lat1)))
+        # Compute cell areas for regular lat/lon grid
+        lat_bnds = ds["lat_bnds"]
+        lon_bnds = ds["lon_bnds"]
+
+        if "time" in lat_bnds.dims:
+            lat_bnds = lat_bnds.isel(time=0)
+        if "time" in lon_bnds.dims:
+            lon_bnds = lon_bnds.isel(time=0)
+
+        lat_bnds = lat_bnds.values
+        lon_bnds = lon_bnds.values % 360
+
+        lat1 = np.deg2rad(lat_bnds[:, 0])
+        lat2 = np.deg2rad(lat_bnds[:, 1])
+        lon1 = np.deg2rad(lon_bnds[:, 0])
+        lon2 = np.deg2rad(lon_bnds[:, 1])
+
+        dphi = np.sin(lat2) - np.sin(lat1)
+        dlambda = lon2 - lon1
+        cell_area = np.abs(dphi[:, None] * dlambda[None, :])
 
         theta = np.deg2rad(90.0 - src_lat_2d.ravel())
         phi = np.deg2rad(src_lon_2d.ravel())
@@ -492,7 +495,6 @@ def coarsen_healpix(ds: xr.Dataset, target_level: int) -> xr.Dataset:
 
         da = da.chunk({"cell": -1})
 
-
         def _ud_grade(x):
             downgraded = hp.ud_grade(
                 x,
@@ -504,7 +506,10 @@ def coarsen_healpix(ds: xr.Dataset, target_level: int) -> xr.Dataset:
             )
             # It could be that unseen pixels exist (-1.65e30) so we must overwrite them as NaN
             # https://healpy.readthedocs.io/en/latest/tutorial.html#Visualization
-            downgraded[downgraded == hp.UNSEEN] = np.nan
+            try:
+                downgraded[downgraded == hp.UNSEEN] = np.nan
+            except ValueError as e:
+                logging.warning("%s (variable %s will contain healpy.UNSEEN sentinel values)", e, var)
             return downgraded
 
 
