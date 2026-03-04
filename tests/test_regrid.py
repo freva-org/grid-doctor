@@ -6,13 +6,20 @@ from grid_doctor.helpers import regrid_to_healpix, latlon_to_healpix_pyramid
 
 
 @pytest.mark.parametrize(
-    "test_ds",
-    ["regular", "curvilinear", "era5"],
-    ids=["regular", "curvilinear", "era5"],
-    indirect=True,
+    "test_ds,method",
+    [
+        ("regular", "nearest"),
+        ("regular", "linear"),
+        ("curvilinear", "nearest"),
+        ("curvilinear", "linear"),
+        ("era5", "nearest"),
+        ("era5", "linear"),
+        ("era5", "conservative"),
+    ],
+    indirect=["test_ds"],
 )
-def test_regrid_to_healpix(test_ds):
-    hp_ds = regrid_to_healpix(test_ds, level=9)
+def test_regrid_to_healpix(test_ds, method):
+    hp_ds = regrid_to_healpix(test_ds, level=9, method=method)
 
     print(test_ds)
     print(hp_ds)
@@ -63,9 +70,9 @@ def test_latlon_to_healpix_pyramid_lazy(test_ds, method):
     indirect=["test_ds"],
 )
 def test_latlon_to_healpix_pyramid_global_mean(test_ds, method):
-    hp_p = latlon_to_healpix_pyramid(test_ds, method=method)
+    hp_p = latlon_to_healpix_pyramid(test_ds.isel(time=0), method=method)
 
     _, hp_ds = hp_p.popitem()
 
     for name, var in hp_ds.data_vars.items():
-        meam = var.isel(time=0).mean().compute()
+        meam = var.mean().compute()

@@ -37,22 +37,22 @@ def era5(
 
     tas = rand(
         (len(time), len(lat), len(lon)),
-        chunks=(40, 640, 1280),
+        chunks=(1, 640, 1280),
     ).astype("float32")
 
     pr = rand(
         (len(time), len(lat), len(lon)),
-        chunks=(39, 640, 1280),
+        chunks=(1, 640, 1280),
     ).astype("float32")
 
     lon_bnds = rand(
         (len(time), len(lon), 2),
-        chunks=(729, 1280, 2),
+        chunks=(1, 1280, 2),
     )
 
     lat_bnds = rand(
         (len(time), len(lat), 2),
-        chunks=(729, 640, 2),
+        chunks=(1, 640, 2),
     )
 
     ds = xr.Dataset(
@@ -111,6 +111,7 @@ def _make_dataset(grid=Literal['regular','curvilinear']) -> xr.Dataset:
             "land_mask": (
                 dims.keys(),
                 (da.random.random(shape, chunks=chunks) > 0.7),
+                {'test':'ok'}
             ),
         },
         coords=coords,
