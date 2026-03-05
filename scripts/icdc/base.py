@@ -1,6 +1,7 @@
 import xarray as xr
 import logging
 
+from abc import ABC, abstractmethod
 from typing import Iterable, Mapping
 from os import getenv
 
@@ -11,7 +12,7 @@ from grid_doctor import (
 
 Pyramid = Mapping[int, xr.Dataset]
 
-class BaseStructure():
+class BaseStructure(ABC):
     _open_kargs = {}
 
     def __init__(self, structure):
@@ -32,6 +33,10 @@ class BaseStructure():
         for k, v in self._structure.items():
             yield k, v
 
+    @abstractmethod
+    def convert(self) -> Mapping[str, Pyramid]:
+        pass
+    
     def write(self, pyramids:Mapping[str, Pyramid], init:bool = False, region: Mapping[str,slice] = {'time':slice(0,1)}):
         import zarr
         zarr.config.set(default_zarr_format=2)
@@ -47,4 +52,5 @@ class BaseStructure():
             else:
                 logging.info("Writting region: %s to %s", str(region), dst_url)
                 save_pyramid_to_s3(pyramid, dst_url, mode="r+", region=region, s3_options=opts)
+
 
