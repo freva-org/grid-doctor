@@ -42,7 +42,7 @@ class BaseStructure():
         }
         for dst_url, pyramid in pyramids.items():
             if init:
-                logging.info("Writting ONLY metadata to %s", str(region), dst_url)
+                logging.info("Writting ONLY metadata to %s", dst_url)
                 save_pyramid_to_s3(pyramid, dst_url, mode="w", compute=False, s3_options=opts)
             else:
                 logging.info("Writting region: %s to %s", str(region), dst_url)
