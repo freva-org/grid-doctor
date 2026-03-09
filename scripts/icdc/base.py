@@ -1,16 +1,114 @@
 import xarray as xr
 import logging
+import zarr
 
 from abc import ABC, abstractmethod
-from typing import Iterable, Mapping
+from dataclasses import dataclass, field
+from typing import Callable, Iterable, Mapping, Optional
 from os import getenv
 
 from grid_doctor import (
     cached_open_dataset,
+    latlon_to_healpix_pyramid,
     save_pyramid_to_s3,
 )
 
+Region = dict[str, slice]
 Pyramid = Mapping[int, xr.Dataset]
+
+
+@dataclass
+class Config:
+    dst_s3url: str
+    paths: str
+    engine: str = "netcdf4"
+    parallel: bool = False,
+    chunking: dict[str, int] = field(default_factory=dict)
+    regrid_function: Callable[[],Pyramid] = latlon_to_healpix_pyramid
+    init: bool = False
+    region: Optional[Region]=None
+    zarr_format: int = 2
+
+
+class Source(ABC):
+    def __init__(self, spec: Config):
+        self.spec = spec
+
+    def load(self) -> xr.Dataset:
+        try:
+            ds = cached_open_dataset(
+                self.spec.paths, engine=self.spec.engine, parallel=self.spec.parallel
+            )
+        except Exception as e:
+            print(f"ERROR unable to open source dataset specified with {self.spec}")
+            print(f"{e}")
+            raise e
+        return ds
+
+
+class Transform(ABC):
+    def __init__(self, function: Callable, chunking: Optional[dict[str:int]] = None):
+        self.function = function
+        self.chunking = chunking
+
+    def convert(self, ds: xr.Dataset) -> Pyramid:
+        print(ds.chunk(self.chunking))
+        print(self.function)
+        return self.function(ds.chunk(self.chunking))
+
+
+
+class ZarrS3Sink():
+    def __init__(self, base_url, init:bool, region:Optional[Region] = None):
+        self.base_url = base_url
+        self.s3_options = {
+            "endpoint_url": "https://s3.eu-dkrz-3.dkrz.cloud",
+            "key": getenv("S3_KEY"),
+            "secret": getenv("S3_SECRET"),
+        }
+        self.init = init,
+        self.region = region
+
+    def write(
+        self,
+        pyramid: Pyramid,
+    ):
+        zarr.config.set(default_format=2)
+        dst = self.base_url
+        if self.init:
+            logging.info("Writing metadata %s", dst)
+            save_pyramid_to_s3(
+                pyramid,
+                dst,
+                mode="w",
+                compute=False,
+                s3_options=self.s3_options,
+            )
+        if self.region:
+            print("??????",self.region)
+
+            logging.info("Writing region %s → %s", self.region, dst)
+            save_pyramid_to_s3(
+                pyramid,
+                dst,
+                mode="r+",
+                region=self.region,
+                s3_options=self.s3_options,
+            )
+
+
+class Pipeline(ABC):
+
+    def __init__(self, config: Config):
+        self.source = Source(config)
+        self.transform = Transform(config.regrid_function, chunking=config.chunking)
+        self.destination = ZarrS3Sink(config.dst_s3url, config.init, region=config.region)
+
+    def run(self):
+        ds = self.source.load()
+        pyramid = self.transform.convert(ds)
+        self.destination.write(pyramid)
+
 
 class BaseStructure(ABC):
     _open_kargs = {}
@@ -28,7 +126,7 @@ class BaseStructure(ABC):
                 print(f"{e}")
                 continue
             yield k, ds
-    
+
     def __iter__(self) -> Iterable[str, xr.Dataset]:
         for k, v in self._structure.items():
             yield k, v
@@ -36,9 +134,15 @@ class BaseStructure(ABC):
     @abstractmethod
     def convert(self) -> Mapping[str, Pyramid]:
         pass
-    
-    def write(self, pyramids:Mapping[str, Pyramid], init:bool = False, region: Mapping[str,slice] = {'time':slice(0,1)}):
+
+    def write(
+        self,
+        pyramids: Mapping[str, Pyramid],
+        init: bool = False,
+        region: Mapping[str, slice] = {"time": slice(0, 1)},
+    ):
         import zarr
+
         zarr.config.set(default_zarr_format=2)
         opts = {
             "endpoint_url": "https://s3.eu-dkrz-3.dkrz.cloud",
@@ -48,9 +152,11 @@ class BaseStructure(ABC):
         for dst_url, pyramid in pyramids.items():
             if init:
                 logging.info("Writting ONLY metadata to %s", dst_url)
-                save_pyramid_to_s3(pyramid, dst_url, mode="w", compute=False, s3_options=opts)
+                save_pyramid_to_s3(
+                    pyramid, dst_url, mode="w", compute=False, s3_options=opts
+                )
             else:
                 logging.info("Writting region: %s to %s", str(region), dst_url)
-                save_pyramid_to_s3(pyramid, dst_url, mode="r+", region=region, s3_options=opts)
-
-
+                save_pyramid_to_s3(
+                    pyramid, dst_url, mode="r+", region=region, s3_options=opts
+                )
