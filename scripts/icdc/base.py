@@ -4,7 +4,7 @@ import zarr
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Mapping, Optional
+from typing import Callable, Iterable, Mapping, Optional, Any
 from os import getenv
 
 from grid_doctor import (
@@ -23,6 +23,7 @@ class Config:
     paths: str
     engine: str = "netcdf4"
     parallel: bool = False,
+    open_kwargs : dict[str, Any] = field(default_factory=dict)
     chunking: dict[str, int] = field(default_factory=dict)
     regrid_function: Callable[[],Pyramid] = latlon_to_healpix_pyramid
     init: bool = False
