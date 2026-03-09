@@ -1,59 +1,26 @@
-import logging
+from icdc.base import Config, Pipeline
 
-from argparse import ArgumentParser
-from icdc.base import BaseStructure
-from os import getenv
+from grid_doctor import latlon_to_healpix_pyramid
 
-class IMERG(BaseStructure):
-    _open_kwargs = {'parallel':False, 'engine':'netcdf4'}
-    def __init__(self):
-        super().__init__({
-            'IMERG/PT30M/' : '/pool/data/ICDC/atmosphere/imerg/DATA/2025/IMERG_precipitationrate__V07B__halfhourly__0.1degree__*.nc',
-        })
-    
-    @classmethod
-    def chunking(cls):
-        return {'time':1}
-
-    def convert(self, init: bool = True, region:dict = {'time':slice(0,1)}):
-        from grid_doctor import (
-            latlon_to_healpix_pyramid,
-        )
-        dst_url = 's3://icdc/healpix/atmosphere/'
-        pyramids = {} 
-        for name, ds in self.items():
-            print(ds)
-            ds_hp = latlon_to_healpix_pyramid(ds.chunk(self.chunking()), method='nearest', keep_nans=True)
-            pyramids[ dst_url + name ] = ds_hp
-        
-        self.write(pyramids, init=init, region=region)
+IMERGSpec = Config(
+    name="s3://icdc/healpix/atmosphere/IMERG/PT30M/",
+    paths="/pool/data/ICDC/atmosphere/imerg/DATA/2025/IMERG_precipitationrate__V07B__halfhourly__0.1degree__*.nc",
+    engine="netcdf-4",
+    parallel=False,
+    chunking={"time": 48},
+    regrid=latlon_to_healpix_pyramid,
+    init=True,
+    region={"time": slice(0, 96)},
+    zarr_format=2,
+)
 
 
-def main():
-    start_idx = int(getenv("SLURM_ARRAY_TASK_ID", 0))
-    parser = ArgumentParser()
-    parser.add_argument("--init", action="store_true")
-    parser.add_argument("--slice-size", default=48, type=int)
-    parser.add_argument("--start", default=start_idx, type=int)
-    parser.add_argument("--debug", action="store_true")
+IMERGPipeline = Pipeline(IMERGSpec)
 
-    args = parser.parse_args()
 
-    logging.getLogger().setLevel(logging.DEBUG if args.debug else logging.INFO)
+def run():
+    IMERGPipeline.run()
 
-    if args.slice_size % IMERG.chunking()['time']:
-        print("slice-size must be a multiple of 48 (time chunk)")
-        exit(1)
 
-    region = {
-        "time": slice(args.start * args.slice_size, (args.start + 1) * args.slice_size)
-    }
-    print(f"init={args.init}, region={region}")
-    imerg = IMERG()
-    imerg.convert(init=args.init, region=region)
-
-    
-
-        
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    run()
