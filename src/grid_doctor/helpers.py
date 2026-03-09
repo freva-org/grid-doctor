@@ -609,6 +609,7 @@ def save_pyramid_to_s3(
     mode: Literal["a", "w", "r+"] = "a",
     compute: bool = True,
     region: Union[Literal["auto"], dict[str, slice]] = "auto",
+    zarr_format: int = 2
 ) -> None:
     """Save HEALPix pyramid to S3 as Zarr stores.
 
@@ -635,7 +636,7 @@ def save_pyramid_to_s3(
         store = s3fs.S3Map(root=level_path, s3=fs)
 
         if region == "auto":
-            ds.to_zarr(store, mode=mode, compute=compute)
+            ds.to_zarr(store, mode=mode, compute=compute, zarr_format=zarr_format)
         else:
             to_drop = (
                 set(
@@ -647,11 +648,11 @@ def save_pyramid_to_s3(
                 | set(ds.coords)
             )
             ds.drop_vars(to_drop, errors="warn").isel(region).to_zarr(
-                store, mode=mode, compute=compute, region=region
+                store, mode=mode, compute=compute, region=region, zarr_format=zarr_format
             )
 
         if mode == "w" and not compute:
-            ds[list(ds.coords)].to_zarr(store, mode="r+")
+            ds[list(ds.coords)].to_zarr(store, mode="r+", zarr_format=zarr_format)
 
     print(f"Pyramid saved to {s3_path}")
 
