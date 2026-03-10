@@ -9,6 +9,7 @@ permissions:
 on:
   push:
     branches: [main]
+  workflow_call:
 
 # Prevent concurrent deployments
 concurrency:
