@@ -2,13 +2,17 @@
 grid-doctor: Convert lat/lon xarray datasets to HEALPix pyramids and save to S3.
 """
 
+import logging
 from typing import Any, Literal, Optional, Tuple, Union
 
 import healpy as hp
 import numpy as np
 import s3fs
 import xarray as xr
+from easygems import remap as egr
 from scipy.interpolate import griddata
+
+logger = logging.getLogger(__name__)
 
 
 def get_latlon_resolution(ds: xr.Dataset) -> float:
@@ -17,13 +21,16 @@ def get_latlon_resolution(ds: xr.Dataset) -> float:
     Parameters
     ----------
     ds:
-        Dataset with lat/lon coordinates (regular or curvilinear).
+        Dataset with lat/lon coordinates (regular, curvilinear, or unstructured).
 
     Returns
     -------
     float:
         Approximate resolution (grid spacing) in degrees.
     """
+    if _is_unstructured(ds):
+        return _get_unstructured_resolution(ds)
+
     # Try to get lat/lon - could be 1D coordinates or 2D arrays
     lat, lon = _get_latlon_arrays(ds)
 
@@ -57,6 +64,7 @@ def _get_latlon_arrays(ds: xr.Dataset) -> Tuple[np.ndarray, np.ndarray]:
     """
     # Common latitude coordinate names
     lat_names = [
+        "clat",  # ICON
         "lat",
         "latitude",
         "LAT",
@@ -83,6 +91,7 @@ def _get_latlon_arrays(ds: xr.Dataset) -> Tuple[np.ndarray, np.ndarray]:
 
     # Common longitude coordinate names
     lon_names = [
+        "clon",  # ICON
         "lon",
         "longitude",
         "LON",
@@ -246,6 +255,188 @@ def _get_spatial_dims(ds: xr.Dataset) -> Tuple[str, str]:
     return y_dim, x_dim
 
 
+# Known dimension names for unstructured grids (e.g. ICON).
+_UNSTRUCTURED_DIMS = {"cell", "ncells", "ncell", "nCells"}
+
+
+def _is_unstructured(ds: xr.Dataset) -> bool:
+    """Check whether *ds* lives on an unstructured grid.
+
+    Detection is based on well-known dimension names and CDI metadata
+    attributes that ICON / CDO set on their output.
+    """
+    if _UNSTRUCTURED_DIMS & set(ds.dims):
+        return True
+
+    for var in ds.data_vars.values():
+        if var.attrs.get("CDI_grid_type") == "unstructured":
+            return True
+
+    return False
+
+
+def _get_unstructured_dim(ds: xr.Dataset) -> str:
+    """Return the single spatial dimension name for an unstructured grid."""
+    for dim in _UNSTRUCTURED_DIMS:
+        if dim in ds.dims:
+            return dim
+
+    # Fall back: look for the dimension that lat is indexed on.
+    lat_names = ["clat", "lat", "latitude"]
+    for name in lat_names:
+        if name in ds.coords and ds[name].ndim == 1:
+            return ds[name].dims[0]
+
+    raise ValueError(
+        f"Cannot determine unstructured spatial dimension. "
+        f"Available dims: {list(ds.dims)}"
+    )
+
+
+def _get_unstructured_resolution(ds: xr.Dataset) -> float:
+    """Estimate the spatial resolution (in degrees) of an unstructured grid
+    from the number of cells.
+
+    On the unit sphere the mean cell area is ``4π / n`` steradians, so the
+    equivalent grid spacing in degrees is ``degrees(sqrt(4π / n))``.
+    """
+    dim = _get_unstructured_dim(ds)
+    n = ds.sizes[dim]
+    return float(np.degrees(np.sqrt(4 * np.pi / n)))
+
+
+def compute_weights_delaunay(
+    ds: xr.Dataset,
+    level: int,
+    nest: bool = True,
+) -> xr.Dataset:
+    """Compute Delaunay interpolation weights from the source grid of *ds*
+    to a HEALPix grid at the given *level*.
+
+    The returned weight dataset can be saved with ``weights.to_netcdf(...)``
+    and reloaded later to avoid recomputation.
+
+    Parameters
+    ----------
+    ds:
+        Input dataset (any grid type).
+    level:
+        Target HEALPix level (``nside = 2**level``).
+    nest:
+        If ``True`` use NESTED ordering, else RING.
+
+    Returns
+    -------
+    xr.Dataset:
+        Weight dataset compatible with :func:`easygems.remap.apply_weights`.
+    """
+    nside = 2**level
+    npix = hp.nside2npix(nside)
+
+    hp_theta, hp_phi = hp.pix2ang(nside, np.arange(npix), nest=nest)
+    hp_lat = 90.0 - np.degrees(hp_theta)
+    hp_lon = np.degrees(hp_phi)
+
+    src_lat, src_lon = _get_latlon_arrays(ds)
+    src_lat = np.asarray(src_lat).ravel()
+    src_lon = np.asarray(src_lon).ravel()
+
+    # Normalise longitudes to [0, 360)
+    src_lon = src_lon % 360
+    hp_lon = hp_lon % 360
+
+    return egr.compute_weights_delaunay(
+        points=(src_lon, src_lat),
+        xi=(hp_lon, hp_lat),
+    )
+
+
+def regrid_unstructured_to_healpix(
+    ds: xr.Dataset,
+    level: int,
+    nest: bool = True,
+    weights: Optional[xr.Dataset] = None,
+) -> xr.Dataset:
+    """Regrid an unstructured-grid dataset (e.g. ICON) to HEALPix using
+    Delaunay-interpolation weights from :mod:`easygems.remap`.
+
+    Parameters
+    ----------
+    ds:
+        Input dataset on an unstructured grid.
+    level:
+        Target HEALPix level (``nside = 2**level``).
+    nest:
+        If ``True`` use NESTED ordering.
+    weights:
+        Pre-computed weights (from :func:`compute_weights_delaunay`).
+        When ``None`` they are computed on the fly.
+
+    Returns
+    -------
+    xr.Dataset:
+        Dataset on the HEALPix grid with a ``cell`` dimension.
+    """
+    nside = 2**level
+    npix = hp.nside2npix(nside)
+
+    if weights is None:
+        weights = compute_weights_delaunay(ds, level, nest=nest)
+
+    spatial_dim = _get_unstructured_dim(ds)
+
+    # Select only variables that have the spatial dimension.
+    vars_to_regrid = [var for var, da in ds.data_vars.items() if spatial_dim in da.dims]
+    if not vars_to_regrid:
+        raise ValueError(f"No data variables with dimension '{spatial_dim}' found.")
+    ds_spatial = ds[vars_to_regrid]
+
+    ds_hp = xr.apply_ufunc(
+        egr.apply_weights,
+        ds_spatial,
+        kwargs=weights,
+        keep_attrs=True,
+        input_core_dims=[[spatial_dim]],
+        output_core_dims=[["cell"]],
+        output_dtypes=["f4"],
+        vectorize=True,
+        exclude_dims={spatial_dim},
+        dask="parallelized",
+        dask_gufunc_kwargs={
+            "output_sizes": {"cell": weights.sizes["tgt_idx"]},
+        },
+    )
+
+    # Attach HEALPix coordinates and metadata
+    hp_theta, hp_phi = hp.pix2ang(nside, np.arange(npix), nest=nest)
+    hp_lat = 90.0 - np.degrees(hp_theta)
+    hp_lon = np.degrees(hp_phi)
+
+    ds_hp = ds_hp.assign_coords(
+        cell=np.arange(npix),
+        latitude=("cell", hp_lat),
+        longitude=("cell", hp_lon),
+    )
+
+    ds_hp.attrs |= ds.attrs
+    ds_hp.attrs["healpix_nside"] = nside
+    ds_hp.attrs["healpix_level"] = level
+    ds_hp.attrs["healpix_order"] = "nested" if nest else "ring"
+
+    crs = xr.DataArray(
+        name="crs",
+        data=np.nan,
+        attrs={
+            "grid_mapping_name": "healpix",
+            "healpix_nside": nside,
+            "healpix_order": "nest" if nest else "ring",
+        },
+    )
+    ds_hp = ds_hp.assign_coords(crs=crs)
+
+    return ds_hp
+
+
 def resolution_to_healpix_level(resolution_deg: float) -> int:
     """Find HEALPix level with resolution just coarser than input.
 
@@ -386,8 +577,11 @@ def regrid_to_healpix(
     # since they might have different dtypes
     for var, da in ds.data_vars.items():
         if not {y_dim, x_dim}.issubset(da.dims):
-            print(
-                f"Skipping regridding for {var} ({y_dim, x_dim}) not in its dimensions"
+            logger.info(
+                "Skipping regridding for %s (%s, %s) not in its dimensions",
+                var,
+                y_dim,
+                x_dim,
             )
             continue
 
@@ -466,9 +660,7 @@ def coarsen_healpix(ds: xr.Dataset, target_level: int) -> xr.Dataset:
     is_nested = order in ("nested", "nest")
 
     # Get new pixel coordinates
-    hp_theta, hp_phi = hp.pix2ang(
-        target_nside, np.arange(npix_target), nest=is_nested
-    )
+    hp_theta, hp_phi = hp.pix2ang(target_nside, np.arange(npix_target), nest=is_nested)
     hp_lat = 90 - np.degrees(hp_theta)
     hp_lon = np.degrees(hp_phi)
 
@@ -482,7 +674,6 @@ def coarsen_healpix(ds: xr.Dataset, target_level: int) -> xr.Dataset:
             continue
 
         da = da.chunk({"cell": -1})
-
 
         def _ud_grade(x):
             return hp.ud_grade(
@@ -547,7 +738,7 @@ def create_healpix_pyramid(
     Parameters
     ----------
     ds:
-        Input lat/lon dataset.
+        Input dataset (regular, curvilinear, or unstructured).
     max_level:
         Highest resolution HEALPix level.
     min_level:
@@ -561,19 +752,26 @@ def create_healpix_pyramid(
     pyramid = {}
 
     # Convert to highest resolution HEALPix
-    print(
-        f"Regridding to HEALPix level {max_level} "
-        f"(NSIDE={2**max_level}, npix={12 * 4**max_level})"
+    logger.info(
+        "Regridding to HEALPix level $d (NSIDE=%d, npix=%d)",
+        max_level,
+        2**max_level,
+        12 * 4**max_level,
     )
-    ds_hp = regrid_to_healpix(ds, max_level, **kwargs)
+    if _is_unstructured(ds):
+        ds_hp = regrid_unstructured_to_healpix(ds, max_level, **kwargs)
+    else:
+        ds_hp = regrid_to_healpix(ds, max_level, **kwargs)
     pyramid[max_level] = ds_hp
 
     # Coarsen down to min_level
     current_ds = ds_hp
     for level in range(max_level - 1, min_level - 1, -1):
-        print(
-            f"Coarsening to level {level} "
-            f"(NSIDE={2**level}, npix={12 * 4**level})"
+        logger.info(
+            "Coarsening to level %d (NSIDE=%d, npix=%d)",
+            level,
+            2**level,
+            12 * 4**level,
         )
         current_ds = coarsen_healpix(current_ds, level)
         pyramid[level] = current_ds
@@ -588,6 +786,7 @@ def save_pyramid_to_s3(
     mode: Literal["a", "w", "r+"] = "a",
     compute: bool = True,
     region: Union[Literal["auto"], dict[str, slice]] = "auto",
+    zarr_format: Literal[2, 3] = 2,
 ) -> None:
     """Save HEALPix pyramid to S3 as Zarr stores.
 
@@ -601,19 +800,24 @@ def save_pyramid_to_s3(
         Options for s3fs (key, secret, endpoint_url, etc.).
     mode
         Write mode: 'w' to overwrite, 'a' to append.
+    zarr_format
+        Zarr format for saving data.
     """
     s3_options = s3_options or {}
 
     fs = s3fs.S3FileSystem(**s3_options)
 
     for level, ds in pyramid.items():
-        level_path = f"{s3_path}/level_{level}"
-        print(f"Saving level {level} to {level_path}")
+        level_path = f"{s3_path}/level_{level}.zarr"
+        logger.info("Saving level %d to %s", level, level_path)
 
         store = s3fs.S3Map(root=level_path, s3=fs)
+        kwargs = {"zarr_format": zarr_format}
+        if zarr_format == 2:
+            kwargs["consolidated"] = True
 
         if region == "auto":
-            ds.to_zarr(store, mode=mode, compute=compute)
+            ds.to_zarr(store, mode=mode, compute=compute, **kwargs)
         else:
             to_drop = (
                 set(
@@ -625,13 +829,13 @@ def save_pyramid_to_s3(
                 | set(ds.coords)
             )
             ds.drop_vars(to_drop, errors="warn").isel(region).to_zarr(
-                store, mode=mode, compute=compute, region=region
+                store, mode=mode, compute=compute, region=region, **kwargs
             )
 
         if mode == "w" and not compute:
-            ds[list(ds.coords)].to_zarr(store, mode="r+")
+            ds[list(ds.coords)].to_zarr(store, mode="r+", **kwargs)
 
-    print(f"Pyramid saved to {s3_path}")
+    logger.info("Pyramid saved to %s", s3_path)
 
 
 def latlon_to_healpix_pyramid(
@@ -639,8 +843,14 @@ def latlon_to_healpix_pyramid(
     min_level: int = 0,
     max_level: Optional[int] = None,
     method: Literal["nearest", "linear", "conservative"] = "nearest",
+    weights: Optional[xr.Dataset] = None,
+    grid: Optional[xr.Dataset] = None,
 ) -> dict[int, xr.Dataset]:
-    """Full pipeline: lat/lon dataset -> HEALPix pyramid.
+    """Full pipeline: dataset -> HEALPix pyramid.
+
+    Works with regular, curvilinear, and unstructured (e.g. ICON) grids.
+    For unstructured grids the *method* parameter is ignored (Delaunay
+    interpolation from :mod:`easygems.remap` is used instead).
 
     Parameters
     ----------
@@ -650,6 +860,13 @@ def latlon_to_healpix_pyramid(
         Minimum HEALPix level (default 0).
     max_level:
         Maximum HEALPix level. If None, computed from dataset resolution.
+    method:
+        Interpolation method for structured grids: 'nearest', 'linear',
+        or 'conservative'.  Ignored for unstructured grids.
+    weights:
+        Pre-computed Delaunay weights for unstructured grids.  When
+        ``None`` they are computed on the fly.  Recommended for large
+        grids — call :func:`compute_weights_delaunay` once and reuse.
 
     Returns
     -------
@@ -658,12 +875,16 @@ def latlon_to_healpix_pyramid(
     """
     # Step 1: Calculate resolution
     resolution = get_latlon_resolution(ds)
-    print(f"Dataset resolution: {resolution:.4f}°")
+    logger.info("Dataset resolution: %d°", round(resolution, 4))
 
     # Step 2: Find appropriate HEALPix level
     if max_level is None:
         max_level = resolution_to_healpix_level(resolution)
-    print(f"Selected max HEALPix level: {max_level} (NSIDE={2**max_level})")
+    logger.info("Selected max HEALPix level: %d (NSIDE=%d)", max_level, 2**max_level)
 
     # Step 3: Create pyramid
-    return create_healpix_pyramid(ds, max_level, min_level)
+    if _is_unstructured(ds):
+        logger.info("Detected unstructured grid, using easygems Delaunay remapping")
+        return create_healpix_pyramid(ds, max_level, min_level, weights=weights)
+    else:
+        return create_healpix_pyramid(ds, max_level, min_level, method=method)
