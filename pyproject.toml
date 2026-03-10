@@ -44,6 +44,7 @@ dependencies = [
     "s3fs",
     "scipy",
     "fsspec",
+    "easygems",
     "dask[array]",
     "data-portal-worker @ git+https://github.com/freva-org/freva-nextgen.git#subdirectory=freva-data-portal-worker",
 ]
