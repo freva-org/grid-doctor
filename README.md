@@ -1,4 +1,4 @@
-# Grid doctor HEALs your Grids
+# Grid Doctor HEALs your Grids
 
 > [!NOTE]
 > This is a scripting solution for a proof of concept. An operational ready
@@ -6,88 +6,147 @@
 > your script solution into the `scripts/<yourname>` folder.
 
 
-After you've cloned the repository
+## Installation
 
 ```console
-git clone git@github.com:freva-org/grid-doctor.git && \
+git clone git@github.com:freva-org/grid-doctor.git
 cd grid-doctor
-```
-
-You should follow these steps to get things working:
-
-
-### Installation
-
-Install the dependencies via pip
-
-```console
 python -m pip install -e .
 ```
 
+## Quick Start
 
-### Add the solution to your dataset
+### Structured Grids (ERA5, CMIP, …)
+
+```python
+import grid_doctor as gd
+
+ds = gd.cached_open_dataset(["path/to/*.nc"])
+pyramid = gd.latlon_to_healpix_pyramid(ds)
+gd.save_pyramid_to_s3(
+    pyramid,
+    "s3://my-bucket/dataset.zarr",
+    s3_options=gd.get_s3_options(
+        "https://s3.eu-dkrz-3.dkrz.cloud",
+        "~/.s3-credentials.json",
+    ),
+)
+```
+
+### Unstructured Grids (ICON)
+
+For ICON and other triangular-mesh models, pre-compute and cache the
+Delaunay interpolation weights:
+
+```python
+import grid_doctor as gd
+
+grid_ds = gd.cached_open_dataset(["ICON_grid.nc"])
+max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
+weights = gd.cached_weights(grid_ds, level=max_level)
+
+ds = gd.cached_open_dataset(["icon_data_*.grb"])
+ds = ds.rename_dims({"values": "cell"}).chunk({"cell": -1})
+
+pyramid = gd.latlon_to_healpix_pyramid(ds, max_level=max_level, weights=weights)
+gd.save_pyramid_to_s3(pyramid, "s3://my-bucket/icon.zarr", s3_options=...)
+```
+
+## 🏥 Grid Rehab Progress
+How are our patients doing? Every dataset starts broken and leaves HEALed.
+If your dataset is still 😢, it needs a doctor — that could be you.
+Claim a patient, write a script, and turn that frown into 😎.
+
+| | Meaning |
+|:-:|---------|
+| 😢 | Not started |
+| 🩹 | In treatment |
+| 😎 | HEALed |
+
+| Dataset | Uploaded to S3 | Script Submitted |
+|---------|:--------------:|:----------------:|
+| ICON-DREAM Global | 🩹 | 😎 |
+| EERIE | 😢 | 😢 |
+| ERA5 | 😎 | 😎 |
+| CMIP6 | 🩹 | 😢 |
+| NextGEMS | 😎 | 😢 |
+| ICDC     | 😎 | 😢 |
+| ORCHESTRA | 🩹 | 😢 |
+| PalMod | 😢 | 😢 |
+> [!TIP]
+> To claim a dataset, open a PR adding your script to `scripts/<dataset>/`
+> and update this table. See [Getting Started](#writing-a-conversion-script)
+> for the template.
+
+## Writing a Conversion Script
+
+Create a folder under `scripts/` and add your script:
 
 ```console
 mkdir -p scripts/<yourname>
-
 ```
-Then add your script solution into `scripts/<yourname>/convert.py`.
-> [!IMPORTANT]
-> Please add a descriptive README about what this script is trying to achieve.
-> Also, document any problems you ran into.
 
-### Usage
-
-Please make use of the installed
-[data-portal](https://github.com/freva-org/freva-nextgen/tree/main/freva-data-portal-worker)
-libary and the `helpers` function within this repository.
-
-An minimal example looks like this:
+A minimal script using the built-in CLI helpers:
 
 ```python
-import xarray as xr
-
-from data_portal_worker.aggregator import DatasetAggregator
+import grid_doctor as gd
+import grid_doctor.cli as gd_cli
 from data_portal_worker.rechunker import ChunkOptimizer
-from grid_doctor import latlon_to_healpix_pyramid, save_pyramid_to_s3
 
-agg = DatasetAggregator()
+parser = gd_cli.get_parser("my-dataset", "Convert my-dataset to HEALPix.")
+parser.add_argument("--variables", nargs="*", default=["t_2m"])
+args = parser.parse_args()
+gd_cli.setup_logging_from_args(args)
+
+ds = gd.cached_open_dataset(["path/to/*.nc"])
+pyramid = gd.latlon_to_healpix_pyramid(ds)
+
 opt = ChunkOptimizer()
+chunked = {lvl: opt.apply(d) for lvl, d in pyramid.items()}
 
-dset1 = xr.open_mfdataset("<path-to-file>", parallel=True, chunks="auto")
-dset2 = xr.open_mfdataset("<path-to-file>", parallel=True, chunks="auto")
-
-# The DatasetAggregator is able to combine non aggregatable data to into
-# groups. This should be avoided though - try to aggregate into a single
-# dataset.
-dset_aggregated = agg.aggregate([dset1, dset2])["root"]
-healpix_pyramid = latlon_to_healpix_pyramid(dset_aggregated)
-chunked_heal_pix = {k: opt.apply(d) for k, d in healpix_pyramid.items()}
-save_pyramid_to_s3(chunked_heal_pi, "s3://<bucket>/<path>.zarr",
-                  s3_option={"https://s3.eu-dkrz-1.dkrz.cloud",
-                             "key": os.getenv("S3_KEY"),
-                             "serect": os.getenv("S3_SECRET")})
-
+gd.save_pyramid_to_s3(
+    chunked,
+    f"s3://{args.s3_bucket}/my-dataset.zarr",
+    s3_options=gd.get_s3_options(args.s3_endpoint, args.s3_credentials_file),
+)
 ```
-> [!CAUTION]
-> DO NOT commit s3 keys or secrets to this repository. Use env variables.
 
-More fine grained settings options for ``DatasetAggregator`` and ``ChunkOptimizer``
-classes can be found in the
-[DatasetAggregator](https://github.com/freva-org/freva-nextgen/blob/main/freva-data-portal-worker/src/data_portal_worker/aggregator.py)
-and the [ChunkOptimizer](https://github.com/freva-org/freva-nextgen/blob/main/freva-data-portal-worker/src/data_portal_worker/rechunker.py)
-source code.
+Run with verbosity:
+
+```console
+python scripts/my-dataset/convert.py my-bucket -vv
+```
 
 > [!IMPORTANT]
-> The example usage notebook is for demo purpose only. Pleas do not submit a
-> jupyter notebook as your solution.
->
->
+> Please add a descriptive README about what your script is trying to achieve.
+> Document any problems you ran into.
+
+> [!CAUTION]
+> DO NOT commit S3 keys or secrets to this repository. Use environment
+> variables or a credentials file.
+
+
+## Building Documentation
+
+```console
+pip install tox
+tox -e docs          # build to site/
+tox -e docs-serve    # live preview at http://127.0.0.1:8000
+```
+
+
+## Type Checking
+
+```console
+tox -e type-check
+```
+
+
 ## Issues
 
 As this is still very much work in progress it is very likely that you will
-run into Problems. Please note any of those problems in the `README.md` file
-for your dataset folder. Feel free to submit PR's if there are any issues
-with the ``DatasetAggregator`` or ``ChunkOptimizer`` classes. If you don't feel
-comfortable with submitting PR's you can file an issue report
-[here](https://github.com/freva-org/freva-nextgen/issues)
+run into problems. Please note any problems in the `README.md` file
+for your dataset folder. Feel free to submit PRs if there are any issues
+with the `DatasetAggregator` or `ChunkOptimizer` classes. If you don't feel
+comfortable with submitting PRs you can file an issue report
+[here](https://github.com/freva-org/freva-nextgen/issues).
