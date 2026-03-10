@@ -1,7 +1,7 @@
 """Download/update and convert icron-dream in grib to healpix.
 
 # About
-Icron dream is a reanalysis product from the German Weather Service.
+Icon dream is a reanalysis product from the German Weather Service.
 
 With ICON-DREAM, Germany's national meteorological service DWD
 (Deutscher Wetterdienst) started a new generation of reanalyses after the
