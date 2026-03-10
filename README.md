@@ -64,7 +64,7 @@ dset_aggregated = agg.aggregate([dset1, dset2])["root"]
 healpix_pyramid = latlon_to_healpix_pyramid(dset_aggregated)
 chunked_heal_pix = {k: opt.apply(d) for k, d in healpix_pyramid.items()}
 save_pyramid_to_s3(chunked_heal_pi, "s3://<bucket>/<path>.zarr",
-                  s3_option={"https://s3.eu-dkrz-1.dkrz.cloud",
+                  s3_option={"endpoint_url": "https://s3.eu-dkrz-1.dkrz.cloud",
                              "key": os.getenv("S3_KEY"),
                              "serect": os.getenv("S3_SECRET")})
 
