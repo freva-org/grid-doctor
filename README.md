@@ -52,6 +52,31 @@ pyramid = gd.latlon_to_healpix_pyramid(ds, max_level=max_level, weights=weights)
 gd.save_pyramid_to_s3(pyramid, "s3://my-bucket/icon.zarr", s3_options=...)
 ```
 
+## 🏥 Grid Rehab Progress
+How are our patients doing? Every dataset starts broken and leaves HEALed.
+If your dataset is still 😢, it needs a doctor — that could be you.
+Claim a patient, write a script, and turn that frown into 😎.
+
+| | Meaning |
+|:-:|---------|
+| 😢 | Not started |
+| 🩹 | In treatment |
+| 😎 | HEALed |
+
+| Dataset | Uploaded to S3 | Script Submitted |
+|---------|:--------------:|:----------------:|
+| ICON-DREAM Global | 🩹 | 😎 |
+| EERIE | 😢 | 😢 |
+| ERA5 | 😎 | 😎 |
+| CMIP6 | 🩹 | 😢 |
+| NextGEMS | 😎 | 😢 |
+| ICDC     | 😎 | 😢 |
+| ORCHESTRA | 🩹 | 😢 |
+| PalMod | 😢 | 😢 |
+> [!TIP]
+> To claim a dataset, open a PR adding your script to `scripts/<dataset>/`
+> and update this table. See [Getting Started](#writing-a-conversion-script)
+> for the template.
 
 ## Writing a Conversion Script
 
