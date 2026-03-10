@@ -65,7 +65,7 @@ Claim a patient, write a script, and turn that frown into 😎.
 
 | Dataset | Uploaded to S3 | Script Submitted |
 |---------|:--------------:|:----------------:|
-| ICON-DREAM Global | 🩹 | 😎 |
+| ICON-DREAM  | 🩹 | 😎 |
 | EERIE | 😢 | 😢 |
 | ERA5 | 😎 | 😎 |
 | CMIP6 | 🩹 | 😢 |
@@ -73,6 +73,7 @@ Claim a patient, write a script, and turn that frown into 😎.
 | ICDC     | 😎 | 😢 |
 | ORCHESTRA | 🩹 | 😢 |
 | PalMod | 😢 | 😢 |
+| Dyamond| 😢 | 😢 |
 > [!TIP]
 > To claim a dataset, open a PR adding your script to `scripts/<dataset>/`
 > and update this table. See [Getting Started](#writing-a-conversion-script)
