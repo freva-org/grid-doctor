@@ -1,14 +1,15 @@
-"""
-grid-doctor: Convert lat/lon xarray datasets to HEALPix pyramids.
+"""grid-doctor — Convert lat/lon xarray datasets to HEALPix pyramids.
 
 Your lat/lon data goes to rehab and comes out HEALed.
 """
 
+from __future__ import annotations
+
 from typing import Any
 
-__version__ = "2603.0.0"
+__version__: str = "2603.0.0"
 
-_LAZY_IMPORTS = {
+_LAZY_IMPORTS: dict[str, str] = {
     "compute_weights_delaunay": ".helpers",
     "get_latlon_resolution": ".helpers",
     "latlon_to_healpix_pyramid": ".helpers",
@@ -23,7 +24,7 @@ _LAZY_IMPORTS = {
 
 
 def __getattr__(name: str) -> Any:
-    """Lazy import xarray dependent modules."""
+    """Lazily import heavy modules to keep ``import grid_doctor`` fast."""
     if name in _LAZY_IMPORTS:
         import importlib
 
@@ -31,19 +32,19 @@ def __getattr__(name: str) -> Any:
         return getattr(module, name)
     raise AttributeError(
         f"module {__name__!r} has no attribute {name!r}"
-    )  # pragma: no cover
+    )
 
 
-__all__ = [
-    "save_pyramid_to_s3",
-    "latlon_to_healpix_pyramid",
-    "cached_open_dataset",
-    "compute_weights_delaunay",
-    "regrid_unstructured_to_healpix",
-    "cached_weights",
-    "get_s3_options",
-    "get_latlon_resolution",
-    "resolution_to_healpix_level",
-    "setup_logging",
+__all__: list[str] = [
     "__version__",
+    "cached_open_dataset",
+    "cached_weights",
+    "compute_weights_delaunay",
+    "get_latlon_resolution",
+    "get_s3_options",
+    "latlon_to_healpix_pyramid",
+    "regrid_unstructured_to_healpix",
+    "resolution_to_healpix_level",
+    "save_pyramid_to_s3",
+    "setup_logging",
 ]

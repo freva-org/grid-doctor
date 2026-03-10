@@ -39,6 +39,7 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "xarray",
+    "requests",
     "healpy",
     "zarr",
     "s3fs",
@@ -58,13 +59,15 @@ dev = [
     "black>=23.0",
     "pre-commit>=3.0",
 ]
-docs = [
-    "sphinx>=6.0",
-    "sphinx-rtd-theme>=1.0",
-    "myst-parser>=1.0",
-]
+tests = ["pytest",
+         "pytest-env",
+         "mock",
+         "pytest-mock",
+         "pytest-cov",
+         ]
+
 all = [
-    "grid-doctor[dev,docs]",
+    "grid-doctor[dev,tests]",
 ]
 
 [project.urls]
@@ -90,11 +93,8 @@ allow_untyped_calls = true
 
 [tool.isort]
 known_first_party = [
-    "freva_rest",
-    "freva_client",
-    "freva_data_portal",
+    "grid_doctor",
     "data_portal_worker",
-    "databrowser_api",
 ]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 
@@ -120,3 +120,65 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "if __name__ == .__main__.:",
 ]
+
+
+[tool.tox]
+legacy_tox_ini = """
+[tox]
+min_version = 4.0
+env_list = docs, types, lint
+[testenv]
+passenv = *
+parallel_show_output = false
+
+[testenv:lint]
+description = "Check code quality."
+deps = -e .
+       black
+       isort
+       flake8
+       pydocstyle
+       codespell
+       bandit[toml]
+commands =
+    python3 -m isort --check --profile black -t py312 -l 79 src
+    python3 -m flake8 src --count --max-complexity=10 --ignore=F405,F403,E704,W503,C901 --max-line-length=100 --statistics --show-source
+    codespell {posargs: --quiet-level=2} src/
+    python3 -m pydocstyle src/grid_doctor
+    bandit -r src/grid_doctor --severity-level medium --confidence-level high
+[testenv:test]
+description = "Run the unit tests."
+deps = -e .[tests]
+commands =
+    python3 -m pytest -vv --cov=grid_doctor --cov-report=html:coverage_report --junitxml report.xml --cov-report xml tests/
+    python3 -m coverage report --fail-under=65 --precision=2
+
+[testenv:docs]
+description = Build the documentation with mkdocs
+deps =
+    codespell
+    mkdocs>=1.6
+    mkdocs-material>=9.5
+    mkdocstrings[python]>=0.27
+    pymdown-extensions>=10.0
+commands =
+    codespell {posargs: --quiet-level=2} docs
+    mkdocs build --strict {posargs}
+
+[testenv:docs-serve]
+description = Serve the documentation locally for preview
+deps =
+    {[testenv:docs]deps}
+commands =
+    mkdocs serve {posargs}
+
+[testenv:types]
+description = Run mypy in strict mode
+deps = -e .
+    mypy>=1.11
+    types-requests
+    numpy
+    xarray
+commands =
+    mypy src/grid_doctor
+"""
