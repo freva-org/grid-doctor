@@ -147,6 +147,8 @@ commands =
     python3 -m pydocstyle src/grid_doctor
     bandit -r src/grid_doctor --severity-level medium --confidence-level high
 [testenv:test]
+setenv =
+    VIRTUALENV_SYSTEM_SITE_PACKAGES=true
 description = "Run the unit tests."
 deps = -e .[tests]
 commands =
