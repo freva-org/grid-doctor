@@ -11,7 +11,6 @@ import pytest
 import xarray as xr
 
 
-# ── helper factories ───────────────────────────────────────────────
 def _xy_to_latlon(
     x: np.ndarray,
     y: np.ndarray,
@@ -148,7 +147,6 @@ def _make_unstructured_dataset(
     return ds
 
 
-# ── parametrised fixtures ──────────────────────────────────────────
 @pytest.fixture
 def test_ds(request: pytest.FixtureRequest) -> xr.Dataset:
     """Parametrised fixture: 'regular', 'curvilinear', 'era5'."""
