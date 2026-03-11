@@ -16,6 +16,7 @@ _LAZY_IMPORTS: dict[str, str] = {
     "regrid_unstructured_to_healpix": ".helpers",
     "resolution_to_healpix_level": ".helpers",
     "save_pyramid_to_s3": ".helpers",
+    "make_encoding": ".helpers",
     "cached_open_dataset": ".utils",
     "cached_weights": ".utils",
     "get_s3_options": ".utils",
@@ -30,9 +31,7 @@ def __getattr__(name: str) -> Any:
 
         module = importlib.import_module(_LAZY_IMPORTS[name], __name__)
         return getattr(module, name)
-    raise AttributeError(
-        f"module {__name__!r} has no attribute {name!r}"
-    )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__: list[str] = [

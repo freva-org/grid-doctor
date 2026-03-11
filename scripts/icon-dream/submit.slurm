@@ -1,9 +1,10 @@
 #!/bin/bash
 #SBATCH -J icon-dream2healpix
 #SBATCH -p compute
-#SBATCH -n 12
-#SBATCH --cpus-per-task=24
-#SBATCH --mem=20G
+#SBATCH --nodes=3
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=128
+#SBATCH --mem=0
 #SBATCH -t 08:00:00
 #SBATCH --signal=15@10
 #SBATCH -o slurm-%j.out

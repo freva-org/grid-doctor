@@ -11,6 +11,7 @@ import logging
 from typing import Any, Dict, List, Literal, Optional, Union, cast
 
 import healpy as hp
+import numcodecs
 import numpy as np
 import numpy.typing as npt
 import s3fs
@@ -18,14 +19,14 @@ import xarray as xr
 from easygems import remap as egr
 from scipy.interpolate import griddata
 
+from data_portal_worker.rechunker import ChunkOptimizer, ChunkPlan
+
 from .types import RegridFunc, ZarrOptions
 
 logger = logging.getLogger(__name__)
 
 #: Known dimension names for unstructured grids (e.g. ICON).
-_UNSTRUCTURED_DIMS: frozenset[str] = frozenset(
-    {"cell", "ncells", "ncell", "nCells"}
-)
+_UNSTRUCTURED_DIMS: frozenset[str] = frozenset({"cell", "ncells", "ncell", "nCells"})
 
 #: Common latitude coordinate names (order matters — first match wins).
 _LAT_NAMES: List[str] = [
@@ -229,14 +230,12 @@ def _get_spatial_dims(ds: xr.Dataset) -> tuple[str, str]:
 
     if y_dim is None or x_dim is None:
         raise ValueError(
-            f"Could not identify spatial dimensions. "
-            f"Found dims: {list(ds.dims)}."
+            f"Could not identify spatial dimensions. Found dims: {list(ds.dims)}."
         )
 
     return y_dim, x_dim
 
 
-# ── unstructured grid helpers ──────────────────────────────────────
 def _is_unstructured(ds: xr.Dataset) -> bool:
     """Check whether *ds* lives on an unstructured grid.
 
@@ -317,7 +316,6 @@ def _get_unstructured_resolution(ds: xr.Dataset) -> float:
     return float(np.degrees(np.sqrt(4 * np.pi / n)))
 
 
-# ── resolution / level helpers ─────────────────────────────────────
 def get_latlon_resolution(ds: xr.Dataset) -> float:
     """Calculate the spatial resolution of a dataset in degrees.
 
@@ -378,7 +376,94 @@ def resolution_to_healpix_level(resolution_deg: float) -> int:
     return max(0, level)
 
 
-# ── weight computation ─────────────────────────────────────────────
+def make_encoding(
+    pyramid: Dict[int, xr.Dataset],
+    comp_level: int = 4,
+    target_size: int = 16 * 1024**2,
+    access_pattern: Literal["map", "time_series"] = "map",
+) -> Dict[str, Dict[str, Any]]:
+    """Build Zarr encoding with optimised chunks and compression.
+
+    Uses :class:`~data_portal_worker.rechunker.ChunkOptimizer` to derive
+    chunk sizes that target *target_bytes* per chunk, then layers on
+    compression and byte-shuffle filters appropriate for each variable's
+    dtype.
+
+    Parameters
+    ----------
+    pyramid : dict[int, xr.Dataset]
+        healpix pyramid of dataset to build encoding for.
+        Can be on any grid type
+        (regular lon/lat, curvilinear, or unstructured).
+    comp_level : Zstd compression level,
+         Defaults to ``numcodecs.Zstd(level=4)`` which gives a good trade-off
+        between compression ratio and speed for climate data.
+    target_size : int, optional
+        Target chunk size in bytes (default 16 MiB).
+    access_patter: str
+        - access_pattern="map": optimize for slicing a single primary step (e.g. one time)
+          across large secondary axes.
+        - access_pattern="time_series": optimize for long runs along the primary axis at
+          fixed/small secondary axes.
+
+
+    Returns
+    -------
+    dict[int, dict[str, dict[str, Any]]]
+        Pyramid of encoding dictionary keyed by variable name,
+        suitable for passing to :meth:`save_pyramid_to_s3`.
+
+
+    See Also
+    --------
+    save_pyramid_to_s3 : Upload a HEALPix pyramid to S3.
+    """
+    comp_rate = comp_level * 10  # TODO: this is a little crude.
+    by_axis = {"map": "time", "time_series": "cell"}[access_pattern]
+
+    def _optimize(ds: "xr.Dataset") -> ChunkPlan:
+        plan = ChunkOptimizer(target_size * comp_rate).plan(ds)
+        if by_axis not in ds.sizes:
+            return plan
+        for i in range(2, ds.sizes[by_axis]):
+            _plan = ChunkOptimizer(
+                target_size * comp_rate, min_chunks={by_axis: i}
+            ).plan(ds)
+            actual_key = max(_plan.estimated_bytes_per_chunk_by_group)
+            actual = _plan.estimated_bytes_per_chunk_by_group[actual_key]
+            if target_size * comp_rate < actual:
+                return ChunkOptimizer(
+                    target_size * comp_rate, min_chunks={by_axis: i - 1}
+                ).plan(ds)
+        return plan
+
+    compressor = numcodecs.Zstd(level=comp_level)
+    encoding: Dict[int, Dict[str, dict[str, Any]]] = {}
+    for level, ds in pyramid.items():
+        plan = _optimize(ds)
+        encoding[level] = {}
+        for name, var in ds.data_vars.items():
+            nbytes = var.dtype.itemsize
+            chunks = tuple(plan.chunks.get(d, var.sizes[d]) for d in var.dims)
+
+            enc: dict[str, Any] = {
+                "chunks": chunks,
+                "compressor": compressor,
+            }
+
+            if var.dtype.kind == "f":
+                enc["filters"] = [numcodecs.Shuffle(elementsize=nbytes)]
+            elif var.dtype.kind in ("i", "u"):
+                enc["filters"] = [
+                    numcodecs.Delta(dtype=var.dtype),
+                    numcodecs.Shuffle(elementsize=nbytes),
+                ]
+
+            encoding[level][name] = enc
+
+    return encoding
+
+
 def compute_weights_delaunay(
     ds: xr.Dataset,
     level: int,
@@ -479,13 +564,9 @@ def regrid_unstructured_to_healpix(
 
     spatial_dim = _get_unstructured_dim(ds)
 
-    vars_to_regrid = [
-        var for var, da in ds.data_vars.items() if spatial_dim in da.dims
-    ]
+    vars_to_regrid = [var for var, da in ds.data_vars.items() if spatial_dim in da.dims]
     if not vars_to_regrid:
-        raise ValueError(
-            f"No data variables with dimension '{spatial_dim}' found."
-        )
+        raise ValueError(f"No data variables with dimension '{spatial_dim}' found.")
 
     ds_spatial = ds[vars_to_regrid]
 
@@ -756,9 +837,7 @@ def coarsen_healpix(ds: xr.Dataset, target_level: int) -> xr.Dataset:
     order: str = ds.attrs.get("healpix_order", "nested")
     is_nested = order in ("nested", "nest")
 
-    hp_theta, hp_phi = hp.pix2ang(
-        target_nside, np.arange(npix_target), nest=is_nested
-    )
+    hp_theta, hp_phi = hp.pix2ang(target_nside, np.arange(npix_target), nest=is_nested)
     hp_lat = 90.0 - np.degrees(hp_theta)
     hp_lon = np.degrees(hp_phi)
 
@@ -872,7 +951,6 @@ def create_healpix_pyramid(
     return pyramid
 
 
-# ── S3 I/O ─────────────────────────────────────────────────────────
 def save_pyramid_to_s3(
     pyramid: Dict[int, xr.Dataset],
     s3_path: str,
@@ -881,6 +959,7 @@ def save_pyramid_to_s3(
     compute: bool = True,
     region: Union[Literal["auto"], Dict[str, slice]] = "auto",
     zarr_format: Literal[2, 3] = 2,
+    encoding: Optional[Dict[int, Dict[str, Dict[str, Any]]]] = None,
 ) -> None:
     """Save a HEALPix pyramid to S3 as Zarr stores.
 
@@ -903,6 +982,8 @@ def save_pyramid_to_s3(
         Write region for partial updates.
     zarr_format : ``{2, 3}``, optional
         Zarr format version (default ``2``).
+    encoding: dict, optional
+        Nested dict of encodings for each zoom level.
     """
     s3_options = s3_options or {}
     fs = s3fs.S3FileSystem(**s3_options)
@@ -912,12 +993,12 @@ def save_pyramid_to_s3(
         logger.info("Saving level %d to %s", level, level_path)
 
         store = s3fs.S3Map(root=level_path, s3=fs)
-        zarr_options = ZarrOptions(
-            compute=compute, mode=mode, zarr_format=zarr_format
-        )
+        zarr_options = ZarrOptions(compute=compute, mode=mode, zarr_format=zarr_format)
 
         if zarr_format == 2:
             zarr_options["consolidated"] = True
+        if encoding:
+            zarr_options["encoding"] = encoding[level]
 
         if region == "auto":
             ds.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
@@ -939,9 +1020,7 @@ def save_pyramid_to_s3(
 
         if mode == "w" and not compute:
             zarr_options["mode"] = "w"
-            ds[list(ds.coords)].to_zarr(
-                store, **zarr_options
-            )  # type: ignore[call-overload]
+            ds[list(ds.coords)].to_zarr(store, **zarr_options)  # type: ignore[call-overload]
 
     logger.info("Pyramid saved to %s", s3_path)
 
@@ -996,14 +1075,10 @@ def latlon_to_healpix_pyramid(
 
     if max_level is None:
         max_level = resolution_to_healpix_level(resolution)
-    logger.info(
-        "Selected max HEALPix level: %d (NSIDE=%d)", max_level, 2**max_level
-    )
+    logger.info("Selected max HEALPix level: %d (NSIDE=%d)", max_level, 2**max_level)
 
     if _is_unstructured(ds):
-        logger.info(
-            "Detected unstructured grid, using easygems Delaunay remapping"
-        )
+        logger.info("Detected unstructured grid, using easygems Delaunay remapping")
         return create_healpix_pyramid(ds, max_level, min_level, weights=weights)
     else:
         return create_healpix_pyramid(ds, max_level, min_level, method=method)
