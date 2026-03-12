@@ -1,70 +1,61 @@
-"""Download/update and convert ICON-DREAM in GRIB to HEALPix.
+"""Convert ICON-DREAM GRIB data to HEALPix Zarr without cross-worker Dask.
 
-Pipeline modes
---------------
-This version is designed for HPC/SLURM style execution without dask-distributed:
+This script is designed around a three-stage workflow that maps naturally to
+Slurm array jobs:
 
-1. ``prepare``
-   - downloads all source GRIB files in parallel into a shared directory
-   - downloads the grid file and pre-computes/saves the weights dataset
-   - groups files into worker jobs (typically one time chunk per job)
-   - writes a JSON manifest consumed by worker/pack jobs
+1. ``plan`` builds a manifest of source files that should be processed.
+2. ``prepare`` downloads the raw files in parallel and computes the HEALPix
+   weights once.
+3. ``worker`` converts exactly one manifest entry to temporary HEALPix Zarr
+   stores.
+4. ``finalize`` merges the temporary stores into the final S3 target and only
+   appends time steps that are not already present.
 
-2. ``worker``
-   - processes one manifest entry (selected via ``SLURM_ARRAY_TASK_ID`` or
-     ``--job-index``)
-   - opens all GRIB files for that job, merges them, converts to HEALPix,
-     writes a temporary local Zarr pyramid, and copies it to the shared parts
-     directory
-
-3. ``pack``
-   - runs serially after all workers finish
-   - opens each shared temporary pyramid in manifest order and appends it to the
-     final S3-backed Zarr pyramid
+The same script can also be executed outside Slurm with the ``run`` subcommand,
+which performs the full workflow locally.
 """
 
-from __future__ import annotations
-
-import gc
+import argparse
+import concurrent.futures
+import dataclasses
 import json
 import logging
 import os
 import re
 import shutil
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Dict,
-    Iterator,
-    List,
-    Literal,
-    Optional,
-    Tuple,
-)
+from typing import (TYPE_CHECKING, Any, Dict, Iterator, List, Literal,
+                    Optional, Sequence, Tuple, Union)
+from urllib.parse import urlsplit
 
-import dateparser
-import xarray as xr
-
-import grid_doctor.cli as gd_cli
+import numpy as np
+import s3fs
 
 if TYPE_CHECKING:
-    import argparse
+    import xarray as xr
 
-    import numpy as np
+import grid_doctor as gd
+import grid_doctor.cli as gd_cli
 
-DATE_FORMAT = "%Y%m"
-MANIFEST_NAME = "job_manifest.json"
-SUCCESS_MARKER = "_SUCCESS.json"
+LOGGER = logging.getLogger(__name__)
+UTC = timezone.utc
 
-logger = logging.getLogger("icon-dream-catcher")
+DATE_TOKEN_RE = re.compile(r"_(\d{6}|\d{8})_")
+DEFAULT_SOURCE_ROOT = (
+    "https://opendata.dwd.de/climate_environment/REA/ICON-DREAM-Global"
+)
+DEFAULT_GRID_URL = f"{DEFAULT_SOURCE_ROOT}/invariant/ICON-DREAM-Global_grid.nc"
+DEFAULT_INVARIANT_URL = (
+    f"{DEFAULT_SOURCE_ROOT}/invariant/ICON-DREAM-Global_constant_fields.grb"
+)
+TIME_FREQUENCY = Literal["hourly", "daily", "monthly", "fx"]
+OUTPUT_MODE = Literal["temp", "direct"]
 
-IconDreamVariable = Literal[
+ICON_DREAM_VARIABLES: Tuple[str, ...] = (
     "aswdifd_s",
     "aswdir_s",
     "clct",
@@ -89,714 +80,1485 @@ IconDreamVariable = Literal[
     "ws",
     "ws_10m",
     "z0",
-]
-
-
-# -----------------------------------------------------------------------------
-# Dataset helpers
-# -----------------------------------------------------------------------------
-
-
-def flatten_step(ds: "xr.Dataset") -> "xr.Dataset":
-    """Merge ``time`` + ``step`` into one valid-time axis."""
-    if "step" not in ds.dims:
-        return ds
-
-    valid = ds.valid_time.values
-    ds = ds.stack(valid=("time", "step"))
-    ds = ds.drop_vars(["valid", "time", "step"], errors="ignore")
-    ds = ds.assign_coords(valid=valid.ravel())
-    ds = ds.rename({"valid": "time"})
-    ds = ds.sortby("time")
-    return ds
-
-
-def _open_dataset(
-    file: str,
-    clat: "np.ndarray",
-    clon: "np.ndarray",
-) -> "xr.Dataset":
-    ds = xr.open_dataset(file, engine="cfgrib", chunks="auto")
-    ds = flatten_step(ds.rename_dims({"values": "cell"}))
-    ds = ds.assign_coords(clat=("cell", clat), clon=("cell", clon))
-    chunk_spec = {"cell": -1}
-    if "time" in ds.dims:
-        chunk_spec["time"] = -1
-    ds = ds.chunk(chunk_spec)
-    return ds
-
-
-def _open_merged_dataset(
-    files: list[str],
-    clat: "np.ndarray",
-    clon: "np.ndarray",
-    parallel: bool = True,
-) -> "xr.Dataset":
-    datasets = [
-        _open_dataset(str(path), clat=clat, clon=clon, parallel=parallel)
-        for path in files
-    ]
-    if len(datasets) == 1:
-        return datasets[0]
-
-    ds = xr.merge(
-        datasets,
-        compat="override",
-        combine_attrs="drop_conflicts",
-        join="outer",
-    )
-    if "time" in ds.dims:
-        ds = ds.sortby("time")
-    return ds
-
-
-# -----------------------------------------------------------------------------
-# Download + manifest helpers
-# -----------------------------------------------------------------------------
+)
 
 
 class HrefParser(HTMLParser):
-    """Extract ``.grb`` links from an HTML directory listing."""
+    """Collect href targets ending in a specific suffix.
 
-    file_suffix: str = ".grb"
+    Parameters
+    ----------
+    suffix : str, optional
+        File suffix to keep.
+    """
 
-    def __init__(self) -> None:
+    def __init__(self, suffix: str = ".grb") -> None:
         super().__init__()
-        self.hrefs: list[str] = []
+        self.suffix = suffix
+        self.hrefs: List[str] = []
 
-    def handle_starttag(
-        self, tag: str, attrs: list[tuple[str, Optional[str]]]
-    ) -> None:
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        """Inspect HTML start tags.
+
+        Parameters
+        ----------
+        tag : str
+            HTML tag name.
+        attrs : list[tuple[str, str | None]]
+            Tag attributes.
+        """
         if tag != "a":
             return
         for key, value in attrs:
-            if key == "href" and value and value.endswith(self.file_suffix):
+            if key == "href" and value and value.endswith(self.suffix):
                 self.hrefs.append(value)
 
 
 @dataclass
+class SourceFile:
+    """Metadata for one source file to process.
+
+    Parameters
+    ----------
+    item_index : int
+        Sequential index used by array workers.
+    variable : str
+        ICON-DREAM variable name.
+    frequency : str
+        Data frequency.
+    url : str
+        Source URL.
+    filename : str
+        File name derived from the URL.
+    relative_path : str
+        File path relative to the run directory.
+    date_token : str | None, optional
+        Date token extracted from the file name.
+    period_start : str | None, optional
+        ISO 8601 start of the coarse file coverage.
+    period_end : str | None, optional
+        ISO 8601 exclusive end of the coarse file coverage.
+    """
+
+    item_index: int
+    variable: str
+    frequency: str
+    url: str
+    filename: str
+    relative_path: str
+    date_token: Optional[str] = None
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+
+
+@dataclass
+class RunManifest:
+    """Serializable run manifest.
+
+    Parameters
+    ----------
+    run_dir : str
+        Shared working directory for the whole run.
+    target_root : str
+        Final S3 prefix excluding the level suffix.
+    frequency : str
+        Data frequency.
+    variables : list[str]
+        Requested variables.
+    requested_time : tuple[str, str]
+        User supplied time interval.
+    created_at : str
+        Manifest creation timestamp.
+    grid_url : str
+        URL to the ICON-DREAM grid file.
+    invariant_url : str
+        URL to the invariant file.
+    grid_path : str
+        Path of the downloaded grid file.
+    weights_path : str
+        Path of the cached weights file.
+    temp_root : str
+        Root directory for worker output.
+    raw_root : str
+        Root directory for downloaded raw files.
+    source_items : list[SourceFile]
+        Files to process.
+    source_engine : str
+        Xarray backend engine used for source files.
+    source_backend_kwargs : dict[str, Any]
+        Backend kwargs forwarded to xarray.
+    max_level : int | None, optional
+        Highest HEALPix level.
+    existing_max_time : str | None, optional
+        Maximum time already present in the target store.
+    output_mode : str, optional
+        Worker write mode.
+    """
+
+    run_dir: str
+    target_root: str
+    frequency: str
+    variables: List[str]
+    requested_time: Tuple[str, str]
+    created_at: str
+    grid_url: str
+    invariant_url: str
+    grid_path: str
+    weights_path: str
+    temp_root: str
+    raw_root: str
+    source_items: List[SourceFile]
+    source_engine: str
+    source_backend_kwargs: Dict[str, Any]
+    max_level: Optional[int] = None
+    existing_max_time: Optional[str] = None
+    output_mode: str = "temp"
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RunPaths:
+    """Convenience container for run directories."""
+
+    run_dir: Path
+    raw_root: Path
+    temp_root: Path
+    metadata_root: Path
+    logs_root: Path
+    manifest_path: Path
+    grid_path: Path
+    weights_path: Path
+
+
+@dataclass
+class ExistingTargetInfo:
+    """Summary of an already existing target store."""
+
+    has_store: bool
+    time_values: Optional[List[str]] = None
+    max_time: Optional[str] = None
+
+
+@dataclass
+class WorkerResult:
+    """Summary of one worker output."""
+
+    item_index: int
+    variable: str
+    level_paths: Dict[int, str]
+    time_count: int
+    time_start: Optional[str]
+    time_end: Optional[str]
+    has_time: bool
+
+
+def _parse_datetime(value: str) -> datetime:
+    """Parse a user-provided datetime string.
+
+    Parameters
+    ----------
+    value : str
+        Input string.
+
+    Returns
+    -------
+    datetime
+        Timezone-aware UTC datetime.
+
+    Raises
+    ------
+    ValueError
+        Raised when parsing fails.
+    """
+    normalized = value.strip()
+    if normalized.lower() == "now":
+        return datetime.now(tz=UTC)
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", normalized):
+        normalized = normalized + "T00:00:00+00:00"
+    else:
+        normalized = normalized.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as error:
+        raise ValueError(f"Could not parse datetime string: {value!r}") from error
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _isoformat_utc(value: datetime) -> str:
+    """Convert a datetime to ISO 8601 in UTC."""
+    return value.astimezone(UTC).isoformat()
+
+
+def _default_run_dir() -> Path:
+    """Return a default shared run directory."""
+    stamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+    return gd_cli.get_scratch("grid-doctor", f"icon-dream-healpix-{stamp}")
+
+
+def _build_paths(run_dir: Union[str, Path]) -> RunPaths:
+    """Build the directory layout for one run."""
+    root = Path(run_dir).expanduser().resolve()
+    raw_root = root / "raw"
+    temp_root = root / "tmp-zarr"
+    metadata_root = root / "metadata"
+    logs_root = root / "logs"
+    manifest_path = root / "manifest.json"
+    grid_path = root / "cache" / "ICON-DREAM-Global_grid.nc"
+    weights_path = root / "cache" / "weights.nc"
+    for path in (raw_root, temp_root, metadata_root, logs_root, grid_path.parent):
+        path.mkdir(parents=True, exist_ok=True)
+    return RunPaths(
+        run_dir=root,
+        raw_root=raw_root,
+        temp_root=temp_root,
+        metadata_root=metadata_root,
+        logs_root=logs_root,
+        manifest_path=manifest_path,
+        grid_path=grid_path,
+        weights_path=weights_path,
+    )
+
+
+def _manifest_to_dict(manifest: RunManifest) -> Dict[str, Any]:
+    """Convert a manifest dataclass to a JSON-serializable dictionary."""
+    return dataclasses.asdict(manifest)
+
+
+def _manifest_from_dict(data: Dict[str, Any]) -> RunManifest:
+    """Create a manifest dataclass from a dictionary."""
+    items = [SourceFile(**item) for item in data.pop("source_items")]
+    return RunManifest(source_items=items, **data)
+
+
+def save_manifest(manifest: RunManifest, path: Union[str, Path]) -> None:
+    """Write the manifest to disk."""
+    target = Path(path)
+    target.write_text(json.dumps(_manifest_to_dict(manifest), indent=2, sort_keys=True))
+
+
+def load_manifest(path: Union[str, Path]) -> RunManifest:
+    """Load a run manifest from disk."""
+    payload = json.loads(Path(path).read_text())
+    return _manifest_from_dict(payload)
+
+
 class IconDreamSource:
-    """Describe an ICON-DREAM data source on the DWD open-data server."""
+    """Discover source files on the DWD open data server.
 
-    variables: List[IconDreamVariable]
-    time_frequency: Literal["hourly", "daily", "monthly", "fx"]
-    time: Tuple[str, str]
+    Parameters
+    ----------
+    variables : sequence[str]
+        Variables to process.
+    frequency : {"hourly", "daily", "monthly", "fx"}
+        Data frequency.
+    requested_time : tuple[str, str]
+        User supplied start and end time.
+    source_root : str, optional
+        Root URL of the DWD dataset.
+    grid_url : str, optional
+        Grid file URL.
+    invariant_url : str, optional
+        Invariant file URL.
+    """
 
-    def __post_init__(self) -> None:
-        self._dir_source = (
-            "https://opendata.dwd.de/climate_environment/REA/"
-            "ICON-DREAM-Global/{freq}/{var}"
-        )
-        self.grid_source = (
-            "https://opendata.dwd.de/climate_environment/REA/"
-            "ICON-DREAM-Global/invariant/ICON-DREAM-Global_grid.nc"
-        )
-        self._invariants = (
-            "https://opendata.dwd.de/climate_environment/REA/"
-            "ICON-DREAM-Global/invariant/"
-            "ICON-DREAM-Global_constant_fields.grb"
+    def __init__(
+        self,
+        variables: Sequence[str],
+        frequency: TIME_FREQUENCY,
+        requested_time: Tuple[str, str],
+        source_root: str = DEFAULT_SOURCE_ROOT,
+        grid_url: str = DEFAULT_GRID_URL,
+        invariant_url: str = DEFAULT_INVARIANT_URL,
+    ) -> None:
+        self.variables = list(variables)
+        self.frequency = frequency
+        self.requested_time = requested_time
+        self.source_root = source_root.rstrip("/")
+        self.grid_url = grid_url
+        self.invariant_url = invariant_url
+        self.start_time = _parse_datetime(requested_time[0])
+        self.end_time = _parse_datetime(requested_time[1])
+
+    def _directory_url(self, variable: str) -> str:
+        """Return the DWD directory URL for one variable."""
+        return (
+            f"{self.source_root}/{self.frequency}/{variable.upper().replace('-', '_')}"
         )
 
-        self._start = self._parse_user_datetime(self.time[0])
-        self._end = self._parse_user_datetime(self.time[-1])
+    def _period_from_token(self, token: str) -> Tuple[datetime, datetime]:
+        """Infer a coarse file coverage interval from a file name token.
 
-    def _parse_user_datetime(self, value: str) -> datetime:
-        dt = dateparser.parse(
-            value,
-            settings={
-                "TIMEZONE": "UTC",
-                "TO_TIMEZONE": "UTC",
-                "RETURN_AS_TIMEZONE_AWARE": True,
-            },
-        )
-        if dt is None:
-            raise ValueError(f"Could not parse datetime string: {value!r}")
-        return dt
+        Parameters
+        ----------
+        token : str
+            Either ``YYYYMM`` or ``YYYYMMDD``.
 
-    def _href_to_datetime(self, href: str) -> Tuple[str, datetime]:
-        match = re.search(r"_(\d{6})_", href)
-        if not match:
-            raise ValueError(f"Could not extract YYYYMM from href: {href}")
-        dt = datetime.strptime(match.group(1), "%Y%m").replace(
-            tzinfo=timezone.utc
-        )
-        return href, dt
+        Returns
+        -------
+        tuple[datetime, datetime]
+            Start and exclusive end of the period.
+        """
+        if len(token) == 6:
+            start = datetime.strptime(token, "%Y%m").replace(tzinfo=UTC)
+            if start.month == 12:
+                end = start.replace(year=start.year + 1, month=1)
+            else:
+                end = start.replace(month=start.month + 1)
+            return start, end
+        if len(token) == 8:
+            start = datetime.strptime(token, "%Y%m%d").replace(tzinfo=UTC)
+            return start, start + timedelta(days=1)
+        raise ValueError(f"Unsupported date token: {token!r}")
 
-    def _get_download_link(self, variable: str) -> Iterator[str]:
-        url = self._dir_source.format(
-            freq=self.time_frequency,
-            var=variable.upper().replace("-", "_"),
-        )
-        parser = HrefParser()
+    def _extract_token(self, href: str) -> Optional[str]:
+        """Extract a coarse date token from a file name."""
+        match = DATE_TOKEN_RE.search(href)
+        if match is None:
+            return None
+        return match.group(1)
+
+    def _should_keep(
+        self, token: Optional[str], existing_max_time: Optional[datetime]
+    ) -> bool:
+        """Decide whether a coarse file period can still contain new data."""
+        if token is None:
+            return True
+        period_start, period_end = self._period_from_token(token)
+        if period_end <= self.start_time or period_start > self.end_time:
+            return False
+        if existing_max_time is not None and period_end <= existing_max_time:
+            return False
+        return True
+
+    def _list_variable_urls(
+        self,
+        variable: str,
+        existing_max_time: Optional[datetime],
+    ) -> Iterator[SourceFile]:
+        """Yield matching source files for one variable."""
+        url = self._directory_url(variable)
+        parser = HrefParser(suffix=".grb")
         with gd_cli.AutoRaiseSession() as session:
-            response = session.get(url, timeout=5)
+            response = session.get(url, timeout=30)
             parser.feed(response.text)
 
-        for href, date_value in map(self._href_to_datetime, parser.hrefs):
-            if self._start <= date_value <= self._end:
-                logger.debug("Found %s/%s", url, href)
-                yield f"{url}/{href}"
+        for href in sorted(set(parser.hrefs)):
+            token = self._extract_token(href)
+            if not self._should_keep(token, existing_max_time):
+                continue
+            period_start: Optional[str] = None
+            period_end: Optional[str] = None
+            if token is not None:
+                start, end = self._period_from_token(token)
+                period_start = _isoformat_utc(start)
+                period_end = _isoformat_utc(end)
+            filename = Path(href).name
+            yield SourceFile(
+                item_index=-1,
+                variable=variable,
+                frequency=self.frequency,
+                url=f"{url}/{href}",
+                filename=filename,
+                relative_path=str(Path(variable) / filename),
+                date_token=token,
+                period_start=period_start,
+                period_end=period_end,
+            )
 
-    @property
-    def links(self) -> Iterator[str]:
-        if self.time_frequency == "fx":
-            yield self._invariants
-            return
-        for var in self.variables:
-            yield from self._get_download_link(var)
+    def list_items(
+        self, existing_max_time: Optional[datetime] = None
+    ) -> List[SourceFile]:
+        """List the source files that should be processed.
 
+        Parameters
+        ----------
+        existing_max_time : datetime | None, optional
+            Maximum time already present in the target store. Files whose
+            coarse coverage ends before or at this time are skipped.
 
-def extract_job_label(path: str) -> str:
-    """Return the manifest grouping label for a downloaded file."""
-    if path.endswith("ICON-DREAM-Global_constant_fields.grb"):
-        return "fx"
-    match = re.search(r"_(\d{6})_", Path(path).name)
-    if not match:
-        raise ValueError(f"Could not extract YYYYMM from file path: {path}")
-    return match.group(1)
+        Returns
+        -------
+        list[SourceFile]
+            Ordered list of source files.
+        """
+        items: List[SourceFile] = []
+        if self.frequency == "fx":
+            filename = Path(urlsplit(self.invariant_url).path).name
+            items.append(
+                SourceFile(
+                    item_index=0,
+                    variable="fx",
+                    frequency=self.frequency,
+                    url=self.invariant_url,
+                    filename=filename,
+                    relative_path=str(Path("fx") / filename),
+                )
+            )
+            return items
 
+        for variable in self.variables:
+            items.extend(self._list_variable_urls(variable, existing_max_time))
 
-def download_files_parallel(
-    urls: list[str],
-    target_dir: Path,
-    timeout: int = 60,
-    overwrite: bool = False,
-    max_workers: int = 4,
-) -> list[Path]:
-    """Download files concurrently to a shared directory."""
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    def _download_one(url: str) -> Path:
-        result = gd_cli.download_file(
-            url,
-            target_dir,
-            timeout=timeout,
-            overwrite=overwrite,
-            chunk_size=1024 * 1024,
+        items.sort(
+            key=lambda item: (
+                item.period_start or "",
+                item.variable,
+                item.filename,
+            )
         )
-        return Path(result)
-
-    results: list[Path] = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_download_one, url): url for url in urls}
-        for future in as_completed(futures):
-            url = futures[future]
-            result = future.result()
-            logger.info("Downloaded %s -> %s", url, result)
-            results.append(result)
-    return sorted(results)
+        for index, item in enumerate(items):
+            item.item_index = index
+        return items
 
 
-def build_jobs(
-    downloaded_files: list[Path], time_frequency: str
-) -> list[Dict[str, Any]]:
-    """Group downloaded GRIB files into worker jobs.
+def _read_json_text(value: str) -> Dict[str, Any]:
+    """Parse JSON text from the command line."""
+    if not value:
+        return {}
+    parsed = json.loads(value)
+    if not isinstance(parsed, dict):
+        raise TypeError("Backend kwargs JSON must decode to an object.")
+    return parsed
 
-    For hourly/daily/monthly data we group by ``YYYYMM`` so one worker job sees
-    all selected variables for the same month.
 
-    For ``fx``/time-invariant data we intentionally emit exactly one job, since
-    the resulting datasets may not have a ``time`` dimension and therefore
-    cannot be packed via append-along-time semantics.
+def _download_one(
+    url: str,
+    target_path: Path,
+    timeout: int,
+    overwrite: bool,
+    chunk_size: int,
+) -> str:
+    """Download one file to a fixed output path.
+
+    Parameters
+    ----------
+    url : str
+        Source URL.
+    target_path : Path
+        Final output file path.
+    timeout : int
+        Request timeout in seconds.
+    overwrite : bool
+        Whether to overwrite an existing file.
+    chunk_size : int
+        HTTP stream chunk size in bytes.
+
+    Returns
+    -------
+    str
+        Absolute output path.
     """
-    files = [str(path) for path in sorted(downloaded_files)]
-    if time_frequency == "fx":
-        return [
-            {
-                "job_index": 0,
-                "label": "fx",
-                "files": files,
-                "part_name": "00000_fx",
-            }
-        ]
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    if target_path.exists() and not overwrite:
+        LOGGER.debug("Skipping existing download %s", target_path)
+        return str(target_path)
 
-    groups: Dict[str, list[str]] = {}
-    for path in files:
-        label = extract_job_label(path)
-        groups.setdefault(label, []).append(path)
+    tmp_path = target_path.with_suffix(target_path.suffix + ".part")
+    with gd_cli.AutoRaiseSession() as session:
+        with session.get(url, stream=True, timeout=timeout) as response:
+            with tmp_path.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        handle.write(chunk)
+    tmp_path.replace(target_path)
+    return str(target_path)
 
-    jobs: list[Dict[str, Any]] = []
-    for job_index, label in enumerate(sorted(groups)):
-        jobs.append(
-            {
-                "job_index": job_index,
-                "label": label,
-                "files": groups[label],
-                "part_name": f"{job_index:05d}_{label}",
-            }
+
+def download_files(
+    items: Sequence[SourceFile],
+    raw_root: Path,
+    max_workers: int,
+    timeout: int,
+    overwrite: bool,
+    chunk_size: int,
+) -> List[Path]:
+    """Download source files in parallel using ``concurrent.futures``.
+
+    Parameters
+    ----------
+    items : sequence[SourceFile]
+        Files to download.
+    raw_root : Path
+        Root directory for downloaded files.
+    max_workers : int
+        Number of download threads.
+    timeout : int
+        Per-request timeout in seconds.
+    overwrite : bool
+        Whether to overwrite existing files.
+    chunk_size : int
+        HTTP stream chunk size in bytes.
+
+    Returns
+    -------
+    list[Path]
+        Downloaded file paths in manifest order.
+    """
+    if not items:
+        return []
+
+    results: Dict[int, Path] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map: Dict[concurrent.futures.Future[str], int] = {}
+        for item in items:
+            target = raw_root / item.relative_path
+            future = executor.submit(
+                _download_one,
+                item.url,
+                target,
+                timeout,
+                overwrite,
+                chunk_size,
+            )
+            future_map[future] = item.item_index
+
+        for future in concurrent.futures.as_completed(future_map):
+            item_index = future_map[future]
+            output = Path(future.result())
+            results[item_index] = output
+            LOGGER.info("Downloaded item %s -> %s", item_index, output)
+
+    return [results[item.item_index] for item in items]
+
+
+def _s3_map(path: str, s3_options: Dict[str, str]) -> s3fs.S3Map:
+    """Create an S3 mapping for a Zarr store."""
+    fs = s3fs.S3FileSystem(**s3_options)
+    return s3fs.S3Map(root=path, s3=fs, check=False)
+
+
+def _open_existing_target(
+    level_path: str,
+    s3_options: Dict[str, str],
+) -> Optional["xr.Dataset"]:
+    """Open an existing Zarr store from S3 if it exists."""
+    import xarray as xr
+
+    fs = s3fs.S3FileSystem(**s3_options)
+    if not fs.exists(level_path):
+        return None
+    store = s3fs.S3Map(root=level_path, s3=fs, check=False)
+    try:
+        return xr.open_zarr(store, consolidated=True)
+    except Exception:
+        return xr.open_zarr(store, consolidated=False)
+
+
+def _target_root(bucket: str, frequency: str) -> str:
+    """Return the final S3 prefix for one frequency."""
+    return f"s3://{bucket}/healpix/icon-dream/{frequency}"
+
+
+def _load_existing_target_info(
+    target_root: str,
+    s3_options: Dict[str, str],
+) -> ExistingTargetInfo:
+    """Inspect the existing target store.
+
+    Parameters
+    ----------
+    target_root : str
+        S3 prefix excluding the level suffix.
+    s3_options : dict[str, str]
+        S3 credentials.
+
+    Returns
+    -------
+    ExistingTargetInfo
+        Existing time coordinate information, if available.
+    """
+    level_path = f"{target_root}/level_0.zarr"
+    existing = _open_existing_target(level_path, s3_options)
+    if existing is None:
+        return ExistingTargetInfo(has_store=False)
+
+    if "time" not in existing.coords and "time" not in existing.dims:
+        return ExistingTargetInfo(has_store=True)
+
+    time_values = _to_time_strings(existing["time"].values)
+    return ExistingTargetInfo(
+        has_store=True,
+        time_values=time_values,
+        max_time=time_values[-1] if time_values else None,
+    )
+
+
+def _open_source_dataset(
+    path: Union[str, Path],
+    engine: str,
+    backend_kwargs: Dict[str, Any],
+) -> "xr.Dataset":
+    """Open one source file as an xarray dataset.
+
+    Parameters
+    ----------
+    path : str or Path
+        Source file path.
+    engine : str
+        Xarray backend engine.
+    backend_kwargs : dict[str, Any]
+        Backend kwargs for the engine.
+
+    Returns
+    -------
+    xr.Dataset
+        Opened dataset.
+    """
+    import xarray as xr
+
+    dataset = xr.open_dataset(
+        Path(path),
+        engine=engine,
+        backend_kwargs=backend_kwargs or None,
+        chunks="auto",
+    )
+    return dataset
+
+
+def _open_grid_dataset(path: Union[str, Path]) -> "xr.Dataset":
+    """Open the ICON-DREAM grid definition."""
+    import xarray as xr
+
+    return xr.open_dataset(Path(path), chunks="auto")
+
+
+def _maybe_start_local_client(n_workers: int) -> Optional[Any]:
+    """Start a local distributed client when requested.
+
+    Parameters
+    ----------
+    n_workers : int
+        Number of local workers. A value smaller than one disables the client.
+
+    Returns
+    -------
+    object | None
+        ``distributed.Client`` instance when available, else ``None``.
+    """
+    if n_workers < 1:
+        return None
+    try:
+        from distributed import Client, LocalCluster
+    except Exception:  # pragma: no cover - optional dependency
+        LOGGER.warning(
+            "distributed is not available; continuing without a local client"
         )
-    return jobs
+        return None
+
+    cluster = LocalCluster(
+        n_workers=n_workers,
+        threads_per_worker=1,
+        processes=True,
+        dashboard_address=None,
+    )
+    return Client(cluster)
 
 
-# -----------------------------------------------------------------------------
-# Manifest persistence
-# -----------------------------------------------------------------------------
+def _rename_values_dim(ds: "xr.Dataset") -> "xr.Dataset":
+    """Rename a ``values`` dimension to ``cell`` when needed."""
+    if "values" in ds.dims and "cell" not in ds.dims:
+        return ds.rename({"values": "cell"})
+    return ds.chunk({"cell": -1})
 
 
-def get_run_paths(work_dir: Path) -> Dict[str, Path]:
-    return {
-        "work_dir": work_dir,
-        "raw_dir": work_dir / "raw",
-        "shared_dir": work_dir / "shared",
-        "parts_dir": work_dir / "parts",
-        "manifests_dir": work_dir / "manifests",
-        "logs_dir": work_dir / "logs",
-        "manifest_path": work_dir / "manifests" / MANIFEST_NAME,
-    }
+def _flatten_forecast_time(ds: "xr.Dataset") -> "xr.Dataset":
+    """Collapse ``time`` and ``step`` into one valid ``time`` axis.
+
+    Some ICON-DREAM GRIB files expose an analysis/forecast layout with a base
+    ``time`` dimension, a forecast ``step`` dimension, and a two-dimensional
+    ``valid_time`` coordinate. For downstream HEALPix conversion we want a
+    single monotonic time axis.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Input dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with a single ``time`` dimension when ``valid_time`` can be
+        flattened, otherwise the original dataset.
+    """
+    if "step" not in ds.dims:
+        return ds
+    if "valid_time" not in ds.coords:
+        return ds
+    if ds["valid_time"].ndim != 2:
+        return ds
+
+    valid_time_values = np.asarray(ds["valid_time"].values).ravel()
+    stacked = ds.stack(_stacked_time=("time", "step"))
+    stacked = stacked.drop_vars(["valid_time", "time", "step"], errors="ignore")
+    stacked = stacked.assign_coords(_stacked_time=valid_time_values)
+    stacked = stacked.rename({"_stacked_time": "time"})
+    return stacked.sortby("time")
 
 
-def ensure_run_layout(work_dir: Path) -> Dict[str, Path]:
-    paths = get_run_paths(work_dir)
-    for key, path in paths.items():
-        if key.endswith("_path"):
+def _normalise_time_axis(ds: "xr.Dataset") -> "xr.Dataset":
+    """Normalise the main time axis to a canonical ``time`` dimension.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Input dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with a standard ``time`` dimension when a valid time axis can
+        be inferred. Datasets without temporal coordinates are returned
+        unchanged.
+    """
+    ds = _flatten_forecast_time(ds)
+
+    if "time" in ds.dims:
+        return ds.sortby("time")
+
+    if "valid_time" in ds.coords and ds["valid_time"].ndim == 1:
+        source_dim = str(ds["valid_time"].dims[0])
+        if source_dim != "valid_time":
+            ds = ds.swap_dims({source_dim: "valid_time"})
+        ds = ds.rename({"valid_time": "time"})
+        if source_dim in ds.coords and source_dim != "time":
+            ds = ds.drop_vars(source_dim, errors="ignore")
+        return ds.sortby("time")
+
+    for coord_name, coord in ds.coords.items():
+        if coord.ndim != 1:
             continue
-        path.mkdir(parents=True, exist_ok=True)
-    paths["manifest_path"].parent.mkdir(parents=True, exist_ok=True)
-    return paths
+        if str(coord.dtype).startswith("datetime64"):
+            source_dim = str(coord.dims[0])
+            if source_dim != coord_name:
+                ds = ds.swap_dims({source_dim: coord_name})
+            ds = ds.rename({coord_name: "time"})
+            if source_dim in ds.coords and source_dim != "time":
+                ds = ds.drop_vars(source_dim, errors="ignore")
+            return ds.sortby("time")
+
+    return ds
 
 
-def save_manifest(manifest: Dict[str, Any], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
-    logger.info("Wrote manifest to %s", path)
+def _prepare_dataset_for_regridding(ds: "xr.Dataset") -> "xr.Dataset":
+    """Apply lightweight dataset normalisation before regridding."""
+    ds = _rename_values_dim(ds)
+    ds = _normalise_time_axis(ds)
+    if "time" in ds.dims:
+        _, index = np.unique(ds["time"].values, return_index=True)
+        index = np.sort(index)
+        ds = ds.isel(time=index)
+    return ds.chunk({"cell": -1})
 
 
-def load_manifest(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text())
+def _to_time_strings(values: Union[np.ndarray, Sequence[Any]]) -> List[str]:
+    """Convert a time coordinate to sorted ISO strings."""
+    array = np.asarray(values)
+    if array.size == 0:
+        return []
+    strings = [
+        np.datetime_as_string(value, unit="ns", timezone="UTC") for value in array
+    ]
+    return sorted(strings)
 
 
-# -----------------------------------------------------------------------------
-# Pyramid local temp store helpers
-# -----------------------------------------------------------------------------
+def _chunk_healpix_dataset(
+    ds: "xr.Dataset",
+    time_chunk: int,
+    cell_chunk: int,
+) -> "xr.Dataset":
+    """Apply explicit chunks to a HEALPix dataset.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset on the HEALPix grid.
+    time_chunk : int
+        Time chunk size.
+    cell_chunk : int
+        Cell chunk size.
+
+    Returns
+    -------
+    xr.Dataset
+        Chunked dataset.
+    """
+    chunks: Dict[str, int] = {}
+    if "time" in ds.dims:
+        chunks["time"] = min(time_chunk, int(ds.sizes["time"]))
+    if "cell" in ds.dims:
+        chunks["cell"] = min(cell_chunk, int(ds.sizes["cell"]))
+    if not chunks:
+        return ds
+    return ds.chunk(chunks)
 
 
-def write_pyramid_to_local(
-    pyramid: Dict[int, xr.Dataset], target_dir: Path
-) -> None:
-    """Write one HEALPix pyramid to a local/shared filesystem Zarr directory."""
-    target_dir.mkdir(parents=True, exist_ok=True)
-    for level, ds in sorted(pyramid.items()):
-        level_path = target_dir / f"level_{level}.zarr"
-        logger.info("Writing local part level %d to %s", level, level_path)
-        ds.to_zarr(level_path, mode="w", consolidated=True)
+def _worker_output_root(paths: RunPaths, item_index: int) -> Path:
+    """Return the temporary output directory of one worker."""
+    return paths.temp_root / f"item-{item_index:06d}"
 
 
-def open_local_pyramid(target_dir: Path) -> Dict[int, xr.Dataset]:
-    pyramid: Dict[int, xr.Dataset] = {}
-    for level_dir in sorted(target_dir.glob("level_*.zarr")):
-        match = re.search(r"level_(\d+)\.zarr$", level_dir.name)
-        if not match:
-            continue
-        level = int(match.group(1))
-        pyramid[level] = xr.open_zarr(level_dir, consolidated=True)
-    if not pyramid:
-        raise RuntimeError(f"No pyramid levels found in {target_dir}")
-    return pyramid
+def _worker_metadata_path(paths: RunPaths, item_index: int) -> Path:
+    """Return the metadata JSON path of one worker."""
+    return paths.metadata_root / f"item-{item_index:06d}.json"
 
 
-def copy_tree(src: Path, dst: Path) -> None:
-    if dst.exists():
-        shutil.rmtree(dst)
-    shutil.copytree(src, dst)
+def _write_worker_result(paths: RunPaths, result: WorkerResult) -> None:
+    """Persist worker output metadata."""
+    target = _worker_metadata_path(paths, result.item_index)
+    target.write_text(json.dumps(dataclasses.asdict(result), indent=2, sort_keys=True))
 
 
-def mark_success(part_dir: Path, payload: Dict[str, Any]) -> None:
-    (part_dir / SUCCESS_MARKER).write_text(
-        json.dumps(payload, indent=2, sort_keys=True)
+def _read_worker_result(paths: RunPaths, item_index: int) -> Optional[WorkerResult]:
+    """Load one worker result if it exists."""
+    path = _worker_metadata_path(paths, item_index)
+    if not path.exists():
+        return None
+    return WorkerResult(**json.loads(path.read_text()))
+
+
+def _level_output_path(output_root: Path, level: int) -> Path:
+    """Return the temporary Zarr store path for one level."""
+    return output_root / f"level_{level}.zarr"
+
+
+def _write_temp_pyramid(
+    pyramid: Dict[int, "xr.Dataset"],
+    output_root: Path,
+    time_chunk: int,
+    cell_chunk: int,
+) -> Dict[int, str]:
+    """Write one worker's HEALPix pyramid to local temporary Zarr stores."""
+    level_paths: Dict[int, str] = {}
+    output_root.mkdir(parents=True, exist_ok=True)
+    for level, ds in pyramid.items():
+        target = _level_output_path(output_root, level)
+        if target.exists():
+            shutil.rmtree(target)
+        chunked = _chunk_healpix_dataset(
+            ds, time_chunk=time_chunk, cell_chunk=cell_chunk
+        )
+        chunked.to_zarr(target, mode="w", consolidated=True)
+        level_paths[level] = str(target)
+    return level_paths
+
+
+def _append_missing_times(
+    ds: "xr.Dataset",
+    target_path: str,
+    s3_options: Dict[str, str],
+    consolidated: bool = True,
+) -> Tuple[int, int]:
+    """Append only the missing time steps of a temporary dataset.
+
+    Parameters
+    ----------
+    ds : "xr.Dataset"
+        Temporary worker output.
+    target_path : str
+        Final S3 Zarr path for one level.
+    s3_options : dict[str, str]
+        S3 credentials.
+    consolidated : bool, optional
+        Whether to use consolidated metadata.
+
+    Returns
+    -------
+    tuple[int, int]
+        Number of time steps written and total number of time steps considered.
+
+    Notes
+    -----
+    This helper performs append-only updates. If a candidate store contains
+    missing timestamps that would need to be inserted *before* the current
+    maximum time already present in the target store, the function raises an
+    error instead of silently corrupting the time order.
+    """
+    store = _s3_map(target_path, s3_options)
+    existing = _open_existing_target(target_path, s3_options)
+
+    if existing is None:
+        ds.to_zarr(store, mode="w", consolidated=consolidated)
+        count = int(ds.sizes.get("time", 0))
+        return count, count
+
+    existing_time_list = _to_time_strings(existing["time"].values)
+    existing_times = set(existing_time_list)
+    existing_max_time = existing_time_list[-1] if existing_time_list else None
+    candidate_times = _to_time_strings(ds["time"].values)
+    missing_index = [
+        i for i, value in enumerate(candidate_times) if value not in existing_times
+    ]
+    if not missing_index:
+        return 0, len(candidate_times)
+
+    if existing_max_time is not None:
+        older_missing = [
+            candidate_times[index]
+            for index in missing_index
+            if candidate_times[index] <= existing_max_time
+        ]
+        if older_missing:
+            raise RuntimeError(
+                "Append-only update cannot insert missing timestamps before the "
+                f"current maximum target time {existing_max_time}. "
+                f"Offending timestamps: {older_missing[:5]}"
+            )
+
+    update = ds.isel(time=missing_index)
+    update.to_zarr(store, mode="a", append_dim="time", consolidated=consolidated)
+    return len(missing_index), len(candidate_times)
+
+
+def _write_static_dataset(
+    ds: "xr.Dataset",
+    target_path: str,
+    s3_options: Dict[str, str],
+    overwrite_static: bool,
+    consolidated: bool = True,
+) -> bool:
+    """Write a non-temporal dataset.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Static dataset.
+    target_path : str
+        Final S3 Zarr path for one level.
+    s3_options : dict[str, str]
+        S3 credentials.
+    overwrite_static : bool
+        Whether to overwrite an existing static target.
+    consolidated : bool, optional
+        Whether to use consolidated metadata.
+
+    Returns
+    -------
+    bool
+        ``True`` when data were written.
+    """
+    fs = s3fs.S3FileSystem(**s3_options)
+    existing = _open_existing_target(target_path, s3_options)
+    if existing is not None and not overwrite_static:
+        LOGGER.info("Static target already exists, skipping %s", target_path)
+        return False
+
+    if existing is not None and overwrite_static:
+        fs.rm(target_path, recursive=True)
+
+    store = s3fs.S3Map(root=target_path, s3=fs, check=False)
+    ds.to_zarr(store, mode="w", consolidated=consolidated)
+    return True
+
+
+def _resolve_item_index(explicit_index: Optional[int]) -> int:
+    """Resolve the worker index from CLI or Slurm environment."""
+    if explicit_index is not None:
+        return explicit_index
+    for env_name in ("SLURM_ARRAY_TASK_ID", "ICON_DREAM_ITEM_INDEX"):
+        value = os.getenv(env_name)
+        if value is not None:
+            return int(value)
+    return 0
+
+
+def plan_run(args: argparse.Namespace) -> Dict[str, Any]:
+    """Build the static run manifest.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command line arguments.
+
+    Returns
+    -------
+    dict[str, Any]
+        Small summary suitable for machine parsing.
+    """
+    run_dir = Path(args.run_dir) if args.run_dir else _default_run_dir()
+    paths = _build_paths(run_dir)
+    s3_options = gd.get_s3_options(args.s3_endpoint, args.s3_credentials_file)
+    target_root = _target_root(args.s3_bucket, args.freq)
+    target_info = _load_existing_target_info(target_root, s3_options)
+    existing_max_time_dt = (
+        _parse_datetime(target_info.max_time) if target_info.max_time else None
     )
 
-
-def check_success(part_dir: Path) -> bool:
-    return (part_dir / SUCCESS_MARKER).exists()
-
-
-# -----------------------------------------------------------------------------
-# Prepare / worker / pack stages
-# -----------------------------------------------------------------------------
-
-
-def prepare_shared_grid_and_weights(
-    grid_source: str,
-    shared_dir: Path,
-) -> tuple[Path, Path, int]:
-    import grid_doctor as gd
-
-    shared_dir.mkdir(parents=True, exist_ok=True)
-    grid_file = Path(
-        gd_cli.download_file(grid_source, shared_dir, overwrite=False)
-    )
-
-    grid_ds = gd.cached_open_dataset([grid_file])
-    max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
-    weights = gd.cached_weights(grid_ds, level=max_level)
-
-    weights_file = shared_dir / f"weights_level_{max_level}.nc"
-    if not weights_file.exists():
-        logger.info("Saving weights to %s", weights_file)
-        weights.to_netcdf(weights_file)
-
-    return grid_file, weights_file, max_level
-
-
-def run_prepare(args: "argparse.Namespace") -> None:
     source = IconDreamSource(
-        time_frequency=args.freq,
         variables=args.variables,
-        time=tuple(args.time),
+        frequency=args.freq,
+        requested_time=(args.time[0], args.time[1]),
     )
-    paths = ensure_run_layout(Path(args.work_dir))
-
-    logger.info("Starting prepare stage in %s", paths["work_dir"])
-    grid_file, weights_file, max_level = prepare_shared_grid_and_weights(
-        source.grid_source,
-        paths["shared_dir"],
+    items = source.list_items(
+        existing_max_time=existing_max_time_dt if args.update_only else None
     )
 
-    urls = list(source.links)
-    logger.info(
-        "Downloading %d source files into %s", len(urls), paths["raw_dir"]
+    manifest = RunManifest(
+        run_dir=str(paths.run_dir),
+        target_root=target_root,
+        frequency=args.freq,
+        variables=list(args.variables),
+        requested_time=(args.time[0], args.time[1]),
+        created_at=_isoformat_utc(datetime.now(tz=UTC)),
+        grid_url=DEFAULT_GRID_URL,
+        invariant_url=DEFAULT_INVARIANT_URL,
+        grid_path=str(paths.grid_path),
+        weights_path=str(paths.weights_path),
+        temp_root=str(paths.temp_root),
+        raw_root=str(paths.raw_root),
+        source_items=items,
+        source_engine=args.source_engine,
+        source_backend_kwargs=_read_json_text(args.source_backend_kwargs_json),
+        existing_max_time=target_info.max_time,
+        output_mode=args.output_mode,
+        metadata={
+            "update_only": bool(args.update_only),
+            "time_chunk": int(args.time_chunk),
+            "cell_chunk": int(args.cell_chunk),
+        },
     )
-    downloaded_files = download_files_parallel(
-        urls=urls,
-        target_dir=paths["raw_dir"],
+    save_manifest(manifest, paths.manifest_path)
+
+    summary = {
+        "run_dir": str(paths.run_dir),
+        "manifest": str(paths.manifest_path),
+        "item_count": len(items),
+        "existing_max_time": target_info.max_time,
+        "target_root": target_root,
+    }
+    return summary
+
+
+def prepare_run(args: argparse.Namespace) -> Dict[str, Any]:
+    """Download raw files and compute weights.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command line arguments.
+
+    Returns
+    -------
+    dict[str, Any]
+        Small execution summary.
+    """
+    if not args.run_dir:
+        raise ValueError("--run-dir is required for the prepare step.")
+    paths = _build_paths(args.run_dir)
+    manifest = load_manifest(paths.manifest_path)
+    downloaded_grid = gd_cli.download_file(
+        manifest.grid_url,
+        paths.grid_path.parent,
         timeout=args.download_timeout,
         overwrite=args.overwrite_downloads,
+        chunk_size=args.download_chunk_size,
+    )
+    manifest.grid_path = downloaded_grid
+
+    grid_ds = _open_grid_dataset(downloaded_grid)
+    if args.max_level is None:
+        max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
+    else:
+        max_level = int(args.max_level)
+    manifest.max_level = max_level
+
+    gd.cached_weights(grid_ds, level=max_level, cache_path=paths.weights_path)
+    manifest.weights_path = str(paths.weights_path)
+
+    download_files(
+        manifest.source_items,
+        raw_root=paths.raw_root,
         max_workers=args.download_workers,
+        timeout=args.download_timeout,
+        overwrite=args.overwrite_downloads,
+        chunk_size=args.download_chunk_size,
     )
+    save_manifest(manifest, paths.manifest_path)
 
-    jobs = build_jobs(downloaded_files, time_frequency=args.freq)
-    logger.info("Prepared %d worker jobs", len(jobs))
-
-    manifest = {
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "freq": args.freq,
-        "variables": list(args.variables),
-        "time": list(args.time),
-        "work_dir": str(paths["work_dir"]),
-        "raw_dir": str(paths["raw_dir"]),
-        "shared_dir": str(paths["shared_dir"]),
-        "parts_dir": str(paths["parts_dir"]),
-        "grid_file": str(grid_file),
-        "weights_file": str(weights_file),
-        "max_level": max_level,
-        "jobs": jobs,
+    return {
+        "run_dir": str(paths.run_dir),
+        "manifest": str(paths.manifest_path),
+        "item_count": len(manifest.source_items),
+        "max_level": manifest.max_level,
+        "weights_path": manifest.weights_path,
     }
-    save_manifest(manifest, paths["manifest_path"])
-    logger.info(
-        "Prepare stage finished. Manifest: %s (jobs=%d)",
-        paths["manifest_path"],
-        len(jobs),
-    )
 
 
-def resolve_job_index(args: "argparse.Namespace") -> int:
-    if args.job_index is not None:
-        return args.job_index
-    if os.getenv("SLURM_ARRAY_TASK_ID") is not None:
-        return int(os.environ["SLURM_ARRAY_TASK_ID"])
-    raise RuntimeError(
-        "No job index given. Use --job-index locally or run inside a SLURM array job."
-    )
+def worker_run(args: argparse.Namespace) -> Dict[str, Any]:
+    """Convert one manifest entry to a temporary HEALPix pyramid.
 
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command line arguments.
 
-def run_worker(args: "argparse.Namespace") -> None:
-    import grid_doctor as gd
+    Returns
+    -------
+    dict[str, Any]
+        Worker summary.
+    """
+    import xarray as xr
 
-    manifest = load_manifest(Path(args.manifest))
-    job_index = resolve_job_index(args)
-    jobs = manifest["jobs"]
-    if job_index < 0:
-        raise IndexError(f"job index must be >= 0, got {job_index}")
-    if job_index >= len(jobs):
-        logger.info(
-            (
-                "Worker index %d has no assigned work "
-                "(manifest contains %d jobs); exiting."
-            ),
-            job_index,
-            len(jobs),
-        )
-        return
+    if not args.run_dir:
+        raise ValueError("--run-dir is required for the worker step.")
+    paths = _build_paths(args.run_dir)
+    manifest = load_manifest(paths.manifest_path)
+    if manifest.max_level is None:
+        raise RuntimeError("Manifest has no max_level. Run the prepare step first.")
 
-    job = jobs[job_index]
-    part_name = job["part_name"]
-    shared_part_dir = Path(manifest["parts_dir"]) / part_name
-    shared_staging_dir = Path(manifest["parts_dir"]) / f"{part_name}.staging"
-
-    if (
-        shared_part_dir.exists()
-        and check_success(shared_part_dir)
-        and not args.overwrite_parts
-    ):
-        logger.info(
-            "Part already exists and is marked successful, skipping: %s",
-            shared_part_dir,
-        )
-        return
-
-    local_tmp_root = Path(args.local_tmp_dir)
-    local_tmp_root.mkdir(parents=True, exist_ok=True)
-    local_part_dir = local_tmp_root / part_name
-    if local_part_dir.exists():
-        shutil.rmtree(local_part_dir)
-
-    logger.info("Worker job %d processing label=%s", job_index, job["label"])
-
-    grid_ds = gd.cached_open_dataset([manifest["grid_file"]])
-    clat = grid_ds.clat.values
-    clon = grid_ds.clon.values
-    weights = xr.open_dataset(manifest["weights_file"])
-
+    item_index = _resolve_item_index(args.item_index)
     try:
-        ds = _open_merged_dataset(
-            job["files"], clat=clat, clon=clon, parallel=True
+        item = manifest.source_items[item_index]
+    except IndexError as error:
+        raise IndexError(
+            f"Item index {item_index} is out of range for {len(manifest.source_items)} items"
+        ) from error
+
+    client = _maybe_start_local_client(args.local_dask_workers)
+    try:
+        source_path = Path(manifest.raw_root) / item.relative_path
+        if not source_path.exists():
+            raise FileNotFoundError(f"Missing raw input file: {source_path}")
+
+        ds = _open_source_dataset(
+            source_path,
+            engine=manifest.source_engine,
+            backend_kwargs=manifest.source_backend_kwargs,
         )
+        ds = _prepare_dataset_for_regridding(ds)
+
+        weights = xr.open_dataset(manifest.weights_path)
         pyramid = gd.latlon_to_healpix_pyramid(
             ds,
-            max_level=int(manifest["max_level"]),
+            max_level=manifest.max_level,
             weights=weights,
         )
-        write_pyramid_to_local(pyramid, local_part_dir)
 
-        if shared_staging_dir.exists():
-            shutil.rmtree(shared_staging_dir)
-        copy_tree(local_part_dir, shared_staging_dir)
-        mark_success(
-            shared_staging_dir,
-            {
-                "job_index": job_index,
-                "label": job["label"],
-                "files": job["files"],
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            },
+        if manifest.output_mode == "direct":
+            if len(manifest.source_items) != 1:
+                raise RuntimeError(
+                    "output_mode='direct' is only safe when exactly one worker writes. "
+                    "Use the default temp mode for Slurm arrays."
+                )
+            s3_options = gd.get_s3_options(args.s3_endpoint, args.s3_credentials_file)
+            for level, level_ds in pyramid.items():
+                target_path = f"{manifest.target_root}/level_{level}.zarr"
+                level_ds = _chunk_healpix_dataset(
+                    level_ds, args.time_chunk, args.cell_chunk
+                )
+                if "time" in level_ds.dims:
+                    _append_missing_times(level_ds, target_path, s3_options)
+                else:
+                    _write_static_dataset(
+                        level_ds,
+                        target_path,
+                        s3_options,
+                        overwrite_static=args.overwrite_static,
+                    )
+            summary = {
+                "item_index": item_index,
+                "variable": item.variable,
+                "mode": "direct",
+            }
+            return summary
+
+        output_root = _worker_output_root(paths, item_index)
+        level_paths = _write_temp_pyramid(
+            pyramid,
+            output_root=output_root,
+            time_chunk=args.time_chunk,
+            cell_chunk=args.cell_chunk,
         )
-
-        if shared_part_dir.exists():
-            shutil.rmtree(shared_part_dir)
-        os.replace(shared_staging_dir, shared_part_dir)
-        logger.info("Worker job %d finished -> %s", job_index, shared_part_dir)
+        time_values = _to_time_strings(ds["time"].values) if "time" in ds.dims else []
+        result = WorkerResult(
+            item_index=item_index,
+            variable=item.variable,
+            level_paths=level_paths,
+            time_count=len(time_values),
+            time_start=time_values[0] if time_values else None,
+            time_end=time_values[-1] if time_values else None,
+            has_time=bool(time_values),
+        )
+        _write_worker_result(paths, result)
+        return {
+            "item_index": item_index,
+            "variable": item.variable,
+            "mode": "temp",
+            "levels": sorted(level_paths),
+            "time_count": len(time_values),
+        }
     finally:
-        try:
-            if local_part_dir.exists() and not args.keep_local_parts:
-                shutil.rmtree(local_part_dir)
-        finally:
-            del weights, grid_ds
-            gc.collect()
+        if client is not None:
+            client.close()
 
 
-def pyramid_has_time_dimension(pyramid: Dict[int, xr.Dataset]) -> bool:
-    return all("time" in ds.dims for ds in pyramid.values())
+def finalize_run(args: argparse.Namespace) -> Dict[str, Any]:
+    """Merge worker outputs into the final S3 target.
 
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command line arguments.
 
-def append_pyramid_to_s3(
-    pyramid: Dict[int, xr.Dataset],
-    output_path: str,
-    s3_opts: Dict[str, str],
-    *,
-    mode: Literal["w", "a"],
-) -> None:
-    import s3fs
+    Returns
+    -------
+    dict[str, Any]
+        Finalization summary.
+    """
+    import xarray as xr
 
-    fs = s3fs.S3FileSystem(**s3_opts)
-    for level, ds in sorted(pyramid.items()):
-        level_path = f"{output_path}/level_{level}.zarr"
-        store = s3fs.S3Map(root=level_path, s3=fs)
+    if not args.run_dir:
+        raise ValueError("--run-dir is required for the finalize step.")
+    paths = _build_paths(args.run_dir)
+    manifest = load_manifest(paths.manifest_path)
+    if manifest.max_level is None:
+        raise RuntimeError("Manifest has no max_level. Run the prepare step first.")
 
-        kwargs: Dict[str, Any] = {"consolidated": True, "mode": mode}
-        if mode == "a":
-            if "time" not in ds.dims:
-                raise RuntimeError(
-                    f"Cannot append non-time dataset for level {level}; "
-                    "time-invariant data must be packed from a single part only."
-                )
-            kwargs["append_dim"] = "time"
+    s3_options = gd.get_s3_options(args.s3_endpoint, args.s3_credentials_file)
+    worker_results: List[WorkerResult] = []
+    for item in manifest.source_items:
+        result = _read_worker_result(paths, item.item_index)
+        if result is None:
+            LOGGER.warning(
+                "Skipping item %s because no worker metadata was found",
+                item.item_index,
+            )
+            continue
+        worker_results.append(result)
 
-        logger.info(
-            "Packing level %d to %s with mode=%s",
-            level,
-            level_path,
-            kwargs["mode"],
+    worker_results.sort(
+        key=lambda result: (
+            result.time_start or "",
+            result.variable,
+            result.item_index,
         )
-        ds.to_zarr(store, **kwargs)
-
-
-def run_pack(args: "argparse.Namespace") -> None:
-    import grid_doctor as gd
-
-    manifest = load_manifest(Path(args.manifest))
-    jobs = manifest["jobs"]
-    parts_dir = Path(manifest["parts_dir"])
-    output_path = "s3://{bucket}/healpix/icon-dream/{time_frequency}".format(
-        bucket=args.s3_bucket,
-        time_frequency=args.freq,
     )
-    s3_opts = gd.get_s3_options(args.s3_endpoint, args.s3_credentials_file)
 
-    if not jobs:
-        raise RuntimeError("Manifest contains no jobs")
+    total_time_candidates = 0
+    total_time_written = 0
+    static_written = 0
 
-    first_written = False
-    first_part_has_time: Optional[bool] = None
-
-    for job in jobs:
-        part_dir = parts_dir / job["part_name"]
-        if not part_dir.exists():
-            raise FileNotFoundError(
-                f"Expected part directory missing: {part_dir}"
-            )
-        if not check_success(part_dir):
-            raise RuntimeError(
-                f"Part directory is missing success marker: {part_dir}"
-            )
-
-        logger.info("Packing part %s", part_dir)
-        pyramid = open_local_pyramid(part_dir)
-        has_time = pyramid_has_time_dimension(pyramid)
-
-        if not first_written:
-            append_pyramid_to_s3(
-                pyramid=pyramid,
-                output_path=output_path,
-                s3_opts=s3_opts,
-                mode="w",
-            )
-            first_written = True
-            first_part_has_time = has_time
-        else:
-            if not has_time:
-                raise RuntimeError(
-                    "Encountered an additional time-invariant part during pack. "
-                    "For datasets without a time dimension, prepare should emit "
-                    "exactly one job."
+    for result in worker_results:
+        for level, level_path in sorted(result.level_paths.items()):
+            ds = xr.open_zarr(level_path, consolidated=True)
+            target_path = f"{manifest.target_root}/level_{level}.zarr"
+            if "time" in ds.dims:
+                written, considered = _append_missing_times(ds, target_path, s3_options)
+                total_time_written += written
+                total_time_candidates += considered
+                LOGGER.info(
+                    "Merged item %s level %s: wrote %s/%s time slices",
+                    result.item_index,
+                    level,
+                    written,
+                    considered,
                 )
-            if first_part_has_time is False:
-                raise RuntimeError(
-                    "Cannot append time-varying parts after a time-invariant "
-                    "first part."
+            else:
+                did_write = _write_static_dataset(
+                    ds,
+                    target_path,
+                    s3_options,
+                    overwrite_static=args.overwrite_static,
                 )
-            append_pyramid_to_s3(
-                pyramid=pyramid,
-                output_path=output_path,
-                s3_opts=s3_opts,
-                mode="a",
-            )
+                static_written += int(did_write)
 
-        del pyramid
-        gc.collect()
-
-    logger.info("All parts packed to %s", output_path)
+    return {
+        "target_root": manifest.target_root,
+        "items_seen": len(worker_results),
+        "time_slices_considered": total_time_candidates,
+        "time_slices_written": total_time_written,
+        "static_writes": static_written,
+    }
 
 
-# -----------------------------------------------------------------------------
-# CLI
-# -----------------------------------------------------------------------------
+def run_all(args: argparse.Namespace) -> Dict[str, Any]:
+    """Run the full workflow locally in one process."""
+    plan_summary = plan_run(args)
+    args.run_dir = plan_summary["run_dir"]
+    prepare_summary = prepare_run(args)
+    item_count = int(plan_summary["item_count"])
+    for item_index in range(item_count):
+        worker_args = argparse.Namespace(**vars(args))
+        worker_args.item_index = item_index
+        worker_run(worker_args)
+    finalize_summary = finalize_run(args)
+    return {
+        "plan": plan_summary,
+        "prepare": prepare_summary,
+        "finalize": finalize_summary,
+    }
 
 
-def parse_args(
-    name: str, argv: Optional[List[str]] = None
-) -> "argparse.Namespace":
-    parser = gd_cli.get_parser(
-        name,
-        description="Download and convert ICON-DREAM data to HEALPix.",
-    )
+def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add common CLI arguments to a parser."""
+    parser.add_argument("s3_bucket", help="S3 target bucket.")
     parser.add_argument(
-        "--mode",
-        required=True,
-        choices=["prepare", "worker", "pack"],
-        help="Pipeline stage to execute.",
-    )
-    parser.add_argument(
-        "--work-dir",
-        required=True,
-        help="Shared pipeline directory containing raw/shared/parts/manifests.",
-    )
-    parser.add_argument(
-        "--manifest",
+        "--run-dir",
         default=None,
-        help=(
-            "Path to the manifest JSON. Defaults to "
-            "<work-dir>/manifests/job_manifest.json."
-        ),
+        help="Shared working directory used by all stages.",
     )
     parser.add_argument(
-        "--job-index",
-        type=int,
-        default=None,
-        help="Worker job index for local execution. If omitted, "
-        "uses SLURM_ARRAY_TASK_ID.",
+        "--s3-endpoint",
+        default="https://s3.eu-dkrz-3.dkrz.cloud",
+        help="S3 endpoint URL.",
     )
     parser.add_argument(
-        "--local-tmp-dir",
-        default=os.environ.get("TMPDIR", "/tmp/icon-dream-catcher"),
-        help="Node-local temporary directory used by workers to build local parts.",
-    )
-    parser.add_argument(
-        "--keep-local-parts",
-        action="store_true",
-        help="Do not remove the worker-local temporary part directory after success.",
-    )
-    parser.add_argument(
-        "--overwrite-parts",
-        action="store_true",
-        help="Recompute a worker part even if the shared part already exists.",
-    )
-    parser.add_argument(
-        "--download-workers",
-        type=int,
-        default=4,
-        help="Number of concurrent downloads in prepare mode.",
-    )
-    parser.add_argument(
-        "--download-timeout",
-        type=int,
-        default=60,
-        help="Per-download timeout in seconds for prepare mode.",
-    )
-    parser.add_argument(
-        "--overwrite-downloads",
-        action="store_true",
-        help="Re-download files even if they already exist in the "
-        "shared raw directory.",
+        "--s3-credentials-file",
+        default=str(Path.home() / ".s3-credentials.json"),
+        help="Path to a JSON file containing accessKey and secretKey.",
     )
     parser.add_argument(
         "--variables",
         nargs="*",
         default=["t_2m", "tot_prec"],
-        choices=IconDreamVariable.__args__,
+        choices=ICON_DREAM_VARIABLES,
+        help="Variables to process.",
     )
     parser.add_argument(
         "--freq",
-        "--time-frequency",
         default="hourly",
         choices=["hourly", "daily", "monthly", "fx"],
-        help="Time frequency of the data.",
+        help="ICON-DREAM data frequency.",
     )
     parser.add_argument(
         "--time",
         nargs=2,
-        default=["2010-01-01T00:00", "now"],
+        default=["2010-01-01T00:00:00Z", "now"],
+        metavar=("START", "END"),
+        help="Requested time interval in UTC.",
+    )
+    parser.add_argument(
+        "--source-engine",
+        default="cfgrib",
+        help="Xarray backend engine for source files.",
+    )
+    parser.add_argument(
+        "--source-backend-kwargs-json",
+        default="{}",
+        help="JSON object forwarded as backend_kwargs to xarray.",
+    )
+    parser.add_argument(
+        "--output-mode",
+        choices=["temp", "direct"],
+        default="temp",
+        help="Worker output mode. Temp mode is the safe choice for arrays.",
+    )
+    parser.add_argument(
+        "--update-only",
+        action="store_true",
+        help="Skip coarse source files that end before the current target max time.",
+    )
+    parser.add_argument(
+        "--overwrite-downloads",
+        action="store_true",
+        help="Re-download raw files even if they are already present.",
+    )
+    parser.add_argument(
+        "--overwrite-static",
+        action="store_true",
+        help="Overwrite an existing non-temporal target store.",
+    )
+    parser.add_argument(
+        "--download-workers",
+        type=int,
+        default=8,
+        help="Number of parallel download threads in the prepare step.",
+    )
+    parser.add_argument(
+        "--download-timeout",
+        type=int,
+        default=60,
+        help="HTTP timeout in seconds for downloads.",
+    )
+    parser.add_argument(
+        "--download-chunk-size",
+        type=int,
+        default=1024 * 1024,
+        help="HTTP stream chunk size in bytes.",
+    )
+    parser.add_argument(
+        "--max-level",
+        type=int,
+        default=None,
+        help="Override the automatically selected maximum HEALPix level.",
+    )
+    parser.add_argument(
+        "--time-chunk",
+        type=int,
+        default=168,
+        help="Time chunk size for temporary HEALPix Zarr stores.",
+    )
+    parser.add_argument(
+        "--cell-chunk",
+        type=int,
+        default=262144,
+        help="Cell chunk size for temporary HEALPix Zarr stores.",
+    )
+    parser.add_argument(
+        "--local-dask-workers",
+        type=int,
+        default=0,
+        help="Optional local distributed workers inside one process.",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase log verbosity.",
     )
 
+
+def build_parser() -> argparse.ArgumentParser:
+    """Create the command line parser."""
+    parser = argparse.ArgumentParser(
+        prog="convert.py",
+        description="Convert ICON-DREAM GRIB data to HEALPix Zarr.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    for name in ("plan", "prepare", "worker", "finalize", "run"):
+        subparser = subparsers.add_parser(name)
+        _add_common_arguments(subparser)
+        if name == "worker":
+            subparser.add_argument(
+                "--item-index",
+                type=int,
+                default=None,
+                help="Manifest item index processed by this worker.",
+            )
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Run the command line interface.
+
+    Parameters
+    ----------
+    argv : sequence[str] | None, optional
+        Command line arguments. ``None`` uses ``sys.argv``.
+
+    Returns
+    -------
+    int
+        Process exit code.
+    """
+    parser = build_parser()
     args = parser.parse_args(argv)
-    gd_cli.setup_logging_from_args(args)
+    gd.setup_logging(verbosity=args.verbose)
 
-    if args.manifest is None:
-        args.manifest = str(get_run_paths(Path(args.work_dir))["manifest_path"])
-    return args
-
-
-def main(name: str, argv: Optional[List[str]] = None) -> None:
-    args = parse_args(name, argv)
-
-    if args.mode == "prepare":
-        run_prepare(args)
-    elif args.mode == "worker":
-        run_worker(args)
-    elif args.mode == "pack":
-        run_pack(args)
-    else:
-        raise ValueError(f"Unknown mode: {args.mode}")
+    handlers = {
+        "plan": plan_run,
+        "prepare": prepare_run,
+        "worker": worker_run,
+        "finalize": finalize_run,
+        "run": run_all,
+    }
+    summary = handlers[args.command](args)
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
 
 
 if __name__ == "__main__":
-    main("icon-dream-catcher", sys.argv[1:])
+    raise SystemExit(main(sys.argv[1:]))

@@ -40,7 +40,9 @@ def get_parser(
         formatter_class=ArgFormatter,
     )
     parser.add_argument(
-        "s3_bucket", help="S3 target bucket.", metavar="s3-bucket"
+        "--s3-bucket",
+        help="S3 target bucket.",
+        required=True,
     )
     parser.add_argument(
         "--s3-endpoint",
