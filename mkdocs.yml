@@ -1,0 +1,67 @@
+site_name: grid-doctor
+site_description: Convert lat/lon xarray datasets to HEALPix pyramids.
+site_url: https://freva-org.github.io/grid-doctor/
+repo_url: https://github.com/freva-org/grid-doctor
+repo_name: freva-org/grid-doctor
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.expand
+    - toc.integrate
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: false
+            show_root_heading: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            merge_init_into_class: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - API Reference:
+      - grid_doctor: api/grid_doctor.md
+      - grid_doctor.helpers: api/helpers.md
+      - grid_doctor.utils: api/utils.md
+      - grid_doctor.log: api/log.md
+      - grid_doctor.cli: api/cli.md
+  - Recipes:
+      - Overview: recipes/index.md
+      - Structured Grids (ERA5, CMIP): recipes/structured.md
+      - Unstructured Grids (ICON): recipes/icon.md
