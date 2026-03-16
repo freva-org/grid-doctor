@@ -64,6 +64,7 @@ tests = ["pytest",
          "mock",
          "pytest-mock",
          "pytest-cov",
+         "pytest-pythonpath",
          ]
 
 all = [
@@ -106,6 +107,7 @@ target-version = ["py310", "py311", "py312"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+pythonpath = ["src", "scripts"]
 addopts = "-v --cov=grid_doctor --cov-report=term-missing"
 
 [tool.coverage.run]

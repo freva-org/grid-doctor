@@ -2,7 +2,7 @@ from icdc.base import Config, Pipeline
 
 from grid_doctor import latlon_to_healpix_pyramid
 
-CRUTEMSpec = Config(
+CRUTEMSpecP1M = Config(
     dst_s3url="s3://icdc/healpix/atmosphere/CRUTEM/P1M/",
     paths="/pool/data/ICDC/atmosphere/crutem/DATA/CRUTEM.5.0.2.0.anomalies.nc",
     engine="netcdf4",
@@ -15,7 +15,7 @@ CRUTEMSpec = Config(
 )
 
 
-CRUTEMPipeline = Pipeline(CRUTEMSpec)
+CRUTEMPipeline = Pipeline(CRUTEMSpecP1M)
 
 
 def run():
@@ -23,4 +23,4 @@ def run():
 
 
 if __name__ == "__main__":
-    run()  # main()
+    run()

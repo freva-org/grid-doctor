@@ -2,7 +2,7 @@ from icdc.base import Config, Pipeline
 
 from grid_doctor import latlon_to_healpix_pyramid
 
-MODISSpecAqua = Config(
+MODISSpecAquaP1D = Config(
     dst_s3url="s3://icdc/healpix/atmosphere/MODIS/aqua/P1D/",
     paths="/pool/data/ICDC/atmosphere/modis_aqua_watervapor_pwc_temperature/DATA/{year}/MODIS-C6.1__MYD08__daily__watervapor-parameters__[0-9]*__UHAM-ICDC__fv0.1.nc",
     engine="netcdf4",
@@ -14,7 +14,7 @@ MODISSpecAqua = Config(
     zarr_format=2,
 )
 
-MODISSpecTerra = Config(
+MODISSpecTerraP1D = Config(
     dst_s3url="s3://icdc/healpix/atmosphere/MODIS/terra/P1D/",
     paths="/pool/data/ICDC/atmosphere/modis_terra_watervapor_pwc_temperature/DATA/{year}/MODIS-C6.1__MOD08__daily__watervapor-parameters__[0-9]*__UHAM-ICDC__fv0.1.nc",
     engine="netcdf4",
@@ -29,8 +29,8 @@ MODISSpecTerra = Config(
 
 def run():
     for spec in (
-        MODISSpecAqua,
-        MODISSpecTerra,
+        MODISSpecAquaP1D,
+        MODISSpecTerraP1D,
     ):
         MODISPipeline = Pipeline(spec)
         MODISPipeline.run()

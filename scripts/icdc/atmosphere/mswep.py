@@ -2,7 +2,7 @@ from icdc.base import Config, Pipeline
 
 from grid_doctor import latlon_to_healpix_pyramid
 
-MSWEPSpec = Config(
+MSWEPSpecPT3H = Config(
     dst_s3url="s3://icdc/healpix/atmosphere/MSWEP/PT3H/",
     paths="/pool/data/ICDC/atmosphere/mswep_precipitation/DATA/*/*.nc",
     engine="netcdf4",
@@ -15,7 +15,7 @@ MSWEPSpec = Config(
 )
 
 
-MSWEPPipeline = Pipeline(MSWEPSpec)
+MSWEPPipeline = Pipeline(MSWEPSpecPT3H)
 
 
 def run():

@@ -1,6 +1,5 @@
 import logging
 
-
 from icdc.base import Config, Pipeline
 
 from grid_doctor import latlon_to_healpix_pyramid

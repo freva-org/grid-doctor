@@ -2,7 +2,7 @@ from icdc.base import Config, Pipeline
 
 from grid_doctor import latlon_to_healpix_pyramid
 
-BNSCSpec = Config(
+BNSCSpecP1M = Config(
     dst_s3url="s3://icdc/healpix/atmosphere/BNSC/P1M/",
     paths="/pool/data/ICDC/atmosphere/bnsc/DATA/v2/air_temperature/monthly/BNSC_Air_Temperature___UHAM_ICDC__v2__1deg__*.nc",
     engine="netcdf4",
@@ -15,7 +15,7 @@ BNSCSpec = Config(
 )
 
 
-BNSCPipeline = Pipeline(BNSCSpec)
+BNSCPipeline = Pipeline(BNSCSpecP1M)
 
 
 def run():
@@ -23,4 +23,4 @@ def run():
 
 
 if __name__ == "__main__":
-    run()  # main()
+    run()

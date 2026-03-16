@@ -2,7 +2,7 @@ from icdc.base import Config, Pipeline
 
 from grid_doctor import latlon_to_healpix_pyramid
 
-ECADSpecMean = Config(
+ECADSpecMeanP1D = Config(
     dst_s3url="s3://icdc/healpix/atmosphere/ECAD/P1D/mean/",
     paths="/pool/data/ICDC/atmosphere/ecad_eobs/DATA/t*ens_mean_0.1deg_reg_v31.0e.nc",
     engine="netcdf-4",
@@ -14,7 +14,7 @@ ECADSpecMean = Config(
     zarr_format=2,
 )
 
-ECADSpecSpread = Config(
+ECADSpecSpreadP1D = Config(
     dst_s3url="s3://icdc/healpix/atmosphere/ECAD/P1D/spread/",
     paths="/pool/data/ICDC/atmosphere/ecad_eobs/DATA/t*ens_spread_0.1deg_reg_v31.0e.nc",
     engine="netcdf-4",
@@ -28,7 +28,7 @@ ECADSpecSpread = Config(
 
 
 def run():
-    for spec in (ECADSpecMean, ECADSpecSpread):
+    for spec in (ECADSpecMeanP1D, ECADSpecSpreadP1D):
         ECADPipeline = Pipeline(spec)
         ECADPipeline.run()
 
