@@ -71,7 +71,7 @@ Claim a patient, write a script, and turn that frown into 😎.
 | CMIP6 | 🩹 | 😢 |
 | NextGEMS | 😎 | 😢 |
 | ICDC     | 😎 | 😢 |
-| ORCHESTRA | 🩹 | 😢 |
+| ORCHESTRA | 🩹 | 🩹 |
 | PalMod | 😢 | 😢 |
 | Dyamond| 😢 | 😢 |
 > [!TIP]
