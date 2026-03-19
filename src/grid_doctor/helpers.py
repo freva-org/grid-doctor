@@ -376,11 +376,100 @@ def resolution_to_healpix_level(resolution_deg: float) -> int:
     return max(0, level)
 
 
+def dataset_encoding(
+    ds: xr.Dataset,
+    comp_level: int = 4,
+    target_size: int = 16 * 1024**2,
+    access_pattern: Literal["map", "time_series"] = "map",
+    strict_access_pattern: bool = False,
+) -> Dict[str, Any]:
+    """Build Zarr encoding with optimised chunks and compression.
+
+    Uses :class:`~data_portal_worker.rechunker.ChunkOptimizer` to derive
+    chunk sizes that target *target_bytes* per chunk, then layers on
+    compression and byte-shuffle filters appropriate for each variable's
+    dtype.
+
+    Parameters
+    ----------
+    pyramid : dict[int, xr.Dataset]
+        healpix pyramid of dataset to build encoding for.
+        Can be on any grid type
+        (regular lon/lat, curvilinear, or unstructured).
+    comp_level : Zstd compression level,
+         Defaults to ``numcodecs.Zstd(level=4)`` which gives a good trade-off
+        between compression ratio and speed for climate data.
+    target_size : int, optional
+        Target chunk size in bytes (default 16 MiB).
+    access_patter: str
+        - access_pattern="map": optimize for slicing a single primary step (e.g. one time)
+          across large secondary axes.
+        - access_pattern="time_series": optimize for long runs along the primary axis at
+          fixed/small secondary axes.
+    strict_access_pattern: bool,
+        enforces chunk-size 1 of the axes applied to access_pattern.
+
+
+    Returns
+    -------
+    dict[str, dict[str, Any]]
+        Encoding dictionary keyed by variable name,
+        suitable for passing to :meth:`save_pyramid_to_s3`.
+
+
+    See Also
+    --------
+    make_encoding : To create encdoing for a whol healpix pyramid.
+    """
+    comp_rate = comp_level * 10  # TODO: this is a little crude.
+    by_axis = {"map": "time", "time_series": "cell"}[access_pattern]
+
+    def _optimize() -> ChunkPlan:
+        plan = ChunkOptimizer(target_size * comp_rate, access_pattern).plan(ds)
+        if by_axis not in ds.sizes or strict_access_pattern:
+            return plan
+        for i in range(2, ds.sizes[by_axis]):
+            _plan = ChunkOptimizer(
+                target_size * comp_rate, access_pattern, min_chunks={by_axis: i}
+            ).plan(ds)
+            actual_key = max(_plan.estimated_bytes_per_chunk_by_group)
+            actual = _plan.estimated_bytes_per_chunk_by_group[actual_key]
+            if target_size * comp_rate < actual:
+                return ChunkOptimizer(
+                    target_size * comp_rate, min_chunks={by_axis: i - 1}
+                ).plan(ds)
+        return plan
+
+    compressor = numcodecs.Zstd(level=comp_level)
+    encoding: Dict[str, dict[str, Any]] = {}
+    for name, var in ds.data_vars.items():
+        plan = _optimize()
+        nbytes = var.dtype.itemsize
+        chunks = tuple(plan.chunks.get(d, var.sizes[d]) for d in var.dims)
+
+        enc: dict[str, Any] = {
+            "chunks": chunks,
+            "compressor": compressor,
+        }
+
+        if var.dtype.kind == "f":
+            enc["filters"] = [numcodecs.Shuffle(elementsize=nbytes)]
+        elif var.dtype.kind in ("i", "u"):
+            enc["filters"] = [
+                numcodecs.Delta(dtype=var.dtype),
+                numcodecs.Shuffle(elementsize=nbytes),
+            ]
+
+        encoding[name] = enc
+    return encoding
+
+
 def make_encoding(
     pyramid: Dict[int, xr.Dataset],
     comp_level: int = 4,
     target_size: int = 16 * 1024**2,
     access_pattern: Literal["map", "time_series"] = "map",
+    strict_access_pattern: bool = False,
 ) -> Dict[str, Dict[str, Any]]:
     """Build Zarr encoding with optimised chunks and compression.
 
@@ -405,6 +494,8 @@ def make_encoding(
           across large secondary axes.
         - access_pattern="time_series": optimize for long runs along the primary axis at
           fixed/small secondary axes.
+    strict_access_pattern: bool
+        enforces chunk-size 1 of the axes applied to access_pattern.
 
 
     Returns
@@ -418,50 +509,16 @@ def make_encoding(
     --------
     save_pyramid_to_s3 : Upload a HEALPix pyramid to S3.
     """
-    comp_rate = comp_level * 10  # TODO: this is a little crude.
-    by_axis = {"map": "time", "time_series": "cell"}[access_pattern]
-
-    def _optimize(ds: "xr.Dataset") -> ChunkPlan:
-        plan = ChunkOptimizer(target_size * comp_rate).plan(ds)
-        if by_axis not in ds.sizes:
-            return plan
-        for i in range(2, ds.sizes[by_axis]):
-            _plan = ChunkOptimizer(
-                target_size * comp_rate, min_chunks={by_axis: i}
-            ).plan(ds)
-            actual_key = max(_plan.estimated_bytes_per_chunk_by_group)
-            actual = _plan.estimated_bytes_per_chunk_by_group[actual_key]
-            if target_size * comp_rate < actual:
-                return ChunkOptimizer(
-                    target_size * comp_rate, min_chunks={by_axis: i - 1}
-                ).plan(ds)
-        return plan
-
-    compressor = numcodecs.Zstd(level=comp_level)
-    encoding: Dict[int, Dict[str, dict[str, Any]]] = {}
-    for level, ds in pyramid.items():
-        plan = _optimize(ds)
-        encoding[level] = {}
-        for name, var in ds.data_vars.items():
-            nbytes = var.dtype.itemsize
-            chunks = tuple(plan.chunks.get(d, var.sizes[d]) for d in var.dims)
-
-            enc: dict[str, Any] = {
-                "chunks": chunks,
-                "compressor": compressor,
-            }
-
-            if var.dtype.kind == "f":
-                enc["filters"] = [numcodecs.Shuffle(elementsize=nbytes)]
-            elif var.dtype.kind in ("i", "u"):
-                enc["filters"] = [
-                    numcodecs.Delta(dtype=var.dtype),
-                    numcodecs.Shuffle(elementsize=nbytes),
-                ]
-
-            encoding[level][name] = enc
-
-    return encoding
+    return {
+        lev: dataset_encoding(
+            ds,
+            comp_level=comp_level,
+            target_size=target_size,
+            access_pattern=access_pattern,
+            strict_access_pattern=strict_access_pattern,
+        )
+        for lev, ds in pyramid.items()
+    }
 
 
 def compute_weights_delaunay(
