@@ -790,7 +790,7 @@ def _flatten_forecast_time(ds: "xr.Dataset") -> "xr.Dataset":
         return ds
 
     valid_time_values = np.asarray(ds["valid_time"].values).ravel()
-    stacked = ds.stack(_stacked_time=("time", "step"))
+    stacked = ds.stack(_stacked_time=("time", "step"), create_index=False)
     stacked = stacked.drop_vars(["valid_time", "time", "step"], errors="ignore")
     stacked = stacked.assign_coords(_stacked_time=valid_time_values)
     stacked = stacked.rename({"_stacked_time": "time"})
@@ -928,8 +928,13 @@ def _write_temp_pyramid(
     output_root: Path,
     time_chunk: int,
     cell_chunk: int,
+    zarr_format: Literal[2, 3] = 2,
+    compression_level: int = 4,
+    access_pattern: Literal["map", "time_series"] = "map",
+    strict_access_pattern: bool = True,
 ) -> Dict[int, str]:
     """Write one worker's HEALPix pyramid to local temporary Zarr stores."""
+
     level_paths: Dict[int, str] = {}
     output_root.mkdir(parents=True, exist_ok=True)
     for level, ds in pyramid.items():
@@ -939,7 +944,13 @@ def _write_temp_pyramid(
         chunked = _chunk_healpix_dataset(
             ds, time_chunk=time_chunk, cell_chunk=cell_chunk
         )
-        chunked.to_zarr(target, mode="w", consolidated=True)
+        chunked.to_zarr(
+            target,
+            mode="w",
+            consolidated=True,
+            zarr_format=zarr_format,
+            align_chunks=True,
+        )
         level_paths[level] = str(target)
     return level_paths
 
@@ -949,6 +960,9 @@ def _append_missing_times(
     target_path: str,
     s3_options: Dict[str, str],
     consolidated: bool = True,
+    zarr_format: Literal[2, 3] = 2,
+    compression_level: int = 4,
+    access_pattern: Literal["map", "time_series"] = "map",
 ) -> Tuple[int, int]:
     """Append only the missing time steps of a temporary dataset.
 
@@ -962,6 +976,18 @@ def _append_missing_times(
         S3 credentials.
     consolidated : bool, optional
         Whether to use consolidated metadata.
+    zarr_format: int
+        Zarr format version (default ``2``)
+    compression_level: int
+        Encoding compression level (default ``4``)
+    access_patter: str
+        - access_pattern="map": optimize for slicing a single primary step (e.g. one time)
+          across large secondary axes.
+        - access_pattern="time_series": optimize for long runs along the primary axis at
+          fixed/small secondary axes.
+    strict_access_pattern: bool
+        enforces chunk-size 1 of the axes applied to access_pattern.
+
 
     Returns
     -------
@@ -976,10 +1002,24 @@ def _append_missing_times(
     error instead of silently corrupting the time order.
     """
     store = _s3_map(target_path, s3_options)
-    existing = _open_existing_target(target_path, s3_options)
+    from grid_doctor.helpers import dataset_encoding
 
+    encoding = dataset_encoding(
+        ds,
+        comp_level=compression_level,
+        access_pattern=access_pattern,
+        strict_access_pattern=True,
+    )
+    existing = _open_existing_target(target_path, s3_options)
     if existing is None:
-        ds.to_zarr(store, mode="w", consolidated=consolidated)
+        ds.to_zarr(
+            store,
+            mode="w",
+            consolidated=consolidated,
+            zarr_format=zarr_format,
+            encoding=encoding,
+            align_chunks=True,
+        )
         count = int(ds.sizes.get("time", 0))
         return count, count
 
@@ -1007,7 +1047,14 @@ def _append_missing_times(
             )
 
     update = ds.isel(time=missing_index)
-    update.to_zarr(store, mode="a", append_dim="time", consolidated=consolidated)
+    update.to_zarr(
+        store,
+        mode="a",
+        append_dim="time",
+        consolidated=consolidated,
+        zarr_format=zarr_format,
+        align_chunks=True,
+    )
     return len(missing_index), len(candidate_times)
 
 
@@ -1017,6 +1064,10 @@ def _write_static_dataset(
     s3_options: Dict[str, str],
     overwrite_static: bool,
     consolidated: bool = True,
+    zarr_format: Literal[2, 3] = 2,
+    access_pattern: Literal["map", "time_series"] = "map",
+    compression_level: int = 4,
+    strict_access_pattern: bool = True,
 ) -> bool:
     """Write a non-temporal dataset.
 
@@ -1032,12 +1083,25 @@ def _write_static_dataset(
         Whether to overwrite an existing static target.
     consolidated : bool, optional
         Whether to use consolidated metadata.
+    zarr_format: int
+        Zarr format version (default ``2``)
+    compression_level: int
+        Encoding compression level (default ``4``)
+    access_pattern: str
+        - access_pattern="map": optimize for slicing a single primary step (e.g. one time)
+          across large secondary axes.
+        - access_pattern="time_series": optimize for long runs along the primary axis at
+          fixed/small secondary axes.
+    strict_access_pattern: bool
+        enforces chunk-size 1 of the axes applied to access_pattern.
 
     Returns
     -------
     bool
         ``True`` when data were written.
     """
+    from grid_doctor.helpers import dataset_encoding
+
     fs = s3fs.S3FileSystem(**s3_options)
     existing = _open_existing_target(target_path, s3_options)
     if existing is not None and not overwrite_static:
@@ -1046,9 +1110,21 @@ def _write_static_dataset(
 
     if existing is not None and overwrite_static:
         fs.rm(target_path, recursive=True)
-
+    encoding = dataset_encoding(
+        ds,
+        comp_level=compression_level,
+        access_pattern=access_pattern,
+        strict_access_pattern=strict_access_pattern,
+    )
     store = s3fs.S3Map(root=target_path, s3=fs, check=False)
-    ds.to_zarr(store, mode="w", consolidated=consolidated)
+    ds.to_zarr(
+        store,
+        mode="w",
+        consolidated=consolidated,
+        zarr_format=zarr_format,
+        encoding=encoding,
+        align_chunks=True,
+    )
     return True
 
 
