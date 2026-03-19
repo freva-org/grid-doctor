@@ -445,7 +445,9 @@ def dataset_encoding(
     for name, var in ds.data_vars.items():
         plan = _optimize()
         nbytes = var.dtype.itemsize
-        chunks = tuple(plan.chunks.get(d, var.sizes[d]) for d in var.dims)
+        chunks = tuple(
+            plan.chunks.get(d, int(var.sizes[d])) for d in map(str, var.dims)
+        )
 
         enc: dict[str, Any] = {
             "chunks": chunks,
@@ -460,7 +462,7 @@ def dataset_encoding(
                 numcodecs.Shuffle(elementsize=nbytes),
             ]
 
-        encoding[name] = enc
+        encoding[str(name)] = enc
     return encoding
 
 
@@ -470,7 +472,7 @@ def make_encoding(
     target_size: int = 16 * 1024**2,
     access_pattern: Literal["map", "time_series"] = "map",
     strict_access_pattern: bool = False,
-) -> Dict[str, Dict[str, Any]]:
+) -> Dict[int, Dict[str, Any]]:
     """Build Zarr encoding with optimised chunks and compression.
 
     Uses :class:`~data_portal_worker.rechunker.ChunkOptimizer` to derive

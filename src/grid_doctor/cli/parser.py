@@ -4,12 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Optional, Union
-
-try:
-    from rich_argparse import ArgumentDefaultsRichHelpFormatter as ArgFormatter
-except ImportError:
-    from argparse import ArgumentDefaultsHelpFormatter as ArgFormatter
+from typing import Optional, Type, Union
 
 
 def get_parser(
@@ -34,10 +29,19 @@ def get_parser(
         Parser with common arguments.  Script-specific arguments can be
         added before calling :meth:`~argparse.ArgumentParser.parse_args`.
     """
+    try:
+        from rich_argparse import ArgumentDefaultsRichHelpFormatter
+
+        formatter: Optional[Type[ArgumentDefaultsRichHelpFormatter]] = (
+            ArgumentDefaultsRichHelpFormatter
+        )
+    except ImportError:
+        formatter = None
+
     parser = argparse.ArgumentParser(
         prog=name,
         description=description,
-        formatter_class=ArgFormatter,
+        formatter_class=formatter or argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--s3-bucket",
