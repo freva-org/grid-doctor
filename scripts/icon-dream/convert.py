@@ -4,20 +4,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Annotated, Literal
+from typing import Annotated, Any, Literal
 
+from icon_dream_reflow_helpers import (DEFAULT_SOURCE_ROOT, TIME_FREQUENCY,
+                                       build_plan, convert_downloaded_item,
+                                       download_source_item, finalize_outputs,
+                                       prepare_shared_assets)
 from reflow import Param, Result, RunDir, Workflow
-
-from icon_dream_reflow_helpers import (
-    DEFAULT_SOURCE_ROOT,
-    TIME_FREQUENCY,
-    build_plan,
-    convert_downloaded_item,
-    default_run_dir,
-    download_source_item,
-    finalize_outputs,
-    prepare_shared_assets,
-)
 
 wf = Workflow("icon_dream_healpix")
 
@@ -25,16 +18,31 @@ wf = Workflow("icon_dream_healpix")
 @wf.job(cpus=2, time="00:20:00", mem="0", partition="compute")
 def gather_sources(
     s3_bucket: Annotated[str, Param(help="Target S3 bucket")],
-    start: Annotated[str, Param(help="Requested UTC start time")],
-    end: Annotated[str, Param(help="Requested UTC end time")],
-    variables: Annotated[list[str], Param(help="Variables to process")] = ["t_2m", "tot_prec"],
+    start: Annotated[str, Param(help="Requested UTC start time")] = "2010-01-01T00:00",
+    end: Annotated[str, Param(help="Requested UTC end time")] = "now",
+    variables: Annotated[list[str], Param(help="Variables to process")] = [
+        "t_2m",
+        "tot_prec",
+    ],
     freq: Annotated[TIME_FREQUENCY, Param(help="ICON-DREAM data frequency")] = "hourly",
-    source_root: Annotated[str, Param(help="Source dataset root URL")] = DEFAULT_SOURCE_ROOT,
-    s3_endpoint: Annotated[str, Param(help="S3 endpoint URL")] = "https://s3.eu-dkrz-3.dkrz.cloud",
-    s3_credentials_file: Annotated[str, Param(help="Path to S3 credentials JSON")] = str(Path.home() / ".s3-credentials.json"),
-    source_engine: Annotated[str, Param(help="Xarray backend engine for source files")] = "cfgrib",
-    source_backend_kwargs_json: Annotated[str, Param(help="JSON backend_kwargs for xarray")] = "{}",
-    update_only: Annotated[bool, Param(help="Skip source chunks already covered by existing variables")] = True,
+    source_root: Annotated[
+        str, Param(help="Source dataset root URL")
+    ] = DEFAULT_SOURCE_ROOT,
+    s3_endpoint: Annotated[
+        str, Param(help="S3 endpoint URL")
+    ] = "https://s3.eu-dkrz-3.dkrz.cloud",
+    s3_credentials_file: Annotated[
+        str, Param(help="Path to S3 credentials JSON")
+    ] = str(Path.home() / ".s3-credentials.json"),
+    source_engine: Annotated[
+        str, Param(help="Xarray backend engine for source files")
+    ] = "cfgrib",
+    source_backend_kwargs_json: Annotated[
+        str, Param(help="JSON backend_kwargs for xarray")
+    ] = "{}",
+    update_only: Annotated[
+        bool, Param(help="Skip source chunks already covered by existing variables")
+    ] = True,
     run_dir: RunDir = RunDir(),
 ) -> list[dict[str, Any]]:
     """Discover source files that still need processing and persist the run plan."""
@@ -54,12 +62,20 @@ def gather_sources(
     )["source_items"]
 
 
-@wf.job(cpus=16, time="08:00:00", mem="0", partition="compute", after=["gather_sources"])
+@wf.job(
+    cpus=16, time="08:00:00", mem="0", partition="compute", after=["gather_sources"]
+)
 def prepare_shared(
-    max_level: Annotated[int | None, Param(help="Override the automatically chosen HEALPix level")] = None,
+    max_level: Annotated[
+        int | None, Param(help="Override the automatically chosen HEALPix level")
+    ] = None,
     download_timeout: Annotated[int, Param(help="HTTP timeout in seconds")] = 60,
-    download_chunk_size: Annotated[int, Param(help="HTTP stream chunk size in bytes")] = 1024 * 1024,
-    overwrite_downloads: Annotated[bool, Param(help="Re-download the grid file even if it exists")] = False,
+    download_chunk_size: Annotated[
+        int, Param(help="HTTP stream chunk size in bytes")
+    ] = 1024 * 1024,
+    overwrite_downloads: Annotated[
+        bool, Param(help="Re-download the grid file even if it exists")
+    ] = False,
     run_dir: RunDir = RunDir(),
 ) -> str:
     """Download the grid once and cache shared HEALPix weights."""
@@ -72,12 +88,18 @@ def prepare_shared(
     )
 
 
-@wf.array_job(cpus=1, time="01:00:00", mem="0", partition="compute", array_parallelism=16)
+@wf.array_job(
+    cpus=1, time="01:00:00", mem="0", partition="compute", array_parallelism=2
+)
 def download_source(
     source_item: Annotated[dict[str, Any], Result(step="gather_sources")],
     download_timeout: Annotated[int, Param(help="HTTP timeout in seconds")] = 60,
-    download_chunk_size: Annotated[int, Param(help="HTTP stream chunk size in bytes")] = 1024 * 1024,
-    overwrite_downloads: Annotated[bool, Param(help="Re-download raw files even if they already exist")] = False,
+    download_chunk_size: Annotated[
+        int, Param(help="HTTP stream chunk size in bytes")
+    ] = 1024 * 1024,
+    overwrite_downloads: Annotated[
+        bool, Param(help="Re-download raw files even if they already exist")
+    ] = False,
     run_dir: RunDir = RunDir(),
 ) -> dict[str, Any]:
     """Download one raw source file, retaining the local skip logic."""
@@ -100,10 +122,16 @@ def download_source(
 )
 def convert_source(
     downloaded: Annotated[dict[str, Any], Result(step="download_source")],
-    time_chunk: Annotated[int, Param(help="Time chunk size for temporary Zarr stores")] = 168,
-    cell_chunk: Annotated[int, Param(help="Cell chunk size for temporary Zarr stores")] = 262144,
+    time_chunk: Annotated[
+        int, Param(help="Time chunk size for temporary Zarr stores")
+    ] = 168,
+    cell_chunk: Annotated[
+        int, Param(help="Cell chunk size for temporary Zarr stores")
+    ] = 262144,
     zarr_format: Annotated[Literal[2, 3], Param(help="Target Zarr format version")] = 2,
-    local_dask_workers: Annotated[int, Param(help="Optional local distributed workers inside one process")] = 0,
+    local_dask_workers: Annotated[
+        int, Param(help="Optional local distributed workers inside one process")
+    ] = 0,
     run_dir: RunDir = RunDir(),
 ) -> dict[str, Any]:
     """Convert one raw file into temporary per-level HEALPix Zarr stores."""
@@ -117,22 +145,67 @@ def convert_source(
     )
 
 
-@wf.job(cpus=8, time="08:00:00", mem="0", partition="compute")
-def finalize(
+@wf.job(cpus=2, time="00:05:00", mem="3GB", partition="compute")
+def gather_temp_levels(
     worker_results: Annotated[list[dict[str, Any]], Result(step="convert_source")],
-    s3_endpoint: Annotated[str, Param(help="S3 endpoint URL")] = "https://s3.eu-dkrz-3.dkrz.cloud",
-    s3_credentials_file: Annotated[str, Param(help="Path to S3 credentials JSON")] = str(Path.home() / ".s3-credentials.json"),
-    overwrite_static: Annotated[bool, Param(help="Overwrite an existing static target store")] = False,
-    replace_existing_times: Annotated[bool, Param(help="Rewrite overlapping time slices for already-present variables")] = False,
-    compression_level: Annotated[int, Param(help="Compression level for final Zarr encoding")] = 4,
-    access_pattern: Annotated[Literal["map", "time_series"], Param(help="Chunking optimisation pattern")] = "map",
-    strict_access_pattern: Annotated[bool, Param(help="Enforce strict chunking for the chosen access pattern")] = True,
+) -> list[dict[str, int | list[str]]]:
+    """Merge temporary outputs and publish the final pyramid to S3."""
+    grouped: dict[int, list[str]] = {}
+    resutls: list[dict[str, int | list[str]]] = []
+    for result in sorted(
+        worker_results,
+        key=lambda result: (
+            result.get("time_start") or "",
+            result["variable"],
+            result["item_index"],
+        ),
+    ):
+        for level_str, level_path in result["level_paths"].items():
+            grouped.setdefault(int(level_str), []).append(level_path)
+    for level, level_paths in sorted(grouped.items()):
+        resutls.append({"level": level, "level_paths": sorted(level_paths)})
+    return resutls
+
+
+@wf.array_job(
+    cpus=32,
+    time="08:00:00",
+    mem="0",
+    partition="compute",
+    array_parallelism=16,
+)
+def finalize(
+    level_paths: Annotated[
+        dict[str, int | list[str]], Result(step="gather_temp_levels")
+    ],
+    s3_endpoint: Annotated[
+        str, Param(help="S3 endpoint URL")
+    ] = "https://s3.eu-dkrz-3.dkrz.cloud",
+    s3_credentials_file: Annotated[
+        str, Param(help="Path to S3 credentials JSON")
+    ] = str(Path.home() / ".s3-credentials.json"),
+    overwrite_static: Annotated[
+        bool, Param(help="Overwrite an existing static target store")
+    ] = False,
+    replace_existing_times: Annotated[
+        bool,
+        Param(help="Rewrite overlapping time slices for already-present variables"),
+    ] = False,
+    compression_level: Annotated[
+        int, Param(help="Compression level for final Zarr encoding")
+    ] = 4,
+    access_pattern: Annotated[
+        Literal["map", "time_series"], Param(help="Chunking optimisation pattern")
+    ] = "map",
+    strict_access_pattern: Annotated[
+        bool, Param(help="Enforce strict chunking for the chosen access pattern")
+    ] = True,
     zarr_format: Annotated[Literal[2, 3], Param(help="Final Zarr format version")] = 2,
     run_dir: RunDir = RunDir(),
 ) -> dict[str, Any]:
     """Merge temporary outputs and publish the final pyramid to S3."""
     return finalize_outputs(
-        worker_results,
+        level_paths,
         s3_endpoint=s3_endpoint,
         s3_credentials_file=s3_credentials_file,
         overwrite_static=overwrite_static,

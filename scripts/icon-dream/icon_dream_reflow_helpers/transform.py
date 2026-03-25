@@ -7,15 +7,12 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Sequence
 
+import numpy as np
+
 import grid_doctor as gd
 
-from .common import (
-    build_paths,
-    load_plan,
-    maybe_start_local_client,
-    open_source_dataset,
-    to_time_strings,
-)
+from .common import (build_paths, load_plan, maybe_start_local_client,
+                     open_source_dataset, to_time_strings)
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -30,11 +27,17 @@ def rename_values_dim(ds: "xr.Dataset") -> "xr.Dataset":
 
 def flatten_forecast_time(ds: "xr.Dataset") -> "xr.Dataset":
     """Drop a forecast lead dimension if present."""
-    if "step" not in ds.coords or "time" not in ds.coords:
+    if (
+        "step" not in ds.coords
+        or "time" not in ds.coords
+        or "valid_time" not in ds.coords
+    ):
+        return ds
+    if ds["valid_time"].ndim != 2:
         return ds
     if ds.sizes.get("step", 1) == 1:
         ds = ds.isel(step=0, drop=True)
-    return ds
+    return ds.load()
 
 
 def normalise_time_axis(ds: "xr.Dataset") -> "xr.Dataset":
@@ -43,7 +46,11 @@ def normalise_time_axis(ds: "xr.Dataset") -> "xr.Dataset":
     if "time" in ds.coords and "time" not in ds.dims:
         ds = ds.expand_dims("time")
     if "valid_time" in ds.coords and "time" in ds.dims:
-        ds = ds.assign_coords(time=ds["valid_time"].values).drop_vars("valid_time")
+        valid_time_values = np.asarray(ds["valid_time"].values).ravel()
+        stacked = ds.stack(_stacked_time=("time", "step"))
+        stacked = stacked.drop_vars(["valid_time", "time", "step"], errors="ignore")
+        stacked = stacked.assign_coords(_stacked_time=valid_time_values)
+        ds = stacked.rename({"_stacked_time": "time"})
     if "time" in ds.coords:
         ds = ds.sortby("time")
     return ds
@@ -51,10 +58,12 @@ def normalise_time_axis(ds: "xr.Dataset") -> "xr.Dataset":
 
 def prepare_dataset_for_regridding(ds: "xr.Dataset") -> "xr.Dataset":
     """Apply the minimal normalisation needed for regridding."""
-    return normalise_time_axis(rename_values_dim(ds))
+    return normalise_time_axis(rename_values_dim(ds)).rename({"values": "cell"})
 
 
-def chunk_healpix_dataset(ds: "xr.Dataset", *, time_chunk: int, cell_chunk: int) -> "xr.Dataset":
+def chunk_healpix_dataset(
+    ds: "xr.Dataset", *, time_chunk: int, cell_chunk: int
+) -> "xr.Dataset":
     """Apply the temporary chunk layout used for intermediate worker outputs."""
     chunk_map: dict[str, int] = {}
     if "time" in ds.dims:
@@ -81,17 +90,18 @@ def write_temp_pyramid(
     output_root: Path,
     time_chunk: int,
     cell_chunk: int,
-    zarr_format: Literal[2, 3],
 ) -> dict[str, str]:
     """Write the temporary HEALPix pyramid produced by one worker."""
     output_root.mkdir(parents=True, exist_ok=True)
     level_paths: dict[str, str] = {}
-    for level, level_ds in enumerate(pyramid):
-        target = level_output_path(output_root, level)
+    for level, level_ds in pyramid.items():
+        target = level_output_path(output_root, level).with_suffix(".nc")
         if target.exists():
             shutil.rmtree(target)
-        chunked = chunk_healpix_dataset(level_ds, time_chunk=time_chunk, cell_chunk=cell_chunk)
-        chunked.to_zarr(target, mode="w", consolidated=True, zarr_format=zarr_format)
+        chunked = chunk_healpix_dataset(
+            level_ds, time_chunk=time_chunk, cell_chunk=cell_chunk
+        )
+        chunked.to_netcdf(target, mode="w")
         level_paths[str(level)] = str(target)
     return level_paths
 
@@ -105,13 +115,10 @@ def convert_downloaded_item(
     local_dask_workers: int,
     run_dir: str | Path,
 ) -> dict[str, Any]:
-    """Convert one raw input file into temporary per-level Zarr stores."""
+    """Convert one raw input file into temporary per-level netCDF file."""
     import xarray as xr
 
     plan = load_plan(run_dir)
-    if "max_level" not in plan:
-        raise RuntimeError("Shared preparation has not finished yet: max_level missing from plan")
-
     source_path = Path(downloaded["local_path"])
     if not source_path.exists():
         raise FileNotFoundError(f"Missing raw input file: {source_path}")
@@ -126,13 +133,17 @@ def convert_downloaded_item(
             )
         )
         weights = xr.open_dataset(plan["weights_path"])
-        pyramid = gd.latlon_to_healpix_pyramid(ds, max_level=int(plan["max_level"]), weights=weights)
+        max_level = (
+            None if plan.get("max_level") is None else int(plan.get("max_level"))
+        )
+        pyramid = gd.latlon_to_healpix_pyramid(ds, max_level=max_level, weights=weights)
         level_paths = write_temp_pyramid(
             pyramid,
-            output_root=worker_output_root(build_paths(run_dir), int(downloaded["item_index"])),
+            output_root=worker_output_root(
+                build_paths(run_dir), int(downloaded["item_index"])
+            ),
             time_chunk=time_chunk,
             cell_chunk=cell_chunk,
-            zarr_format=zarr_format,
         )
         time_values = to_time_strings(ds["time"].values) if "time" in ds.dims else []
         return {

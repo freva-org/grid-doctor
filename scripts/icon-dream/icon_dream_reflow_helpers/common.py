@@ -6,17 +6,14 @@ from __future__ import annotations
 import json
 import logging
 import re
-import shutil
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Optional, Sequence
-from urllib.parse import urlsplit
 
 import numpy as np
 import s3fs
 
-import grid_doctor as gd
 import grid_doctor.cli as gd_cli
 
 if TYPE_CHECKING:
@@ -112,6 +109,90 @@ def build_paths(run_dir: str | Path) -> dict[str, Path]:
     }
 
 
+def drop_surface_coords(ds: "xr.Dataset") -> "xr.Dataset":
+    """Drop not needed surface level coords."""
+    BAD = ["heightAboveGround", "surface"]
+    present = [name for name in BAD if name in ds.variables or name in ds.coords]
+    if present:
+        return ds.drop_vars(present, errors="ignore")
+    return ds
+
+
+def chunk_for_target_store_size(
+    *,
+    level: int,
+    dtype: str | np.dtype = "float32",
+    target_stored_mib: float = 16.0,
+    compression_ratio: float = 2.0,
+    access: Literal["time_series", "map"] = "map",
+    ntime: int | None = None,
+    max_time_chunk: int | None = None,
+    max_cell_chunk: int | None = None,
+) -> dict[str, int]:
+    """
+    Compute (time, cell) chunks for a HEALPix dataset.
+
+    Parameters
+    ----------
+    level
+        HEALPix order / level.
+    dtype
+        Variable dtype.
+    target_stored_mib
+        Desired approximate compressed chunk size on disk.
+    compression_ratio
+        Estimated ratio:
+            uncompressed_bytes / compressed_bytes
+    access
+        "map" or "time_series".
+    ntime
+        Total time size. Needed for time_series mode unless max_time_chunk is given.
+    max_time_chunk
+        Optional cap for time chunk.
+    max_cell_chunk
+        Optional cap for cell chunk.
+
+    Returns
+    -------
+    dict[str, int]
+        Chunk sizes, e.g. {"time": 5, "cell": 786432}.
+    """
+    nside = 2**level
+    ncell = 12 * nside * nside
+    itemsize = np.dtype(dtype).itemsize
+
+    target_stored_bytes = int(target_stored_mib * 1024 * 1024)
+    target_uncompressed_bytes = int(target_stored_bytes * compression_ratio)
+
+    if access == "map":
+        cell_chunk = ncell if max_cell_chunk is None else min(ncell, max_cell_chunk)
+        time_chunk = max(1, target_uncompressed_bytes // (itemsize * cell_chunk))
+        return {"time": int(time_chunk), "cell": int(cell_chunk)}
+
+    if access == "time_series":
+        if max_time_chunk is not None:
+            time_chunk = max_time_chunk
+        elif ntime is not None:
+            time_chunk = ntime
+        else:
+            raise ValueError(
+                "For access='time_series', provide either ntime or max_time_chunk."
+            )
+
+        if ntime is not None:
+            time_chunk = min(time_chunk, ntime)
+
+        cell_chunk = max(1, target_uncompressed_bytes // (itemsize * time_chunk))
+        cell_chunk = min(cell_chunk, ncell)
+
+        if max_cell_chunk is not None:
+            cell_chunk = min(cell_chunk, max_cell_chunk)
+
+        return {"time": int(time_chunk), "cell": int(cell_chunk)}
+
+    raise ValueError(f"Unsupported access mode: {access!r}")
+
+
 def save_plan(plan: dict[str, Any], path: Path) -> None:
     """Persist the run plan to disk."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,7 +232,6 @@ def download_one(
             timeout=timeout,
             overwrite=overwrite,
             chunk_size=chunk_size,
-            path=local_path,
         )
     )
 
@@ -161,7 +241,9 @@ def s3_map(path: str, s3_options: dict[str, str]) -> s3fs.S3Map:
     return s3fs.S3Map(root=path, s3=s3fs.S3FileSystem(**s3_options), check=False)
 
 
-def open_existing_target(target_path: str, s3_options: dict[str, str]) -> "xr.Dataset | None":
+def open_existing_target(
+    target_path: str, s3_options: dict[str, str]
+) -> "xr.Dataset | None":
     """Open an existing target Zarr dataset from S3 if it exists."""
     import xarray as xr
 
@@ -177,7 +259,9 @@ def target_root(bucket: str, frequency: str) -> str:
     return f"{bucket.rstrip('/')}/icon-dream/{frequency}"
 
 
-def load_existing_target_info(target_root_path: str, s3_options: dict[str, str]) -> dict[str, Any]:
+def load_existing_target_info(
+    target_root_path: str, s3_options: dict[str, str]
+) -> dict[str, Any]:
     """Inspect the existing target and return a compact summary."""
     variables: set[str] = set()
     max_time: datetime | None = None
@@ -196,7 +280,9 @@ def load_existing_target_info(target_root_path: str, s3_options: dict[str, str])
     }
 
 
-def open_source_dataset(path: str | Path, *, engine: str, backend_kwargs: dict[str, Any]) -> "xr.Dataset":
+def open_source_dataset(
+    path: str | Path, *, engine: str, backend_kwargs: dict[str, Any]
+) -> "xr.Dataset":
     """Open one ICON-DREAM source file."""
     import xarray as xr
 

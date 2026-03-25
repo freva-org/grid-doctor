@@ -10,26 +10,11 @@ from typing import Any, Sequence
 import grid_doctor as gd
 import grid_doctor.cli as gd_cli
 
-from .common import (
-    DATE_TOKEN_RE,
-    DEFAULT_GRID_URL,
-    DEFAULT_INVARIANT_URL,
-    DEFAULT_SOURCE_ROOT,
-    HrefParser,
-    ICON_DREAM_VARIABLES,
-    TIME_FREQUENCY,
-    UTC,
-    build_paths,
-    download_one,
-    isoformat_utc,
-    load_existing_target_info,
-    load_plan,
-    open_grid_dataset,
-    parse_datetime,
-    read_json_text,
-    save_plan,
-    target_root,
-)
+from .common import (DATE_TOKEN_RE, DEFAULT_GRID_URL, DEFAULT_INVARIANT_URL,
+                     DEFAULT_SOURCE_ROOT, ICON_DREAM_VARIABLES, TIME_FREQUENCY,
+                     UTC, HrefParser, build_paths, download_one, isoformat_utc,
+                     load_existing_target_info, load_plan, open_grid_dataset,
+                     parse_datetime, read_json_text, save_plan, target_root)
 
 
 class IconDreamSource:
@@ -54,7 +39,9 @@ class IconDreamSource:
         self.end_time = parse_datetime(requested_time[1])
 
     def _directory_url(self, variable: str) -> str:
-        return f"{self.source_root}/{self.frequency}/{variable.upper().replace('-', '_')}"
+        return (
+            f"{self.source_root}/{self.frequency}/{variable.upper().replace('-', '_')}"
+        )
 
     def _period_from_token(self, token: str) -> tuple[datetime, datetime]:
         if len(token) == 6:
@@ -74,7 +61,9 @@ class IconDreamSource:
         match = DATE_TOKEN_RE.search(href)
         return None if match is None else match.group(1)
 
-    def _should_keep(self, token: str | None, existing_max_time: datetime | None) -> bool:
+    def _should_keep(
+        self, token: str | None, existing_max_time: datetime | None
+    ) -> bool:
         if token is None:
             return True
         period_start, period_end = self._period_from_token(token)
@@ -149,10 +138,16 @@ class IconDreamSource:
         existing_variables = existing_variables or set()
         items: list[dict[str, Any]] = []
         for variable in self.variables:
-            variable_max = existing_max_time if update_only and variable in existing_variables else None
+            variable_max = (
+                existing_max_time
+                if update_only and variable in existing_variables
+                else None
+            )
             items.extend(self._list_variable_urls(variable, variable_max))
 
-        for idx, item in enumerate(sorted(items, key=lambda item: (item["variable"], item["url"]))):
+        for idx, item in enumerate(
+            sorted(items, key=lambda item: (item["variable"], item["url"]))
+        ):
             item["item_index"] = idx
         return items
 
@@ -182,7 +177,9 @@ def build_plan(
     paths = build_paths(run_dir)
     s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
     existing = load_existing_target_info(target_root(s3_bucket, freq), s3_options)
-    existing_max = parse_datetime(existing["max_time"]) if existing["max_time"] else None
+    existing_max = (
+        parse_datetime(existing["max_time"]) if existing["max_time"] else None
+    )
     items = IconDreamSource(
         variables=variables,
         frequency=freq,
@@ -211,6 +208,7 @@ def build_plan(
         "source_engine": source_engine,
         "source_backend_kwargs": read_json_text(source_backend_kwargs_json),
         "existing_target": existing,
+        "max_level": None,
     }
     save_plan(plan, paths["plan_path"])
     return plan
@@ -241,7 +239,11 @@ def prepare_shared_assets(
         else int(max_level)
     )
     gd.cached_weights(grid_ds, level=resolved_level, cache_path=paths["weights_path"])
-    plan.update(grid_path=str(downloaded_grid), weights_path=str(paths["weights_path"]), max_level=resolved_level)
+    plan.update(
+        grid_path=str(downloaded_grid),
+        weights_path=str(paths["weights_path"]),
+        max_level=resolved_level,
+    )
     save_plan(plan, paths["plan_path"])
     return str(paths["weights_path"])
 
