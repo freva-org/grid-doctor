@@ -1,13 +1,13 @@
 import pytest
 
-from scripts.icdc import specs
+from scripts.icdc import collections
 
 
 class TestICDC:
-    def test_specs(self):
-        assert len(specs) == 10
+    def test_collections(self):
+        assert len(collections) == 7
 
-    @pytest.mark.parametrize("spec", specs)
+    @pytest.mark.parametrize("collections", collections)
     @pytest.mark.skip(reason="Not implemented (yet?!)")
-    def test_spec(self, spec):
+    def test_spec(self, collections):
         pass  # TODO

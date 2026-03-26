@@ -4,6 +4,7 @@ import zarr
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Callable, Iterable, Mapping, Optional, Any
 from os import getenv
 
@@ -16,6 +17,20 @@ from grid_doctor import (
 Region = dict[str, slice]
 Pyramid = Mapping[int, xr.Dataset]
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+class Collection(Enum):
+    pass
+    
+    @classmethod
+    def run_pipelines(cls):
+        for collection in cls:
+            name, config = collection.name, collection.value
+            pipeline = Pipeline(config)
+            logger.info("Running %s pipeline", name)
+            #pipeline.run()
+            
 
 @dataclass
 class Config:

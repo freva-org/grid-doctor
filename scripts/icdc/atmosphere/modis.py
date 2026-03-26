@@ -1,38 +1,37 @@
-from icdc.base import Config, Pipeline
+from icdc.core import Config, Pipeline, Collection
 
 from grid_doctor import latlon_to_healpix_pyramid
 
-MODISSpecAquaP1D = Config(
-    dst_s3url="s3://icdc/healpix/atmosphere/MODIS/aqua/P1D/",
-    paths="/pool/data/ICDC/atmosphere/modis_aqua_watervapor_pwc_temperature/DATA/{year}/MODIS-C6.1__MYD08__daily__watervapor-parameters__[0-9]*__UHAM-ICDC__fv0.1.nc",
-    engine="netcdf4",
-    parallel=False,
-    chunking={"time": 8},
-    regrid_function=lambda x: latlon_to_healpix_pyramid(x, keep_nans=True),
-    init=True,
-    region={"time": slice(0, 16)},
-    zarr_format=2,
-)
+class MODIS(Collection):
+    AQUA = Config(
+        dst_s3url="s3://icdc/healpix/atmosphere/MODIS/aqua/P1D/",
+        paths="/pool/data/ICDC/atmosphere/modis_aqua_watervapor_pwc_temperature/DATA/{year}/MODIS-C6.1__MYD08__daily__watervapor-parameters__[0-9]*__UHAM-ICDC__fv0.1.nc",
+        engine="netcdf4",
+        parallel=False,
+        chunking={"time": 8},
+        regrid_function=lambda x: latlon_to_healpix_pyramid(x, keep_nans=True),
+        init=True,
+        region={"time": slice(0, 16)},
+        zarr_format=2,
+    )
 
-MODISSpecTerraP1D = Config(
-    dst_s3url="s3://icdc/healpix/atmosphere/MODIS/terra/P1D/",
-    paths="/pool/data/ICDC/atmosphere/modis_terra_watervapor_pwc_temperature/DATA/{year}/MODIS-C6.1__MOD08__daily__watervapor-parameters__[0-9]*__UHAM-ICDC__fv0.1.nc",
-    engine="netcdf4",
-    parallel=False,
-    chunking={"time": 8},
-    regrid_function=lambda x: latlon_to_healpix_pyramid(x, keep_nans=True),
-    init=True,
-    region={"time": slice(0, 16)},
-    zarr_format=2,
-)
+    TERRA = Config(
+        dst_s3url="s3://icdc/healpix/atmosphere/MODIS/terra/P1D/",
+        paths="/pool/data/ICDC/atmosphere/modis_terra_watervapor_pwc_temperature/DATA/{year}/MODIS-C6.1__MOD08__daily__watervapor-parameters__[0-9]*__UHAM-ICDC__fv0.1.nc",
+        engine="netcdf4",
+        parallel=False,
+        chunking={"time": 8},
+        regrid_function=lambda x: latlon_to_healpix_pyramid(x, keep_nans=True),
+        init=True,
+        region={"time": slice(0, 16)},
+        zarr_format=2,
+    )
 
 
 def run():
-    for spec in (
-        MODISSpecAquaP1D,
-        MODISSpecTerraP1D,
-    ):
-        MODISPipeline = Pipeline(spec)
+    for collection in MODIS:
+        name, config = collection.name, collection.value
+        MODISPipeline = Pipeline(config)
         MODISPipeline.run()
 
 

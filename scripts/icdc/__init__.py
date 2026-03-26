@@ -1,22 +1,48 @@
-from .atmosphere.imerg import IMERGSpec
-from .atmosphere.hoaps import HOAPSSpecP1M, HOAPSSpecPT6H
-from .atmosphere.bnsc import BNSCSpecP1M
-from .atmosphere.ecad import ECADSpecMeanP1D, ECADSpecSpreadP1D
-from .atmosphere.crutem import CRUTEMSpecP1M
-from .atmosphere.modis import MODISSpecAquaP1D, MODISSpecTerraP1D
-from .atmosphere.mswep import MSWEPSpecPT3H
+from types import FunctionType
 
-specs = [
-    IMERGSpec,
-    HOAPSSpecP1M,
-    HOAPSSpecPT6H,
-    BNSCSpecP1M,
-    ECADSpecMeanP1D,
-    ECADSpecSpreadP1D,
-    CRUTEMSpecP1M,
-    MODISSpecAquaP1D,
-    MODISSpecTerraP1D,
-    MSWEPSpecPT3H,
-]
+def load_collections():
+    from .atmosphere.imerg import IMERG
+    from .atmosphere.hoaps import HOAPS
+    from .atmosphere.bnsc import BNSC
+    from .atmosphere.ecad import ECAD
+    from .atmosphere.crutem import CRUTEM
+    from .atmosphere.modis import MODIS
+    from .atmosphere.mswep import MSWEP
 
-__all__: list[str] = ["specs"]
+    collections =   \
+        BNSC,   \
+        CRUTEM, \
+        ECAD,   \
+        HOAPS,  \
+        IMERG,  \
+        MODIS,  \
+        MSWEP,  \
+
+    return collections
+
+_LAZY_IMPORTS: dict[str, str] = {
+        'collections' : load_collections,
+        "IMERG": ".atmosphere.imerg",
+        "HOAPS": ".atmosphere.hoaps",
+        "BNSC" : ".atmosphere.bnsc",
+        "ECAD ": ".atmosphere.ecad",
+        "CRUTE": ".atmosphere.crutem",
+        "MODIS": ".atmosphere.modis",
+        "MSWEP": ".atmosphere.mswep",
+}
+
+
+def __getattr__(name: str) -> Any:
+    item = _LAZY_IMPORTS.get(name)
+    if isinstance(item,str):
+        import importlib
+        module = importlib.import_module(_LAZY_IMPORTS[name], __name__)
+        return getattr(module, name)
+    elif isinstance(item, FunctionType):
+        return item()
+
+    raise AttributeError(
+        f"module {__name__!r} has no attribute {name!r}"
+    )
+
+__all__: list[str] = [_LAZY_IMPORTS.keys()]
