@@ -28,12 +28,7 @@ class MODIS(Collection):
     )
 
 
-def run():
-    for collection in MODIS:
-        name, config = collection.name, collection.value
-        MODISPipeline = Pipeline(config)
-        MODISPipeline.run()
-
-
 if __name__ == "__main__":
-    run()
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    MODIS.run_pipelines()

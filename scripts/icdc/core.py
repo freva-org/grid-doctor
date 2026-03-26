@@ -5,7 +5,7 @@ import zarr
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Iterable, Mapping, Optional, Any
+from typing import  Any, Callable, Dict, Iterable, Mapping, Optional, Literal
 from os import getenv
 
 from grid_doctor import (
@@ -16,6 +16,9 @@ from grid_doctor import (
 
 Region = dict[str, slice]
 Pyramid = Mapping[int, xr.Dataset]
+TransformCallable = Callable[[Any], Pyramid]
+_ChunkingArg =  str | int | Literal['auto'] | tuple[int, ...] | None
+Chunking = _ChunkingArg | Mapping[Any,  _ChunkingArg]
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -24,7 +27,7 @@ class Collection(Enum):
     pass
     
     @classmethod
-    def run_pipelines(cls):
+    def run_pipelines(cls) -> None:
         for collection in cls:
             name, config = collection.name, collection.value
             pipeline = Pipeline(config)
@@ -37,10 +40,10 @@ class Config:
     dst_s3url: str
     paths: str
     engine: str = "netcdf4"
-    parallel: bool = (False,)
+    parallel: bool = False
     open_kwargs: dict[str, Any] = field(default_factory=dict)
-    chunking: dict[str, int] = field(default_factory=dict)
-    regrid_function: Callable[[], Pyramid] = latlon_to_healpix_pyramid
+    chunking: Chunking = field(default_factory=dict)
+    regrid_function: Callable[[Any], Pyramid] = latlon_to_healpix_pyramid
     init: bool = False
     region: Optional[Region] = None
     zarr_format: int = 2
@@ -52,7 +55,7 @@ class Source(ABC):
 
     def load(self) -> xr.Dataset:
         try:
-            ds = cached_open_dataset(
+            ds:xr.Dataset = cached_open_dataset(
                 self.spec.paths, engine=self.spec.engine, parallel=self.spec.parallel
             )
         except Exception as e:
@@ -63,7 +66,7 @@ class Source(ABC):
 
 
 class Transform(ABC):
-    def __init__(self, function: Callable, chunking: Optional[dict[str:int]] = None):
+    def __init__(self, function: TransformCallable, chunking: Chunking = None):
         self.function = function
         self.chunking = chunking
 
@@ -74,7 +77,7 @@ class Transform(ABC):
 
 
 class ZarrS3Sink:
-    def __init__(self, base_url, init: bool, region: Optional[Region] = None):
+    def __init__(self, base_url: str, init: bool, region: Optional[Region] = None):
         self.base_url = base_url
         self.s3_options = {
             "endpoint_url": "https://s3.eu-dkrz-3.dkrz.cloud",
@@ -87,7 +90,7 @@ class ZarrS3Sink:
     def write(
         self,
         pyramid: Pyramid,
-    ):
+    ) -> None:
         zarr.config.set(default_format=2)
         dst = self.base_url
         if self.init:
@@ -118,7 +121,7 @@ class Pipeline(ABC):
             config.dst_s3url, config.init, region=config.region
         )
 
-    def run(self):
+    def run(self) -> None:
         ds = self.source.load()
         pyramid = self.transform.convert(ds)
         self.destination.write(pyramid)

@@ -1,7 +1,7 @@
-from typing import Any
+from typing import Any, Callable, Tuple, Union
 from types import FunctionType
 
-def load_collections():
+def load_collections() -> Tuple[type, ...]:
     from .atmosphere.imerg import IMERG
     from .atmosphere.hoaps import HOAPS
     from .atmosphere.bnsc import BNSC
@@ -21,7 +21,7 @@ def load_collections():
 
     return collections
 
-_LAZY_IMPORTS: dict[str, str] = {
+_LAZY_IMPORTS: dict[str, Union[str,Callable[[], tuple[type, ...]]]] = {
         'collections' : load_collections,
         "IMERG": ".atmosphere.imerg",
         "HOAPS": ".atmosphere.hoaps",
@@ -37,7 +37,7 @@ def __getattr__(name: str) -> Any:
     item = _LAZY_IMPORTS.get(name)
     if isinstance(item,str):
         import importlib
-        module = importlib.import_module(_LAZY_IMPORTS[name], __name__)
+        module = importlib.import_module(item, __name__)
         return getattr(module, name)
     elif isinstance(item, FunctionType):
         return item()
@@ -46,4 +46,4 @@ def __getattr__(name: str) -> Any:
         f"module {__name__!r} has no attribute {name!r}"
     )
 
-__all__: list[str] = [_LAZY_IMPORTS.keys()]
+__all__: list[str] = [*_LAZY_IMPORTS.keys()]
