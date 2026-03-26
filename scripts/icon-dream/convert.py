@@ -173,6 +173,7 @@ def gather_temp_levels(
     mem="0",
     partition="compute",
     array_parallelism=16,
+    version="2",
 )
 def finalize(
     level_paths: Annotated[

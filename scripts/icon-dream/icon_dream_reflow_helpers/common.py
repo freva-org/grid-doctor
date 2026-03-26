@@ -256,7 +256,7 @@ def open_existing_target(
 
 def target_root(bucket: str, frequency: str) -> str:
     """Return the S3 root for a given bucket and frequency."""
-    return f"{bucket.rstrip('/')}/icon-dream/{frequency}"
+    return f"{bucket.rstrip('/')}/healpix/icon-dream-global/{frequency}"
 
 
 def load_existing_target_info(
