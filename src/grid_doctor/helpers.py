@@ -519,6 +519,7 @@ def regrid_to_healpix(
     level: int,
     nest: bool = True,
     method: Literal["nearest", "linear", "conservative"] = "nearest",
+    keep_nans: Optional[bool] = False,
 ) -> xr.Dataset:
     """Regrid a structured lat/lon dataset to HEALPix.
 
@@ -633,11 +634,12 @@ def regrid_to_healpix(
                 method=method,
                 fill_value=np.nan,
             )
-            return data
 
             if keep_nans:
                 tree = cKDTree(src_points)
-                _, idx = tree.query(target_points, k=1)  # find nearest source index for each target
+                _, idx = tree.query(
+                    target_points, k=1
+                )  # find nearest source index for each target
                 data[np.isnan(src_values[idx])] = np.nan
 
             return data
@@ -799,9 +801,12 @@ def coarsen_healpix(ds: xr.Dataset, target_level: int) -> xr.Dataset:
             try:
                 downgraded[downgraded == hp.UNSEEN] = np.nan
             except ValueError as e:
-                logger.warning("%s (variable %s will contain healpy.UNSEEN sentinel values)", e, var)
-            return downgraded # type: ignore[no-any-return]
-
+                logger.warning(
+                    "%s (variable %s will contain healpy.UNSEEN sentinel values)",
+                    e,
+                    var,
+                )
+            return downgraded  # type: ignore[no-any-return]
 
         coarsened_vars[var] = xr.apply_ufunc(
             _ud_grade,
@@ -954,7 +959,7 @@ def save_pyramid_to_s3(
                 | set(str(d) for d in ds.dims)
                 | set(str(c) for c in ds.coords)
             )
-            ds.drop_vars(to_drop, errors="warn").isel(region).to_zarr(
+            ds.drop_vars(to_drop, errors="ignore").isel(region).to_zarr(
                 store,
                 region=region,
                 **zarr_options,

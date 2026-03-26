@@ -1,3 +1,4 @@
+from typing import Any
 from types import FunctionType
 
 def load_collections():
