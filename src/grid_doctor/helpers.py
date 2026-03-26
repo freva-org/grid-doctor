@@ -568,16 +568,9 @@ def regrid_to_healpix(
 
     if method == "conservative":
         # Compute cell areas for regular lat/lon grid
-        lat_bnds = ds["lat_bnds"]
-        lon_bnds = ds["lon_bnds"]
 
-        if "time" in lat_bnds.dims:
-            lat_bnds = lat_bnds.isel(time=0)
-        if "time" in lon_bnds.dims:
-            lon_bnds = lon_bnds.isel(time=0)
-
-        lat_bnds = lat_bnds.values
-        lon_bnds = lon_bnds.values % 360
+        lat_bnds = ds["lat_bnds"].isel(time=0, missing_dims='ignore').values
+        lon_bnds = ds["lon_bnds"].isel(time=0, missing_dims='ignore').values % 360
 
         lat1 = np.deg2rad(lat_bnds[:, 0])
         lat2 = np.deg2rad(lat_bnds[:, 1])
