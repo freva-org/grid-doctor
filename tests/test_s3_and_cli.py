@@ -38,9 +38,7 @@ class TestSavePyramidToS3:
 
     @mock.patch("grid_doctor.helpers.s3fs.S3FileSystem")
     @mock.patch("grid_doctor.helpers.s3fs.S3Map")
-    def test_calls_to_zarr(
-        self, mock_s3map: mock.Mock, mock_s3fs: mock.Mock
-    ) -> None:
+    def test_calls_to_zarr(self, mock_s3map: mock.Mock, mock_s3fs: mock.Mock) -> None:
         from grid_doctor.helpers import save_pyramid_to_s3
 
         pyramid = self._make_pyramid()
@@ -48,16 +46,12 @@ class TestSavePyramidToS3:
         mock_s3map.return_value = mock_store
 
         with mock.patch.object(xr.Dataset, "to_zarr") as mock_zarr:
-            save_pyramid_to_s3(
-                pyramid, "s3://bucket/test", s3_options={}, mode="w"
-            )
+            save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w")
             assert mock_zarr.call_count == 2
 
     @mock.patch("grid_doctor.helpers.s3fs.S3FileSystem")
     @mock.patch("grid_doctor.helpers.s3fs.S3Map")
-    def test_zarr_format_3(
-        self, mock_s3map: mock.Mock, mock_s3fs: mock.Mock
-    ) -> None:
+    def test_zarr_format_3(self, mock_s3map: mock.Mock, mock_s3fs: mock.Mock) -> None:
         from grid_doctor.helpers import save_pyramid_to_s3
 
         pyramid = self._make_pyramid()
@@ -89,19 +83,19 @@ class TestGetParser:
 
     def test_defaults(self) -> None:
         parser = get_parser("test-prog")
-        args = parser.parse_args(["my-bucket"])
+        args = parser.parse_args(["--s3-bucket", "my-bucket"])
         assert args.s3_bucket == "my-bucket"
         assert args.verbose == 0
         assert "s3" in args.s3_endpoint
 
     def test_verbosity_count(self) -> None:
         parser = get_parser("test-prog")
-        args = parser.parse_args(["my-bucket", "-vvv"])
+        args = parser.parse_args(["--s3-bucket", "my-bucket", "-vvv"])
         assert args.verbose == 3
 
     def test_credentials_file_default(self) -> None:
         parser = get_parser("test-prog")
-        args = parser.parse_args(["my-bucket"])
+        args = parser.parse_args(["--s3-bucket", "my-bucket"])
         assert args.s3_credentials_file == Path.home() / ".s3-credentials.json"
 
 
@@ -111,6 +105,7 @@ class TestSetupLoggingFromArgs:
         setup_logging_from_args(args)
 
         import grid_doctor.log as log_mod
+
         assert log_mod.get_level() == 10  # DEBUG
 
 
