@@ -34,7 +34,6 @@ def get_parser(
         Parser with common arguments.  Script-specific arguments can be
         added before calling :meth:`~argparse.ArgumentParser.parse_args`.
     """
-
     parser = argparse.ArgumentParser(
         prog=name,
         description=description,
