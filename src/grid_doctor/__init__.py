@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__version__ = "2603.1.0"
+__version__ = "2604.0.0"
 
 _LAZY_IMPORTS: dict[str, str] = {
     "apply_weight_file": ".remap",
