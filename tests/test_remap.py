@@ -21,12 +21,11 @@ from grid_doctor.remap import (
     _infer_bounds_1d,
     _infer_curvilinear_corners,
     _interpolate_linear_array,
-    _looks_global,
     _normalise_angle_units,
-    _source_polygons,
     regrid_to_healpix,
     regrid_unstructured_to_healpix,
 )
+from grid_doctor.remap_backend import _source_polygons, _looks_global
 from .helpers import _FakeHealpixModule
 
 
