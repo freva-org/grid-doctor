@@ -2,9 +2,11 @@
 
 ## Desgin Approach
 
-Since there are many sources in the case of ICDC, there is a pipeline class that accepts 3 other, Source, Transform, Sink, that determine how to treat the input dataset. One only needs to instanciante yet another class, Config, that parameterizes the process. The aim is that minimal amount of code need to be added for a new dataset.
+Since there are many sources in the case of ICDC, there is a pipeline (`Pipeline`) class that accepts 3 other, `Source`, `Transform`, `Sink`, that determines how to treat each input dataset.
+One only needs to instanciante yet another class, `Config`, that parameterizes the process. The aim is that minimal amount of code need to be added for a new dataset.
+To make structure things further, we use the class `Collection` which is an enum derived class that enumerates each of its' `Config` and implements a method `run_pipelines` that triggers the pipeline execution for each.
 
-Also, worth noting that now, initializing the dataset and writting a region are done (if enabled) consecutively. So one needs to pay attention not to "delete" the already exising output, once appending, or writting a given region.
+The collections code is structured into icdc/<realm>/<collection>.py
 
 ### NaNs
 
