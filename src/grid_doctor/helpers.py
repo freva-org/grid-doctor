@@ -12,7 +12,6 @@ Remapping itself lives in [`grid_doctor.remap`][grid_doctor.remap].
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any, Literal, cast
 
 import numpy as np
@@ -287,7 +286,7 @@ def coarsen_healpix(ds: xr.Dataset, target_level: int) -> xr.Dataset:
 
 def create_healpix_pyramid(
     ds: xr.Dataset,
-    max_level: int,
+    max_level: int | None = None,
     min_level: int = 0,
     **kwargs: Any,
 ) -> dict[int, xr.Dataset]:
@@ -316,6 +315,9 @@ def create_healpix_pyramid(
     dict[int, xarray.Dataset]
         Pyramid keyed by level.
     """
+    if max_level is None:
+        max_level = resolution_to_healpix_level(get_latlon_resolution(ds))
+
     pyramid: dict[int, xr.Dataset] = {}
     finest = regrid_to_healpix(ds, max_level, **kwargs)
     pyramid[max_level] = finest
@@ -404,14 +406,7 @@ def save_pyramid_to_s3(
 
 
 def latlon_to_healpix_pyramid(
-    ds: xr.Dataset,
-    *,
-    min_level: int = 0,
-    max_level: int | None = None,
-    method: Literal["nearest", "linear", "conservative"] = "conservative",
-    source_units: Literal["auto", "deg", "rad"] = "auto",
-    weights_path: str | Path | None = None,
-    missing_policy: Literal["renormalize", "propagate"] = "renormalize",
+    ds: xr.Dataset, *, min_level: int = 0, max_level: int | None = None, **kwargs: Any
 ) -> dict[int, xr.Dataset]:
     """Convert a source dataset into a HEALPix pyramid.
 
@@ -424,15 +419,8 @@ def latlon_to_healpix_pyramid(
     max_level:
         Finest level to generate. When omitted, the level is estimated from the
         source-grid resolution.
-    method:
-        Remapping method forwarded to
-        [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix].
-    source_units:
-        Unit convention of the source coordinates.
-    weights_path:
-        Optional weight file for `nearest` or `conservative` remapping.
-    missing_policy:
-        Missing-value handling for weight-based remapping.
+    **kwargs:
+        Forwarded to [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix].
 
     Returns
     -------
@@ -451,16 +439,11 @@ def latlon_to_healpix_pyramid(
     )
     ```
     """
-    if max_level is None:
-        max_level = resolution_to_healpix_level(get_latlon_resolution(ds))
     return create_healpix_pyramid(
         ds,
         max_level=max_level,
         min_level=min_level,
-        method=method,
-        source_units=source_units,
-        weights_path=weights_path,
-        missing_policy=missing_policy,
+        **kwargs,
     )
 
 
