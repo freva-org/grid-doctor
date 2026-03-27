@@ -1440,15 +1440,16 @@ def write_ugrid_mesh_file(
         attrs={"Conventions": "UGRID-1.0"},
     )
     face_node_var = f"{mesh_name}_face_nodes"
-    ds.to_netcdf(
-        output,
-        encoding={
-            face_node_var: {
-                "dtype": "int32",
-                "_FillValue": np.int32(-1),
-            },
-        },
-    )
+    encoding: dict[str, dict[str, Any]] = {
+        var: {"_FillValue": None}
+        for var in ds.data_vars
+        if var != face_node_var
+    }
+    encoding[face_node_var] = {
+        "dtype": "int32",
+        "_FillValue": np.int32(-1),
+    }
+    ds.to_netcdf(output, encoding=encoding, format="NETCDF3_64BIT")
 
     return output
 
