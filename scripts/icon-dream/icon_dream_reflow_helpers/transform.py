@@ -116,7 +116,6 @@ def convert_downloaded_item(
     run_dir: str | Path,
 ) -> dict[str, Any]:
     """Convert one raw input file into temporary per-level netCDF file."""
-    import xarray as xr
 
     plan = load_plan(run_dir)
     source_path = Path(downloaded["local_path"])
@@ -132,11 +131,12 @@ def convert_downloaded_item(
                 backend_kwargs=plan["source_backend_kwargs"],
             )
         )
-        weights = xr.open_dataset(plan["weights_path"])
         max_level = (
             None if plan.get("max_level") is None else int(plan.get("max_level"))
         )
-        pyramid = gd.latlon_to_healpix_pyramid(ds, max_level=max_level, weights=weights)
+        pyramid = gd.create_healpix_pyramid(
+            ds, max_level=max_level, weights_path=plan["weights_path"]
+        )
         level_paths = write_temp_pyramid(
             pyramid,
             output_root=worker_output_root(

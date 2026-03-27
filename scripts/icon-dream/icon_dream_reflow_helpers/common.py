@@ -104,7 +104,7 @@ def build_paths(run_dir: str | Path) -> dict[str, Path]:
         "plan_path": root / "plan.json",
         "grid_path": root / "shared" / "ICON-DREAM-Global_grid.nc",
         "weights_path": root / "shared" / "healpix-weights.nc",
-        "temp_root": root / "temp-zarr",
+        "temp_root": root / "temp-healpix",
         "raw_root": root / "raw-input",
     }
 

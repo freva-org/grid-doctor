@@ -1,3 +1,0 @@
-dateparser
-requests
-git+https://github.com/freva-org/reflow.git

@@ -119,6 +119,7 @@ def download_source(
     partition="compute",
     array_parallelism=16,
     after=["prepare_shared"],
+    version="2",
 )
 def convert_source(
     downloaded: Annotated[dict[str, Any], Result(step="download_source")],
