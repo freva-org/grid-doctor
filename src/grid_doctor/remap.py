@@ -717,7 +717,7 @@ def compute_healpix_weights(
     ds: xr.Dataset,
     level: int,
     *,
-    method: Literal["nearest", "conservative"] = "nearest",
+    method: Literal["nearest", "conservative"] = "conservative",
     nest: bool = True,
     source_units: SourceUnits = "auto",
     weights_path: str | Path | None = None,
