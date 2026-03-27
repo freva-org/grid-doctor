@@ -443,6 +443,9 @@ def compute_healpix_weights(
     spectral_transform_command:
         External command used when `source_kind="spectral"`. The command may
         use `{input}` and `{output}` placeholders.
+    **kwargs:
+        Any additional keyword arguments for
+        [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights]
 
     Returns
     -------
@@ -923,6 +926,7 @@ def regrid_to_healpix(
     source_units: SourceUnits = "auto",
     weights_path: str | Path | None = None,
     missing_policy: MissingPolicy = "renormalize",
+    **kwags: Any,
 ) -> xr.Dataset:
     """Regrid `ds` to a HEALPix target grid.
 
