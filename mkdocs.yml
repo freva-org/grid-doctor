@@ -56,7 +56,7 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - API Reference:
-      - grid_doctor: api/grid_doctor.md
+      - grid_doctor.remap: api/remap.md
       - grid_doctor.helpers: api/helpers.md
       - grid_doctor.utils: api/utils.md
       - grid_doctor.log: api/log.md

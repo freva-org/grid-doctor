@@ -1,13 +1,12 @@
 # Unstructured Grids (ICON)
 
 This recipe converts ICON model output on a triangular mesh to a
-HEALPix pyramid.  ICON data is detected automatically — the
-`easygems.remap` Delaunay interpolation path is used instead of
-`scipy.griddata`.
+HEALPix pyramid.  ICON data is detected automatically and a weights file
+for conservative remapping can be generated.
 
 ## Key Difference: Pre-compute Weights
 
-Delaunay triangulation on millions of cells is expensive.  For ICON
+Remapping from unstructured grids is expensive.  For ICON
 you should **compute and cache weights once**, then reuse them across
 all variables and time steps:
 
@@ -18,12 +17,12 @@ import grid_doctor as gd
 grid_ds = gd.cached_open_dataset(["ICON-DREAM-Global_grid.nc"])
 
 # Derive the HEALPix level from the grid resolution.
-max_level = gd.resolution_to_healpix_level(
+level =  gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
+weights_file = gd.compute_healpix_weights(
+    grids_ds,
     gd.get_latlon_resolution(grid_ds)
+    weights_path=f"weights_{level}.nc"
 )
-
-# Compute (or load from cache) the Delaunay weights.
-weights = gd.cached_weights(grid_ds, level=max_level)
 ```
 
 The weights are cached as a NetCDF file in `$SCRATCH` (or `/tmp`).
@@ -42,7 +41,7 @@ ds = gd.cached_open_dataset(["icon_dream_hourly_*.grb"])
 ds = ds.rename_dims({"values": "cell"}).chunk({"cell": -1})
 
 pyramid = gd.latlon_to_healpix_pyramid(
-    ds, max_level=max_level, weights=weights
+    ds, max_level=max_level, weights_path=f"weights_{level}.nc"
 )
 
 gd.save_pyramid_to_s3(
@@ -73,14 +72,14 @@ debugging:
 
 ```console
 # Submit via SLURM
-srun python scripts/icon-dream/convert.py my-bucket \
+srun python scripts/icon-dream/convert.py --s3-bucket my-bucket \
     --variables t_2m tot_prec \
     --freq hourly \
     --time 2020-01 2020-12 \
     -vv
 
 # Or run locally for testing
-python scripts/icon-dream/convert.py my-bucket \
+python scripts/icon-dream/convert.py --s3-bucket my-bucket \
     --variables t_2m --time 2024-01 2024-01 -vvv
 ```
 
@@ -93,5 +92,5 @@ are met:
 - A variable has the attribute `CDI_grid_type = "unstructured"`.
 
 The coordinate arrays `clat` / `clon` (or `lat` / `lon`) on the cell
-dimension are used directly as the point cloud for the Delaunay
-triangulation — no meshgrid or 2-D reshaping is needed.
+dimension are used directly as the point cloud — no meshgrid or 2-D reshaping
+is needed.
