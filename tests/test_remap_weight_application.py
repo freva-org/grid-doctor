@@ -9,6 +9,7 @@ import pytest
 import xarray as xr
 
 from grid_doctor import remap
+from grid_doctor import remap_backend
 from grid_doctor.remap import (
     _flattened_size,
     _guess_source_dims_from_size,
@@ -476,7 +477,7 @@ class TestWeightFileWorkflow:
     def test_compute_healpix_weights_nearest(
         self, monkeypatch: pytest.MonkeyPatch, regular_ds: xr.Dataset, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr(remap, "_require_esmpy", lambda: _FakeESMPy())
+        monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
@@ -502,7 +503,7 @@ class TestWeightFileWorkflow:
         limited_area_ds: xr.Dataset,
         tmp_path: Path,
     ) -> None:
-        monkeypatch.setattr(remap, "_require_esmpy", lambda: _FakeESMPy())
+        monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
