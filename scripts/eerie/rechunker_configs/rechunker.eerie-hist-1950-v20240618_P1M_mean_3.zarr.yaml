@@ -1,0 +1,78 @@
+schema_version: 1
+rechunker_version: 0.1.0
+input_path: 
+  /scratch/k/k202181/remap_eerie/eerie-hist-1950-v20240618/eerie-hist-1950-v20240618_P1M_mean_3.zarr
+output_path: s3://eerie/eerie-hist-1950-v20240618_P1M_mean_3.zarr
+use_progress: true
+input_storage_options:
+output_storage_options:
+input_storage_options_env:
+output_storage_options_env: /home/k/k202181/eerie-rechunk-s3.env
+base:
+  block_size_limit:
+  base_chunk_rule: auto
+  base_compression:
+  base_to_be_rechunked: true
+config_by_shared_dimension:
+  "['crs']":  # 1 variables with this set of dimensions, length of dimensions: (1,), dtype of dimensions: float32
+    chunk_rule:
+    to_be_rechunked:
+    block_size_limit:
+    compression:
+    source_slices_partial_rechunk:
+    target_region_partial_rechunk:
+    batch_rechunk_stride:
+  "['time', 'cell']": # 2 variables with this set of dimensions, length of dimensions: (780, 768), dtype of dimensions: float32
+    chunk_rule: (780, 768)
+    to_be_rechunked:
+    block_size_limit:
+    compression:
+        id: blosc
+        cname: lz4
+        clevel: 5
+        shuffle: 1
+        blocksize: 0
+    source_slices_partial_rechunk:
+    target_region_partial_rechunk:
+    batch_rechunk_stride:
+  "['time']": # 1 variables with this set of dimensions, length of dimensions: (780,), dtype of dimensions: int64
+    chunk_rule:
+    to_be_rechunked:
+    block_size_limit:
+    compression:
+    source_slices_partial_rechunk:
+    target_region_partial_rechunk:
+    batch_rechunk_stride:
+config_by_variable:
+  crs:  # shape: (1,), chunks: (1,), dtype: float32, compression: Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0), bytes per chunk: 4
+    chunk_rule:
+    to_be_rechunked:
+    block_size_limit:
+    compression:
+    source_slices_partial_rechunk:
+    target_region_partial_rechunk:
+    batch_rechunk_stride:
+  pr: # shape: (780, 768), chunks: (1, 768), dtype: float32, compression: Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0), bytes per chunk: 3072
+    chunk_rule:
+    to_be_rechunked:
+    block_size_limit:
+    compression:
+    source_slices_partial_rechunk:
+    target_region_partial_rechunk:
+    batch_rechunk_stride:
+  time: # shape: (780,), chunks: (780,), dtype: int64, compression: Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0), bytes per chunk: 6240
+    chunk_rule:
+    to_be_rechunked:
+    block_size_limit:
+    compression:
+    source_slices_partial_rechunk:
+    target_region_partial_rechunk:
+    batch_rechunk_stride:
+  ts: # shape: (780, 768), chunks: (1, 768), dtype: float32, compression: Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0), bytes per chunk: 3072
+    chunk_rule:
+    to_be_rechunked:
+    block_size_limit:
+    compression:
+    source_slices_partial_rechunk:
+    target_region_partial_rechunk:
+    batch_rechunk_stride:
