@@ -16,10 +16,11 @@ curvilinear lon/lat grids, and unstructured polygon meshes such as ICON.
 
 from __future__ import annotations
 
+import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -27,9 +28,6 @@ import xarray as xr
 from scipy.interpolate import LinearNDInterpolator
 from scipy.sparse import coo_matrix, csr_matrix
 from scipy.spatial import cKDTree
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -799,7 +797,7 @@ def compute_healpix_weights(
         )
 
     esmpy_mod = _require_esmpy()
-    source_polygons, _ = _source_polygons(ds, source_units=source_units)
+    source_polygons, source_dims = _source_polygons(ds, source_units=source_units)
     source_mesh = _mesh_from_polygons(source_polygons, esmpy_mod=esmpy_mod)
     _, target_polygons = _target_healpix_polygons(level, nest=nest)
     target_mesh = _mesh_from_polygons(target_polygons, esmpy_mod=esmpy_mod)
@@ -851,6 +849,8 @@ def compute_healpix_weights(
         "grid_doctor_level": level,
         "grid_doctor_order": "nested" if nest else "ring",
         "grid_doctor_source_units": source_units,
+        "grid_doctor_source_dims": json.dumps(list(source_dims)),
+        "grid_doctor_source_size": len(source_polygons),
     }
     with xr.open_dataset(target) as raw_weights:
         annotated = raw_weights.load()
@@ -886,23 +886,232 @@ def _apply_sparse_array(
     return weighted
 
 
+def _flattened_size(ds: xr.Dataset, source_dims: tuple[str, ...]) -> int:
+    """Return the flattened size of `source_dims` in `ds`.
+
+    Parameters
+    ----------
+    ds:
+        Dataset whose dimensions should be checked.
+    source_dims:
+        Dimensions that form the source grid ordering used by the weight file.
+
+    Returns
+    -------
+    int
+        Product of the dimension sizes.
+
+    Raises
+    ------
+    ValueError
+        Raised when any requested dimension is missing from `ds`.
+    """
+    missing = [dim for dim in source_dims if dim not in ds.dims]
+    if missing:
+        raise ValueError(
+            f"source_dims {source_dims!r} are not all present in the dataset. "
+            f"Missing dimensions: {missing!r}."
+        )
+
+    size = 1
+    for dim in source_dims:
+        size *= int(ds.sizes[dim])
+    return size
+
+
+def _parse_source_dims_attr(value: object) -> tuple[str, ...] | None:
+    """Parse the stored source-dimension metadata from a weight file.
+
+    Parameters
+    ----------
+    value:
+        Attribute value read from the NetCDF file.
+
+    Returns
+    -------
+    tuple[str, ...] | None
+        Parsed source dimensions when available.
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = [part.strip() for part in text.split(",") if part.strip()]
+        if isinstance(parsed, str):
+            return (parsed,)
+        if isinstance(parsed, list) and all(isinstance(item, str) for item in parsed):
+            return tuple(parsed)
+        return None
+
+    if isinstance(value, tuple) and all(isinstance(item, str) for item in value):
+        return value
+
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return tuple(value)
+
+    return None
+
+
+def _guess_source_dims_from_size(
+    ds: xr.Dataset, n_source: int
+) -> tuple[str, ...] | None:
+    """Guess source dimensions from dataset sizes when geometry is unavailable.
+
+    This is intentionally conservative. It only guesses a single source
+    dimension when that size uniquely matches `n_source`, which is the common
+    unstructured-grid case such as ICON data on a `cell` dimension.
+
+    Parameters
+    ----------
+    ds:
+        Source dataset.
+    n_source:
+        Number of source cells encoded by the weight file.
+
+    Returns
+    -------
+    tuple[str, ...] | None
+        Guessed source dimensions, or `None` when no safe guess is possible.
+    """
+    matches = [str(dim) for dim, size in ds.sizes.items() if int(size) == n_source]
+    preferred = [dim for dim in matches if dim in _UNSTRUCTURED_DIMS]
+
+    if len(preferred) == 1:
+        return (preferred[0],)
+    if len(matches) == 1:
+        return (matches[0],)
+    return None
+
+
+def _resolve_source_dims_for_weight_application(
+    ds: xr.Dataset,
+    *,
+    n_source: int,
+    grid: xr.Dataset | None,
+    source_dims: tuple[str, ...] | None,
+    source_units: SourceUnits,
+    stored_source_dims: tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    """Resolve source dimensions for a previously generated weight file.
+
+    Parameters
+    ----------
+    ds:
+        Dataset that should be remapped.
+    n_source:
+        Number of source cells encoded by the weight file.
+    grid:
+        Optional grid dataset containing the geometry used to generate the
+        weight file.
+    source_dims:
+        Optional explicit source dimensions. This is the most direct way to
+        apply weights when the dataset itself does not contain geometry.
+    source_units:
+        Coordinate units used when geometry-based inference is required.
+    stored_source_dims:
+        Optional source dimensions stored in the weight-file metadata.
+
+    Returns
+    -------
+    tuple[str, ...]
+        Source dimensions in the flattening order expected by the weight file.
+
+    Raises
+    ------
+    ValueError
+        Raised when the source geometry or dimensions cannot be matched to the
+        weight file.
+    """
+    if source_dims is not None:
+        flattened = _flattened_size(ds, source_dims)
+        if flattened != n_source:
+            raise ValueError(
+                "The provided source_dims do not match the weight file geometry. "
+                f"Expected {n_source} source cells, found {flattened}."
+            )
+        return source_dims
+
+    if stored_source_dims is not None:
+        try:
+            flattened = _flattened_size(ds, stored_source_dims)
+        except ValueError:
+            flattened = -1
+        if flattened == n_source:
+            return stored_source_dims
+
+    if grid is not None:
+        grid_lat, _, grid_dims = _source_centre_arrays(grid, source_units=source_units)
+        if grid_lat.size != n_source:
+            raise ValueError(
+                "The provided grid does not match the weight file geometry. "
+                f"Expected {n_source} source cells, found {grid_lat.size} in the grid."
+            )
+
+        flattened = _flattened_size(ds, grid_dims)
+        if flattened != n_source:
+            raise ValueError(
+                "The provided grid implies source dimensions that do not match the "
+                "dataset being remapped. "
+                f"Expected {n_source} source cells, found {flattened} in the dataset."
+            )
+        return grid_dims
+
+    try:
+        src_lat, _, inferred_dims = _source_centre_arrays(ds, source_units=source_units)
+    except ValueError:
+        guessed_dims = _guess_source_dims_from_size(ds, n_source)
+        if guessed_dims is not None:
+            return guessed_dims
+        raise ValueError(
+            "Could not infer the source geometry from the dataset. Pass "
+            "`source_dims=...` or `grid=...` when the geometry is stored in a "
+            "separate file."
+        ) from None
+
+    if src_lat.size == n_source:
+        return inferred_dims
+
+    guessed_dims = _guess_source_dims_from_size(ds, n_source)
+    if guessed_dims is not None:
+        return guessed_dims
+
+    raise ValueError(
+        "The weight file does not match the provided dataset geometry. "
+        f"Expected {n_source} source cells, found {src_lat.size}. "
+        "Pass `source_dims=...` or `grid=...` when the geometry is stored in a "
+        "separate file."
+    )
+
+
 def apply_weight_file(
     ds: xr.Dataset,
     weights_path: str | Path,
     *,
     missing_policy: MissingPolicy = "renormalize",
+    grid: xr.Dataset | None = None,
+    source_dims: tuple[str, ...] | None = None,
+    source_units: SourceUnits = "auto",
 ) -> xr.Dataset:
     """Apply a previously generated ESMF weight file to `ds`.
 
     The weight file is read into a SciPy sparse matrix and applied with
-    `xarray.apply_ufunc`. Missing values can either be
+    [`xarray.apply_ufunc`][xarray.apply_ufunc]. Missing values can either be
     propagated or ignored with per-target renormalisation.
+
+    Unlike weight generation, weight application does not require the full
+    source geometry when the source dimensions are already known. This is useful
+    for model outputs whose grid coordinates live in a separate grid file.
 
     Parameters
     ----------
     ds:
-        Source dataset used with the same grid geometry that produced the weight
-        file.
+        Source dataset to remap.
     weights_path:
         Path to the NetCDF weight file generated by
         [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights].
@@ -913,6 +1122,16 @@ def apply_weight_file(
           sum of valid source weights.
         - `"propagate"`: any missing contributing source value makes the target
           value missing.
+    grid:
+        Optional grid dataset containing the geometry that was used to generate
+        the weight file. Use this when `ds` does not embed latitude/longitude
+        coordinates.
+    source_dims:
+        Optional explicit source dimensions in the flattening order expected by
+        the weight file. This is the most direct option for data files that only
+        carry dimensions such as `("cell",)`.
+    source_units:
+        Unit convention used when geometry-based source inference is required.
 
     Returns
     -------
@@ -921,8 +1140,31 @@ def apply_weight_file(
 
     Examples
     --------
+    Apply weights to a dataset that embeds its own geometry:
+
     ```python
     ds_hp = apply_weight_file(ds_icon, "icon_to_healpix_d8.nc")
+    ```
+
+    Apply weights to an unstructured data file whose geometry lives elsewhere:
+
+    ```python
+    ds_hp = apply_weight_file(
+        ds_data,
+        "icon_to_healpix_d8.nc",
+        source_dims=("cell",),
+    )
+    ```
+
+    Or validate against a separate grid file:
+
+    ```python
+    ds_hp = apply_weight_file(
+        ds_data,
+        "icon_to_healpix_d8.nc",
+        grid=ds_grid,
+        source_units="rad",
+    )
     ```
 
     See Also
@@ -937,27 +1179,33 @@ def apply_weight_file(
         matrix, n_target, n_source = _extract_sparse_weights(weights_ds)
         level = int(weights_ds.attrs.get("grid_doctor_level", -1))
         order = str(weights_ds.attrs.get("grid_doctor_order", "nested"))
-
-    src_lat, _, source_dims = _source_centre_arrays(ds, source_units="auto")
-    if src_lat.size != n_source:
-        raise ValueError(
-            "The weight file does not match the provided dataset geometry. "
-            f"Expected {n_source} source cells, found {src_lat.size}."
+        stored_source_dims = _parse_source_dims_attr(
+            weights_ds.attrs.get("grid_doctor_source_dims")
         )
+
+    resolved_source_dims = _resolve_source_dims_for_weight_application(
+        ds,
+        n_source=n_source,
+        grid=grid,
+        source_dims=source_dims,
+        source_units=source_units,
+        stored_source_dims=stored_source_dims,
+    )
 
     regridded_vars: dict[str, xr.DataArray] = {}
     for name, data in ds.data_vars.items():
-        if not set(source_dims).issubset(map(str, data.dims)):
+        if not set(resolved_source_dims).issubset(map(str, data.dims)):
             regridded_vars[str(name)] = data
             continue
+
         regridded_vars[str(name)] = cast(
             xr.DataArray,
             xr.apply_ufunc(
                 _apply_sparse_array,
                 data,
-                input_core_dims=[list(source_dims)],
+                input_core_dims=[list(resolved_source_dims)],
                 output_core_dims=[["cell"]],
-                exclude_dims=set(source_dims),
+                exclude_dims=set(resolved_source_dims),
                 vectorize=True,
                 dask="parallelized",
                 kwargs={"matrix": matrix, "missing_policy": missing_policy},
