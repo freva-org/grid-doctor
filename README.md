@@ -66,7 +66,7 @@ Claim a patient, write a script, and turn that frown into 😎.
 | Dataset | Uploaded to S3 | Script Submitted |
 |---------|:--------------:|:----------------:|
 | ICON-DREAM  | 🩹 | 😎 |
-| EERIE | 😢 | 😢 |
+| EERIE | 😎 | 😎 |
 | ERA5 | 😎 | 😎 |
 | CMIP6 | 🩹 | 😢 |
 | NextGEMS | 😎 | 😢 |
