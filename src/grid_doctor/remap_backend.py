@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -178,12 +179,18 @@ class OfflineWeightConfig:
 
     enabled: bool = False
     nproc: int = 1
-    mpirun: str = "mpirun"
     esmf_regrid_weightgen: str = "ESMF_RegridWeightGen"
     weight_only: bool = False
     netcdf4: bool = True
     keep_intermediates: bool = False
     workdir: Path | None = None
+
+    @property
+    def mpirun(self) -> str:
+        """Check if we are in a slurm env to use srun."""
+        if os.getenv("SLURM_JOB_ID") is not None:
+            return "srun"
+        return "mpirun"
 
 
 @dataclass(frozen=True, slots=True)
@@ -404,6 +411,8 @@ def _lonlat_to_xyz(lon_deg: FloatArray, lat_deg: FloatArray) -> FloatArray:
 def _xyz_to_lonlat(
     xyz: FloatArray, *, batch: Literal[False] = ...
 ) -> tuple[float, float]: ...  # noqa: E501
+
+
 @overload
 def _xyz_to_lonlat(
     xyz: FloatArray, *, batch: Literal[True]
@@ -1409,7 +1418,7 @@ def write_ugrid_mesh_file(
             f"{mesh_name}_face_nodes": (
                 ("face", "max_face_nodes"),
                 mesh.face_nodes,
-                {"start_index": 0, "_FillValue": np.int32(-1)},
+                {"start_index": 0},
             ),
             "face_lon": (
                 "face",
@@ -1430,7 +1439,17 @@ def write_ugrid_mesh_file(
         },
         attrs={"Conventions": "UGRID-1.0"},
     )
-    ds.to_netcdf(output)
+    face_node_var = f"{mesh_name}_face_nodes"
+    ds.to_netcdf(
+        output,
+        encoding={
+            face_node_var: {
+                "dtype": "int32",
+                "_FillValue": np.int32(-1),
+            },
+        },
+    )
+
     return output
 
 
