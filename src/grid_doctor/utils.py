@@ -191,6 +191,7 @@ def cached_weights(
     nest: bool = True,
     source_units: Literal["auto", "rad", "deg"] = "auto",
     cache_path: str | Path | None = None,
+    **kwargs: Any,
 ) -> Path:
     """Compute or load a cached HEALPix weight file.
 
@@ -210,6 +211,9 @@ def cached_weights(
     cache_path:
         Cache directory or explicit file name. When omitted,
         [`cache_dir`][grid_doctor.utils.cache_dir] is used.
+    **kwargs:
+        Any additional keyword arguments for
+        [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights]
 
     Returns
     -------
@@ -263,6 +267,7 @@ def cached_weights(
         nest=nest,
         source_units=source_units,
         weights_path=weight_file,
+        **kwargs,
     )
 
 
