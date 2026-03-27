@@ -1101,8 +1101,8 @@ def apply_weight_file(
     """Apply a previously generated ESMF weight file to `ds`.
 
     The weight file is read into a SciPy sparse matrix and applied with
-    [`xarray.apply_ufunc`][xarray.apply_ufunc]. Missing values can either be
-    propagated or ignored with per-target renormalisation.
+    `xarray.apply_ufunc`. Missing values can either be propagated or ignored
+    with per-target renormalisation.
 
     Unlike weight generation, weight application does not require the full
     source geometry when the source dimensions are already known. This is useful
