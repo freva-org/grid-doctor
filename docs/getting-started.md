@@ -19,24 +19,6 @@ support (ICON, etc.) you also need [easygems](https://github.com/mpimet/easygems
 pip install easygems
 ```
 
-## Project Layout
-
-```text
-grid-doctor/
-├── src/grid_doctor/
-│   ├── __init__.py          # lazy public API
-│   ├── helpers.py           # regridding & pyramid logic
-│   ├── utils.py             # caching & S3 helpers
-│   ├── log.py               # logging configuration
-│   └── cli/                 # CLI helpers for scripts
-│       ├── parser.py
-│       └── script_utils.py
-├── scripts/                 # per-dataset conversion scripts
-│   └── <dataset>/convert.py
-├── mkdocs.yml
-└── tox.ini
-```
-
 ## Writing a Conversion Script
 
 Create a folder under `scripts/` with your script and a README:

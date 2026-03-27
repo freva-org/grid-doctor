@@ -1,49 +1,45 @@
-"""Argument parser factory for grid-doctor conversion scripts."""
+"""Argument parser helpers for grid-doctor command-line tools."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any
 
 try:
     from rich_argparse import ArgumentDefaultsRichHelpFormatter as ArgFormatter
-except ImportError:
+except ImportError:  # pragma: no cover - optional dependency
     ArgFormatter = argparse.ArgumentDefaultsHelpFormatter
 
 
-def get_parser(
-    name: str,
-    description: Optional[str] = None,
-) -> argparse.ArgumentParser:
-    """Create a pre-configured argument parser for a conversion script.
-
-    The returned parser already includes the common arguments shared by
-    all grid-doctor scripts (S3 target, endpoint, credentials, verbosity).
+def get_parser(name: str, description: str | None = None) -> argparse.ArgumentParser:
+    """Create a parser preloaded with common grid-doctor options.
 
     Parameters
     ----------
-    name : str
-        Program name shown in ``--help`` output.
-    description : str or None, optional
-        One-line description of the script.
+    name:
+        Program name shown in `--help` output.
+    description:
+        Optional one-line program description.
 
     Returns
     -------
     argparse.ArgumentParser
-        Parser with common arguments.  Script-specific arguments can be
-        added before calling :meth:`~argparse.ArgumentParser.parse_args`.
+        Parser configured with common S3 and verbosity arguments.
+
+    Examples
+    --------
+    ```python
+    parser = get_parser("convert-icon", description="Build a HEALPix pyramid")
+    args = parser.parse_args()
+    ```
     """
     parser = argparse.ArgumentParser(
         prog=name,
         description=description,
         formatter_class=ArgFormatter,
     )
-    parser.add_argument(
-        "--s3-bucket",
-        help="S3 target bucket.",
-        required=True,
-    )
+    parser.add_argument("--s3-bucket", help="S3 target bucket.", required=True)
     parser.add_argument(
         "--s3-endpoint",
         default="https://s3.eu-dkrz-3.dkrz.cloud",
@@ -60,23 +56,21 @@ def get_parser(
         "--verbose",
         action="count",
         default=0,
-        help="Increase verbosity (repeat for more: -v, -vv, -vvv).",
+        help="Increase verbosity with repeated flags such as -v or -vv.",
     )
     return parser
 
 
-def setup_logging_from_args(
-    args: argparse.Namespace,
-    **kwargs: Union[str, int],
-) -> None:
+def setup_logging_from_args(args: argparse.Namespace, **kwargs: Any) -> None:
     """Initialise logging from parsed CLI arguments.
 
     Parameters
     ----------
-    args : argparse.Namespace
-        Parsed arguments (must contain ``verbose``).
-    **kwargs : str or int
-        Forwarded to :func:`grid_doctor.setup_logging`.
+    args:
+        Parsed arguments containing a `verbose` attribute.
+    **kwargs:
+        Extra keyword arguments forwarded to
+        [`grid_doctor.setup_logging`][grid_doctor.log.setup_logging].
     """
     import grid_doctor as gd
 

@@ -11,7 +11,7 @@
 ```console
 git clone git@github.com:freva-org/grid-doctor.git
 cd grid-doctor
-python -m pip install -e .
+python -m pip install -e .[remap]
 ```
 
 ## Quick Start

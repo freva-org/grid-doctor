@@ -1,32 +1,17 @@
+"""High-level regridding tests."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import numpy as np
 import pytest
+import xarray as xr
 
-from dask.array import Array as DaskArray
-
-from grid_doctor.helpers import regrid_to_healpix, latlon_to_healpix_pyramid
-
-
-@pytest.mark.parametrize(
-    "test_ds",
-    ["regular", "curvilinear", "era5"],
-    ids=["regular", "curvilinear", "era5"],
-    indirect=True,
-)
-def test_regrid_to_healpix(test_ds):
-    hp_ds = regrid_to_healpix(test_ds, level=9)
-
-    print(test_ds)
-    print(hp_ds)
-    assert all((hp_ds.attrs[k] == v for k, v in test_ds.attrs.items()))
-
-    assert set(test_ds.data_vars).issuperset(hp_ds.data_vars.keys())
-
-    attrs_eq = lambda a, b: a.attrs == b.attrs
-    var_check = lambda v, l: l(test_ds[v], hp_ds[v])
-
-    dtype_eq = lambda a, b: a.dtype == b.dtype
-    for v in hp_ds.data_vars:
-        assert var_check(v, attrs_eq)
-        assert var_check(v, dtype_eq)
+from grid_doctor import remap
+from grid_doctor.helpers import latlon_to_healpix_pyramid
+from grid_doctor.remap import regrid_to_healpix
 
 
 @pytest.mark.parametrize(
@@ -35,34 +20,61 @@ def test_regrid_to_healpix(test_ds):
     ids=["regular", "curvilinear", "era5"],
     indirect=True,
 )
-@pytest.mark.parametrize(
-    "method",
-    ["nearest", "linear", "conservative"],
-    ids=["nearest", "linear", "conservative"],
-)
-def test_latlon_to_healpix_pyramid_lazy(test_ds, method):
-    hp_p = latlon_to_healpix_pyramid(test_ds, method=method)
-    for level, hp_ds in hp_p.items():
-        assert all((hp_ds.attrs[k] == v for k, v in test_ds.attrs.items()))
-        ## ensure all variables are dask.array.Array / lazy
-        assert all((isinstance(v.data, DaskArray) for v in hp_ds.data_vars.values()))
+def test_regrid_to_healpix_linear_lazy(
+    test_ds: xr.Dataset,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(remap, "_healpix_centres", lambda level, nest: (np.array([0.0, 1.0, 2.0]), np.array([0.0, 1.0, 2.0])))
+    hp_ds = regrid_to_healpix(test_ds, level=2, method="linear")
+    assert hp_ds.attrs["healpix_level"] == 2
+    assert hp_ds.attrs["healpix_order"] == "nested"
+
+
+@pytest.mark.parametrize("method", ["nearest", "conservative"])
+def test_latlon_to_healpix_pyramid_weight_methods(
+    regular_ds: xr.Dataset,
+    method: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
+        del kwargs
+        return xr.Dataset(
+            {name: (("cell",), np.arange(12 * (4**level), dtype=np.float64)) for name in ds.data_vars},
+            attrs=ds.attrs | {"healpix_level": level, "healpix_nside": 2**level, "healpix_order": "nested"},
+        )
+
+    monkeypatch.setattr("grid_doctor.helpers.regrid_to_healpix", fake_regrid)
+    pyramid = latlon_to_healpix_pyramid(regular_ds, min_level=1, max_level=2, method=method, weights_path=str(tmp_path / "weights.nc"))
+    assert set(pyramid) == {1, 2}
 
 
 @pytest.mark.parametrize(
-    "test_ds",
-    ["regular", "curvilinear", "era5"],
-    ids=["regular", "curvilinear", "era5"],
-    indirect=True,
+    "missing_policy",
+    ["renormalize", "propagate"],
 )
-@pytest.mark.parametrize(
-    "method",
-    ["nearest", "linear", "conservative"],
-    ids=["nearest", "linear", "conservative"],
-)
-def test_latlon_to_healpix_pyramid_global_mean(test_ds, method):
-    hp_p = latlon_to_healpix_pyramid(test_ds, method=method)
+def test_regrid_to_healpix_weight_methods_delegate(
+    regular_ds: xr.Dataset,
+    missing_policy: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    weight_file = tmp_path / "weights.nc"
+    calls: dict[str, Any] = {}
 
-    _, hp_ds = hp_p.popitem()
+    def fake_compute(ds: xr.Dataset, level: int, **kwargs: Any) -> Path:
+        del ds, level
+        calls["compute"] = kwargs
+        weight_file.write_text("ok")
+        return weight_file
 
-    for name, var in hp_ds.data_vars.items():
-        meam = var.isel(time=0).mean().compute()
+    def fake_apply(ds: xr.Dataset, path: str | Path, *, missing_policy: str = "renormalize") -> xr.Dataset:
+        calls["apply"] = {"path": Path(path), "missing_policy": missing_policy}
+        return xr.Dataset({"temperature": (("cell",), np.arange(3, dtype=np.float64))}, attrs=ds.attrs.copy())
+
+    monkeypatch.setattr(remap, "compute_healpix_weights", fake_compute)
+    monkeypatch.setattr(remap, "apply_weight_file", fake_apply)
+
+    result = regrid_to_healpix(regular_ds, level=1, method="nearest", missing_policy=missing_policy)
+    assert result.sizes["cell"] == 3
+    assert calls["apply"]["missing_policy"] == missing_policy

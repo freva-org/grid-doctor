@@ -1,11 +1,10 @@
-"""Shared utilities for grid-doctor conversion scripts."""
+"""Shared helpers for grid-doctor conversion scripts."""
 
 from __future__ import annotations
 
 import logging
 from getpass import getuser
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlsplit
 
 import requests
@@ -13,53 +12,47 @@ import requests
 logger = logging.getLogger(__name__)
 
 
-def get_scratch(*args: str) -> Path:
-    """Return a scratch directory, falling back to ``/tmp``.
-
-    On DKRZ's Levante the path is ``/scratch/<initial>/<user>/<args>``.
+def get_scratch(*parts: str) -> Path:
+    """Return a writable scratch directory.
 
     Parameters
     ----------
-    *args : str
-        Additional path components appended to the scratch root.
+    *parts:
+        Extra path components appended to the scratch root.
 
     Returns
     -------
-    Path
-        Writable scratch directory.
+    pathlib.Path
+        Scratch directory on `/scratch/<initial>/<user>` when available,
+        otherwise below `/tmp`.
     """
     scratch = Path("/scratch/{0:.1}/{0}".format(getuser()))
     if scratch.is_dir():
-        return scratch.joinpath(*args)
-    return Path("/tmp").joinpath(*args)
+        return scratch.joinpath(*parts)
+    return Path("/tmp").joinpath(*parts)
 
 
 class AutoRaiseSession(requests.Session):
-    """A :class:`requests.Session` that raises on HTTP errors automatically."""
+    """`requests.Session` variant that raises on HTTP errors automatically."""
 
-    def request(self, *args: Any, **kwargs: Any) -> requests.Response:
-        """Send a request and raise :class:`~requests.HTTPError` on failure.
+    def request(self, *args: object, **kwargs: object) -> requests.Response:
+        """Send one request and raise for unsuccessful HTTP status codes.
 
         Parameters
         ----------
-        *args : Any
+        *args:
             Positional arguments forwarded to
-            :meth:`requests.Session.request`.
-        **kwargs : Any
+            `requests.Session.request`.
+        **kwargs:
             Keyword arguments forwarded to
-            :meth:`requests.Session.request`.
+            `requests.Session.request`.
 
         Returns
         -------
         requests.Response
-            The HTTP response.
-
-        Raises
-        ------
-        requests.HTTPError
-            On any 4xx / 5xx status code.
+            HTTP response object with `raise_for_status()` already applied.
         """
-        response = super().request(*args, **kwargs)
+        response = super().request(*args, **kwargs)  # type: ignore
         response.raise_for_status()
         return response
 
@@ -67,60 +60,50 @@ class AutoRaiseSession(requests.Session):
 def download_file(
     url: str,
     target_dir: str | Path,
+    *,
     timeout: int = 60,
     overwrite: bool = False,
     chunk_size: int = 1024 * 1024,
 ) -> str:
-    """Download a single URL to *target_dir*.
-
-    Downloads are written to a ``.part`` temporary file and atomically
-    renamed on success.  Existing files are skipped unless *overwrite*
-    is ``True``.
+    """Download one URL into `target_dir`.
 
     Parameters
     ----------
-    url : str
-        URL to download.
-    target_dir : str or Path
-        Directory where the file is written.
-    timeout : int, optional
-        Per-request timeout in seconds (default ``60``).
-    overwrite : bool, optional
-        Re-download even if the target file already exists.
-    chunk_size : int, optional
-        Read buffer size in bytes (default 1 MiB).
+    url:
+        Source URL.
+    target_dir:
+        Output directory.
+    timeout:
+        Per-request timeout in seconds.
+    overwrite:
+        Replace an existing file when `True`.
+    chunk_size:
+        Streaming chunk size in bytes.
 
     Returns
     -------
     str
-        Absolute path to the downloaded file.
-
-    Raises
-    ------
-    ValueError
-        If a filename cannot be determined from the URL.
+        Absolute path of the downloaded file.
     """
     target_path = Path(target_dir)
     target_path.mkdir(parents=True, exist_ok=True)
 
     filename = Path(urlsplit(url).path).name
     if not filename:
-        raise ValueError(f"Could not determine filename from URL: {url}")
+        raise ValueError(f"Could not determine a filename from URL: {url}")
 
     output_file = target_path / filename
     if output_file.exists() and not overwrite:
         logger.debug("Skipping existing download %s", output_file)
         return str(output_file)
 
-    tmp_file = output_file.with_suffix(output_file.suffix + ".part")
-
+    temp_file = output_file.with_suffix(output_file.suffix + ".part")
     with AutoRaiseSession() as session:
         with session.get(url, stream=True, timeout=timeout) as response:
-            logger.debug("Downloading %s → %s", url, tmp_file)
-            with tmp_file.open("wb") as f:
+            with temp_file.open("wb") as handle:
                 for chunk in response.iter_content(chunk_size=chunk_size):
                     if chunk:
-                        f.write(chunk)
+                        handle.write(chunk)
 
-    tmp_file.replace(output_file)
+    temp_file.replace(output_file)
     return str(output_file)
