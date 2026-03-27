@@ -443,9 +443,6 @@ def compute_healpix_weights(
     spectral_transform_command:
         External command used when `source_kind="spectral"`. The command may
         use `{input}` and `{output}` placeholders.
-    **kwargs:
-        Any additional keyword arguments for
-        [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights]
 
     Returns
     -------

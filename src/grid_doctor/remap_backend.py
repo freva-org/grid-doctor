@@ -1441,9 +1441,9 @@ def write_ugrid_mesh_file(
     )
     face_node_var = f"{mesh_name}_face_nodes"
     encoding: dict[str, dict[str, Any]] = {
-        var: {"_FillValue": None}
+        str(var): {"_FillValue": None}
         for var in ds.data_vars
-        if var != face_node_var
+        if str(var) != face_node_var
     }
     encoding[face_node_var] = {
         "dtype": "int32",
