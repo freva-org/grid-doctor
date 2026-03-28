@@ -14,7 +14,7 @@ curvilinear, or unstructured grids to multi-resolution
   transparently.
 - **HEALPix pyramid creation** — from the finest level down to level 0 in
   a single call.
-- **Delaunay weight caching** — expensive triangulation is computed once
+- **Weight caching** — expensive triangulation is computed once
   and cached as NetCDF for subsequent runs.
 - **S3 upload** — pyramids are written directly to S3 compatible stores
   as Zarr.
@@ -27,10 +27,11 @@ curvilinear, or unstructured grids to multi-resolution
 import grid_doctor as gd
 
 ds = gd.cached_open_dataset(["data/*.nc"])
-pyramid = gd.latlon_to_healpix_pyramid(ds)
+weights_file = gd.cached_weights("/path/to/weights/", nproc=4)
+pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_file)
 gd.save_pyramid_to_s3(
     pyramid,
-    "s3://my-bucket/era5.zarr",
+    "s3://my-bucket/era5",
     s3_options=gd.get_s3_options(
         "https://s3.eu-dkrz-3.dkrz.cloud",
         "~/.s3-credentials.json",

@@ -4,13 +4,14 @@ This recipe converts ICON model output on a triangular mesh to a
 HEALPix pyramid.  ICON data is detected automatically and a weights file
 for conservative remapping can be generated.
 
-## Key Difference: Pre-compute Weights
+## Key Difference: Use a grid file
 
 Remapping from unstructured grids is expensive.  For ICON
 you should **compute and cache weights once**, then reuse them across
 all variables and time steps:
 
 ```python
+from getpass import getuser
 import grid_doctor as gd
 
 # The grid file contains clat/clon but no data variables.
@@ -18,10 +19,10 @@ grid_ds = gd.cached_open_dataset(["ICON-DREAM-Global_grid.nc"])
 
 # Derive the HEALPix level from the grid resolution.
 level =  gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
-weights_file = gd.compute_healpix_weights(
+weights_file = gd.cached_weights(
     grids_ds,
-    gd.get_latlon_resolution(grid_ds)
-    weights_path=f"weights_{level}.nc"
+    level=level
+    weights_path="/scratch/{user[0]}/{user}/healpix-weights".format(user=getuser())
 )
 ```
 
@@ -40,8 +41,8 @@ ds = gd.cached_open_dataset(["icon_dream_hourly_*.grb"])
 # ICON GRIB files may use "values" instead of "cell" — rename:
 ds = ds.rename_dims({"values": "cell"}).chunk({"cell": -1})
 
-pyramid = gd.latlon_to_healpix_pyramid(
-    ds, max_level=max_level, weights_path=f"weights_{level}.nc"
+pyramid = gd.create_healpix_pyramid(
+    ds, max_level=max_level, weights_path=weights_file,
 )
 
 gd.save_pyramid_to_s3(
@@ -57,7 +58,8 @@ gd.save_pyramid_to_s3(
 ## Running on Levante with Dask + SLURM
 
 The ICON-DREAM script under `scripts/icon-dream/convert.py`
-demonstrates a full production workflow:
+demonstrates a full production workflow using
+[`reflow`](https://reflow-docs.org):
 
 1. **Download** GRIB files from DWD's open-data server in parallel
    using `dask.distributed` with a concurrency-limited semaphore.
@@ -71,8 +73,8 @@ The script auto-detects whether it is running inside a SLURM allocation
 debugging:
 
 ```console
-# Submit via SLURM
-srun python scripts/icon-dream/convert.py --s3-bucket my-bucket \
+# Submit via reflow
+python scripts/icon-dream/convert.py submit --s3-bucket my-bucket \
     --variables t_2m tot_prec \
     --freq hourly \
     --time 2020-01 2020-12 \
