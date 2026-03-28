@@ -279,6 +279,8 @@ def _require_esmpy() -> Any:
         raise ImportError(
             "ESMPy is required for in-memory weight generation. "
             "Install ESMPy or enable the offline ESMF path."
+            "install it with:\n"
+            "  conda install -c conda-forge esmpy esmf"
         ) from exc
     return esmpy
 

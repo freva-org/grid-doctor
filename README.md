@@ -14,6 +14,14 @@ cd grid-doctor
 python -m pip install -e .[remap]
 ```
 
+For remapping of large grids you should install
+[ESMF](https://earthsystemmodeling.org/regrid/) through ocnda-forge.
+
+```console
+mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
+```
+
+
 ## Quick Start
 
 ### Structured Grids (ERA5, CMIP, …)

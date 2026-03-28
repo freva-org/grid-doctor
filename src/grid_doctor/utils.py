@@ -185,7 +185,7 @@ def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
 
 def cached_weights(
     ds: xr.Dataset,
-    level: int,
+    level: int | None = None,
     *,
     method: Literal["nearest", "conservative"] = "conservative",
     nest: bool = True,
@@ -226,6 +226,7 @@ def cached_weights(
     weight_file = cached_weights(ds, level=8, method="conservative")
     ```
     """
+    from .helpers import get_latlon_resolution, resolution_to_healpix_level
     from .remap import compute_healpix_weights
 
     digest = hashlib.sha256()
@@ -240,6 +241,10 @@ def cached_weights(
         "lat",
         "longitude",
         "latitude",
+        "rlon",
+        "rlat",
+        "X",
+        "Y",
     ):
         if candidate in ds:
             digest.update(
@@ -260,6 +265,9 @@ def cached_weights(
         return weight_file
 
     logger.info("Generating HEALPix weight file %s", weight_file)
+    if level is None:
+        level = resolution_to_healpix_level(get_latlon_resolution(ds))
+
     return compute_healpix_weights(
         ds,
         level,
