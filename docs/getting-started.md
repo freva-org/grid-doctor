@@ -15,7 +15,7 @@ remapping. Since ESMF is not pip installable you have to install it via
 conda-forge:
 
 ```console
-mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*"
+mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
 ```
 
 Note: Check openmpi module versions on levante and pick an appropriate

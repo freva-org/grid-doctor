@@ -18,7 +18,7 @@ For remapping of large grids you should install
 [ESMF](https://earthsystemmodeling.org/regrid/) through ocnda-forge.
 
 ```console
-mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*"
+mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
 ```
 
 

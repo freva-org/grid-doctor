@@ -226,8 +226,8 @@ def cached_weights(
     weight_file = cached_weights(ds, level=8, method="conservative")
     ```
     """
+    from .helpers import get_latlon_resolution, resolution_to_healpix_level
     from .remap import compute_healpix_weights
-    from .helpers import resolution_to_healpix_level, get_latlon_resolution
 
     digest = hashlib.sha256()
     for candidate in (

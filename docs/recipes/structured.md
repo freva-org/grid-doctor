@@ -65,7 +65,7 @@ parser.add_argument(
    "weights-dir",
     type=Path,
     help="Path to to store weights."
-    defualt="/scratch/{user[0]}/{user}/healpix-weights/".format(user=getuser())
+    default="/scratch/{user[0]}/{user}/healpix-weights/".format(user=getuser())
     )
 args = parser.parse_args()
 gd_cli.setup_logging_from_args(args)
