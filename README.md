@@ -1,12 +1,15 @@
 # Grid Doctor HEALs your Grids
+<p style="text-align: center;">
+  <img src="docs/assets/modis-aqua.png" alt="MODIS SST on HEALPix" width="600">
+</p>
+
 
 > [!NOTE]
 > This is a scripting solution for a proof of concept. An operational ready
 > approach will follow. For adding code for specific datasets please add
 > your script solution into the `scripts/<yourname>` folder.
 
-![Documentation](https://img.shields.io/badge/grid--doctor-docs-green?logo=read-the-docs&logoColor=white)](https://freva-org.github.io/grid-doctor/)
-
+[![Documentation](https://img.shields.io/badge/grid--doctor-docs-green?logo=read-the-docs&logoColor=white)](https://freva-org.github.io/grid-doctor/)
 ## Installation
 
 ```console

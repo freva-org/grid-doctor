@@ -7,6 +7,7 @@ curvilinear, or unstructured grids to multi-resolution
 [HEALPix](https://healpix.jpl.nasa.gov/) pyramids stored as
 [Zarr](https://zarr.dev/) on S3.
 
+
 ## Features
 
 - **Automatic grid detection** — regular (ERA5, CMIP), curvilinear (NEMO,

@@ -1,4 +1,8 @@
 # Waterpark — HEALPix Data Hub
+![MODIS SST on healpix 10](assets/modis-aqua.png){ width="600" .img-center}
+/// caption
+Sea surface temperature seen by MODIS AQUA, remapped to HEALPix level 10.
+///
 
 Waterpark is a task force effort at DKRZ to convert climate and Earth observation
 datasets onto a common [HEALPix](https://healpix.jpl.nasa.gov/) grid and serve
@@ -10,7 +14,7 @@ visualisation without per-dataset regridding at access time.
 
 ## Remapping methodology
 
-All datasets are remapped using **pre-computed, reusable ESMF weight files**
+All datasets *should* be remapped using **pre-computed, reusable ESMF weight files**
 applied via sparse matrix multiplication.  Weight generation is a one-time cost
 per source grid; application runs at near-memory-bandwidth speed using batched
 cuSPARSE on GPU or batched SciPy on CPU.
@@ -40,73 +44,87 @@ nanmean), not by repeated remapping.
 
 ---
 
-??? info "Benchmark for conservative remapping of HP Level 10"
+??? info "Benchmark for conservative remapping of HP Level 10 on NVIDIA GH200"
 
     The example below outlines the full pipeline of conservative remapping
-    on Grace Hopper nodes using CuPy and ESMF with 64 openmpi processes.
+    on a 4x NVIDIA Grace Hopper 200 Superchip node
+    (288 CPUs and 856 GB RAM, 4 GPUs 382 GB) using
+    CuPy and ESMF with 64 openmpi ranks.
     The dataset that was regridded and uploaded on s3 was one year of
     MODIS-AQUA at roughly 2km resolution (HEALPix level 10).
 
+
     ```python
 
-        from dask.diagnostics.progress import ProgressBar
-        from getpass import getuser
-        from pathlib import Path
+    from dask.diagnostics.progress import ProgressBar
+    from getpass import getuser
+    from pathlib import Path
 
-        import grid_doctor as gd
+    import grid_doctor as gd
 
-        # --- 1. Open source data ---
-        dset = gd.cached_open_dataset(
-            Path("/pool/data/ICDC/ocean/modis_aqua_sst/DATA/daily/2025").rglob("*.nc"),
-            chunks={"lat": -1},
-        )
+    # --- 1. Open source data ---
+    dset = gd.cached_open_dataset(
+        Path("/pool/data/ICDC/ocean/modis_aqua_sst/DATA/daily/2025").rglob("*.nc"),
+        chunks={"lat": -1},
+    )
 
-        # --- 2. Generate reusable weights (one-time) ---
-        weights_dir = Path(
-            "/scratch/{u[0]}/{u}/healpix-weights".format(u=getuser())
-        )
-        resolved_level = gd.resolution_to_healpix_level(
-            gd.get_latlon_resolution(dset)
-        )
-        %time weights_file = gd.cached_weights(
-            dset,
-            level=resolved_level,
-            cache_path=weights_dir,
-            nproc=64,
-            prefer_offline=True,
-        )
-        # Wall time: ~2 min 30 s (Grace CPUs, 64 MPI ranks)
+    # --- 2. Generate reusable weights (one-time) ---
+    weights_dir = Path(
+        "/scratch/{u[0]}/{u}/healpix-weights".format(u=getuser())
+    )
+    resolved_level = gd.resolution_to_healpix_level(
+        gd.get_latlon_resolution(dset)
+    )
+    %time weights_file = gd.cached_weights(
+        dset,
+        level=resolved_level,
+        cache_path=weights_dir,
+        nproc=64,
+        prefer_offline=True,
+    )
+    # Wall time: ~2 min 30 s (Grace CPUs, 64 MPI ranks)
 
-        # --- 3. Build multi-resolution pyramid ---
-        pyramid = gd.create_healpix_pyramid(
-            dset,
-            max_level=resolved_level,
-            weights_path=weights_file,
-            backend="cupy",
-        )
-        # --- 4. Verify ---
-        with ProgressBar():
-            hp = pyramid[resolved_level].isel(time=slice(0, 10)).load()
-            # Wall time: ~13 s (Hopper GPU)
+    # --- 3. Build multi-resolution pyramid ---
+    pyramid = gd.create_healpix_pyramid(
+        dset,
+        max_level=resolved_level,
+        weights_path=weights_file,
+        backend="cupy",
+    )
+    # --- 4. Verify ---
+    with ProgressBar():
+        hp = pyramid[resolved_level].isel(time=slice(0, 10)).load()
+        # Wall time: ~13 s (Hopper GPU)
 
-        # --- 5. Write to S3 ---
-        s3_options = gd.get_s3_options(
-            "https://s3.eu-dkrz-3.dkrz.cloud",
-            Path("~/.s3-credentials.json").expanduser(),
-        )
-        %time gd.save_pyramid_to_s3(
-            pyramid,
-            "/icon-dream/healpix/icdc/modis/aqua",
-            s3_options,
-            mode="w",
-        )
-        # Wall time: 1h 25min (Hopper GPU)
+    # --- 5. Write to S3 ---
+    s3_options = gd.get_s3_options(
+        "https://s3.eu-dkrz-3.dkrz.cloud",
+        Path("~/.s3-credentials.json").expanduser(),
+    )
+    %time gd.save_pyramid_to_s3(
+        pyramid,
+        "/icon-dream/healpix/icdc/modis/aqua",
+        s3_options,
+        mode="w",
+    )
+    # Wall time: ~1 h 25 min (Hopper GPU)
     ```
 
     The result can be inspected in
-    [gridlook](https://gridlook.pages.dev/#https://s3.eu-dkrz-3.dkrz.cloud/icon-dream/healpix/icdc/modis/aqua/level_10.zarr)
+    [gridlook](https://gridlook.pages.dev/#https://s3.eu-dkrz-3.dkrz.cloud/icon-dream/healpix/icdc/modis/aqua/level_10.zarr),
     for comparison the original grid can be opened following this
-    [link (no firefox)](https://gridlook.pages.dev/#https://s3.eu-dkrz-3.dkrz.cloud/icon-dream/healpix/icdc/modis/og.zarr)
+    [link (no firefox)](https://gridlook.pages.dev/#https://s3.eu-dkrz-3.dkrz.cloud/icon-dream/healpix/icdc/modis/og.zarr) or below:
+
+    <figure markdown="span">
+        ![MODIS SST on HEALPix](assets/gridlook-healpix.png){ width="600" }
+        <figcaption>HEALPix: remapped to HEALPix level 10.</figcaption>
+    </figure>
+
+    <figure markdown="span">
+        ![MODIS SST on original grid](assets/gridlook-original.png){ width="600" }
+        <figcaption>Original: regular lat-lon grid at about 2.6 km resolution.</figcaption>
+    </figure>
+
 
 ## Datasets
 
