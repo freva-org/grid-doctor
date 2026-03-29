@@ -47,9 +47,11 @@ dependencies = [
     "fsspec",
     "numcodecs",
     "dask[array]",
+    "numba"
 ]
 
 [project.optional-dependencies]
+gpu = ["cupy"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -128,6 +130,8 @@ exclude_lines = [
     "if __name__ == .__main__.:",
 ]
 
+[tool.codespell]
+ignore-words-list = "te,nd,fo,ist,orcestra,cdo,COO"
 
 [tool.tox]
 legacy_tox_ini = """

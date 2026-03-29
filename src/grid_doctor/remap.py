@@ -385,7 +385,7 @@ def apply_weight_file(
     """Apply a previously generated ESMF weight file to *ds*.
 
     Uses the batched engine in
-    [`remap_apply`][grid_doctor.remap_apply] which replaces per-slice
+    `grid_doctor.remap_apply` which replaces per-slice
     ``vectorize=True`` with a single batched sparse matmul for a
     typical 10–50× speedup.
 

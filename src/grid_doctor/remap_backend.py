@@ -1249,27 +1249,6 @@ def _target_healpix_mesh(
     return ipix, _corner_mesh_from_arrays(cell_lon, cell_lat)
 
 
-def _target_healpix_polygons(
-    level: int,
-    *,
-    nest: bool,
-) -> tuple[npt.NDArray[np.int64], list[tuple[FloatArray, FloatArray]]]:
-    """Return HEALPix polygons as Python tuples.
-
-    Note:
-        Legacy helper kept for backward compatibility.
-
-    Args:
-        level: HEALPix refinement level.
-        nest: Use nested ordering when *True*.
-
-    Returns:
-        ``(ipix, polygons)``.
-    """
-    ipix, mesh = _target_healpix_mesh(level, nest=nest)
-    return ipix, _mesh_to_polygons(mesh)
-
-
 # ===================================================================
 # ESMPy mesh construction
 # ===================================================================
@@ -1333,31 +1312,6 @@ def _mesh_from_polygon_mesh(
         element_coords=element_coords,
     )
     return esmf_mesh
-
-
-def _mesh_from_polygons(
-    polygons: list[tuple[FloatArray, FloatArray]],
-    *,
-    esmpy_mod: Any,
-) -> Any:
-    """Backward-compatible wrapper for ESMPy mesh construction.
-
-    Note:
-        Prefer
-        [`_mesh_from_polygon_mesh`][grid_doctor.remap_backend._mesh_from_polygon_mesh]
-        with a pre-built
-        [`PolygonMesh`][grid_doctor.remap_backend.PolygonMesh].
-
-    Args:
-        polygons: List of ``(lon_deg, lat_deg)`` vertex arrays.
-        esmpy_mod: The imported ``esmpy`` module.
-
-    Returns:
-        An ``esmpy.Mesh`` instance.
-    """
-    arrays = _polygons_to_corner_arrays(polygons)
-    mesh = _corner_mesh_from_arrays(*arrays)
-    return _mesh_from_polygon_mesh(mesh, esmpy_mod=esmpy_mod)
 
 
 # ===================================================================

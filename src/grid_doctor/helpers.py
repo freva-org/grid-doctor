@@ -22,9 +22,6 @@ import xarray as xr
 
 from .remap import regrid_to_healpix, regrid_unstructured_to_healpix
 from .remap_backend import (
-    _LAT_NAMES,
-    _LON_NAMES,
-    _UNSTRUCTURED_DIMS,
     _get_latlon_arrays,
     _get_unstructured_dim,
     _is_unstructured,
@@ -65,9 +62,7 @@ def get_latlon_resolution(ds: xr.Dataset) -> float:
     if _is_unstructured(ds):
         cell_dim = _get_unstructured_dim(ds)
         n_cells = ds.sizes[cell_dim]
-        return float(
-            np.degrees(np.sqrt(4.0 * np.pi / float(n_cells)))
-        )
+        return float(np.degrees(np.sqrt(4.0 * np.pi / float(n_cells))))
 
     lat, lon = _get_latlon_arrays(ds)
     if lat.ndim == 1:
@@ -162,8 +157,8 @@ def _coarsen_array(
     n_target = n_cells // factor
     grouped = arr.reshape(*batch_shape, n_target, factor)
     with np.errstate(invalid="ignore"):
-        return np.nanmean(grouped, axis=-1).astype(
-            np.float64, copy=False
+        return cast(
+            FloatArray, np.nanmean(grouped, axis=-1).astype(np.float64, copy=False)
         )
 
 
@@ -208,14 +203,9 @@ def coarsen_healpix(
     current_nside = int(ds.attrs["healpix_nside"])
     target_nside = 2**target_level
     if target_nside >= current_nside:
-        raise ValueError(
-            "target_level must be lower than the current HEALPix "
-            "level."
-        )
+        raise ValueError("target_level must be lower than the current HEALPix level.")
 
-    is_nested = str(
-        ds.attrs.get("healpix_order", "nested")
-    ) in {"nested", "nest"}
+    is_nested = str(ds.attrs.get("healpix_order", "nested")) in {"nested", "nest"}
     if not is_nested:
         raise ValueError(
             "coarsen_healpix only supports nested HEALPix ordering. "
@@ -223,15 +213,10 @@ def coarsen_healpix(
             "regenerate ring levels directly."
         )
 
-    current_level = int(
-        ds.attrs.get("healpix_level", int(np.log2(current_nside)))
-    )
+    current_level = int(ds.attrs.get("healpix_level", int(np.log2(current_nside))))
     delta_level = current_level - target_level
     if delta_level <= 0:
-        raise ValueError(
-            "target_level must be lower than the current HEALPix "
-            "level."
-        )
+        raise ValueError("target_level must be lower than the current HEALPix level.")
 
     factor = 4**delta_level
     npix_target = ds.sizes["cell"] // factor
@@ -253,9 +238,7 @@ def coarsen_healpix(
                 dask="parallelized",
                 kwargs={"factor": factor},
                 output_dtypes=[np.float64],
-                dask_gufunc_kwargs={
-                    "output_sizes": {"cell": npix_target}
-                },
+                dask_gufunc_kwargs={"output_sizes": {"cell": npix_target}},
                 keep_attrs=True,
             ),
         )
@@ -312,9 +295,7 @@ def create_healpix_pyramid(
         Pyramid keyed by level.
     """
     if max_level is None:
-        max_level = resolution_to_healpix_level(
-            get_latlon_resolution(ds)
-        )
+        max_level = resolution_to_healpix_level(get_latlon_resolution(ds))
 
     pyramid: dict[int, xr.Dataset] = {}
     finest = regrid_to_healpix(ds, max_level, **kwargs)
@@ -375,13 +356,9 @@ def save_pyramid_to_s3(
     fs = s3fs.S3FileSystem(**s3_options)
     for level, dataset in pyramid.items():
         level_path = f"{s3_path}/level_{level}.zarr"
-        logger.info(
-            "Writing HEALPix level %s to %s", level, level_path
-        )
+        logger.info("Writing HEALPix level %s to %s", level, level_path)
         store = s3fs.S3Map(root=level_path, s3=fs)
-        zarr_options = ZarrOptions(
-            compute=compute, mode=mode, zarr_format=zarr_format
-        )
+        zarr_options = ZarrOptions(compute=compute, mode=mode, zarr_format=zarr_format)
         if zarr_format == 2:
             zarr_options["consolidated"] = True
         if encoding is not None:
@@ -400,9 +377,7 @@ def save_pyramid_to_s3(
                 | {str(dim) for dim in dataset.dims}
                 | {str(coord) for coord in dataset.coords}
             )
-            dataset.drop_vars(to_drop, errors="ignore").isel(
-                region
-            ).to_zarr(
+            dataset.drop_vars(to_drop, errors="ignore").isel(region).to_zarr(
                 store,
                 region=region,
                 **zarr_options,
@@ -411,9 +386,7 @@ def save_pyramid_to_s3(
         if mode == "w" and not compute:
             coord_options = dict(zarr_options)
             coord_options["mode"] = "w"
-            dataset[list(dataset.coords)].to_zarr(
-                store, **coord_options
-            )  # type: ignore[call-overload]
+            dataset[list(dataset.coords)].to_zarr(store, **coord_options)  # type: ignore[call-overload]
 
 
 # ===================================================================

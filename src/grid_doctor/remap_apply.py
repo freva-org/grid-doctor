@@ -28,13 +28,17 @@ on what is installed and the problem size:
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
 from scipy.sparse import coo_matrix, csr_matrix
 
+if TYPE_CHECKING:
+    from scipy.sparse import csr_array
+
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -59,7 +63,7 @@ def extract_sparse_weights(
     row: FloatArray,
     col: FloatArray,
     values: FloatArray,
-) -> tuple[csr_matrix, int, int]:
+) -> tuple["csr_array", int, int]:
     """Build a CSR weight matrix from COO triplets.
 
     One-based indices (as produced by ESMF) are converted to
@@ -77,25 +81,23 @@ def extract_sparse_weights(
         ValueError: When the arrays have mismatched lengths or are
             empty.
     """
-    row = np.asarray(row, dtype=np.int64).ravel()
-    col = np.asarray(col, dtype=np.int64).ravel()
+    row_i = np.asarray(row, dtype=np.int64).ravel()
+    col_i = np.asarray(col, dtype=np.int64).ravel()
     values = np.asarray(values, dtype=np.float64).ravel()
 
-    if row.size != values.size or col.size != values.size:
-        raise ValueError(
-            "row, col, and values arrays must have the same length."
-        )
-    if row.size == 0:
+    if row_i.size != values.size or col_i.size != values.size:
+        raise ValueError("row, col, and values arrays must have the same length.")
+    if row_i.size == 0:
         raise ValueError("Weight arrays are empty.")
 
-    if row.min() >= 1 and col.min() >= 1:
-        row = row - 1
-        col = col - 1
+    if row_i.min() >= 1 and col.min() >= 1:
+        row_i = row_i - 1
+        col_i = col_i - 1
 
-    n_target = int(row.max()) + 1
-    n_source = int(col.max()) + 1
+    n_target = int(row_i.max()) + 1
+    n_source = int(col_i.max()) + 1
     matrix = coo_matrix(
-        (values, (row, col)),
+        (values, (row_i, col_i)),
         shape=(n_target, n_source),
         dtype=np.float64,
     )
@@ -142,7 +144,7 @@ def _build_numba_kernels() -> (
     if not _HAS_NUMBA:
         return None
 
-    @numba.njit(parallel=True, cache=True)
+    @numba.njit(parallel=True, cache=True)  # type: ignore[untyped-decorator]
     def _numba_renormalize(
         indptr: npt.NDArray[np.int32],
         indices: npt.NDArray[np.int32],
@@ -164,7 +166,7 @@ def _build_numba_kernels() -> (
                     sup += w
             out[i] = wsum / sup if sup > 0.0 else np.nan
 
-    @numba.njit(parallel=True, cache=True)
+    @numba.njit(parallel=True, cache=True)  # type: ignore[untyped-decorator]
     def _numba_propagate(
         indptr: npt.NDArray[np.int32],
         indices: npt.NDArray[np.int32],
@@ -243,13 +245,9 @@ def _apply_numba_single(
     out = np.empty(matrix.shape[0], dtype=np.float64)
 
     if missing_policy == "propagate":
-        prop_kernel(
-            matrix.indptr, matrix.indices, matrix.data, values_1d, out
-        )
+        prop_kernel(matrix.indptr, matrix.indices, matrix.data, values_1d, out)
     else:
-        renorm_kernel(
-            matrix.indptr, matrix.indices, matrix.data, values_1d, out
-        )
+        renorm_kernel(matrix.indptr, matrix.indices, matrix.data, values_1d, out)
     return out
 
 
@@ -280,9 +278,7 @@ def _apply_scipy_batched(
     weighted = np.asarray(matrix @ filled.T, dtype=np.float64).T
 
     if missing_policy == "propagate":
-        missing = np.asarray(
-            matrix @ (~valid).astype(np.float64).T, dtype=np.float64
-        ).T
+        missing = np.asarray(matrix @ (~valid).astype(np.float64).T, dtype=np.float64).T
         weighted[missing > 0.0] = np.nan
         return weighted
 
@@ -291,16 +287,12 @@ def _apply_scipy_batched(
     if n_batch > 1 and np.array_equal(valid[0], valid[-1]):
         # Heuristic: if first and last slices share the same mask,
         # assume the mask is static (covers the common land/ocean case).
-        support_1d = np.asarray(
-            matrix @ valid[0].astype(np.float64), dtype=np.float64
-        )
+        support_1d = np.asarray(matrix @ valid[0].astype(np.float64), dtype=np.float64)
         with np.errstate(invalid="ignore", divide="ignore"):
             weighted /= support_1d[np.newaxis, :]
         weighted[:, support_1d <= 0.0] = np.nan
     else:
-        support = np.asarray(
-            matrix @ valid.astype(np.float64).T, dtype=np.float64
-        ).T
+        support = np.asarray(matrix @ valid.astype(np.float64).T, dtype=np.float64).T
         with np.errstate(invalid="ignore", divide="ignore"):
             weighted /= support
         weighted[support <= 0.0] = np.nan
@@ -386,28 +378,22 @@ def _apply_cupy_batched(
     weighted_gpu = (gpu_matrix @ filled_gpu.T).T
 
     if missing_policy == "propagate":
-        missing_gpu = (
-            gpu_matrix @ (~valid_gpu).astype(cp.float64).T
-        ).T
+        missing_gpu = (gpu_matrix @ (~valid_gpu).astype(cp.float64).T).T
         weighted_gpu[missing_gpu > 0.0] = cp.nan
-        return cp.asnumpy(weighted_gpu).astype(np.float64)
+        return cast(FloatArray, cp.asnumpy(weighted_gpu).astype(np.float64))
 
     # Renormalize — same static-mask optimisation as SciPy path.
     n_batch = values_2d.shape[0]
     if n_batch > 1 and cp.array_equal(valid_gpu[0], valid_gpu[-1]):
         support_1d = gpu_matrix @ valid_gpu[0].astype(cp.float64)
-        with cp.errstate(invalid="ignore", divide="ignore"):
-            weighted_gpu /= support_1d[cp.newaxis, :]
+        weighted_gpu /= support_1d[cp.newaxis, :]
         weighted_gpu[:, support_1d <= 0.0] = cp.nan
     else:
-        support_gpu = (
-            gpu_matrix @ valid_gpu.astype(cp.float64).T
-        ).T
-        with cp.errstate(invalid="ignore", divide="ignore"):
-            weighted_gpu /= support_gpu
+        support_gpu = (gpu_matrix @ valid_gpu.astype(cp.float64).T).T
+        weighted_gpu /= support_gpu
         weighted_gpu[support_gpu <= 0.0] = cp.nan
 
-    return cp.asnumpy(weighted_gpu).astype(np.float64)
+    return cast(FloatArray, cp.asnumpy(weighted_gpu).astype(np.float64))
 
 
 # ===================================================================
@@ -473,33 +459,23 @@ def apply_weights_nd(
 
     # --- Backend dispatch ---
     use_cupy = backend == "cupy" or (backend == "auto" and _HAS_CUPY)
-    use_numba = (
-        not use_cupy
-        and (
-            backend == "numba"
-            or (backend == "auto" and n_batch == 1 and _HAS_NUMBA)
-        )
+    use_numba = not use_cupy and (
+        backend == "numba" or (backend == "auto" and n_batch == 1 and _HAS_NUMBA)
     )
 
     if use_cupy:
-        result_2d = _apply_cupy_batched(
-            matrix, flat_2d, missing_policy
-        )
+        result_2d = _apply_cupy_batched(matrix, flat_2d, missing_policy)
     elif use_numba and n_batch == 1:
-        result_2d = _apply_numba_single(
-            matrix, flat_2d[0], missing_policy
-        )[np.newaxis, :]
+        result_2d = _apply_numba_single(matrix, flat_2d[0], missing_policy)[
+            np.newaxis, :
+        ]
     elif use_numba and n_batch > 1:
         # Numba is fastest per-slice; loop is still faster than
         # Python-level vectorize because the kernel itself is compiled.
         result_2d = np.empty((n_batch, n_target), dtype=np.float64)
         for i in range(n_batch):
-            result_2d[i] = _apply_numba_single(
-                matrix, flat_2d[i], missing_policy
-            )
+            result_2d[i] = _apply_numba_single(matrix, flat_2d[i], missing_policy)
     else:
-        result_2d = _apply_scipy_batched(
-            matrix, flat_2d, missing_policy
-        )
+        result_2d = _apply_scipy_batched(matrix, flat_2d, missing_policy)
 
     return result_2d.reshape(*batch_shape, n_target)
