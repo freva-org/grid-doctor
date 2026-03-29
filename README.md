@@ -9,8 +9,7 @@
 > approach will follow. For adding code for specific datasets please add
 > your script solution into the `scripts/<yourname>` folder.
 
-![Documentation](https://img.shields.io/badge/grid--doctor-docs-green?logo=read-the-docs&logoColor=white)](https://freva-org.github.io/grid-doctor/)
-
+[![Documentation](https://img.shields.io/badge/grid--doctor-docs-green?logo=read-the-docs&logoColor=white)](https://freva-org.github.io/grid-doctor/)
 ## Installation
 
 ```console
