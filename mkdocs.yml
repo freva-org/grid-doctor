@@ -36,7 +36,7 @@ plugins:
   - search
   - social:
       cards_layout_options:
-        background_image: assets/modis-aqua.png
+        background_image: docs/assets/modis-aqua.png
   - mkdocstrings:
       handlers:
         python:
