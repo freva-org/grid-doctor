@@ -5,6 +5,7 @@
 > approach will follow. For adding code for specific datasets please add
 > your script solution into the `scripts/<yourname>` folder.
 
+![Documentation](https://img.shields.io/badge/grid--doctor-docs-green?logo=read-the-docs&logoColor=white)](https://freva-org.github.io/grid-doctor/)
 
 ## Installation
 
@@ -12,6 +13,19 @@
 git clone git@github.com:freva-org/grid-doctor.git
 cd grid-doctor
 python -m pip install -e .
+```
+For GPU support use
+
+```console
+python -m pip install -e .[gpu]
+```
+
+
+For remapping of large grids you should install
+[ESMF](https://earthsystemmodeling.org/regrid/) through ocnda-forge.
+
+```console
+mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
 ```
 
 ## Quick Start
@@ -22,7 +36,20 @@ python -m pip install -e .
 import grid_doctor as gd
 
 ds = gd.cached_open_dataset(["path/to/*.nc"])
-pyramid = gd.latlon_to_healpix_pyramid(ds)
+max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
+weights_dir="/scratch/{user[0]}/{user}/grid-doctor/weights"\
+    .format(user=getuser(), level=level)
+gd.cached_weights(
+    ds,
+    level=max_level,
+    prefer_offline=True,
+    cache_path=weights_path
+)
+pyramid = gd.create_healpix_pyramid(
+    ds,
+    weights_path=weights_dir,
+    max_level=max_level
+)
 gd.save_pyramid_to_s3(
     pyramid,
     "s3://my-bucket/dataset.zarr",
@@ -43,12 +70,19 @@ import grid_doctor as gd
 
 grid_ds = gd.cached_open_dataset(["ICON_grid.nc"])
 max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
-weights = gd.cached_weights(grid_ds, level=max_level)
 
+weights_dir="/scratch/{user[0]}/{user}/grid-doctor/weights/"\
+    .format(user=getuser(), level=level)
+gd.cached_weights(
+    grid_ds,
+    level=max_level,
+    prefer_offline=True,
+    cache_path=weights_dir
+)
 ds = gd.cached_open_dataset(["icon_data_*.grb"])
 ds = ds.rename_dims({"values": "cell"}).chunk({"cell": -1})
 
-pyramid = gd.latlon_to_healpix_pyramid(ds, max_level=max_level, weights=weights)
+pyramid = gd.create_healpix_pyramid(ds, max_level=max_level, weights_path=weights_path)
 gd.save_pyramid_to_s3(pyramid, "s3://my-bucket/icon.zarr", s3_options=...)
 ```
 
@@ -65,15 +99,15 @@ Claim a patient, write a script, and turn that frown into 😎.
 
 | Dataset | Uploaded to S3 | Script Submitted |
 |---------|:--------------:|:----------------:|
-| ICON-DREAM  | 🩹 | 😎 |
+| ICON-DREAM  | 😎 | 😎 |
 | EERIE | 😎 | 😎 |
 | ERA5 | 😎 | 😎 |
 | CMIP6 | 🩹 | 😢 |
-| NextGEMS | 😎 | 😢 |
+| NextGEMS | 😎 | 😎 |
 | ICDC     | 😎 | 😢 |
-| ORCHESTRA | 🩹 | 🩹 |
+| ORCHESTRA | 😎 | 😎 |
 | PalMod | 😢 | 😢 |
-| Dyamond| 😢 | 😢 |
+| Dyamond| 😎 | 😢 |
 > [!TIP]
 > To claim a dataset, open a PR adding your script to `scripts/<dataset>/`
 > and update this table. See [Getting Started](#writing-a-conversion-script)
@@ -100,11 +134,7 @@ args = parser.parse_args()
 gd_cli.setup_logging_from_args(args)
 
 ds = gd.cached_open_dataset(["path/to/*.nc"])
-pyramid = gd.latlon_to_healpix_pyramid(ds)
-
-opt = ChunkOptimizer()
-chunked = {lvl: opt.apply(d) for lvl, d in pyramid.items()}
-
+pyramid = gd.create_healpix_pyramid(ds)
 gd.save_pyramid_to_s3(
     chunked,
     f"s3://{args.s3_bucket}/my-dataset.zarr",

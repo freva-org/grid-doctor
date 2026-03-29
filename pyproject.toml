@@ -40,17 +40,18 @@ dependencies = [
     "numpy",
     "xarray",
     "requests",
-    "healpy",
+    "healpix-geo",
     "zarr",
     "s3fs",
     "scipy",
     "fsspec",
-    "easygems",
+    "numcodecs",
     "dask[array]",
-    "data-portal-worker @ git+https://github.com/freva-org/freva-nextgen.git#subdirectory=freva-data-portal-worker",
+    "numba"
 ]
 
 [project.optional-dependencies]
+gpu = ["cupy"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -58,16 +59,25 @@ dev = [
     "ruff>=0.1",
     "black>=23.0",
     "pre-commit>=3.0",
+    "types-requests",
 ]
-tests = ["pytest",
-         "pytest-env",
-         "mock",
-         "pytest-mock",
-         "pytest-cov",
-         ]
+tests = [
+    "pytest",
+    "pytest-env",
+    "mock",
+    "pytest-mock",
+    "pytest-cov",
+    "healpy",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+    "pymdown-extensions>=10.0",
 
+]
 all = [
-    "grid-doctor[dev,tests]",
+    "grid-doctor[dev,tests,docs]",
 ]
 
 [project.urls]
@@ -94,12 +104,11 @@ allow_untyped_calls = true
 [tool.isort]
 known_first_party = [
     "grid_doctor",
-    "data_portal_worker",
 ]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 
 [tool.black]
-line-length = 100
+line-length = 120
 target-version = ["py310", "py311", "py312"]
 
 [tool.pytest.ini_options]
@@ -121,6 +130,8 @@ exclude_lines = [
     "if __name__ == .__main__.:",
 ]
 
+[tool.codespell]
+ignore-words-list = "te,nd,fo,ist,orcestra,cdo,COO"
 
 [tool.tox]
 legacy_tox_ini = """
@@ -142,7 +153,7 @@ deps = -e .
        bandit[toml]
 commands =
     python3 -m isort --check --profile black -t py312 -l 79 src
-    python3 -m flake8 src --count --max-complexity=10 --ignore=F405,F403,E704,W503,C901 --max-line-length=100 --statistics --show-source
+    python3 -m flake8 src --count --max-complexity=10 --ignore=F405,F403,E704,W503,C901 --max-line-length=120 --statistics --show-source
     codespell {posargs: --quiet-level=2} src/
     python3 -m pydocstyle src/grid_doctor
     bandit -r src/grid_doctor --severity-level medium --confidence-level high
@@ -158,11 +169,8 @@ commands =
 [testenv:docs]
 description = Build the documentation with mkdocs
 deps =
+    -e .[docs]
     codespell
-    mkdocs>=1.6
-    mkdocs-material>=9.5
-    mkdocstrings[python]>=0.27
-    pymdown-extensions>=10.0
 commands =
     codespell {posargs: --quiet-level=2} docs
     mkdocs build --strict {posargs}

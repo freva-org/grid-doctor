@@ -5,37 +5,27 @@
 Install grid-doctor in editable mode from a local clone:
 
 ```console
-git clone git@github.com:freva-org/grid-doctor.git
-cd grid-doctor
-python -m pip install -e .
+python -m pip install git+https://github.com/freva-org/grid-doctor.git
 ```
 
-### Dependencies
-
-Core dependencies are installed automatically.  For **unstructured grid**
-support (ICON, etc.) you also need [easygems](https://github.com/mpimet/easygems):
+To enable GPU support install [`cupy`](https://cupy.dev/)
 
 ```console
-pip install easygems
+python -m pip install cupy
 ```
 
-## Project Layout
+## Dependencies
+For very large grids grid-doctor uses
+[ESMF](https://earthsystemmodeling.org/regrid/) for parallel offline
+remapping. Since ESMF is not pip installable you have to install it via
+conda-forge:
 
-```text
-grid-doctor/
-├── src/grid_doctor/
-│   ├── __init__.py          # lazy public API
-│   ├── helpers.py           # regridding & pyramid logic
-│   ├── utils.py             # caching & S3 helpers
-│   ├── log.py               # logging configuration
-│   └── cli/                 # CLI helpers for scripts
-│       ├── parser.py
-│       └── script_utils.py
-├── scripts/                 # per-dataset conversion scripts
-│   └── <dataset>/convert.py
-├── mkdocs.yml
-└── tox.ini
+```console
+mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
 ```
+
+Note: Check openmpi module versions on levante and pick an appropriate
+`mpi_openmpi` version for installation.
 
 ## Writing a Conversion Script
 
@@ -57,7 +47,8 @@ args = parser.parse_args()
 gd_cli.setup_logging_from_args(args)
 
 ds = gd.cached_open_dataset(["path/to/*.nc"])
-pyramid = gd.latlon_to_healpix_pyramid(ds)
+weights_file = gd.cached_weights("~/weights/", nproc=4)
+pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_path)
 gd.save_pyramid_to_s3(
     pyramid,
     f"s3://{args.s3_bucket}/my-dataset.zarr",
