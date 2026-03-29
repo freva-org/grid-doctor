@@ -288,21 +288,26 @@ def _require_esmpy() -> Any:
 def _require_healpix_geo_module(nest: bool) -> tuple[Any, dict[str, str]]:
     """Import and return the appropriate ``healpix_geo`` sub-module.
 
+    All HEALPix geometry is computed on a perfect sphere.  This is
+    consistent with ESMF's internal area calculation
+    (``CoordSys.SPH_DEG``) and with the geocentric coordinates used
+    by climate models.  The maximum latitude discrepancy relative to
+    WGS84 geodetic coordinates is ~0.19° at 45° latitude, which is
+    well within the tolerance of conservative remapping.
+
     Args:
         nest: Select `healpix_geo.nested` when *True*, otherwise
             `healpix_geo.ring`.
 
     Returns:
-        The imported sub-module (`healpix_geo.nested` or
-        `healpix_geo.ring`).
+        ``(module, kwargs)`` where *kwargs* should be forwarded to
+        ``module.vertices`` and ``module.healpix_to_lonlat``.
 
     Raises:
         ImportError: When `healpix-geo` is not installed.
     """
-    kwargs = {}
     try:
         if nest:
-            kwargs["ellipsoid"] = "WGS84"
             from healpix_geo import nested as module
         else:
             from healpix_geo import ring as module
@@ -310,7 +315,7 @@ def _require_healpix_geo_module(nest: bool) -> tuple[Any, dict[str, str]]:
         raise ImportError(
             "healpix-geo is required to construct HEALPix polygons."
         ) from exc
-    return module, kwargs
+    return module, {"ellipsoid": "sphere"}
 
 
 # ===================================================================
@@ -1244,27 +1249,6 @@ def _target_healpix_mesh(
     return ipix, _corner_mesh_from_arrays(cell_lon, cell_lat)
 
 
-def _target_healpix_polygons(
-    level: int,
-    *,
-    nest: bool,
-) -> tuple[npt.NDArray[np.int64], list[tuple[FloatArray, FloatArray]]]:
-    """Return HEALPix polygons as Python tuples.
-
-    Note:
-        Legacy helper kept for backward compatibility.
-
-    Args:
-        level: HEALPix refinement level.
-        nest: Use nested ordering when *True*.
-
-    Returns:
-        ``(ipix, polygons)``.
-    """
-    ipix, mesh = _target_healpix_mesh(level, nest=nest)
-    return ipix, _mesh_to_polygons(mesh)
-
-
 # ===================================================================
 # ESMPy mesh construction
 # ===================================================================
@@ -1328,31 +1312,6 @@ def _mesh_from_polygon_mesh(
         element_coords=element_coords,
     )
     return esmf_mesh
-
-
-def _mesh_from_polygons(
-    polygons: list[tuple[FloatArray, FloatArray]],
-    *,
-    esmpy_mod: Any,
-) -> Any:
-    """Backward-compatible wrapper for ESMPy mesh construction.
-
-    Note:
-        Prefer
-        [`_mesh_from_polygon_mesh`][grid_doctor.remap_backend._mesh_from_polygon_mesh]
-        with a pre-built
-        [`PolygonMesh`][grid_doctor.remap_backend.PolygonMesh].
-
-    Args:
-        polygons: List of ``(lon_deg, lat_deg)`` vertex arrays.
-        esmpy_mod: The imported ``esmpy`` module.
-
-    Returns:
-        An ``esmpy.Mesh`` instance.
-    """
-    arrays = _polygons_to_corner_arrays(polygons)
-    mesh = _corner_mesh_from_arrays(*arrays)
-    return _mesh_from_polygon_mesh(mesh, esmpy_mod=esmpy_mod)
 
 
 # ===================================================================

@@ -5,14 +5,21 @@
 > approach will follow. For adding code for specific datasets please add
 > your script solution into the `scripts/<yourname>` folder.
 
+![Documentation](https://img.shields.io/badge/grid--doctor-docs-green?logo=read-the-docs&logoColor=white)](https://freva-org.github.io/grid-doctor/)
 
 ## Installation
 
 ```console
 git clone git@github.com:freva-org/grid-doctor.git
 cd grid-doctor
-python -m pip install -e .[remap]
+python -m pip install -e .
 ```
+For GPU support use
+
+```console
+python -m pip install -e .[gpu]
+```
+
 
 For remapping of large grids you should install
 [ESMF](https://earthsystemmodeling.org/regrid/) through ocnda-forge.
@@ -20,7 +27,6 @@ For remapping of large grids you should install
 ```console
 mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
 ```
-
 
 ## Quick Start
 
@@ -31,7 +37,7 @@ import grid_doctor as gd
 
 ds = gd.cached_open_dataset(["path/to/*.nc"])
 max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
-weights_path="/scratch/{user[0]}/{user}/grid-doctor/weights/era5-weights-{level}.nc"\
+weights_dir="/scratch/{user[0]}/{user}/grid-doctor/weights"\
     .format(user=getuser(), level=level)
 gd.cached_weights(
     ds,
@@ -41,7 +47,7 @@ gd.cached_weights(
 )
 pyramid = gd.create_healpix_pyramid(
     ds,
-    weights_path=weights_path,
+    weights_path=weights_dir,
     max_level=max_level
 )
 gd.save_pyramid_to_s3(
@@ -65,13 +71,13 @@ import grid_doctor as gd
 grid_ds = gd.cached_open_dataset(["ICON_grid.nc"])
 max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
 
-weights_path="/scratch/{user[0]}/{user}/grid-doctor/weights/icon-weights-{level}.nc"\
+weights_dir="/scratch/{user[0]}/{user}/grid-doctor/weights/"\
     .format(user=getuser(), level=level)
 gd.cached_weights(
     grid_ds,
     level=max_level,
     prefer_offline=True,
-    cache_path=weights_path
+    cache_path=weights_dir
 )
 ds = gd.cached_open_dataset(["icon_data_*.grb"])
 ds = ds.rename_dims({"values": "cell"}).chunk({"cell": -1})
@@ -94,7 +100,7 @@ Claim a patient, write a script, and turn that frown into 😎.
 | Dataset | Uploaded to S3 | Script Submitted |
 |---------|:--------------:|:----------------:|
 | ICON-DREAM  | 😎 | 😎 |
-| EERIE | 😎 | 😢 |
+| EERIE | 😎 | 😎 |
 | ERA5 | 😎 | 😎 |
 | CMIP6 | 🩹 | 😢 |
 | NextGEMS | 😎 | 😎 |

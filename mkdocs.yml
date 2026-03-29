@@ -6,6 +6,9 @@ repo_name: freva-org/grid-doctor
 
 theme:
   name: material
+  icon:
+    admonition:
+      example: material/database
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -47,6 +50,13 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.highlight:
       anchor_linenums: true
+  - pymdownx.tasklist:
+      custom_checkbox: true  # clickable checkboxes in roadmap
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - tables
+  - attr_list
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - toc:
@@ -54,6 +64,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Waterpark: waterpark.md
   - Getting Started: getting-started.md
   - API Reference:
       - grid_doctor.remap: api/remap.md

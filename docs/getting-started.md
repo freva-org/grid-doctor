@@ -8,6 +8,12 @@ Install grid-doctor in editable mode from a local clone:
 python -m pip install git+https://github.com/freva-org/grid-doctor.git
 ```
 
+To enable GPU support install [`cupy`](https://cupy.dev/)
+
+```console
+python -m pip install cupy
+```
+
 ## Dependencies
 For very large grids grid-doctor uses
 [ESMF](https://earthsystemmodeling.org/regrid/) for parallel offline
