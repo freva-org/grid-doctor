@@ -1,8 +1,10 @@
-site_name: grid-doctor
+site_name: Grid Doctor
 site_description: Convert lat/lon xarray datasets to HEALPix pyramids.
 site_url: https://freva-org.github.io/grid-doctor/
 repo_url: https://github.com/freva-org/grid-doctor
 repo_name: freva-org/grid-doctor
+
+
 
 theme:
   name: material
@@ -32,6 +34,9 @@ theme:
 
 plugins:
   - search
+  - social:
+      cards_layout_options:
+        background_image: assets/modis-aqua.png
   - mkdocstrings:
       handlers:
         python:

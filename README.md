@@ -1,4 +1,8 @@
 # Grid Doctor HEALs your Grids
+<p style="text-align: center;">
+  <img src="docs/assets/modis-aqua.png" alt="MODIS SST on HEALPix" width="600">
+</p>
+
 
 > [!NOTE]
 > This is a scripting solution for a proof of concept. An operational ready
