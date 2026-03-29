@@ -288,21 +288,26 @@ def _require_esmpy() -> Any:
 def _require_healpix_geo_module(nest: bool) -> tuple[Any, dict[str, str]]:
     """Import and return the appropriate ``healpix_geo`` sub-module.
 
+    All HEALPix geometry is computed on a perfect sphere.  This is
+    consistent with ESMF's internal area calculation
+    (``CoordSys.SPH_DEG``) and with the geocentric coordinates used
+    by climate models.  The maximum latitude discrepancy relative to
+    WGS84 geodetic coordinates is ~0.19° at 45° latitude, which is
+    well within the tolerance of conservative remapping.
+
     Args:
         nest: Select `healpix_geo.nested` when *True*, otherwise
             `healpix_geo.ring`.
 
     Returns:
-        The imported sub-module (`healpix_geo.nested` or
-        `healpix_geo.ring`).
+        ``(module, kwargs)`` where *kwargs* should be forwarded to
+        ``module.vertices`` and ``module.healpix_to_lonlat``.
 
     Raises:
         ImportError: When `healpix-geo` is not installed.
     """
-    kwargs = {}
     try:
         if nest:
-            kwargs["ellipsoid"] = "WGS84"
             from healpix_geo import nested as module
         else:
             from healpix_geo import ring as module
@@ -310,7 +315,7 @@ def _require_healpix_geo_module(nest: bool) -> tuple[Any, dict[str, str]]:
         raise ImportError(
             "healpix-geo is required to construct HEALPix polygons."
         ) from exc
-    return module, kwargs
+    return module, {"ellipsoid": "sphere"}
 
 
 # ===================================================================
