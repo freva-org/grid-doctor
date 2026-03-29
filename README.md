@@ -2,7 +2,7 @@
 <p align="center">
   <img src="docs/assets/modis-aqua.png" alt="MODIS AQUA" width="600"><br>
   <img
-      src="https://img.shields.io/badge/grid--doctor-docs-green?logo=read-the-docs&amp;logoColor=white"
+      src="https://img.shields.io/badge/grid--doctor-Documentation-green?logo=read-the-docs&amp;logoColor=white"
       alt="Documentation"
     >
 </p>
