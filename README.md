@@ -1,6 +1,6 @@
 # Grid Doctor HEALs your Grids
 <p align="center">
-  <img src="assets/modis-aqua.png" alt="MODIS AQUA" width="600"><br>
+  <img src="docs/assets/modis-aqua.png" alt="MODIS AQUA" width="600"><br>
   <em>Sea surface temperature seen by MODIS AQUA.</em>
 </p>
 
