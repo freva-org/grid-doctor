@@ -59,8 +59,12 @@ markdown_extensions:
   - attr_list
   - pymdownx.inlinehilite
   - pymdownx.snippets
+  - pymdownx.blocks.caption
   - toc:
       permalink: true
+
+extra_css:
+  - assets/styles.css
 
 nav:
   - Home: index.md
