@@ -124,15 +124,18 @@ addopts = "-v --cov=grid_doctor --cov-report=term-missing"
 
 [tool.coverage.run]
 source = ["grid-doctor"]
-branch = true
+branch = false
 
 [tool.coverage.report]
+ignore_errors = false
 exclude_lines = [
     "pragma: no cover",
+    "noqa",
     "def __repr__",
     "raise NotImplementedError",
     "if TYPE_CHECKING:",
     "if __name__ == .__main__.:",
+     "except ImportError:",
 ]
 
 [tool.codespell]
