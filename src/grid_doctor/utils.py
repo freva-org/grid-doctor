@@ -212,7 +212,7 @@ def cached_weights(
         Unit convention of the source coordinates.
     cache_path:
         Cache directory or explicit file name. When omitted,
-        [`cache_dir`][grid_doctor.utils.cache_dir] is used.
+        the default package cache directory is used.
     **kwargs:
         Any additional keyword arguments for
         [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights]
