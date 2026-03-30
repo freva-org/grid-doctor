@@ -1,4 +1,4 @@
-"""Caching utilities for datasets and interpolation weights."""
+"""Caching utilities for datasets and HEALPix weight files."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pickle
 import tempfile
 from os import environ
 from pathlib import Path
-from typing import Any, Collection, Optional, Union
+from typing import Any, Collection, Literal, cast
 
 import numpy as np
 import xarray as xr
@@ -17,28 +17,101 @@ import xarray as xr
 logger = logging.getLogger(__name__)
 
 
-def get_s3_options(
-    endpoint_url: str,
-    secrets_file: Union[str, Path],
-    **kwargs: str,
-) -> dict[str, str]:
-    """Build an S3 options dictionary from an endpoint and a secrets file.
+def chunk_for_target_store_size(
+    *,
+    level: int,
+    dtype: str | np.dtype = "float32",
+    target_stored_mib: float = 16.0,
+    compression_ratio: float = 2.0,
+    access: Literal["time_series", "map"] = "map",
+    ntime: int | None = None,
+    max_time_chunk: int | None = None,
+    max_cell_chunk: int | None = None,
+) -> dict[str, int]:
+    """
+    Compute (time, cell) chunks for a HEALPix dataset.
 
     Parameters
     ----------
-    endpoint_url : str
-        S3-compatible endpoint URL (e.g.
-        ``"https://s3.eu-dkrz-3.dkrz.cloud"``).
-    secrets_file : str or Path
-        Path to a JSON file containing ``accessKey`` and ``secretKey``.
-    **kwargs : str
-        Additional keyword arguments merged into the returned dict.
+    level
+        HEALPix order / level.
+    dtype
+        Variable dtype.
+    target_stored_mib
+        Desired approximate compressed chunk size on disk.
+    compression_ratio
+        Estimated ratio:
+            uncompressed_bytes / compressed_bytes
+    access
+        "map" or "time_series".
+    ntime
+        Total time size. Needed for time_series mode unless max_time_chunk is given.
+    max_time_chunk
+        Optional cap for time chunk.
+    max_cell_chunk
+        Optional cap for cell chunk.
+
+    Returns
+    -------
+    dict[str, int]
+        Chunk sizes, e.g. {"time": 5, "cell": 786432}.
+    """
+    nside = 2**level
+    ncell = 12 * nside * nside
+    itemsize = np.dtype(dtype).itemsize
+
+    target_stored_bytes = int(target_stored_mib * 1024 * 1024)
+    target_uncompressed_bytes = int(target_stored_bytes * compression_ratio)
+
+    if access == "map":
+        cell_chunk = ncell if max_cell_chunk is None else min(ncell, max_cell_chunk)
+        time_chunk = max(1, target_uncompressed_bytes // (itemsize * cell_chunk))
+        return {"time": int(time_chunk), "cell": int(cell_chunk)}
+
+    if access == "time_series":
+        if max_time_chunk is not None:
+            time_chunk = max_time_chunk
+        elif ntime is not None:
+            time_chunk = ntime
+        else:
+            raise ValueError(
+                "For access='time_series', provide either ntime or max_time_chunk."
+            )
+
+        if ntime is not None:
+            time_chunk = min(time_chunk, ntime)
+
+        cell_chunk = max(1, target_uncompressed_bytes // (itemsize * time_chunk))
+        cell_chunk = min(cell_chunk, ncell)
+
+        if max_cell_chunk is not None:
+            cell_chunk = min(cell_chunk, max_cell_chunk)
+
+        return {"time": int(time_chunk), "cell": int(cell_chunk)}
+
+    raise ValueError(f"Unsupported access mode: {access!r}")
+
+
+def get_s3_options(
+    endpoint_url: str,
+    secrets_file: str | Path,
+    **kwargs: str,
+) -> dict[str, str]:
+    """Build an S3 options dictionary from an endpoint and credentials file.
+
+    Parameters
+    ----------
+    endpoint_url:
+        S3-compatible endpoint URL.
+    secrets_file:
+        JSON file containing `accessKey` and `secretKey`.
+    **kwargs:
+        Additional options merged into the returned dictionary.
 
     Returns
     -------
     dict[str, str]
-        Dictionary suitable for :func:`save_pyramid_to_s3`'s
-        *s3_options* parameter.
+        Options for `s3fs.S3FileSystem`.
     """
     secrets: dict[str, str] = json.loads(Path(secrets_file).read_text())
     return {
@@ -50,15 +123,10 @@ def get_s3_options(
 
 
 def cache_dir() -> Path:
-    """Return the directory used for caching.
+    """Return the writable cache directory used by grid-doctor.
 
-    Tries ``/scratch/$USER`` first (common on HPC systems like Levante)
-    and falls back to :func:`tempfile.gettempdir`.
-
-    Returns
-    -------
-    Path
-        Writable cache directory.
+    The function prefers `/scratch/<initial>/<user>/tmp*` on systems such as
+    Levante and falls back to `tempfile.gettempdir`.
     """
     scratch = Path("/scratch/{0:.1}/{0}".format(environ["USER"]))
     if scratch.is_dir():
@@ -66,8 +134,9 @@ def cache_dir() -> Path:
         try:
             scratch_temp.mkdir(exist_ok=True, parents=True)
         except PermissionError:
-            logger.error(
-                "Unable to create cache in /scratch, continuing with default"
+            logger.warning(
+                "Could not create %s, falling back to the default temp dir.",
+                scratch_temp,
             )
         else:
             environ["TMPDIR"] = str(scratch_temp)
@@ -75,116 +144,145 @@ def cache_dir() -> Path:
     return Path(tempfile.gettempdir())
 
 
-def cached_open_dataset(
-    files: Collection[str],
-    **kwargs: Any,
-) -> xr.Dataset:
-    """Open files as a single dataset, caching the result as a pickle.
-
-    On subsequent calls with the same file list the cached pickle is
-    loaded directly, skipping the (potentially slow) ``open_mfdataset``
-    call.
+def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
+    """Open multiple files and cache the merged dataset as a pickle.
 
     Parameters
     ----------
-    files : Collection[str]
-        Paths (or glob patterns) to open.
-    **kwargs : Any
-        Forwarded to :func:`xarray.open_mfdataset`.  Defaults to
-        ``parallel=True, chunks="auto"`` which can be overridden.
+    files:
+        Input file paths or glob-expanded file names.
+    **kwargs:
+        Extra keyword arguments for `xarray.open_mfdataset`.
 
     Returns
     -------
-    xr.Dataset
-        The opened (and cached) dataset.
+    xarray.Dataset
+        The opened dataset.
     """
-    h = hashlib.sha256()
-    h.update(np.sort(np.unique(list(files))).astype(bytes))
-    pickle_file = cache_dir() / f"{h.hexdigest()}.pickle"
+    digest = hashlib.sha256()
+    normalised = sorted({str(path) for path in files})
+    digest.update("\0".join(normalised).encode())
+    pickle_file = cache_dir() / f"{digest.hexdigest()}.pickle"
 
     if pickle_file.exists():
-        logger.debug("Loading dataset from %s", pickle_file)
         try:
-            with pickle_file.open("rb") as f:
-                dset: xr.Dataset = pickle.load(f)  # nosec B301  # noqa: S301
-                return dset
-        except Exception as error:
-            logger.warning("Failed to load pickle file: %s", error)
-            pickle_file.unlink()
+            with pickle_file.open("rb") as handle:
+                return cast(xr.Dataset, pickle.load(handle))  # nosec B301  # noqa: S301
+        except Exception as exc:  # pragma: no cover - defensive cache cleanup
+            logger.warning("Could not read cached dataset %s: %s", pickle_file, exc)
+            pickle_file.unlink(missing_ok=True)
 
-    logger.info("Opening dataset with %d files …", len(files))
     from dask.diagnostics.progress import ProgressBar
 
+    merged_kwargs: dict[str, Any] = {"parallel": True, "chunks": "auto"} | kwargs
     with ProgressBar():
-        merged_kwargs: dict[str, Any] = {
-            "parallel": True,
-            "chunks": "auto",
-        } | kwargs
-        ds: xr.Dataset = xr.open_mfdataset(list(files), **merged_kwargs)
+        dataset = xr.open_mfdataset(normalised, **merged_kwargs)
 
-    with open(pickle_file, "wb") as f:
-        logger.debug("Saving dataset in %s", pickle_file)
-        pickle.dump(ds, file=f)
-    return ds
+    with pickle_file.open("wb") as handle:
+        pickle.dump(dataset, handle)
+    return dataset
 
 
 def cached_weights(
     ds: xr.Dataset,
-    level: int,
+    level: int | None = None,
+    *,
+    method: Literal["nearest", "conservative"] = "conservative",
     nest: bool = True,
-    cache_path: Optional[Union[str, Path]] = None,
-) -> xr.Dataset:
-    """Compute (or load cached) Delaunay interpolation weights.
-
-    Weights are expensive to compute for large grids.  This helper
-    transparently caches them as NetCDF files so subsequent runs reuse
-    previously computed weights.
+    source_units: Literal["auto", "rad", "deg"] = "auto",
+    cache_path: str | Path | None = None,
+    **kwargs: Any,
+) -> Path:
+    """Compute or load a cached HEALPix weight file.
 
     Parameters
     ----------
-    ds : xr.Dataset
-        Input dataset (any grid type supported by grid-doctor).
-    level : int
-        Target HEALPix level (``nside = 2**level``).
-    nest : bool, optional
-        HEALPix pixel ordering (default ``True`` = NESTED).
-    cache_path : str, Path or None, optional
-        Explicit path (file or directory) for the weight cache.
-        When ``None`` the default :func:`cache_dir` is used.
+    ds:
+        Source dataset whose grid geometry defines the weights.
+    level:
+        HEALPix level.
+    method:
+        Weight-generation method. Supported values are `"nearest"` and
+        `"conservative"`.
+    nest:
+        Use nested HEALPix ordering when `True`.
+    source_units:
+        Unit convention of the source coordinates.
+    cache_path:
+        Cache directory or explicit file name. When omitted,
+        [`cache_dir`][grid_doctor.utils.cache_dir] is used.
+    **kwargs:
+        Any additional keyword arguments for
+        [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights]
 
     Returns
     -------
-    xr.Dataset
-        Weight dataset for use with
-        :func:`~grid_doctor.helpers.regrid_unstructured_to_healpix`.
+    pathlib.Path
+        Path to the cached NetCDF weight file.
 
-    See Also
+    Examples
     --------
-    compute_weights_delaunay : Low-level weight computation.
+    ```python
+    weight_file = cached_weights(ds, level=8, method="conservative")
+    ```
     """
-    from .helpers import _get_latlon_arrays, compute_weights_delaunay
+    from .helpers import get_latlon_resolution, resolution_to_healpix_level
+    from .remap import compute_healpix_weights
 
-    lat, lon = _get_latlon_arrays(ds)
-    h = hashlib.sha256()
-    h.update(np.ascontiguousarray(np.asarray(lat).ravel()).data)
-    h.update(np.ascontiguousarray(np.asarray(lon).ravel()).data)
-    h.update(f"level={level},nest={nest}".encode())
-    key = h.hexdigest()[:16]
+    digest = hashlib.sha256()
+    for candidate in (
+        "clon_vertices",
+        "clat_vertices",
+        "lon_vertices",
+        "lat_vertices",
+        "clon",
+        "clat",
+        "lon",
+        "lat",
+        "longitude",
+        "latitude",
+        "rlon",
+        "rlat",
+        "X",
+        "Y",
+    ):
+        if candidate in ds:
+            digest.update(
+                np.ascontiguousarray(np.asarray(ds[candidate].values)).tobytes()
+            )
+    digest.update(
+        f"level={level};method={method};nest={nest};units={source_units}".encode()
+    )
+    key = digest.hexdigest()[:16]
 
     if cache_path is None:
         weight_file = cache_dir() / f"weights_{key}.nc"
     else:
-        p = Path(cache_path)
-        weight_file = p / f"weights_{key}.nc" if p.is_dir() else p
-
+        path = Path(cache_path)
+        weight_file = path / f"weights_{key}.nc" if path.is_dir() else path
     if weight_file.exists():
-        logger.info("Loading cached weights from %s", weight_file)
-        return xr.open_dataset(weight_file)
+        logger.info("Using cached weight file %s", weight_file)
+        return weight_file
 
-    logger.info("Computing Delaunay weights (level=%d) …", level)
-    weights = compute_weights_delaunay(ds, level, nest=nest)
+    logger.info("Generating HEALPix weight file %s", weight_file)
+    if level is None:
+        level = resolution_to_healpix_level(get_latlon_resolution(ds))
 
-    weight_file.parent.mkdir(parents=True, exist_ok=True)
-    weights.to_netcdf(weight_file)
-    logger.info("Weights cached at %s", weight_file)
-    return weights
+    return compute_healpix_weights(
+        ds,
+        level,
+        method=method,
+        nest=nest,
+        source_units=source_units,
+        weights_path=weight_file,
+        **kwargs,
+    )
+
+
+__all__ = [
+    "cache_dir",
+    "cached_open_dataset",
+    "chunk_for_target_store_size",
+    "cached_weights",
+    "get_s3_options",
+]

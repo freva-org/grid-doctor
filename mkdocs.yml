@@ -1,11 +1,16 @@
-site_name: grid-doctor
+site_name: Grid Doctor
 site_description: Convert lat/lon xarray datasets to HEALPix pyramids.
 site_url: https://freva-org.github.io/grid-doctor/
 repo_url: https://github.com/freva-org/grid-doctor
 repo_name: freva-org/grid-doctor
 
+
+
 theme:
   name: material
+  icon:
+    admonition:
+      example: material/database
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -29,6 +34,9 @@ theme:
 
 plugins:
   - search
+  - social:
+      cards_layout_options:
+        background_image: docs/assets/modis-aqua.png
   - mkdocstrings:
       handlers:
         python:
@@ -47,16 +55,28 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.highlight:
       anchor_linenums: true
+  - pymdownx.tasklist:
+      custom_checkbox: true  # clickable checkboxes in roadmap
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - tables
+  - attr_list
   - pymdownx.inlinehilite
   - pymdownx.snippets
+  - pymdownx.blocks.caption
   - toc:
       permalink: true
 
+extra_css:
+  - assets/styles.css
+
 nav:
   - Home: index.md
+  - Waterpark: waterpark.md
   - Getting Started: getting-started.md
   - API Reference:
-      - grid_doctor: api/grid_doctor.md
+      - grid_doctor.remap: api/remap.md
       - grid_doctor.helpers: api/helpers.md
       - grid_doctor.utils: api/utils.md
       - grid_doctor.log: api/log.md
