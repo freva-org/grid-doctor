@@ -8,6 +8,24 @@ import numpy.typing as npt
 RegridFunc = Callable[[npt.NDArray[np.floating[Any]]], npt.NDArray[np.floating[Any]]]
 regrid_core: RegridFunc
 
+RemapMethod = Literal["nearest", "conservative"]
+"""Supported weight-generation methods."""
+
+SourceUnits = Literal["auto", "deg", "rad"]
+"""Angular unit convention for source coordinates."""
+
+SourceKind = Literal["auto", "regular", "curvilinear", "unstructured", "spectral"]
+"""Explicit source grid classification."""
+
+FloatArray = npt.NDArray[np.float64]
+"""Shorthand for a float64 NumPy array."""
+
+IntArray = npt.NDArray[np.int32]
+"""Shorthand for a int32 NumPy array."""
+
+Int64Array = npt.NDArray[np.int64]
+"""Shorthand for a int64 NumPy array."""
+
 
 class ZarrOptions(TypedDict, total=False):
     """Definitions of possible to_zarr arguments."""

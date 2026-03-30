@@ -26,11 +26,9 @@ from .remap_backend import (
     _get_unstructured_dim,
     _is_unstructured,
 )
-from .types import ZarrOptions
+from .types import FloatArray, ZarrOptions
 
 logger = logging.getLogger(__name__)
-
-FloatArray = npt.NDArray[np.float64]
 
 
 # ===================================================================

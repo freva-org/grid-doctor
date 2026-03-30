@@ -32,26 +32,19 @@ from pathlib import Path
 from typing import Any, Literal, overload
 
 import numpy as np
-import numpy.typing as npt
 import xarray as xr
+
+from .types import (
+    FloatArray,
+    Int64Array,
+    IntArray,
+    RemapMethod,
+    SourceKind,
+    SourceUnits,
+)
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Type aliases
-# ---------------------------------------------------------------------------
-
-RemapMethod = Literal["nearest", "conservative"]
-"""Supported weight-generation methods."""
-
-SourceUnits = Literal["auto", "deg", "rad"]
-"""Angular unit convention for source coordinates."""
-
-SourceKind = Literal["auto", "regular", "curvilinear", "unstructured", "spectral"]
-"""Explicit source grid classification."""
-
-FloatArray = npt.NDArray[np.float64]
-"""Shorthand for a float64 NumPy array."""
 
 # ---------------------------------------------------------------------------
 # Well-known coordinate and dimension names
@@ -215,7 +208,7 @@ class PolygonMesh:
 
     node_lon: FloatArray
     node_lat: FloatArray
-    face_nodes: npt.NDArray[np.int32]
+    face_nodes: IntArray
     face_lon: FloatArray
     face_lat: FloatArray
 
@@ -1231,7 +1224,7 @@ def _target_healpix_mesh(
     level: int,
     *,
     nest: bool,
-) -> tuple[npt.NDArray[np.int64], PolygonMesh]:
+) -> tuple[Int64Array, PolygonMesh]:
     """Return the HEALPix destination mesh.
 
     Args:

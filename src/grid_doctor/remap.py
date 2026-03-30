@@ -19,10 +19,9 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import numpy as np
-import numpy.typing as npt
 import xarray as xr
 
 from .remap_apply import (
@@ -34,7 +33,6 @@ from .remap_apply import (
 from .remap_backend import (
     _UNSTRUCTURED_DIMS,
     OfflineWeightConfig,
-    SourceKind,
     _canonical_lon,
     _get_latlon_arrays,
     _get_spatial_dims,
@@ -44,21 +42,9 @@ from .remap_backend import (
     _require_healpix_geo_module,
     compute_healpix_weights_backend,
 )
+from .types import FloatArray, RemapMethod, SourceKind, SourceUnits
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Type aliases
-# ---------------------------------------------------------------------------
-
-RemapMethod = Literal["nearest", "conservative"]
-"""Supported remapping methods."""
-
-SourceUnits = Literal["auto", "deg", "rad"]
-"""Angular unit convention for source coordinates."""
-
-FloatArray = npt.NDArray[np.float64]
-"""Shorthand for a float64 NumPy array."""
 
 
 # ===================================================================

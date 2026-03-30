@@ -14,6 +14,8 @@ from typing import Any, Collection, Literal, cast
 import numpy as np
 import xarray as xr
 
+from .types import RemapMethod, SourceUnits
+
 logger = logging.getLogger(__name__)
 
 
@@ -187,9 +189,9 @@ def cached_weights(
     ds: xr.Dataset,
     level: int | None = None,
     *,
-    method: Literal["nearest", "conservative"] = "conservative",
+    method: RemapMethod = "conservative",
     nest: bool = True,
-    source_units: Literal["auto", "rad", "deg"] = "auto",
+    source_units: SourceUnits = "auto",
     cache_path: str | Path | None = None,
     **kwargs: Any,
 ) -> Path:
