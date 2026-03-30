@@ -493,6 +493,8 @@ def regrid_to_healpix(
     backend: ApplyBackend = "auto",
     grid: xr.Dataset | None = None,
     source_kind: SourceKind = "auto",
+    ignore_unmapped: bool | None = None,
+    large_file: bool = True,
     prefer_offline: bool | None = None,
     nproc: int = 1,
     esmf_regrid_weightgen: str = "ESMF_RegridWeightGen",
@@ -563,6 +565,8 @@ def regrid_to_healpix(
             keep_intermediates=keep_intermediates,
             workdir=workdir,
             spectral_transform_command=spectral_transform_command,
+            ignore_unmapped=ignore_unmapped,
+            large_file=large_file,
         )
     return apply_weight_file(
         ds,
