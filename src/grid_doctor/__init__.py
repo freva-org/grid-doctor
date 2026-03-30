@@ -16,6 +16,7 @@ _SUBMODULES: dict[str, str] = {
     "log": ".log",
     "remap": ".remap",
     "utils": ".utils",
+    "cli": ".cli",
 }
 
 
