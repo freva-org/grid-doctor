@@ -19,6 +19,8 @@
 /work/k20200/k202181/venv-rechunk/bin/python -m ztk.rechunker --configure s3://eerie/eerie-hist-1950-v20240618_P1M_mean_9.zarr --input /scratch/k/k202181/remap_eerie/eerie-hist-1950-v20240618/eerie-hist-1950-v20240618_P1M_mean_9.zarr --config /home/k/k202181/Git/grid-doctor/scripts/eerie/rechunker_configs --output_storage_options_env /home/k/k202181/eerie-rechunk-s3.env
 
 
+/work/k20200/k202181/venv-rechunk/bin/python -m ztk.rechunker --configure s3://eerie/healpix/hist-1950-v20240618/ICON/P1M/mean.zarr --input /scratch/k/k202181/remap_eerie/eerie-hist-1950-v20240618.zarr --config /home/k/k202181/Git/grid-doctor/scripts/eerie/rechunker_configs
+
 
 /work/k20200/k202181/venv-rechunk/bin/python -m ztk.rechunker --configure s3://eerie/eerie-future-ssp245-v20240618_P1M_mean_0.zarr --input /scratch/k/k202181/remap_eerie/eerie-future-ssp245-v20240618/eerie-future-ssp245-v20240618_P1M_mean_0.zarr --config /home/k/k202181/Git/grid-doctor/scripts/eerie/rechunker_configs --output_storage_options_env /home/k/k202181/eerie-rechunk-s3.env
 
@@ -39,3 +41,6 @@
 /work/k20200/k202181/venv-rechunk/bin/python -m ztk.rechunker --configure s3://eerie/eerie-future-ssp245-v20240618_P1M_mean_8.zarr --input /scratch/k/k202181/remap_eerie/eerie-future-ssp245-v20240618/eerie-future-ssp245-v20240618_P1M_mean_8.zarr --config /home/k/k202181/Git/grid-doctor/scripts/eerie/rechunker_configs --output_storage_options_env /home/k/k202181/eerie-rechunk-s3.env
 
 /work/k20200/k202181/venv-rechunk/bin/python -m ztk.rechunker --configure s3://eerie/eerie-future-ssp245-v20240618_P1M_mean_9.zarr --input /scratch/k/k202181/remap_eerie/eerie-future-ssp245-v20240618/eerie-future-ssp245-v20240618_P1M_mean_9.zarr --config /home/k/k202181/Git/grid-doctor/scripts/eerie/rechunker_configs --output_storage_options_env /home/k/k202181/eerie-rechunk-s3.env
+
+
+/work/k20200/k202181/venv-rechunk/bin/python -m ztk.rechunker --configure s3://eerie/healpix/future-ssp245-v20240618/ICON/P1M/mean.zarr --input /scratch/k/k202181/remap_eerie/eerie-future-ssp245-v20240618.zarr --config /home/k/k202181/Git/grid-doctor/scripts/eerie/rechunker_configs
