@@ -54,9 +54,10 @@ class Source(ABC):
         self.spec = spec
 
     def load(self) -> xr.Dataset:
+        from glob import glob
         try:
             ds:xr.Dataset = cached_open_dataset(
-                self.spec.paths, engine=self.spec.engine, parallel=self.spec.parallel
+                glob(self.spec.paths), engine=self.spec.engine, parallel=self.spec.parallel, **self.spec.open_kwargs
             )
         except Exception as e:
             print(f"ERROR unable to open source dataset specified with {self.spec}")
