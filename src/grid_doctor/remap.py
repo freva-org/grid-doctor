@@ -19,10 +19,9 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import numpy as np
-import numpy.typing as npt
 import xarray as xr
 
 from .remap_apply import (
@@ -34,7 +33,6 @@ from .remap_apply import (
 from .remap_backend import (
     _UNSTRUCTURED_DIMS,
     OfflineWeightConfig,
-    SourceKind,
     _canonical_lon,
     _get_latlon_arrays,
     _get_spatial_dims,
@@ -44,21 +42,9 @@ from .remap_backend import (
     _require_healpix_geo_module,
     compute_healpix_weights_backend,
 )
+from .types import FloatArray, RemapMethod, SourceKind, SourceUnits
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Type aliases
-# ---------------------------------------------------------------------------
-
-RemapMethod = Literal["nearest", "conservative"]
-"""Supported remapping methods."""
-
-SourceUnits = Literal["auto", "deg", "rad"]
-"""Angular unit convention for source coordinates."""
-
-FloatArray = npt.NDArray[np.float64]
-"""Shorthand for a float64 NumPy array."""
 
 
 # ===================================================================
@@ -566,7 +552,16 @@ def regrid_to_healpix(
     weights_path: str | Path | None = None,
     missing_policy: MissingPolicy = "renormalize",
     backend: ApplyBackend = "auto",
-    **kwargs: Any,
+    grid: xr.Dataset | None = None,
+    source_kind: SourceKind = "auto",
+    ignore_unmapped: bool | None = None,
+    large_file: bool = True,
+    prefer_offline: bool | None = None,
+    nproc: int = 1,
+    esmf_regrid_weightgen: str = "ESMF_RegridWeightGen",
+    keep_intermediates: bool = False,
+    workdir: str | Path | None = None,
+    spectral_transform_command: list[str] | tuple[str, ...] | None = None,
 ) -> xr.Dataset:
     """Regrid *ds* to a HEALPix target grid.
 
@@ -588,9 +583,26 @@ def regrid_to_healpix(
         Missing-value handling.
     backend:
         Application backend (``"auto"``, ``"scipy"``, ``"numba"``).
-    **kwargs:
-        Forwarded to
-        [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights].
+    grid:
+        Optional external geometry dataset.
+    source_kind:
+        Explicit source representation or ``"auto"``.
+    ignore_unmapped:
+        Ignore unmapped destination cells.
+    large_file:
+        Forwarded to the in-memory ESMPy workflow.
+    prefer_offline:
+        Force or disable the offline ESMF path.
+    nproc:
+        Number of MPI ranks for the offline path.
+    esmf_regrid_weightgen:
+        Name or path of the offline ESMF executable.
+    keep_intermediates:
+        Keep intermediate mesh files.
+    workdir:
+        Working directory for offline intermediate files.
+    spectral_transform_command:
+        External command for ``source_kind="spectral"``.
 
     Returns
     -------
@@ -606,7 +618,16 @@ def regrid_to_healpix(
             nest=nest,
             source_units=source_units,
             weights_path=weight_file,
-            **kwargs,
+            grid=grid,
+            source_kind=source_kind,
+            prefer_offline=prefer_offline,
+            nproc=nproc,
+            esmf_regrid_weightgen=esmf_regrid_weightgen,
+            keep_intermediates=keep_intermediates,
+            workdir=workdir,
+            spectral_transform_command=spectral_transform_command,
+            ignore_unmapped=ignore_unmapped,
+            large_file=large_file,
         )
     return apply_weight_file(
         ds,
