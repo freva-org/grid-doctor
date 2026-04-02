@@ -49,8 +49,6 @@ dependencies = [
     "dask[array]",
     "numba"
 ]
-[package-data]
-metadata_crawler = ["py.typed", "__init__.pyi"]
 
 
 [project.optional-dependencies]
