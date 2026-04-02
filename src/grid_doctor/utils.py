@@ -7,6 +7,7 @@ import json
 import logging
 import pickle
 import tempfile
+from glob import glob
 from os import environ
 from pathlib import Path
 from typing import Any, Collection, Literal, cast
@@ -167,18 +168,21 @@ def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
     if pickle_file.exists():
         try:
             with pickle_file.open("rb") as handle:
+                logger.info(f"Loading pickle {pickle_file}")
                 return cast(xr.Dataset, pickle.load(handle))  # nosec B301  # noqa: S301
         except Exception as exc:  # pragma: no cover - defensive cache cleanup
-            logger.warning("Could not read cached dataset %s: %s", pickle_file, exc)
+            logger.error("Could not read cached dataset %s: %s", pickle_file, exc)
             pickle_file.unlink(missing_ok=True)
 
     from dask.diagnostics.progress import ProgressBar
 
     merged_kwargs: dict[str, Any] = {"parallel": True, "chunks": "auto"} | kwargs
     with ProgressBar():
+        logger.info(f"Opening dataset")
         dataset = xr.open_mfdataset(normalised, **merged_kwargs)
 
     with pickle_file.open("wb") as handle:
+        logger.info(f"Caching dataset in {pickle_file.open}")
         pickle.dump(dataset, handle)
     return dataset
 
