@@ -30,7 +30,10 @@ theme:
     - content.code.copy
     - navigation.sections
     - navigation.expand
+    - navigation.footer
     - toc.integrate
+    - search.highlight
+    - search.suggest
 
 plugins:
   - search
@@ -42,12 +45,14 @@ plugins:
         python:
           options:
             docstring_style: numpy
-            show_source: false
+            show_source: true
             show_root_heading: true
             show_symbol_type_heading: true
             show_symbol_type_toc: true
             members_order: source
             merge_init_into_class: true
+            scoped_crossrefs: true
+            relative_crossrefs: true
 
 markdown_extensions:
   - admonition
@@ -76,11 +81,11 @@ nav:
   - Waterpark: waterpark.md
   - Getting Started: getting-started.md
   - API Reference:
-      - grid_doctor.remap: api/remap.md
-      - grid_doctor.helpers: api/helpers.md
-      - grid_doctor.utils: api/utils.md
-      - grid_doctor.log: api/log.md
-      - grid_doctor.cli: api/cli.md
+      - High Level API: api/helpers.md
+      - Regridding: api/remap.md
+      - Helper Utilities: api/utils.md
+      - Logging: api/log.md
+      - CLI: api/cli.md
   - Recipes:
       - Overview: recipes/index.md
       - Structured Grids (ERA5, CMIP): recipes/structured.md

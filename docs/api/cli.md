@@ -1,20 +1,14 @@
-# grid_doctor.cli
+# Command-line Interface
 
-Command-line helpers shared by all conversion scripts.
+The command-line interface exposes the main `grid_doctor` workflows for
+use in scripts and batch processing environments.
 
-## Parser
+## Entry point
 
-::: grid_doctor.cli.parser
+::: grid_doctor.cli
     options:
+      show_root_heading: true
+      show_root_full_path: false
       members:
         - get_parser
         - setup_logging_from_args
-
-## Script Utilities
-
-::: grid_doctor.cli.script_utils
-    options:
-      members:
-        - get_scratch
-        - download_file
-        - AutoRaiseSession
