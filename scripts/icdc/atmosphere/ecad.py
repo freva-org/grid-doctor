@@ -7,22 +7,22 @@ class ECAD(Collection):
     MEAN    = Config(
         dst_s3url="s3://icdc/healpix/atmosphere/ECAD/P1D/mean/",
         paths="/pool/data/ICDC/atmosphere/ecad_eobs/DATA/t*ens_mean_0.1deg_reg_v31.0e.nc",
-        engine="netcdf-4",
+        engine="netcdf4",
         parallel=False,
         chunking={"time": 48},
-        regrid_function=lambda x: latlon_to_healpix_pyramid(x, keep_nans=True),
+        regrid_function=lambda x: latlon_to_healpix_pyramid(x, method='nearest', max_level=8, missing_policy='propagate'),
         init=True,
         region={"time": slice(0, 96)},
         zarr_format=2,
     )
 
-    SPEAD   = Config(
+    SPREAD   = Config(
         dst_s3url="s3://icdc/healpix/atmosphere/ECAD/P1D/spread/",
         paths="/pool/data/ICDC/atmosphere/ecad_eobs/DATA/t*ens_spread_0.1deg_reg_v31.0e.nc",
-        engine="netcdf-4",
+        engine="netcdf4",
         parallel=False,
         chunking={"time": 48},
-        regrid_function=latlon_to_healpix_pyramid,
+        regrid_function=lambda x: latlon_to_healpix_pyramid(x, method='nearest', max_level=8, missing_policy='propagate'),
         init=True,
         region={"time": slice(0, 96)},
         zarr_format=2,
