@@ -7,7 +7,6 @@ import json
 import logging
 import pickle
 import tempfile
-from glob import glob
 from os import environ
 from pathlib import Path
 from typing import Any, Collection, Literal, cast
@@ -178,7 +177,7 @@ def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
 
     merged_kwargs: dict[str, Any] = {"parallel": True, "chunks": "auto"} | kwargs
     with ProgressBar():
-        logger.info(f"Opening dataset")
+        logger.info("Opening dataset")
         dataset = xr.open_mfdataset(normalised, **merged_kwargs)
 
     with pickle_file.open("wb") as handle:
