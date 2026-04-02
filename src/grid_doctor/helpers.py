@@ -20,7 +20,11 @@ import numpy.typing as npt
 import s3fs
 import xarray as xr
 
-from .remap import regrid_to_healpix, regrid_unstructured_to_healpix
+from .remap import (
+    _make_crs_variable,
+    regrid_to_healpix,
+    regrid_unstructured_to_healpix,
+)
 from .remap_backend import (
     _get_latlon_arrays,
     _get_unstructured_dim,
@@ -249,10 +253,22 @@ def coarsen_healpix(
         cell=np.arange(npix_target, dtype=np.int64),
         latitude=("cell", lat_deg),
         longitude=("cell", lon_deg),
+        crs=_make_crs_variable(
+            level=target_level,
+            nside=target_nside,
+            order="nested",
+        ),
     )
+
+    # Tag every spatially-mapped data variable.
+    for name in result.data_vars:
+        if "cell" in result[name].dims:
+            result[name].attrs["grid_mapping"] = "crs"
+
     result.attrs["healpix_nside"] = target_nside
     result.attrs["healpix_level"] = target_level
     result.attrs["healpix_order"] = "nested"
+    result.attrs["grid_doctor_coarsened_from_level"] = current_level
     return result
 
 
