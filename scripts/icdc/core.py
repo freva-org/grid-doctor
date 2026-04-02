@@ -32,7 +32,7 @@ class Collection(Enum):
             name, config = collection.name, collection.value
             pipeline = Pipeline(config)
             logger.info("Running %s pipeline", name)
-            #pipeline.run()
+            pipeline.run()
             
 
 @dataclass
