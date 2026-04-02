@@ -17,6 +17,9 @@ SourceUnits = Literal["auto", "deg", "rad"]
 SourceKind = Literal["auto", "regular", "curvilinear", "unstructured", "spectral"]
 """Explicit source grid classification."""
 
+CoarsenMode = Literal["mean", "mode", "auto"]
+"""Coarsening strategy for HEALPix pyramid construction."""
+
 FloatArray = npt.NDArray[np.float64]
 """Shorthand for a float64 NumPy array."""
 
@@ -25,6 +28,12 @@ IntArray = npt.NDArray[np.int32]
 
 Int64Array = npt.NDArray[np.int64]
 """Shorthand for a int64 NumPy array."""
+
+MissingPolicy = Literal["renormalize", "propagate"]
+"""Missing-value handling strategy for weight application."""
+
+ApplyBackend = Literal["auto", "scipy", "numba", "cupy"]
+"""Which application backend to use."""
 
 
 class ZarrOptions(TypedDict, total=False):

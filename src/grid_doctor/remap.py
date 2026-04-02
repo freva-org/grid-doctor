@@ -25,8 +25,6 @@ import numpy as np
 import xarray as xr
 
 from .remap_apply import (
-    ApplyBackend,
-    MissingPolicy,
     apply_weights_nd,
     extract_sparse_weights,
 )
@@ -42,7 +40,14 @@ from .remap_backend import (
     _require_healpix_geo_module,
     compute_healpix_weights_backend,
 )
-from .types import FloatArray, RemapMethod, SourceKind, SourceUnits
+from .types import (
+    ApplyBackend,
+    FloatArray,
+    MissingPolicy,
+    RemapMethod,
+    SourceKind,
+    SourceUnits,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -384,7 +389,33 @@ def apply_weight_file(
     weights_path:
         Path to the NetCDF weight file.
     missing_policy:
-        ``"renormalize"`` or ``"propagate"``.
+        Strategy for handling NaN (missing) values in the source
+        grid during weight application.
+
+        ``"renormalize"`` (default)
+            Source cells that are NaN are excluded from the
+            weighted sum and the weights of the remaining valid
+            source cells are rescaled so they sum to 1.  A target
+            cell receives a valid value as long as **at least one**
+            contributing source cell is valid.  This is the right
+            choice for most climate fields: for instance, a
+            HEALPix cell on a coastline that partly overlaps land
+            (NaN) and partly ocean still receives a valid SST from
+            the ocean fraction.
+
+        ``"propagate"``
+            If **any** contributing source cell is NaN, the target
+            cell is set to NaN — no partial averages.  Use this
+            when completeness of the source coverage matters more
+            than spatial coverage of the output, for example when
+            computing area-integrated flux budgets where a partial
+            average would bias the integral.  Note that this is
+            very aggressive: a single NaN source cell at the edge
+            of a target cell's footprint is enough to discard it.
+            For conservative remapping where a HEALPix cell can
+            overlap dozens of source cells, large portions of the
+            output along coastlines, swath edges, and orbit gaps
+            will be NaN.
     grid:
         Optional grid dataset with source geometry.
     source_dims:
@@ -494,6 +525,13 @@ def _attach_healpix_coords(
         longitude=("cell", lon_deg),
         crs=_make_crs_variable(level=level, nside=nside, order=order),
     )
+
+    # Tag every spatially-mapped data variable.
+    for name in ds_hp.data_vars:
+        if "cell" in ds_hp[name].dims:
+            ds_hp[name].attrs["grid_mapping"] = "crs"
+
+    # Global HEALPix metadata.
     ds_hp.attrs["healpix_level"] = level
     ds_hp.attrs["healpix_nside"] = nside
     ds_hp.attrs["healpix_order"] = order
@@ -580,7 +618,16 @@ def regrid_to_healpix(
     weights_path:
         Optional existing or target weight file.
     missing_policy:
-        Missing-value handling.
+        How NaN values in the source grid are treated.
+        ``"renormalize"`` (default) excludes NaN source cells and
+        rescales the remaining weights so that a target cell is valid
+        whenever at least one source cell contributes — appropriate
+        for most continuous fields.  ``"propagate"`` sets a target
+        cell to NaN if any contributing source cell is NaN — useful
+        for strict budget-closure checks but very aggressive along
+        coastlines and data edges.  See
+        [`apply_weight_file`][grid_doctor.remap.apply_weight_file]
+        for a detailed description.
     backend:
         Application backend (``"auto"``, ``"scipy"``, ``"numba"``).
     grid:
