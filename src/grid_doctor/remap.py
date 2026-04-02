@@ -133,11 +133,11 @@ def _healpix_centres(
 
 def _read_weight_file(
     weights_path: str | Path,
-) -> tuple[Any, int, int, int, str, tuple[str, ...] | None]:
+) -> tuple[Any, int, int, int, str, str | None, tuple[str, ...] | None]:
     """Read a weight file and return matrix plus metadata.
 
     Returns:
-        ``(matrix, n_target, n_source, level, order,
+        ``(matrix, n_target, n_source, level, order, method,
         stored_source_dims)``.
     """
     with xr.open_dataset(weights_path) as wds:
@@ -152,10 +152,12 @@ def _read_weight_file(
         )
         level = int(wds.attrs.get("grid_doctor_level", -1))
         order = str(wds.attrs.get("grid_doctor_order", "nested"))
+        method_raw = wds.attrs.get("grid_doctor_method")
+        method = str(method_raw) if method_raw is not None else None
         stored_source_dims = _parse_source_dims_attr(
             wds.attrs.get("grid_doctor_source_dims")
         )
-    return matrix, n_target, n_source, level, order, stored_source_dims
+    return matrix, n_target, n_source, level, order, method, stored_source_dims
 
 
 # ===================================================================
@@ -420,7 +422,7 @@ def apply_weight_file(
     if missing_policy not in {"renormalize", "propagate"}:
         raise ValueError("missing_policy must be 'renormalize' or 'propagate'.")
 
-    matrix, n_target, n_source, level, order, stored_sd = _read_weight_file(
+    matrix, n_target, n_source, level, order, method, stored_sd = _read_weight_file(
         weights_path
     )
 
@@ -462,7 +464,12 @@ def apply_weight_file(
 
     result = xr.Dataset(regridded, attrs=ds.attrs.copy())
     if level >= 0:
-        result = _attach_healpix_coords(result, level=level, nest=(order == "nested"))
+        result = _attach_healpix_coords(
+            result,
+            level=level,
+            nest=(order == "nested"),
+            method=method,
+        )
     return result
 
 
@@ -476,18 +483,72 @@ def _attach_healpix_coords(
     *,
     level: int,
     nest: bool,
+    method: str | None = None,
 ) -> xr.Dataset:
-    """Attach HEALPix cell-centre coordinates and metadata."""
+    """Attach HEALPix cell-centre coordinates, CRS variable, and metadata.
+
+    Adds:
+
+    - ``cell``, ``latitude``, ``longitude`` coordinates.
+    - A scalar ``crs`` coordinate variable whose attributes describe the
+      HEALPix grid (``grid_mapping_name``, ``healpix_nside``, …).
+    - ``grid_mapping = "crs"`` on every data variable so that CF-aware
+      tools can discover the projection automatically.
+    - Global provenance attributes (``healpix_*``, ``grid_doctor_*``).
+    """
+    import grid_doctor as _gd
+
+    nside = 2**level
+    order = "nested" if nest else "ring"
+
     lat_deg, lon_deg = _healpix_centres(level, nest=nest)
     ds_hp = ds_hp.assign_coords(
         cell=np.arange(lat_deg.size, dtype=np.int64),
         latitude=("cell", lat_deg),
         longitude=("cell", lon_deg),
+        crs=_make_crs_variable(level=level, nside=nside, order=order),
     )
     ds_hp.attrs["healpix_level"] = level
-    ds_hp.attrs["healpix_nside"] = 2**level
-    ds_hp.attrs["healpix_order"] = "nested" if nest else "ring"
+    ds_hp.attrs["healpix_nside"] = nside
+    ds_hp.attrs["healpix_order"] = order
+
+    # Provenance.
+    ds_hp.attrs["grid_doctor_version"] = _gd.__version__
+    if method is not None:
+        ds_hp.attrs["grid_doctor_method"] = method
+
     return ds_hp
+
+
+def _make_crs_variable(
+    *,
+    level: int,
+    nside: int,
+    order: str,
+) -> xr.DataArray:
+    """Create a scalar CRS coordinate variable for HEALPix.
+
+    The variable follows the CF ``grid_mapping`` convention: a
+    dimensionless scalar whose attributes describe the coordinate
+    reference system.
+
+    Args:
+        level: HEALPix refinement level.
+        nside: ``2**level``.
+        order: ``"nested"`` or ``"ring"``.
+
+    Returns:
+        Scalar :class:`xarray.DataArray`.
+    """
+    return xr.DataArray(
+        np.float64(0.0),
+        attrs={
+            "grid_mapping_name": "healpix",
+            "healpix_nside": nside,
+            "healpix_level": level,
+            "healpix_order": order,
+        },
+    )
 
 
 # ===================================================================
