@@ -1,6 +1,6 @@
 # Grid Doctor HEALs your Grids
 <p align="center">
-  <img src="docs/assets/modis-aqua.png" alt="MODIS AQUA" width="600"><br>
+  <img src="docs/assets/logo-512.png" alt="Logo" width="600"><br>
   <img
       src="https://img.shields.io/badge/grid--doctor-Documentation-green?logo=read-the-docs&amp;logoColor=white"
       alt="Documentation"
@@ -35,8 +35,6 @@ mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
 
 ## Quick Start
 
-### Structured Grids (ERA5, CMIP, …)
-
 ```python
 import grid_doctor as gd
 
@@ -63,32 +61,6 @@ gd.save_pyramid_to_s3(
         "~/.s3-credentials.json",
     ),
 )
-```
-
-### Unstructured Grids (ICON)
-
-For ICON and other triangular-mesh models, pre-compute and cache the
-Delaunay interpolation weights:
-
-```python
-import grid_doctor as gd
-
-grid_ds = gd.cached_open_dataset(["ICON_grid.nc"])
-max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
-
-weights_dir="/scratch/{user[0]}/{user}/grid-doctor/weights/"\
-    .format(user=getuser(), level=level)
-gd.cached_weights(
-    grid_ds,
-    level=max_level,
-    prefer_offline=True,
-    cache_path=weights_dir
-)
-ds = gd.cached_open_dataset(["icon_data_*.grb"])
-ds = ds.rename_dims({"values": "cell"}).chunk({"cell": -1})
-
-pyramid = gd.create_healpix_pyramid(ds, max_level=max_level, weights_path=weights_path)
-gd.save_pyramid_to_s3(pyramid, "s3://my-bucket/icon.zarr", s3_options=...)
 ```
 
 ## 🏥 Grid Rehab Progress

@@ -1,4 +1,5 @@
-# grid-doctor
+![logo](assets/apple-touch-icon.png)
+#grid-doctor
 
 > Your lat/lon data goes to rehab and comes out HEALed.
 
@@ -40,5 +41,7 @@ gd.save_pyramid_to_s3(
 )
 ```
 
-See [Getting Started](getting-started.md) for installation instructions
-and [Recipes](recipes/index.md) for full worked examples.
+See  [Technical Decisions](technical-decisions.md) section for a comprehensive
+description on the remapping procedures, the [Getting Started](getting-started.md)
+for installation instructions and [Recipes](recipes/index.md)
+for full worked examples.

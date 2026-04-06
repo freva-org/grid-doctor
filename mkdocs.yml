@@ -8,9 +8,14 @@ repo_name: freva-org/grid-doctor
 
 theme:
   name: material
+  logo: assets/logo-512.png
+  favicon: assets/favicon.ico
   icon:
     admonition:
       example: material/database
+    previous: fontawesome/solid/angle-left
+    next: fontawesome/solid/angle-right
+
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -65,6 +70,8 @@ markdown_extensions:
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.arithmatex:
+      generic: true
   - tables
   - attr_list
   - pymdownx.inlinehilite
@@ -76,10 +83,14 @@ markdown_extensions:
 extra_css:
   - assets/styles.css
 
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
 nav:
-  - Home: index.md
+  - Overview: index.md
+  - Technical decisions: technical-decisions.md
   - Waterpark: waterpark.md
-  - Getting Started: getting-started.md
+  - Grid-doctor software: getting-started.md
   - API Reference:
       - High Level API: api/helpers.md
       - Regridding: api/remap.md
