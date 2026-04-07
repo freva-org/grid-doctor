@@ -484,10 +484,10 @@ nanmean), not by repeated remapping.
 
     Suggestion: `<bucket>/healpix/<experiment-compaign>/<model>/<freq>/level_X.zarr"`
 
-    Naming convetions can be quite different for different datasets, but we
+    Naming conventions can be quite different for different datasets, but we
     can still aim at having a **fixed** number of directory levels. If this
-    fixed number won't guarantee unique paths the direcotry names themselves
-    can be adjusted to from uniq name patters such as:
+    fixed number won't guarantee unique paths the directory names themselves
+    can be adjusted to from uniq name patterns such as:
 
     ```bash
     <bucket>/healpix/<product>/<instrument-level>/<freq>/level_X.zarr
