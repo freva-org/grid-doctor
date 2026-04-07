@@ -34,24 +34,12 @@ import numpy as np
 import numpy.typing as npt
 from scipy.sparse import coo_matrix, csr_matrix
 
+from .types import ApplyBackend, FloatArray, MissingPolicy
+
 if TYPE_CHECKING:
     from scipy.sparse import csr_array
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Type aliases
-# ---------------------------------------------------------------------------
-
-MissingPolicy = Literal["renormalize", "propagate"]
-"""Missing-value handling strategy for weight application."""
-
-FloatArray = npt.NDArray[np.float64]
-"""Shorthand for a float64 NumPy array."""
-
-ApplyBackend = Literal["auto", "scipy", "numba", "cupy"]
-"""Which application backend to use."""
 
 
 # ===================================================================
@@ -429,8 +417,11 @@ def apply_weights_nd(
         matrix: CSR weight matrix ``(n_target, n_source)``.
         n_source_dims: Number of trailing dimensions that form the
             source grid.
-        missing_policy: NaN handling (``"renormalize"`` or
-            ``"propagate"``).
+        missing_policy: NaN handling strategy.
+            ``"renormalize"`` skips NaN source cells and rescales
+            the remaining weights (target is valid if at least one
+            source cell contributed).  ``"propagate"`` sets the
+            target to NaN if any contributing source cell is NaN.
         backend: Force a specific application backend.  ``"auto"``
             selects the best available.
 
