@@ -1,6 +1,6 @@
 # Grid Doctor HEALs your Grids
 <p align="center">
-  <img src="docs/assets/logo-512.png" alt="Logo" width="600"><br>
+  <img src="docs/assets/logo-512.png" alt="Logo" width="200"><br>
   <img
       src="https://img.shields.io/badge/grid--doctor-Documentation-green?logo=read-the-docs&amp;logoColor=white"
       alt="Documentation"
