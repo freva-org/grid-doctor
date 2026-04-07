@@ -30,7 +30,7 @@ from .remap_backend import (
     _get_unstructured_dim,
     _is_unstructured,
 )
-from .types import FloatArray, ZarrOptions
+from .types import CoarsenMode, FloatArray, ZarrOptions
 
 logger = logging.getLogger(__name__)
 
@@ -140,15 +140,23 @@ def _coarsen_array(
     values: npt.NDArray[np.floating[Any]],
     *,
     factor: int,
+    min_valid_fraction: float = 0.5,
 ) -> FloatArray:
     """Coarsen a HEALPix array by grouping contiguous nested cells.
 
     The last dimension is treated as the cell dimension.  All leading
     dimensions are batch dimensions that are preserved.
 
+    Uses a fused sum/count approach instead of ``np.nanmean`` to
+    avoid redundant NaN detection passes.
+
     Args:
         values: Input array with shape ``(*batch, n_cells)``.
         factor: Number of child cells per parent (``4**delta_level``).
+        min_valid_fraction: Minimum fraction of valid (non-NaN)
+            children required.  Parent cells with fewer valid
+            children are set to NaN.  Default ``0.5`` (at least
+            half of the children must be valid).
 
     Returns:
         Array with shape ``(*batch, n_cells // factor)``.
@@ -158,19 +166,84 @@ def _coarsen_array(
     n_cells = arr.shape[-1]
     n_target = n_cells // factor
     grouped = arr.reshape(*batch_shape, n_target, factor)
+    valid = np.isfinite(grouped)
+    valid_count = valid.sum(axis=-1)
+    filled = np.where(valid, grouped, 0.0)
+
+    min_count = max(1, int(np.ceil(min_valid_fraction * factor)))
     with np.errstate(invalid="ignore"):
-        return cast(
-            FloatArray, np.nanmean(grouped, axis=-1).astype(np.float64, copy=False)
+        result = np.where(
+            valid_count >= min_count,
+            filled.sum(axis=-1) / valid_count,
+            np.nan,
         )
+    return cast(FloatArray, result)
+
+
+def _coarsen_array_mode(
+    values: npt.NDArray[np.floating[Any]],
+    *,
+    factor: int,
+    min_valid_fraction: float = 0.5,
+) -> FloatArray:
+    """Coarsen a HEALPix array by taking the mode of grouped children.
+
+    Intended for categorical / discrete data (land cover, soil type,
+    …) where averaging class labels would be meaningless.
+
+    For each parent cell the most frequent value among its children is
+    selected.  Ties are broken by choosing the value that appears
+    first (lowest child index).  When fewer than
+    ``min_valid_fraction * factor`` children are valid, the parent is
+    set to NaN.
+
+    Args:
+        values: Input array with shape ``(*batch, n_cells)``.
+        factor: Number of child cells per parent (``4**delta_level``).
+        min_valid_fraction: Minimum fraction of valid children.
+
+    Returns:
+        Array with shape ``(*batch, n_cells // factor)``.
+    """
+    arr = np.asarray(values, dtype=np.float64)
+    batch_shape = arr.shape[:-1]
+    n_cells = arr.shape[-1]
+    n_target = n_cells // factor
+    grouped = arr.reshape(*batch_shape, n_target, factor)
+
+    valid = np.isfinite(grouped)
+    valid_count = valid.sum(axis=-1)
+
+    # For each child position, count how many of the other children
+    # share the same value.  This vectorises the mode calculation
+    # without any Python-level loops over cells.
+    counts = np.zeros_like(grouped)
+    for i in range(factor):
+        for j in range(factor):
+            counts[..., i] += (grouped[..., i] == grouped[..., j]) & valid[..., j]
+    counts[~valid] = -1  # invalid positions cannot win
+
+    best = np.argmax(counts, axis=-1)
+    result = np.take_along_axis(
+        grouped,
+        best[..., np.newaxis],
+        axis=-1,
+    ).squeeze(-1)
+
+    min_count = max(1, int(np.ceil(min_valid_fraction * factor)))
+    result[valid_count < min_count] = np.nan
+    return result
 
 
 def coarsen_healpix(
     ds: xr.Dataset,
     target_level: int,
+    coarsen_mode: CoarsenMode = "auto",
+    min_valid_fraction: float = 0.5,
 ) -> xr.Dataset:
     """Coarsen a HEALPix dataset to a lower-resolution level.
 
-    The coarsening is performed as a single reshape + nanmean over
+    The coarsening is performed as a single reshape + reduction over
     all batch dimensions simultaneously — no per-slice Python loops.
 
     Parameters
@@ -180,6 +253,16 @@ def coarsen_healpix(
         attributes ``healpix_nside`` and ``healpix_order``.
     target_level:
         Target HEALPix level (must be lower than the current level).
+    coarsen_mode:
+        ``"mean"`` — NaN-aware averaging for continuous fields.
+        ``"mode"`` — most-frequent-value for categorical fields.
+        ``"auto"`` — infer from ``grid_doctor_method`` in dataset
+        attributes: ``"nearest"`` → mode, everything else → mean.
+    min_valid_fraction:
+        Minimum fraction of valid (non-NaN) children required to
+        produce a valid parent cell.  Parents with fewer valid
+        children are set to NaN.  Default ``0.5`` (at least half
+        of the children must be valid).
 
     Returns
     -------
@@ -191,7 +274,8 @@ def coarsen_healpix(
     Nested HEALPix indices have a direct parent-child relationship:
     pixel *i* at level *L* contains children ``4*i`` to ``4*i+3`` at
     level *L+1*.  Coarsening therefore reduces to grouping contiguous
-    blocks of ``4**delta_level`` child cells and averaging.
+    blocks of ``4**delta_level`` child cells and averaging (or taking
+    the mode for categorical data).
 
     Ring-ordered datasets do not have contiguous parent-child layout
     and must be remapped directly at each target level.
@@ -220,6 +304,15 @@ def coarsen_healpix(
     if delta_level <= 0:
         raise ValueError("target_level must be lower than the current HEALPix level.")
 
+    # Resolve coarsening strategy.
+    if coarsen_mode == "auto":
+        method = str(ds.attrs.get("grid_doctor_method", "conservative"))
+        resolved_mode: CoarsenMode = "mode" if method == "nearest" else "mean"
+    else:
+        resolved_mode = coarsen_mode
+
+    coarsen_func = _coarsen_array_mode if resolved_mode == "mode" else _coarsen_array
+
     factor = 4**delta_level
     npix_target = ds.sizes["cell"] // factor
 
@@ -232,13 +325,16 @@ def coarsen_healpix(
         coarsened_vars[str(name)] = cast(
             xr.DataArray,
             xr.apply_ufunc(
-                _coarsen_array,
+                coarsen_func,
                 data,
                 input_core_dims=[["cell"]],
                 output_core_dims=[["cell"]],
                 exclude_dims={"cell"},
                 dask="parallelized",
-                kwargs={"factor": factor},
+                kwargs={
+                    "factor": factor,
+                    "min_valid_fraction": min_valid_fraction,
+                },
                 output_dtypes=[np.float64],
                 dask_gufunc_kwargs={"output_sizes": {"cell": npix_target}},
                 keep_attrs=True,
@@ -279,6 +375,9 @@ def create_healpix_pyramid(
     ds: xr.Dataset,
     max_level: int | None = None,
     min_level: int = 0,
+    *,
+    coarsen_mode: CoarsenMode = "auto",
+    min_valid_fraction: float = 0.5,
     **kwargs: Any,
 ) -> dict[int, xr.Dataset]:
     """Create a multi-resolution HEALPix pyramid.
@@ -299,6 +398,13 @@ def create_healpix_pyramid(
         Finest HEALPix level.
     min_level:
         Coarsest HEALPix level to keep.
+    coarsen_mode:
+        Coarsening strategy for building lower pyramid levels.
+        ``"mean"`` for continuous data, ``"mode"`` for categorical,
+        ``"auto"`` to infer from the remapping method.
+    min_valid_fraction:
+        Minimum fraction of valid children for a parent cell to be
+        valid.  Default ``0.5``.
     **kwargs:
         Forwarded to
         [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix].
@@ -319,7 +425,12 @@ def create_healpix_pyramid(
     if is_nested:
         current = finest
         for level in range(max_level - 1, min_level - 1, -1):
-            current = coarsen_healpix(current, level)
+            current = coarsen_healpix(
+                current,
+                level,
+                coarsen_mode=coarsen_mode,
+                min_valid_fraction=min_valid_fraction,
+            )
             pyramid[level] = current
         return pyramid
 
