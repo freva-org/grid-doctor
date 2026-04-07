@@ -392,7 +392,7 @@ nanmean), not by repeated remapping.
 
     **S3 store:** [`orchestra/`](https://eu-dkrz-3.dkrz.cloud/browser/orchstra)
     **Notes:** More sub folders
-    ??? quote "Example /icon-dream/healpix/icon-dream-global/hourly/level_8.zarr"
+    ??? quote "Example /orchestra/Basic_Halo_Measurement_and_Sensor_System_BAHAMAS_data.zarr"
         ```python
             <xarray.Dataset> Size: 5MB
             Dimensions:  (time: 55628)
@@ -424,9 +424,9 @@ nanmean), not by repeated remapping.
                 title:          Rain gauge measurements during METEOR cruise M203
         ```
 
-??? example "CMIP6 — Coupled Model Intercomparison Project Phase 6 :material-progress-clock:{ .warning }"
+??? example "CMIP6 — Coupled Model Intercomparison Project Phase 6 :material-check-circle:{ .success }"
 
-    **Status:** :material-progress-clock:{ .warning } Planned
+    **Status:** :material-check-circle:{ .success } Available
 
     [CMIP6](https://wcrp-cmip.org/cmip-phase-6-cmip6/) is the latest
     phase of the international model intercomparison providing the
@@ -437,7 +437,44 @@ nanmean), not by repeated remapping.
     | Property | Value |
     |---|---|
     | Source resolution | ~25–250 km (model-dependent) |
-    | HEALPix level | 5–9 |
+    | HEALPix level | 5 - 6 |
+    **S3 store:** [`orchestra/`](https://eu-dkrz-3.dkrz.cloud/browser/orchstra)
+    ??? quote "Example cmip6/healpix/cmip6/historical-r1i1p1f1/noresm2-mm/PT6H/level_5.zarr"
+        ```python
+            <xarray.Dataset> Size: 19GB
+            Dimensions:    (time: 94900, lat: 192, bnds: 2, lon: 288, cell: 12288)
+            Coordinates:
+              * time       (time) object 759kB 1950-01-01 03:00:00 ... 2014-12-31 21:00:00
+              * lat        (lat) float64 2kB -90.0 -89.06 -88.12 -87.17 ... 88.12 89.06 90.0
+              * lon        (lon) float64 2kB 0.0 1.25 2.5 3.75 ... 355.0 356.2 357.5 358.8
+              * cell       (cell) int64 98kB 0 1 2 3 4 5 ... 12283 12284 12285 12286 12287
+                crs        float64 8B ...
+                height     float64 8B ...
+                latitude   (cell) float64 98kB dask.array<chunksize=(12288,), meta=np.ndarray>
+                longitude  (cell) float64 98kB dask.array<chunksize=(12288,), meta=np.ndarray>
+            Dimensions without coordinates: bnds
+            Data variables:
+                lat_bnds   (time, lat, bnds) float64 292MB dask.array<chunksize=(14600, 192, 2), meta=np.ndarray>
+                lon_bnds   (time, lon, bnds) float64 437MB dask.array<chunksize=(14600, 288, 2), meta=np.ndarray>
+                pr         (time, cell) float64 9GB dask.array<chunksize=(14600, 12288), meta=np.ndarray>
+                tas        (time, cell) float64 9GB dask.array<chunksize=(14600, 12288), meta=np.ndarray>
+                time_bnds  (time, bnds) object 2MB dask.array<chunksize=(1, 2), meta=np.ndarray>
+            Attributes: (12/54)
+                Conventions:               CF-1.7 CMIP-6.2
+                activity_id:               CMIP
+                branch_method:             Hybrid-restart from year 1200-01-01 of piControl
+                branch_time:               0.0
+                branch_time_in_child:      0.0
+                branch_time_in_parent:     438000.0
+                ...                        ...
+                table_id:                  6hrPlev
+                table_info:                Creation Date:(24 July 2019) MD5:0bb394a356ef9...
+                title:                     NorESM2-MM output prepared for CMIP6
+                tracking_id:               hdl:21.14100/19ec4c56-4a33-4abb-a992-efe6324676bd
+                variable_id:               pr
+                variant_label:             r1i1p1f
+        ```
+
 
 ---
 
@@ -446,22 +483,30 @@ nanmean), not by repeated remapping.
 !!! question "Can we define an appropriate naming convention?"
 
     Suggestion: `<bucket>/healpix/<experiment-compaign>/<model>/<freq>/level_X.zarr"`
-    Suggestion: For time frequencies let's follow *cmor* standards rather than ISO8601
+
+    Naming convetions can be quite different for different datasets, but we
+    can still aim at having a **fixed** number of directory levels. If this
+    fixed number won't guarantee unique paths the direcotry names themselves
+    can be adjusted to from uniq name patters such as:
+
+    ```bash
+    <bucket>/healpix/<product>/<instrument-level>/<freq>/level_X.zarr
+    <bucket>/healpix/<product-experiment>/<model-ensemble>/<freq>/level_X.zarr
+    ```
+
+    The output time frequency `freq` should follow ISO 8601 standard.
 
 !!! question "Where to store cached weight files?"
 
+
     Weight files are reusable across runs for the same source grid and
-    target level.  Two options are under consideration:
+    target level. The weight files with their grid signature should be stored
+    at the following location:
 
-    | Option | Advantages | Disadvantages |
-    |---|---|---|
-    | **Lustre** (`/pool/data/healpix-weights/`) | Simple NetCDF files, fast local I/O | Requires a data project allocation, not accessible outside Levante |
-    | **S3 object store** | Accessible from any compute environment | More complex to generate and manage |
+    `/work/ks1387/healpix-weights`
 
-    **Recommendation:** Store on Lustre for production runs on Levante and
-    the Grace Hopper nodes (fast local access), with a copy to S3 for
-    external users.  Weight files are small relative to the data
-    (typically < 1 GB).
+    To make sure that the weight files are getting reproducible and reusable
+    stored use `cache_path=/work/ks1387/healpix-weights` weights generation.
 
 !!! question "Zarr format: v2 or v3?"
 
@@ -479,7 +524,7 @@ nanmean), not by repeated remapping.
 ### Completed
 
 - [x] Conservative remapping pipeline (`grid-doctor`) with GPU acceleration
-- [x] 1st round of Datasets uploaded (except Cmip6)
+- [x] 1st round of Datasets uploaded
 
 
 ### Next steps

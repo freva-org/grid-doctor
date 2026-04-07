@@ -79,12 +79,12 @@ Claim a patient, write a script, and turn that frown into 😎.
 | ICON-DREAM  | 😎 | 😎 |
 | EERIE | 😎 | 😎 |
 | ERA5 | 😎 | 😎 |
-| CMIP6 | 🩹 | 😢 |
+| CMIP6 | 🩹 | 😎 |
 | NextGEMS | 😎 | 😎 |
-| ICDC     | 😎 | 😢 |
+| ICDC     | 😎 | 🩹 |
 | ORCHESTRA | 😎 | 😎 |
 | PalMod | 😢 | 😢 |
-| Dyamond| 😎 | 😢 |
+| Dyamond| 😎 | 😎 |
 > [!TIP]
 > To claim a dataset, open a PR adding your script to `scripts/<dataset>/`
 > and update this table. See [Getting Started](#writing-a-conversion-script)
