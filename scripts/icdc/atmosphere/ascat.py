@@ -8,16 +8,9 @@ def preprocess(ds: Dataset) -> Dataset:
     import xarray as xr
     import pandas as pd
     converted = ds.assign(time = xr.decode_cf(ds[['time']]).time)
-    for v in ds.variables:
-        # Patch differences between missing and fill value leading to NaNs
-        fill = converted[v].attrs.get('_FillValue')
-        miss = converted[v].attrs.get('missing_value')
-        if fill is not None and miss is not None and fill != miss:
-            converted[v].attrs['missing_value'] = fill
-
+    for v in ('utctime_desc','utctime_asc',):
         # These are relative to the time value in each file
-        if v in ('utctime_desc','utctime_asc',):
-            converted[v].attrs["units"] = f"hours since {pd.Timestamp(converted['time'][0].values).strftime('%Y-%m-%d %H:%M:%S')} UTC"
+        converted[v].attrs["units"] = f"hours since {pd.Timestamp(converted['time'][0].values).strftime('%Y-%m-%d %H:%M:%S')} UTC"
     return xr.decode_cf(converted)
 
 class ASCAT(Collection):
