@@ -951,24 +951,66 @@ def _regular_grid_mesh(
     lat_bounds = _infer_bounds_1d(lat)
     lon_bounds = _canonical_lon(_infer_bounds_1d(lon))
     ny, nx = lat.size, lon.size
+    lon_cov = _lon_coverage_from_centres(lon)
+    periodic = lon_cov >= 350.0
 
-    node_idx = np.arange((ny + 1) * (nx + 1), dtype=np.int32).reshape(ny + 1, nx + 1)
-    face_nodes = np.stack(
-        (
-            node_idx[:-1, :-1],
-            node_idx[:-1, 1:],
-            node_idx[1:, 1:],
-            node_idx[1:, :-1],
-        ),
-        axis=-1,
-    ).reshape(-1, 4)
+    if periodic:
+        logger.debug(
+            "Longitude axis detected as globally periodic (coverage=%.1f°); "
+            "mesh will wrap at the seam.",
+            lon_cov,
+        )
+        # For a global grid the last longitude bound coincides with the
+        # first after canonicalisation.  We drop the duplicate column and
+        # let the last column of faces wrap its right-hand nodes back to
+        # column 0 so the mesh is topologically closed.
+        node_idx_full = np.arange((ny + 1) * (nx + 1), dtype=np.int32).reshape(
+            ny + 1, nx + 1
+        )
+        # Rewrite last column to point to column 0 nodes.
+        node_idx_full[:, -1] = node_idx_full[:, 0]
+        face_nodes = np.stack(
+            (
+                node_idx_full[:-1, :-1],
+                node_idx_full[:-1, 1:],
+                node_idx_full[1:, 1:],
+                node_idx_full[1:, :-1],
+            ),
+            axis=-1,
+        ).reshape(-1, 4)
 
-    node_lon_2d, node_lat_2d = np.meshgrid(lon_bounds, lat_bounds)
+        # Keep only the first nx columns of nodes (drop duplicate last column).
+        keep = np.ones((ny + 1) * (nx + 1), dtype=bool)
+        keep[np.arange(ny + 1) * (nx + 1) + nx] = False
+        old_to_new = np.full((ny + 1) * (nx + 1), -1, dtype=np.int32)
+        old_to_new[keep] = np.arange(keep.sum(), dtype=np.int32)
+        face_nodes = old_to_new[face_nodes]
+
+        node_lon_2d, node_lat_2d = np.meshgrid(lon_bounds, lat_bounds)
+        node_lon = node_lon_2d.ravel()[keep]
+        node_lat = node_lat_2d.ravel()[keep]
+    else:
+        node_idx = np.arange(
+            (ny + 1) * (nx + 1), dtype=np.int32
+        ).reshape(ny + 1, nx + 1)
+        face_nodes = np.stack(
+            (
+                node_idx[:-1, :-1],
+                node_idx[:-1, 1:],
+                node_idx[1:, 1:],
+                node_idx[1:, :-1],
+            ),
+            axis=-1,
+        ).reshape(-1, 4)
+        node_lon_2d, node_lat_2d = np.meshgrid(lon_bounds, lat_bounds)
+        node_lon = node_lon_2d.ravel()
+        node_lat = node_lat_2d.ravel()
+
     face_lon_2d, face_lat_2d = np.meshgrid(_canonical_lon(lon), lat)
 
     return PolygonMesh(
-        node_lon=node_lon_2d.ravel().astype(np.float64, copy=False),
-        node_lat=node_lat_2d.ravel().astype(np.float64, copy=False),
+        node_lon=node_lon.astype(np.float64, copy=False),
+        node_lat=node_lat.astype(np.float64, copy=False),
         face_nodes=face_nodes,
         face_lon=face_lon_2d.ravel().astype(np.float64, copy=False),
         face_lat=face_lat_2d.ravel().astype(np.float64, copy=False),
