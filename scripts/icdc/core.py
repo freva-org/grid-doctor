@@ -3,6 +3,7 @@ import logging
 import zarr
 
 from abc import ABC, abstractmethod
+from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import  Any, Callable, Dict, Iterable, Mapping, Optional, Literal
@@ -24,7 +25,6 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 class Collection(Enum):
-    pass
     
     @classmethod
     def run_pipelines(cls) -> None:
@@ -33,7 +33,17 @@ class Collection(Enum):
             pipeline = Pipeline(config)
             logger.info("Running %s pipeline", name)
             pipeline.run()
-            
+
+    @classmethod
+    def configure_parser(cls, parser: ArgumentParser):
+        subp = parser.add_subparsers(dest='_dataset',required=False)
+        name = cls.__name__.lower()
+        for variant in cls:
+            subp.add_parser(f'{variant.name}', help=f'Dataset from {name} collection')
+        parser.set_defaults(_collection=name)
+
+        return parser
+
 
 @dataclass
 class Config:
