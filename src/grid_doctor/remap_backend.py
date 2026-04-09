@@ -941,15 +941,20 @@ def _regular_grid_mesh(
     [`_infer_bounds_1d`][grid_doctor.remap_backend._infer_bounds_1d].
     No Python-level cell loops are used.
 
+    The caller must pass *lon* as a monotonic sequence (i.e. **not**
+    pre-canonicalised to ``[-180, 180)``).  Canonicalisation of face
+    centres is applied internally.
+
     Args:
         lat: 1-D latitude centres in degrees, shape ``(ny,)``.
         lon: 1-D longitude centres in degrees, shape ``(nx,)``.
+            Must be monotonic.
 
     Returns:
         Compact polygon mesh.
     """
     lat_bounds = _infer_bounds_1d(lat)
-    lon_bounds = _canonical_lon(_infer_bounds_1d(lon))
+    lon_bounds = _infer_bounds_1d(lon)
     ny, nx = lat.size, lon.size
     lon_cov = _lon_coverage_from_centres(lon)
     periodic = lon_cov >= 350.0
@@ -961,9 +966,9 @@ def _regular_grid_mesh(
             lon_cov,
         )
         # For a global grid the last longitude bound coincides with the
-        # first after canonicalisation.  We drop the duplicate column and
-        # let the last column of faces wrap its right-hand nodes back to
-        # column 0 so the mesh is topologically closed.
+        # first (modulo 360°).  We drop the duplicate column and let the
+        # last column of faces wrap its right-hand nodes back to column 0
+        # so the mesh is topologically closed.
         node_idx_full = np.arange((ny + 1) * (nx + 1), dtype=np.int32).reshape(
             ny + 1, nx + 1
         )
@@ -990,9 +995,9 @@ def _regular_grid_mesh(
         node_lon = node_lon_2d.ravel()[keep]
         node_lat = node_lat_2d.ravel()[keep]
     else:
-        node_idx = np.arange(
-            (ny + 1) * (nx + 1), dtype=np.int32
-        ).reshape(ny + 1, nx + 1)
+        node_idx = np.arange((ny + 1) * (nx + 1), dtype=np.int32).reshape(
+            ny + 1, nx + 1
+        )
         face_nodes = np.stack(
             (
                 node_idx[:-1, :-1],
@@ -1223,38 +1228,14 @@ def _source_mesh(
 
     lat, lon = _get_latlon_arrays(ds)
     lat = _normalise_angle_units(lat, source_units)
-    lon = _canonical_lon(_normalise_angle_units(lon, source_units))
+    lon = _normalise_angle_units(lon, source_units)
     y_dim, x_dim = _get_spatial_dims(ds)
 
     if lat.ndim == 1:
         return _regular_grid_mesh(lat, lon), (y_dim, x_dim)
     if lat.ndim == 2:
-        return _curvilinear_grid_mesh(lat, lon), (y_dim, x_dim)
+        return _curvilinear_grid_mesh(lat, _canonical_lon(lon)), (y_dim, x_dim)
     raise ValueError("Latitude/longitude coordinates must be 1-D or 2-D.")
-
-
-def _source_polygons(
-    ds: xr.Dataset,
-    *,
-    source_units: SourceUnits,
-) -> tuple[list[tuple[FloatArray, FloatArray]], tuple[str, ...]]:
-    """Return source polygons as Python tuples.
-
-    Note:
-        Production weight generation uses
-        [`_source_mesh`][grid_doctor.remap_backend._source_mesh] to
-        avoid per-cell Python loops.  This wrapper is kept for
-        compatibility with tests and small-scale debugging.
-
-    Args:
-        ds: Source geometry dataset.
-        source_units: Angular unit convention.
-
-    Returns:
-        ``(polygons, source_dims)``.
-    """
-    mesh, source_dims = _source_mesh(ds, source_units=source_units)
-    return _mesh_to_polygons(mesh), source_dims
 
 
 # ===================================================================
