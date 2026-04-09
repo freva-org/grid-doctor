@@ -29,7 +29,7 @@ from grid_doctor.remap_backend import (
     _infer_curvilinear_corners,
     _looks_global,
     _normalise_angle_units,
-    _source_polygons,
+    _regular_grid_mesh,
 )
 from .helpers import _FakeHealpixModule
 
@@ -78,37 +78,76 @@ class TestPrimitiveHelpers:
 
 
 # ===================================================================
-# Source polygons
+# Regular grid mesh (antimeridian & periodicity)
 # ===================================================================
 
 
-class TestSourcePolygons:
-    def test_regular_grid_polygons(self, regular_ds: xr.Dataset) -> None:
-        polygons, dims = _source_polygons(regular_ds, source_units="auto")
-        assert dims == ("y", "x")
-        n_expected = regular_ds.sizes["y"] * regular_ds.sizes["x"]
-        assert len(polygons) == n_expected
-        assert len(polygons[0][0]) == 4
+class TestRegularGridMesh:
+    """Tests for the longitude unwrapping and periodic node wrapping."""
 
-    def test_curvilinear_grid_polygons(self, curvilinear_ds: xr.Dataset) -> None:
-        polygons, dims = _source_polygons(curvilinear_ds, source_units="auto")
-        assert dims == ("y", "x")
-        n_expected = curvilinear_ds.sizes["y"] * curvilinear_ds.sizes["x"]
-        assert len(polygons) == n_expected
+    def test_global_grid_no_giant_polygon(self) -> None:
+        """All source polygons must be ≈ dlon wide, not ~180°."""
+        lat = np.linspace(-90.0, 90.0, 8)
+        lon = np.linspace(0.125, 359.875, 16)
+        mesh = _regular_grid_mesh(lat, lon)
+        # Gather corner longitudes for every face: shape (n_face, 4).
+        corner_lons = mesh.node_lon[mesh.face_nodes]
+        # Unwrap per-face to handle the ±180 wraparound.
+        deltas = np.diff(corner_lons, axis=1)
+        deltas = (deltas + 180.0) % 360.0 - 180.0
+        unwrapped = np.concatenate(
+            [corner_lons[:, :1], corner_lons[:, :1] + np.cumsum(deltas, axis=1)],
+            axis=1,
+        )
+        spans = unwrapped.max(axis=1) - unwrapped.min(axis=1)
+        dlon = 360.0 / lon.size
+        worst = int(np.argmax(spans))
+        assert spans.max() < 2.0 * dlon, (
+            f"Face {worst} spans {spans[worst]:.1f}° in longitude"
+        )
 
-    def test_unstructured_grid_polygons_convert_radians(
-        self, unstructured_rad_ds: xr.Dataset
-    ) -> None:
-        polygons, dims = _source_polygons(unstructured_rad_ds, source_units="auto")
-        assert dims == ("cell",)
-        first_lon, first_lat = polygons[0]
-        assert np.nanmax(np.abs(first_lon)) > 0.1
-        assert np.nanmax(np.abs(first_lat)) > 0.1
+    def test_global_grid_node_count_excludes_duplicate_column(self) -> None:
+        """Periodic grids should have (ny+1)*nx nodes, not (ny+1)*(nx+1)."""
+        lat = np.linspace(-90.0, 90.0, 12)
+        lon = np.linspace(0.0, 360.0, 24, endpoint=False)
+        mesh = _regular_grid_mesh(lat, lon)
+        ny, nx = lat.size, lon.size
+        assert mesh.node_lon.size == (ny + 1) * nx
 
-    def test_unstructured_requires_vertices(self, unstructured_ds: xr.Dataset) -> None:
-        ds = unstructured_ds.drop_vars(["clon_vertices", "clat_vertices"])
-        with pytest.raises(ValueError, match="require per-cell vertex"):
-            _source_polygons(ds, source_units="auto")
+    def test_global_grid_last_face_wraps(self) -> None:
+        """The last face in each lat row should reference column-0 nodes."""
+        lat = np.linspace(-90.0, 90.0, 4)
+        lon = np.linspace(0.0, 360.0, 8, endpoint=False)
+        mesh = _regular_grid_mesh(lat, lon)
+        nx = lon.size
+        # Last face of the first lat row: face index nx-1.
+        last_face = mesh.face_nodes[nx - 1]
+        # The right-hand nodes (indices 1 and 2) should be in column 0,
+        # i.e. node indices 0 and nx (first column, rows 0 and 1).
+        assert last_face[1] == 0  # top-right wraps to column 0
+        assert last_face[2] == nx  # bottom-right wraps to column 0
+
+    def test_regional_grid_no_wrapping(self) -> None:
+        """A regional grid must not have periodic wrapping."""
+        lat = np.linspace(20.0, 40.0, 5)
+        lon = np.linspace(10.0, 30.0, 6)
+        mesh = _regular_grid_mesh(lat, lon)
+        ny, nx = lat.size, lon.size
+        # Non-periodic: (ny+1)*(nx+1) nodes.
+        assert mesh.node_lon.size == (ny + 1) * (nx + 1)
+
+    def test_antimeridian_bounds_are_monotonic(self) -> None:
+        """Node longitudes across the antimeridian must stay monotonic."""
+        lat = np.linspace(-90.0, 90.0, 4)
+        lon = np.linspace(0.125, 359.875, 8)
+        mesh = _regular_grid_mesh(lat, lon)
+        # Extract the first row of node longitudes (ny+1 rows of nx nodes).
+        nx = lon.size
+        first_row_lons = mesh.node_lon[:nx]
+        # The sequence must be monotonically increasing.
+        assert np.all(np.diff(first_row_lons) > 0), (
+            f"Node longitudes are not monotonic: {first_row_lons}"
+        )
 
 
 # ===================================================================
