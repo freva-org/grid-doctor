@@ -10,6 +10,32 @@ them as multi-resolution Zarr pyramids from S3 object storage.  The unified grid
 enables efficient cross-dataset analysis, ML training pipelines, and interactive
 visualisation without per-dataset regridding at access time.
 
+
+### Currently available Datasets
+
+| Dataset | Public Bucket | Data Access via |
+|---------|---------------|-----------------|
+| [CMIP6](https://wcrp-cmip.org/cmip-phase-6-cmip6)   | <https://eu-dkrz-3.dkrz.cloud/browser/cmip6> | `https://s3.eu-dkrz-3.dkrz.cloud/cimp6` |
+| [DYAMOND](https://easy.gems.dkrz.de/DYAMOND/index.html)   | <https://eu-dkrz-3.dkrz.cloud/browser/dyamond> | `https://s3.eu-dkrz-3.dkrz.cloud/dyamond` |
+| [EERIE](https://dataviewer.eerie-project.eu/home/eddy-rich)   | <https://eu-dkrz-3.dkrz.cloud/browser/eerie> | `https://s3.eu-dkrz-3.dkrz.cloud/eerie` |
+| [ERA5](https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5)   | <https://eu-dkrz-3.dkrz.cloud/browser/era5> | `https://s3.eu-dkrz-3.dkrz.cloud/era5 `|
+| [ICDC](https://www.cen.uni-hamburg.de/en/icdc)   | <https://eu-dkrz-3.dkrz.cloud/browser/icdc> | `https://s3.eu-dkrz-3.dkrz.cloud/icdc` |
+| [ICON-DREAM](https://opendata.dwd.de/climate_environment/CDC/help/landing_pages/doi_landingpage_ICON-DREAM_v1-en.html)   | <https://eu-dkrz-3.dkrz.cloud/browser/icon-dream> | `https://s3.eu-dkrz-3.dkrz.cloud/icon-dream` |
+| [nextGEMS](https://nextgems-h2020.eu)   | <https://eu-dkrz-3.dkrz.cloud/browser/nextgems> | `https://s3.eu-dkrz-3.dkrz.cloud/nextgems` |
+| [ORCESTRA](https://orcestra-campaign.org/data.html)   | <https://eu-dkrz-3.dkrz.cloud/browser/orchestra> | `https://s3.eu-dkrz-3.dkrz.cloud/orchsestra`|
+
+!!! note
+    To browse the available datasets use the links in the Public Bucket columns,
+    `https://eu-dkrz-3.dkrz.cloud/browser/<bucket>`. To access the
+    data use the `https://s3.eu-dkrz-3.dkrz.cloud/<bucket>/<sub-dirs>/level_X.zarr`
+    for example
+
+    ```python
+    import xarray as xr
+
+    ds = xr.open_zarr("https://s3.eu-dkrz-3.dkrz.cloud/dyamond/icon-sap-5km/PT15M/level_9.zarr")
+    ```
+
 ---
 
 ## Remapping methodology
@@ -485,8 +511,8 @@ nanmean), not by repeated remapping.
     Suggestion: `<bucket>/healpix/<experiment-compaign>/<model>/<freq>/level_X.zarr"`
 
     Naming conventions can be quite different for different datasets, but we
-    can still aim at having a **fixed** number of directory levels. If this
-    fixed number won't guarantee unique paths the directory names themselves
+    can still aim at having a number **four** directory levels. If those
+    *four* levels don't guarantee unique paths the directory names themselves
     can be adjusted to from uniq name patterns such as:
 
     ```bash
@@ -503,14 +529,19 @@ nanmean), not by repeated remapping.
     target level. The weight files with their grid signature should be stored
     at the following location:
 
-    `/work/ks1387/healpix-weights`
+    ```console
+    ls /work/ks1387/healpix-weights
+
+    weights_0ba7e6dca9ba1ae9.nc  weights_3051722bc32a01e5.nc  weights_46fdfc6feb8ea520.nc  weights_d9c2730b22295f4a.nc
+    weights_2aff1785f62b0254.nc  weights_3a28f272e1fb6024.nc  weights_901fbfc4a3ce2458.nc
+    ```
 
     To make sure that the weight files are getting reproducible and reusable
     stored use `cache_path=/work/ks1387/healpix-weights` weights generation.
 
 !!! question "Zarr format: v2 or v3?"
 
-    The current visualisation tool (gridlook / zarina) requires Zarr v2.
+    Some clients  (gdal,  zarrita) still require Zarr v2.
     Zarr v3 is the future standard but ecosystem support is still
     catching up.
 
