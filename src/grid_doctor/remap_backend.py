@@ -941,34 +941,81 @@ def _regular_grid_mesh(
     [`_infer_bounds_1d`][grid_doctor.remap_backend._infer_bounds_1d].
     No Python-level cell loops are used.
 
+    The caller must pass *lon* as a monotonic sequence (i.e. **not**
+    pre-canonicalised to ``[-180, 180)``).  Canonicalisation of face
+    centres is applied internally.
+
     Args:
         lat: 1-D latitude centres in degrees, shape ``(ny,)``.
         lon: 1-D longitude centres in degrees, shape ``(nx,)``.
+            Must be monotonic.
 
     Returns:
         Compact polygon mesh.
     """
     lat_bounds = _infer_bounds_1d(lat)
-    lon_bounds = _canonical_lon(_infer_bounds_1d(lon))
+    lon_bounds = _infer_bounds_1d(lon)
     ny, nx = lat.size, lon.size
+    lon_cov = _lon_coverage_from_centres(lon)
+    periodic = lon_cov >= 350.0
 
-    node_idx = np.arange((ny + 1) * (nx + 1), dtype=np.int32).reshape(ny + 1, nx + 1)
-    face_nodes = np.stack(
-        (
-            node_idx[:-1, :-1],
-            node_idx[:-1, 1:],
-            node_idx[1:, 1:],
-            node_idx[1:, :-1],
-        ),
-        axis=-1,
-    ).reshape(-1, 4)
+    if periodic:
+        logger.debug(
+            "Longitude axis detected as globally periodic (coverage=%.1f°); "
+            "mesh will wrap at the seam.",
+            lon_cov,
+        )
+        # For a global grid the last longitude bound coincides with the
+        # first (modulo 360°).  We drop the duplicate column and let the
+        # last column of faces wrap its right-hand nodes back to column 0
+        # so the mesh is topologically closed.
+        node_idx_full = np.arange((ny + 1) * (nx + 1), dtype=np.int32).reshape(
+            ny + 1, nx + 1
+        )
+        # Rewrite last column to point to column 0 nodes.
+        node_idx_full[:, -1] = node_idx_full[:, 0]
+        face_nodes = np.stack(
+            (
+                node_idx_full[:-1, :-1],
+                node_idx_full[:-1, 1:],
+                node_idx_full[1:, 1:],
+                node_idx_full[1:, :-1],
+            ),
+            axis=-1,
+        ).reshape(-1, 4)
 
-    node_lon_2d, node_lat_2d = np.meshgrid(lon_bounds, lat_bounds)
+        # Keep only the first nx columns of nodes (drop duplicate last column).
+        keep = np.ones((ny + 1) * (nx + 1), dtype=bool)
+        keep[np.arange(ny + 1) * (nx + 1) + nx] = False
+        old_to_new = np.full((ny + 1) * (nx + 1), -1, dtype=np.int32)
+        old_to_new[keep] = np.arange(keep.sum(), dtype=np.int32)
+        face_nodes = old_to_new[face_nodes]
+
+        node_lon_2d, node_lat_2d = np.meshgrid(lon_bounds, lat_bounds)
+        node_lon = node_lon_2d.ravel()[keep]
+        node_lat = node_lat_2d.ravel()[keep]
+    else:
+        node_idx = np.arange((ny + 1) * (nx + 1), dtype=np.int32).reshape(
+            ny + 1, nx + 1
+        )
+        face_nodes = np.stack(
+            (
+                node_idx[:-1, :-1],
+                node_idx[:-1, 1:],
+                node_idx[1:, 1:],
+                node_idx[1:, :-1],
+            ),
+            axis=-1,
+        ).reshape(-1, 4)
+        node_lon_2d, node_lat_2d = np.meshgrid(lon_bounds, lat_bounds)
+        node_lon = node_lon_2d.ravel()
+        node_lat = node_lat_2d.ravel()
+
     face_lon_2d, face_lat_2d = np.meshgrid(_canonical_lon(lon), lat)
 
     return PolygonMesh(
-        node_lon=node_lon_2d.ravel().astype(np.float64, copy=False),
-        node_lat=node_lat_2d.ravel().astype(np.float64, copy=False),
+        node_lon=node_lon.astype(np.float64, copy=False),
+        node_lat=node_lat.astype(np.float64, copy=False),
         face_nodes=face_nodes,
         face_lon=face_lon_2d.ravel().astype(np.float64, copy=False),
         face_lat=face_lat_2d.ravel().astype(np.float64, copy=False),
@@ -1181,38 +1228,14 @@ def _source_mesh(
 
     lat, lon = _get_latlon_arrays(ds)
     lat = _normalise_angle_units(lat, source_units)
-    lon = _canonical_lon(_normalise_angle_units(lon, source_units))
+    lon = _normalise_angle_units(lon, source_units)
     y_dim, x_dim = _get_spatial_dims(ds)
 
     if lat.ndim == 1:
         return _regular_grid_mesh(lat, lon), (y_dim, x_dim)
     if lat.ndim == 2:
-        return _curvilinear_grid_mesh(lat, lon), (y_dim, x_dim)
+        return _curvilinear_grid_mesh(lat, _canonical_lon(lon)), (y_dim, x_dim)
     raise ValueError("Latitude/longitude coordinates must be 1-D or 2-D.")
-
-
-def _source_polygons(
-    ds: xr.Dataset,
-    *,
-    source_units: SourceUnits,
-) -> tuple[list[tuple[FloatArray, FloatArray]], tuple[str, ...]]:
-    """Return source polygons as Python tuples.
-
-    Note:
-        Production weight generation uses
-        [`_source_mesh`][grid_doctor.remap_backend._source_mesh] to
-        avoid per-cell Python loops.  This wrapper is kept for
-        compatibility with tests and small-scale debugging.
-
-    Args:
-        ds: Source geometry dataset.
-        source_units: Angular unit convention.
-
-    Returns:
-        ``(polygons, source_dims)``.
-    """
-    mesh, source_dims = _source_mesh(ds, source_units=source_units)
-    return _mesh_to_polygons(mesh), source_dims
 
 
 # ===================================================================
