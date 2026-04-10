@@ -478,6 +478,8 @@ def save_pyramid_to_s3(
     encoding:
         Per-level encoding dictionaries.
     """
+    s3_path = s3_path.rstrip('/')
+    s3_options = s3_options or {}
     fs = s3fs.S3FileSystem(**s3_options)
     for level, dataset in pyramid.items():
         level_path = f"{s3_path}/level_{level}.zarr"
@@ -508,10 +510,14 @@ def save_pyramid_to_s3(
                 **zarr_options,
             )  # type: ignore[call-overload]
 
-        if mode == "w" and not compute:
-            coord_options = dict(zarr_options)
-            coord_options["mode"] = "w"
-            dataset[list(dataset.coords)].to_zarr(store, **coord_options)  # type: ignore[call-overload]
+            # We write coordinates if initializing the dataset
+            if mode == "w" and not compute:
+                coord_options = dict(zarr_options)
+                coord_options["mode"] = "r+"
+                coord_options["compute"] = True
+                dataset[list(dataset.coords)].to_zarr(  # type: ignore[call-overload]
+                    store, **coord_options
+                )
 
 
 # ===================================================================

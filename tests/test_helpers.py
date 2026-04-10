@@ -478,3 +478,28 @@ class TestSavePyramidToS3:
             )
             for call in mock_zarr.call_args_list:
                 assert "consolidated" not in call.kwargs
+
+
+    @mock.patch("grid_doctor.helpers.s3fs.S3FileSystem")
+    @mock.patch("grid_doctor.helpers.s3fs.S3Map")
+    def test_calls_to_zarr_init_region(self, mock_s3map: mock.Mock, mock_s3fs: mock.Mock) -> None:
+        del mock_s3fs
+        pyramid = self._make_pyramid()
+        mock_s3map.return_value = mock.MagicMock()
+        with mock.patch.object(xr.Dataset, "to_zarr") as mock_zarr:
+            save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w", compute=False, region={'cell':slice(0,-1)})
+            # Ensure to_zarr is called twice (per dataset), when region is specified!
+            assert mock_zarr.call_count == len(pyramid) * 2
+
+            # Ensure the first call is metadata only and second is 'r+' for coords
+            def pairwise(iterable):
+                a = iter(iterable)
+                return zip(a,a)
+
+            for first, second in pairwise(mock_zarr.call_args_list):
+                assert first.kwargs.get('mode') == 'w'
+                assert first.kwargs.get('compute') == False
+                assert first.kwargs.get('region') is not None
+                assert second.kwargs.get('mode') == 'r+'
+                assert second.kwargs.get('compute') == True
+                assert second.kwargs.get('region') == None
