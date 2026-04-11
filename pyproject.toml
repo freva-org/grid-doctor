@@ -32,22 +32,24 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Atmospheric Science",
     "Topic :: Scientific/Engineering :: GIS",
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "numpy",
-    "xarray",
-    "requests",
-    "healpix-geo",
-    "zarr",
-    "s3fs",
-    "scipy",
-    "fsspec",
-    "numcodecs",
+    "botocore",
     "dask[array]",
-    "numba"
+    "fsspec",
+    "healpix-geo",
+    "numcodecs",
+    "numpy",
+    "requests",
+    "s3fs",
+    "xarray",
+    "zarr",
+    "scipy",
 ]
 
 

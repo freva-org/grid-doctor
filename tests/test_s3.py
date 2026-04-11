@@ -21,8 +21,14 @@ import pytest
 import xarray as xr
 
 from grid_doctor.s3 import (
+    _chunk_key_v2,
+    _chunk_key_v3,
     _execute_write_plan,
     _inspect_store,
+    _read_v2_meta,
+    _read_v3_meta,
+    _v2_shape_and_chunks,
+    _v3_shape_and_chunks,
     _with_retry,
     get_s3_options,
     save_pyramid_to_s3,
@@ -97,21 +103,66 @@ def _zmetadata(vars: list[str], time_len: int, chunk_time: int = 1) -> dict[str,
     return {"metadata": metadata}
 
 
+def _zarr3_meta(vars: list[str], time_len: int, chunk_time: int = 1) -> dict[str, Any]:
+    """Minimal Zarr v3 array metadata dict, keyed by array name.
+
+    Mirrors the structure returned by :func:`_read_v3_meta`: a flat dict
+    mapping array name → v3 array metadata.  Used to build fake consolidated
+    ``zarr.json`` payloads or non-consolidated per-array responses.
+    """
+    npix = 12
+
+    def _arr(shape: list[int], chunk_shape: list[int], dtype: str) -> dict[str, Any]:
+        return {
+            "zarr_format": 3,
+            "node_type": "array",
+            "shape": shape,
+            "chunk_grid": {
+                "name": "regular",
+                "configuration": {"chunk_shape": chunk_shape},
+            },
+            "data_type": dtype,
+            "fill_value": 0,
+            "chunk_key_encoding": {"name": "default", "separator": "/"},
+        }
+
+    meta: dict[str, Any] = {
+        "time": _arr([time_len], [chunk_time], "int64"),
+        "cell": _arr([npix], [npix], "int64"),
+    }
+    for var in vars:
+        meta[var] = _arr([time_len, npix], [chunk_time, npix], "float32")
+    return meta
+
+
 def _fs_mock(
     *,
     store_non_empty: bool = True,
     has_meta: bool = True,
     zmeta: dict[str, Any] | None = None,
     last_chunk_exists: bool = True,
+    zarr_version: int = 2,
+    v3_consolidated: bool = True,
+    v3_array_meta: dict[str, Any] | None = None,
 ) -> mock.MagicMock:
     """Build a mock ``s3fs.S3FileSystem`` for ``_inspect_store`` tests.
 
-    ``fs.exists`` is given a ``side_effect`` list matching the call order
-    inside ``_inspect_store``:
+    For **Zarr v2** (default), ``fs.exists`` is given a ``side_effect`` list
+    matching the call order inside ``_inspect_store``:
 
     1. ``level_path`` (store existence check)
     2. ``{level_path}/.zmetadata`` (consolidated metadata check)
     3. chunk key (only when ``validate=True``)
+
+    For **Zarr v3**, the call order is:
+
+    1. ``level_path`` (store existence check)
+    2. ``{level_path}/.zmetadata`` → ``False`` (v2 absent)
+    3. ``{level_path}/zarr.json`` (v3 root metadata)
+    4. chunk key (only when ``validate=True``)
+
+    When *v3_consolidated* is ``False``, ``fs.ls`` returns fake array entries
+    and ``fs.open`` returns individual per-array ``zarr.json`` files.
     """
     fs = mock.MagicMock()
     if not store_non_empty:
@@ -119,19 +170,65 @@ def _fs_mock(
         fs.ls.return_value = []
         return fs
 
-    fs.ls.return_value = ["level_2.zarr/.zgroup"]
+    if zarr_version == 2:
+        fs.ls.return_value = ["level_2.zarr/.zgroup"]
+        exists_returns = [True, has_meta]
+        if has_meta and zmeta is not None:
+            exists_returns.append(last_chunk_exists)
+        fs.exists.side_effect = exists_returns
 
-    # Build exists side_effect: [level_path, meta_key, optional chunk_key]
-    exists_returns = [True, has_meta]
-    if has_meta and zmeta is not None:
-        exists_returns.append(last_chunk_exists)
-    fs.exists.side_effect = exists_returns
+        if zmeta is not None:
+            ctx = mock.MagicMock()
+            ctx.__enter__.return_value = io.StringIO(json.dumps(zmeta))
+            ctx.__exit__.return_value = False
+            fs.open.return_value = ctx
 
-    if zmeta is not None:
-        ctx = mock.MagicMock()
-        ctx.__enter__.return_value = io.StringIO(json.dumps(zmeta))
-        ctx.__exit__.return_value = False
-        fs.open.return_value = ctx
+    else:  # zarr_version == 3
+        fs.ls.return_value = ["level_2.zarr/zarr.json"]
+        # exists sequence: level_path, .zmetadata (False), zarr.json, [chunk]
+        exists_returns = [True, False, has_meta]
+        if has_meta:
+            exists_returns.append(last_chunk_exists)
+        fs.exists.side_effect = exists_returns
+
+        if has_meta and v3_array_meta is not None:
+            if v3_consolidated:
+                # Consolidated: single zarr.json at root with consolidated_metadata
+                root_payload = {
+                    "zarr_format": 3,
+                    "node_type": "group",
+                    "consolidated_metadata": {"metadata": v3_array_meta},
+                }
+                ctx = mock.MagicMock()
+                ctx.__enter__.return_value = io.StringIO(json.dumps(root_payload))
+                ctx.__exit__.return_value = False
+                fs.open.return_value = ctx
+            else:
+                # Non-consolidated: root zarr.json has no consolidated_metadata;
+                # fs.ls returns one entry per array; fs.open returns per-array json.
+                root_payload = {"zarr_format": 3, "node_type": "group"}
+                array_entries = [
+                    f"level_2.zarr/{name}" for name in v3_array_meta
+                ]
+                fs.ls.return_value = array_entries
+
+                # exists: level_path, .zmetadata(F), zarr.json(T),
+                #         per-array zarr.json (True for each), [chunk]
+                array_exists = [True] * len(array_entries)
+                exists_returns = [True, False, True] + array_exists + [last_chunk_exists]
+                fs.exists.side_effect = exists_returns
+
+                open_responses = [io.StringIO(json.dumps(root_payload))]
+                for name in v3_array_meta:
+                    open_responses.append(io.StringIO(json.dumps(v3_array_meta[name])))
+
+                open_ctxs = []
+                for resp in open_responses:
+                    ctx = mock.MagicMock()
+                    ctx.__enter__.return_value = resp
+                    ctx.__exit__.return_value = False
+                    open_ctxs.append(ctx)
+                fs.open.side_effect = open_ctxs
 
     return fs
 
@@ -337,6 +434,141 @@ class TestInspectStore:
         plan = _inspect_store(fs, "s3://bucket/level_1.zarr", ds)
         assert plan.append_time is False
         assert plan.n_existing_time is None
+
+
+class TestInspectStoreV3:
+    """Mirrors :class:`TestInspectStore` for Zarr v3 stores.
+
+    Uses the ``zarr_version=3`` path of ``_fs_mock`` so that
+    ``_inspect_store`` goes through :func:`_read_v3_meta` instead of
+    :func:`_read_v2_meta`.
+    """
+
+    def test_absent_store_returns_full_write_plan(self) -> None:
+        ds = _healpix_ds(vars=["tas"])
+        fs = _fs_mock(store_non_empty=False, zarr_version=3)
+        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        assert plan.mode == "w"
+        assert plan.dirty is False
+
+    def test_store_without_zarr_json_is_dirty(self) -> None:
+        """v3 store with content but neither .zmetadata nor zarr.json → dirty."""
+        ds = _healpix_ds(vars=["tas"])
+        fs = _fs_mock(store_non_empty=True, has_meta=False, zarr_version=3)
+        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        assert plan.dirty is True
+
+    def test_consolidated_same_schema_returns_r_plus(self) -> None:
+        ds = _healpix_ds(vars=["tas"], n_time=3)
+        v3 = _zarr3_meta(["tas"], time_len=3)
+        fs = _fs_mock(zarr_version=3, v3_array_meta=v3)
+        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        assert plan.mode == "r+"
+        assert plan.n_existing_time == 3
+        assert plan.dirty is False
+
+    def test_consolidated_new_variable_detected(self) -> None:
+        ds = _healpix_ds(vars=["tas", "pr"], n_time=3)
+        v3 = _zarr3_meta(["tas"], time_len=3)
+        fs = _fs_mock(zarr_version=3, v3_array_meta=v3)
+        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        assert plan.mode == "a"
+        assert "pr" in plan.new_vars
+        assert "tas" in plan.existing_vars
+
+    def test_consolidated_more_time_steps_detected(self) -> None:
+        ds = _healpix_ds(vars=["tas"], n_time=5)
+        v3 = _zarr3_meta(["tas"], time_len=3)
+        fs = _fs_mock(zarr_version=3, v3_array_meta=v3)
+        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        assert plan.mode == "a"
+        assert plan.n_existing_time == 3
+        assert plan.append_time is True
+
+    def test_consolidated_new_vars_and_more_time(self) -> None:
+        ds = _healpix_ds(vars=["tas", "pr"], n_time=5)
+        v3 = _zarr3_meta(["tas"], time_len=3)
+        fs = _fs_mock(zarr_version=3, v3_array_meta=v3)
+        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        assert plan.mode == "a"
+        assert "pr" in plan.new_vars
+        assert plan.append_time is True
+
+    def test_non_consolidated_same_schema_returns_r_plus(self) -> None:
+        """Non-consolidated v3: arrays read via individual zarr.json files."""
+        ds = _healpix_ds(vars=["tas"], n_time=3)
+        v3 = _zarr3_meta(["tas"], time_len=3)
+        fs = _fs_mock(zarr_version=3, v3_array_meta=v3, v3_consolidated=False)
+        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        assert plan.mode == "r+"
+        assert plan.n_existing_time == 3
+
+    def test_validate_clean_chunk_not_dirty(self) -> None:
+        ds = _healpix_ds(vars=["tas"], n_time=3)
+        v3 = _zarr3_meta(["tas"], time_len=3, chunk_time=1)
+        fs = _fs_mock(zarr_version=3, v3_array_meta=v3, last_chunk_exists=True)
+        plan = _inspect_store(
+            fs, "s3://bucket/level_2.zarr", ds, validate=True
+        )
+        assert plan.dirty is False
+
+    def test_validate_missing_last_chunk_is_dirty(self) -> None:
+        ds = _healpix_ds(vars=["tas"], n_time=3)
+        v3 = _zarr3_meta(["tas"], time_len=3, chunk_time=1)
+        fs = _fs_mock(zarr_version=3, v3_array_meta=v3, last_chunk_exists=False)
+        plan = _inspect_store(
+            fs, "s3://bucket/level_2.zarr", ds, validate=True
+        )
+        assert plan.dirty is True
+
+
+class TestChunkKeyHelpers:
+    """Unit tests for the chunk-key builder functions."""
+
+    def test_v2_single_dim(self) -> None:
+        assert _chunk_key_v2("s3://b/l.zarr", "time", [0]) == "s3://b/l.zarr/time/0"
+
+    def test_v2_two_dims(self) -> None:
+        assert _chunk_key_v2("s3://b/l.zarr", "tas", [2, 0]) == "s3://b/l.zarr/tas/2.0"
+
+    def test_v3_single_dim(self) -> None:
+        assert _chunk_key_v3("s3://b/l.zarr", "time", [0]) == "s3://b/l.zarr/time/c/0"
+
+    def test_v3_two_dims(self) -> None:
+        assert _chunk_key_v3("s3://b/l.zarr", "tas", [2, 0]) == "s3://b/l.zarr/tas/c/2/0"
+
+
+class TestShapeAndChunkHelpers:
+    """Unit tests for the per-format shape/chunk extractors."""
+
+    def test_v2_extracts_shape_and_chunks(self) -> None:
+        meta = {"shape": [10, 48], "chunks": [1, 48], "zarr_format": 2}
+        shape, chunks = _v2_shape_and_chunks(meta)
+        assert shape == [10, 48]
+        assert chunks == [1, 48]
+
+    def test_v3_extracts_shape_and_chunk_shape(self) -> None:
+        meta = {
+            "zarr_format": 3,
+            "shape": [10, 48],
+            "chunk_grid": {
+                "name": "regular",
+                "configuration": {"chunk_shape": [1, 48]},
+            },
+        }
+        shape, chunks = _v3_shape_and_chunks(meta)
+        assert shape == [10, 48]
+        assert chunks == [1, 48]
+
+    def test_v2_missing_keys_return_empty(self) -> None:
+        shape, chunks = _v2_shape_and_chunks({})
+        assert shape == [] and chunks == []
+
+    def test_v3_missing_chunk_grid_returns_empty_chunks(self) -> None:
+        meta = {"zarr_format": 3, "shape": [5]}
+        shape, chunks = _v3_shape_and_chunks(meta)
+        assert shape == [5]
+        assert chunks == []
 
 
 # ===================================================================

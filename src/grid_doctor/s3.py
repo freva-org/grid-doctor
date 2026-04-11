@@ -3,19 +3,19 @@
 This module owns everything related to writing pyramid datasets to
 S3-backed Zarr stores:
 
-- :func:`get_s3_options` — build an authenticated, timeout-hardened
-  :class:`s3fs.S3FileSystem` configuration dictionary.
-- :func:`save_pyramid_to_s3` — write a pyramid (``dict[int, xr.Dataset]``)
-  level-by-level, with automatic mode inference, retry logic, and dirty-store
-  detection.
+- [`get_s3_options`][get_s3_options] — build an authenticated, timeout
+  `s3fs.S3FileSystem` configuration dictionary.
+- [`save_pyramid_to_s3`][save_pyramid_to_s3] — write a pyramid
+  (``dict[int, xr.Dataset]``) level-by-level, with automatic mode inference,
+  retry logic, and dirty-store detection.
 
 The three private helpers drive the ``mode="auto"`` path:
 
-- :func:`_inspect_store` — reads ``.zmetadata`` and returns a
-  :class:`~grid_doctor.types.WritePlan`.
-- :func:`_execute_write_plan` — executes the plan as one or two
+- `_inspect_store` — reads ``.zmetadata`` and returns a
+  `~grid_doctor.types.WritePlan`.
+- `_execute_write_plan` — executes the plan as one or two
   ``to_zarr`` calls.
-- :func:`_with_retry` — wraps any zero-argument callable with exponential
+- `_with_retry` — wraps any zero-argument callable with exponential
   backoff.
 """
 
@@ -28,6 +28,7 @@ import time as _time
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+import botocore.config as _bc_config
 import s3fs
 import xarray as xr
 
@@ -36,24 +37,19 @@ from .types import OnDirty, WriteMode, WritePlan
 logger = logging.getLogger(__name__)
 
 
-# ===================================================================
-# S3 filesystem configuration
-# ===================================================================
-
-
 def get_s3_options(
     endpoint_url: str,
     secrets_file: str | Path,
     *,
     read_timeout: int = 300,
-    connect_timeout: int = 60,
+    connect_timeout: int = 90,
     max_attempts: int = 10,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Build an S3 options dictionary from an endpoint and credentials file.
 
     The returned dictionary is suitable for passing directly to
-    :class:`s3fs.S3FileSystem`.  Sensible timeout and retry defaults are
+    `s3fs.S3FileSystem`.  Sensible timeout and retry defaults are
     included to guard against transient network issues on the DKRZ S3
     instance; all can be overridden via *kwargs*.
 
@@ -80,25 +76,17 @@ def get_s3_options(
     Returns
     -------
     dict[str, Any]
-        Options for :class:`s3fs.S3FileSystem`.
+        Options for `s3fs.S3FileSystem`.
     """
-    try:
-        import botocore.config as _bc_config
-
-        _boto_config = _bc_config.Config(
-            read_timeout=read_timeout,
-            connect_timeout=connect_timeout,
-            retries={"max_attempts": max_attempts, "mode": "adaptive"},
-        )
-        client_kwargs: dict[str, Any] = {"config": _boto_config}
-    except ImportError:
-        logger.warning(
-            "botocore not available — S3 timeout and retry config will not be "
-            "applied. Install aiobotocore or botocore to enable these defaults."
-        )
-        client_kwargs = {}
-
-    secrets: dict[str, str] = json.loads(Path(secrets_file).read_text())
+    _boto_config = _bc_config.Config(
+        read_timeout=read_timeout,
+        connect_timeout=connect_timeout,
+        retries={"max_attempts": max_attempts, "mode": "adaptive"},
+    )
+    client_kwargs: dict[str, Any] = {"config": _boto_config}
+    client_kwargs = {}
+    secrets_file = Path(secrets_file).expanduser()
+    secrets: dict[str, str] = json.loads(secrets_file.read_text())
     options: dict[str, Any] = {
         "endpoint_url": endpoint_url,
         "secret": secrets["secretKey"],
@@ -110,11 +98,6 @@ def get_s3_options(
     options["client_kwargs"].update(extra_client_kwargs)
     options.update(kwargs)
     return options
-
-
-# ===================================================================
-# Internal helpers
-# ===================================================================
 
 
 def _with_retry(
@@ -154,6 +137,100 @@ def _with_retry(
             _time.sleep(delay)
 
 
+def _read_v2_meta(
+    fs: s3fs.S3FileSystem,
+    level_path: str,
+) -> dict[str, Any] | None:
+    """Read Zarr v2 consolidated metadata from ``.zmetadata``.
+
+    Returns the inner ``"metadata"`` dict (keys like ``"tas/.zarray"``), or
+    ``None`` if the file does not exist.
+    """
+    meta_key = f"{level_path}/.zmetadata"
+    if not fs.exists(meta_key):
+        return None
+    with fs.open(meta_key, "r") as fh:
+        zmeta: dict[str, dict[str, Any]] = json.load(fh)
+    return zmeta.get("metadata", {})
+
+
+def _read_v3_meta(
+    fs: s3fs.S3FileSystem,
+    level_path: str,
+) -> dict[str, Any] | None:
+    """Read Zarr v3 array metadata, returning a normalised dict.
+
+    Tries consolidated metadata first (``zarr.json`` at the store root with a
+    ``consolidated_metadata`` key).  Falls back to listing the store and
+    reading each array's individual ``zarr.json`` file when consolidated
+    metadata is absent.
+
+    Returns a dict keyed by array name (e.g. ``"tas"``, ``"time"``) whose
+    values are the raw array metadata dicts, or ``None`` if no ``zarr.json``
+    exists at the root.
+    """
+    root_key = f"{level_path}/zarr.json"
+    if not fs.exists(root_key):
+        return None
+
+    with fs.open(root_key, "r") as fh:
+        root_meta: dict[str, Any] = json.load(fh)
+
+    # --- Consolidated path (single GET) ------------------------------------
+    consolidated = root_meta.get("consolidated_metadata", {})
+    if consolidated:
+        # consolidated_metadata.metadata is keyed by array name directly.
+        return dict(consolidated.get("metadata", {}))
+
+    # --- Non-consolidated fallback: list root, read per-array zarr.json ----
+    logger.debug(
+        "Zarr v3 store at %s has no consolidated metadata — "
+        "reading individual array zarr.json files.",
+        level_path,
+    )
+    entries = fs.ls(level_path, detail=False)
+    result: dict[str, Any] = {}
+    for entry in entries:
+        array_json = f"{entry}/zarr.json"
+        if not fs.exists(array_json):
+            continue
+        with fs.open(array_json, "r") as fh:
+            array_meta: dict[str, Any] = json.load(fh)
+        if array_meta.get("node_type") == "array":
+            name = entry.rstrip("/").split("/")[-1]
+            result[name] = array_meta
+    return result
+
+
+def _v2_shape_and_chunks(
+    array_meta: dict[str, Any],
+) -> tuple[list[int], list[int]]:
+    """Extract ``(shape, chunks)`` from a Zarr v2 array metadata dict."""
+    shape: list[int] = array_meta.get("shape", [])
+    chunks: list[int] = array_meta.get("chunks", [])
+    return shape, chunks
+
+
+def _v3_shape_and_chunks(
+    array_meta: dict[str, Any],
+) -> tuple[list[int], list[int]]:
+    """Extract ``(shape, chunk_shape)`` from a Zarr v3 array metadata dict."""
+    shape: list[int] = array_meta.get("shape", [])
+    chunk_grid = array_meta.get("chunk_grid", {})
+    chunks: list[int] = chunk_grid.get("configuration", {}).get("chunk_shape", [])
+    return shape, chunks
+
+
+def _chunk_key_v2(level_path: str, var: str, chunk_indices: list[int]) -> str:
+    """Build a Zarr v2 chunk key (dot-separated indices)."""
+    return f"{level_path}/{var}/" + ".".join(str(i) for i in chunk_indices)
+
+
+def _chunk_key_v3(level_path: str, var: str, chunk_indices: list[int]) -> str:
+    """Build a Zarr v3 chunk key (``c/`` prefix, slash-separated indices)."""
+    return f"{level_path}/{var}/c/" + "/".join(str(i) for i in chunk_indices)
+
+
 def _inspect_store(
     fs: s3fs.S3FileSystem,
     level_path: str,
@@ -161,12 +238,16 @@ def _inspect_store(
     *,
     validate: bool = False,
 ) -> WritePlan:
-    """Inspect an existing Zarr v2 store and produce a :class:`WritePlan`.
+    """Inspect an existing Zarr store (v2 or v3) and produce a `WritePlan`.
 
-    The inspection reads only consolidated metadata (``.zmetadata``) — a
-    single cheap S3 call.  When *validate* is ``True``, an additional
-    existence check is performed for the last chunk along the time dimension
-    of each data variable already present in the store.
+    The Zarr format is auto-detected from the store's root metadata files:
+    ``.zmetadata`` signals v2 consolidated metadata; ``zarr.json`` signals v3
+    (consolidated or per-array).  A single cheap S3 GET suffices in both
+    consolidated cases.
+
+    When *validate* is ``True``, an additional existence check is performed
+    for the last chunk along the time dimension of each data variable already
+    present in the store.
 
     Args:
         fs: Authenticated S3 filesystem.
@@ -177,11 +258,8 @@ def _inspect_store(
             ``True`` if any chunk is missing.
 
     Returns:
-        A :class:`WritePlan` describing the required write operations.
+        A [`WritePlan`][WritePlan] describing the required write operations.
     """
-    meta_key = f"{level_path}/.zmetadata"
-
-    # --- Does the store have any content at all? ----------------------------
     store_non_empty = fs.exists(level_path) and bool(fs.ls(level_path, detail=False))
     if not store_non_empty:
         return WritePlan(
@@ -193,44 +271,57 @@ def _inspect_store(
             dirty=False,
         )
 
-    # --- Store exists but consolidated metadata is absent → dirty -----------
-    if not fs.exists(meta_key):
-        logger.warning(
-            "Store at %s has content but no .zmetadata — treating as dirty.",
-            level_path,
-        )
-        return WritePlan(
-            mode="w",
-            new_vars=list(map(str, ds.data_vars)),
-            existing_vars=[],
-            n_existing_time=None,
-            append_time=False,
-            dirty=True,
-        )
+    v2_meta = _read_v2_meta(fs, level_path)
+    if v2_meta is not None:
+        shape_and_chunks = _v2_shape_and_chunks
+        chunk_key_fn = _chunk_key_v2
 
-    # --- Read consolidated metadata (single S3 GET) -------------------------
-    with fs.open(meta_key, "r") as fh:
-        zmeta: dict[str, Any] = json.load(fh)
-    metadata: dict[str, Any] = zmeta.get("metadata", {})
+        store_arrays = {
+            key.split("/")[0]
+            for key in v2_meta
+            if key.endswith("/.zarray") and "/" in key
+        }
+        time_raw = v2_meta.get("time/.zarray")
+        if isinstance(time_raw, str):
+            time_raw = json.loads(time_raw)
+        var_meta_fn: Any = lambda var: (  # noqa: E731
+            json.loads(v2_meta[f"{var}/.zarray"])
+            if isinstance(v2_meta.get(f"{var}/.zarray"), str)
+            else v2_meta.get(f"{var}/.zarray", {})
+        )
+    else:
+        v3_meta = _read_v3_meta(fs, level_path)
+        if v3_meta is None:
+            logger.warning(
+                "Store at %s has content but no recognised metadata "
+                "(.zmetadata or zarr.json) — treating as dirty.",
+                level_path,
+            )
+            return WritePlan(
+                mode="w",
+                new_vars=list(map(str, ds.data_vars)),
+                existing_vars=[],
+                n_existing_time=None,
+                append_time=False,
+                dirty=True,
+            )
 
-    # Extract names of arrays already in the store.
-    store_arrays = {
-        key.split("/")[0] for key in metadata if key.endswith("/.zarray") and "/" in key
-    }
+        shape_and_chunks = _v3_shape_and_chunks
+        chunk_key_fn = _chunk_key_v3
+
+        store_arrays = set(v3_meta.keys())
+        time_raw = v3_meta.get("time")
+        var_meta_fn = lambda var: v3_meta.get(var, {})  # noqa: E731
 
     incoming_data_vars = set(ds.data_vars)
     new_vars = [v for v in incoming_data_vars if v not in store_arrays]
     existing_vars = [v for v in incoming_data_vars if v in store_arrays]
 
-    # --- Determine existing time length -------------------------------------
     n_existing_time: int | None = None
-    if "time/.zarray" in metadata:
-        time_meta = metadata["time/.zarray"]
-        if isinstance(time_meta, str):
-            time_meta = json.loads(time_meta)
-        shape = time_meta.get("shape", [])
-        if shape:
-            n_existing_time = int(shape[0])
+    if time_raw:
+        t_shape, _ = shape_and_chunks(time_raw)
+        if t_shape:
+            n_existing_time = int(t_shape[0])
 
     incoming_time = ds.sizes.get("time")
     append_time = (
@@ -239,29 +330,23 @@ def _inspect_store(
         and incoming_time > n_existing_time
     )
 
-    # --- Validation: check last chunk per existing variable -----------------
     dirty = False
     if validate and existing_vars and n_existing_time is not None:
         for var in existing_vars:
-            var_meta_key = f"{var}/.zarray"
-            if var_meta_key not in metadata:
+            var_meta = var_meta_fn(var)
+            if not var_meta:
                 continue
-            var_meta = metadata[var_meta_key]
-            if isinstance(var_meta, str):
-                var_meta = json.loads(var_meta)
-
-            shape = var_meta.get("shape", [])
-            chunks: list[int] = var_meta.get("chunks", [])
+            shape, chunks = shape_and_chunks(var_meta)
             if not shape or not chunks or len(shape) != len(chunks):
                 continue
 
             # Check that the last chunk along the time dimension (dim 0)
-            # exists.  We use index 0 for all other dimensions to keep the
-            # check cheap: one HEAD request per variable, not per chunk.
+            # exists.  Index 0 for all other dimensions keeps the check
+            # cheap: one HEAD request per variable, not per chunk.
             n_time_chunks = math.ceil(shape[0] / chunks[0])
             chunk_indices = [0] * len(shape)
             chunk_indices[0] = n_time_chunks - 1
-            chunk_key = f"{level_path}/{var}/" + ".".join(str(i) for i in chunk_indices)
+            chunk_key = chunk_key_fn(level_path, var, chunk_indices)
             if not fs.exists(chunk_key):
                 logger.warning(
                     "Expected chunk %s is missing — store may be incomplete.",
@@ -270,7 +355,6 @@ def _inspect_store(
                 dirty = True
                 break  # one missing chunk is enough evidence
 
-    # --- Resolve base write mode --------------------------------------------
     if dirty:
         resolved_mode: Literal["w", "a", "r+"] = "w"  # overridden by on_dirty
     elif not new_vars and not append_time:
@@ -281,7 +365,7 @@ def _inspect_store(
     return WritePlan(
         mode=resolved_mode,
         new_vars=list(map(str, new_vars)),
-        existing_vars=list(map(str, existing_vars)),
+        existing_vars=existing_vars,
         n_existing_time=n_existing_time,
         append_time=append_time,
         dirty=dirty,
@@ -299,7 +383,7 @@ def _execute_write_plan(
     retry_backoff: float,
     encoding: dict[str, dict[str, Any]] | None = None,
 ) -> None:
-    """Execute a :class:`WritePlan` against *store*, with per-call retries.
+    """Execute a [`WritePlan`][WritePlan] against *store*, with per-call retries.
 
     The write is decomposed into at most two ``to_zarr`` calls:
 
@@ -307,13 +391,13 @@ def _execute_write_plan(
     2. **Append new time steps** (for all variables, including any just added
        in step 1).
 
-    Each call is wrapped in :func:`_with_retry` independently so a transient
+    Each call is wrapped in `_with_retry` independently so a transient
     S3 timeout in step 2 does not force a repeat of step 1.
 
     Args:
         dataset: Incoming dataset.
         store: Target Zarr store.
-        plan: Write plan produced by :func:`_inspect_store`.
+        plan: Write plan produced by `_inspect_store`.
         zarr_format: Zarr format version (2 or 3).
         compute: Whether to trigger Dask computation immediately.
         max_retries: Maximum retry attempts per ``to_zarr`` call.
@@ -336,16 +420,12 @@ def _execute_write_plan(
 
     mode = plan.mode
 
-    # ------------------------------------------------------------------
-    # "w" or "r+" — single call covers everything
-    # ------------------------------------------------------------------
+    # "w" or "r+" - single call covers everything
     if mode in {"w", "r+"}:
         _zarr_write(dataset, mode=mode)
         return
 
-    # ------------------------------------------------------------------
-    # "a" — may require two calls
-    # ------------------------------------------------------------------
+    # "a" - may require two calls
 
     # Step 1: write new variables for the time range already in the store.
     if plan.new_vars:
@@ -363,11 +443,6 @@ def _execute_write_plan(
             dataset.sizes.get("time", 0) - plan.n_existing_time,
         )
         _zarr_write(append_ds, mode="a", append_dim="time")
-
-
-# ===================================================================
-# Public API
-# ===================================================================
 
 
 def save_pyramid_to_s3(
@@ -411,8 +486,9 @@ def save_pyramid_to_s3(
     s3_path:
         S3 prefix such as ``"s3://bucket/pyramid"``.
     s3_options:
-        Options forwarded to :class:`s3fs.S3FileSystem`.  Use
-        :func:`get_s3_options` to build this with sensible timeout defaults.
+        Options forwarded to `s3fs.S3FileSystem`.  Use
+        [`get_s3_options`][get_s3_options] to build this with sensible
+        timeout defaults.
     mode:
         ``"w"`` — overwrite entirely.
         ``"a"`` — append / add.
@@ -429,12 +505,12 @@ def save_pyramid_to_s3(
     validate:
         When ``True`` and *mode* is ``"auto"``, verify that the last
         time-chunk of each existing variable is present on S3 before trusting
-        the store's state.  Adds one :meth:`s3fs.S3FileSystem.exists` call
+        the store's state.  Adds one `s3fs.S3FileSystem.exists` call
         per data variable.
     on_dirty:
         Policy applied when a store is found to be in an inconsistent state
         (missing metadata or chunks).  ``"raise"`` aborts with a
-        :class:`RuntimeError`; ``"overwrite"`` deletes the store and rewrites
+        `RuntimeError`; ``"overwrite"`` deletes the store and rewrites
         from scratch; ``"skip"`` leaves the level untouched.
     max_retries:
         Maximum number of retry attempts per individual ``to_zarr`` call.
@@ -451,9 +527,6 @@ def save_pyramid_to_s3(
         store = s3fs.S3Map(root=level_path, s3=fs)
         level_encoding = encoding[level] if encoding is not None else None
 
-        # ------------------------------------------------------------------
-        # Resolve write plan
-        # ------------------------------------------------------------------
         if mode == "auto":
             plan = _inspect_store(fs, level_path, dataset, validate=validate)
 
@@ -496,9 +569,6 @@ def save_pyramid_to_s3(
                 dirty=False,
             )
 
-        # ------------------------------------------------------------------
-        # Handle region writes (only for explicit non-auto modes)
-        # ------------------------------------------------------------------
         if mode != "auto" and region != "auto":
             region_keys = set(region)
             to_drop = (
@@ -528,9 +598,6 @@ def save_pyramid_to_s3(
             )
             continue
 
-        # ------------------------------------------------------------------
-        # Normal (non-region) write via plan executor
-        # ------------------------------------------------------------------
         _execute_write_plan(
             dataset,
             store,
