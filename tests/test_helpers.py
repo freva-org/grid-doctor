@@ -21,7 +21,7 @@ from grid_doctor.helpers import (
     get_latlon_resolution,
     latlon_to_healpix_pyramid,
     resolution_to_healpix_level,
-    save_pyramid_to_s3,
+    save_pyramid_to_s3,  # re-exported from grid_doctor.s3 for backward compat
 )
 
 
@@ -439,42 +439,18 @@ class TestPyramidBuilders:
             assert call["min_valid_fraction"] == 0.75
 
 
-class TestSavePyramidToS3:
-    def _make_pyramid(self) -> dict[int, xr.Dataset]:
-        return {
-            level: xr.Dataset(
-                {"t": (("cell",), np.zeros(12 * (4**level), dtype=np.float32))},
-                coords={"cell": np.arange(12 * (4**level), dtype=np.int64)},
-                attrs={
-                    "healpix_nside": 2**level,
-                    "healpix_level": level,
-                    "healpix_order": "nested",
-                },
-            )
-            for level in (0, 1)
-        }
+class TestSavePyramidToS3BackwardCompat:
+    """Smoke tests confirming that save_pyramid_to_s3 is still importable from
+    grid_doctor.helpers (re-exported for backward compatibility).
 
-    @mock.patch("grid_doctor.helpers.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.helpers.s3fs.S3Map")
-    def test_calls_to_zarr(self, mock_s3map: mock.Mock, mock_s3fs: mock.Mock) -> None:
-        del mock_s3fs
-        pyramid = self._make_pyramid()
-        mock_s3map.return_value = mock.MagicMock()
-        with mock.patch.object(xr.Dataset, "to_zarr") as mock_zarr:
-            save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w")
-            assert mock_zarr.call_count == 2
+    Functional behaviour is fully tested in ``test_s3.py``.
+    """
 
-    @mock.patch("grid_doctor.helpers.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.helpers.s3fs.S3Map")
-    def test_zarr_format_3_omits_consolidated(
-        self, mock_s3map: mock.Mock, mock_s3fs: mock.Mock
-    ) -> None:
-        del mock_s3fs
-        pyramid = self._make_pyramid()
-        mock_s3map.return_value = mock.MagicMock()
-        with mock.patch.object(xr.Dataset, "to_zarr") as mock_zarr:
-            save_pyramid_to_s3(
-                pyramid, "s3://bucket/test", s3_options={}, zarr_format=3
-            )
-            for call in mock_zarr.call_args_list:
-                assert "consolidated" not in call.kwargs
+    def test_reexport_is_callable(self) -> None:
+        from grid_doctor.helpers import save_pyramid_to_s3 as fn
+        assert callable(fn)
+
+    def test_reexport_is_same_object_as_canonical(self) -> None:
+        from grid_doctor.helpers import save_pyramid_to_s3 as from_helpers
+        from grid_doctor.s3 import save_pyramid_to_s3 as from_s3
+        assert from_helpers is from_s3

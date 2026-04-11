@@ -1,23 +1,22 @@
 """High-level helpers for HEALPix pyramids.
 
-The functions in this module cover three tasks:
+The functions in this module cover two tasks:
 
 - estimating source-grid resolution,
 - building a HEALPix pyramid with
-  [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix],
-- and writing the resulting pyramid to Zarr stores.
+  [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix].
 
+S3 / Zarr output lives in [`grid_doctor.s3`][grid_doctor.s3].
 Remapping itself lives in [`grid_doctor.remap`][grid_doctor.remap].
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
-import s3fs
 import xarray as xr
 
 from .remap import (
@@ -30,7 +29,7 @@ from .remap_backend import (
     _get_unstructured_dim,
     _is_unstructured,
 )
-from .types import CoarsenMode, FloatArray, ZarrOptions
+from .types import CoarsenMode, FloatArray
 
 logger = logging.getLogger(__name__)
 
@@ -440,81 +439,6 @@ def create_healpix_pyramid(
 
 
 # ===================================================================
-# S3 / Zarr output
-# ===================================================================
-
-
-def save_pyramid_to_s3(
-    pyramid: dict[int, xr.Dataset],
-    s3_path: str,
-    s3_options: dict[str, Any],
-    *,
-    mode: Literal["a", "w", "r+"] = "a",
-    compute: bool = True,
-    region: Literal["auto"] | dict[str, slice] = "auto",
-    zarr_format: Literal[2, 3] = 2,
-    encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
-) -> None:
-    """Write a HEALPix pyramid to S3-backed Zarr stores.
-
-    Each level is stored below ``"<s3_path>/level_<level>.zarr"``.
-
-    Parameters
-    ----------
-    pyramid:
-        Mapping of HEALPix level to dataset.
-    s3_path:
-        S3 prefix such as ``"s3://bucket/pyramid"``.
-    s3_options:
-        Options forwarded to :class:`s3fs.S3FileSystem`.
-    mode:
-        Zarr write mode.
-    compute:
-        Trigger Dask execution immediately when ``True``.
-    region:
-        Region writes for partial updates.
-    zarr_format:
-        Zarr format version.
-    encoding:
-        Per-level encoding dictionaries.
-    """
-    fs = s3fs.S3FileSystem(**s3_options)
-    for level, dataset in pyramid.items():
-        level_path = f"{s3_path}/level_{level}.zarr"
-        logger.info("Writing HEALPix level %s to %s", level, level_path)
-        store = s3fs.S3Map(root=level_path, s3=fs)
-        zarr_options = ZarrOptions(compute=compute, mode=mode, zarr_format=zarr_format)
-        if zarr_format == 2:
-            zarr_options["consolidated"] = True
-        if encoding is not None:
-            zarr_options["encoding"] = encoding[level]
-
-        if region == "auto":
-            dataset.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
-        else:
-            region_keys = set(region)
-            to_drop = (
-                {
-                    name
-                    for name, var in dataset.data_vars.items()
-                    if region_keys.isdisjoint(map(str, var.dims))
-                }
-                | {str(dim) for dim in dataset.dims}
-                | {str(coord) for coord in dataset.coords}
-            )
-            dataset.drop_vars(to_drop, errors="ignore").isel(region).to_zarr(
-                store,
-                region=region,
-                **zarr_options,
-            )  # type: ignore[call-overload]
-
-        if mode == "w" and not compute:
-            coord_options = dict(zarr_options)
-            coord_options["mode"] = "w"
-            dataset[list(dataset.coords)].to_zarr(store, **coord_options)  # type: ignore[call-overload]
-
-
-# ===================================================================
 # Convenience aliases
 # ===================================================================
 
@@ -559,6 +483,9 @@ def latlon_to_healpix_pyramid(
         **kwargs,
     )
 
+
+# Re-exported for callers that import directly from this submodule.
+from .s3 import save_pyramid_to_s3  # noqa: E402, F401
 
 __all__ = [
     "coarsen_healpix",

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import pickle
 import tempfile
@@ -94,34 +93,9 @@ def chunk_for_target_store_size(
     raise ValueError(f"Unsupported access mode: {access!r}")
 
 
-def get_s3_options(
-    endpoint_url: str,
-    secrets_file: str | Path,
-    **kwargs: str,
-) -> dict[str, str]:
-    """Build an S3 options dictionary from an endpoint and credentials file.
-
-    Parameters
-    ----------
-    endpoint_url:
-        S3-compatible endpoint URL.
-    secrets_file:
-        JSON file containing `accessKey` and `secretKey`.
-    **kwargs:
-        Additional options merged into the returned dictionary.
-
-    Returns
-    -------
-    dict[str, str]
-        Options for `s3fs.S3FileSystem`.
-    """
-    secrets: dict[str, str] = json.loads(Path(secrets_file).read_text())
-    return {
-        "endpoint_url": endpoint_url,
-        "secret": secrets["secretKey"],
-        "key": secrets["accessKey"],
-        **kwargs,
-    }
+# get_s3_options has moved to grid_doctor.s3; re-exported here for
+# backward compatibility with callers that import from this submodule.
+from .s3 import get_s3_options  # noqa: E402, F401
 
 
 def cache_dir() -> Path:

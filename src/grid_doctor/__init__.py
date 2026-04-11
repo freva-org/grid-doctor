@@ -15,6 +15,7 @@ _SUBMODULES: dict[str, str] = {
     "helpers": ".helpers",
     "log": ".log",
     "remap": ".remap",
+    "s3": ".s3",
     "utils": ".utils",
     "cli": ".cli",
 }
@@ -29,25 +30,24 @@ _ATTRS: dict[str, str] = {
     "cached_open_dataset": ".utils",
     "cached_weights": ".utils",
     "get_latlon_resolution": ".helpers",
-    "get_s3_options": ".utils",
+    "get_s3_options": ".s3",
     "latlon_to_healpix_pyramid": ".helpers",
     "regrid_to_healpix": ".remap",
     "regrid_unstructured_to_healpix": ".remap",
     "resolution_to_healpix_level": ".helpers",
-    "save_pyramid_to_s3": ".helpers",
+    "save_pyramid_to_s3": ".s3",
     "setup_logging": ".log",
 }
 
 
 if TYPE_CHECKING:
-    from . import helpers, log, remap, utils
+    from . import helpers, log, remap, s3, utils
     from .helpers import (
         coarsen_healpix,
         create_healpix_pyramid,
         get_latlon_resolution,
         latlon_to_healpix_pyramid,
         resolution_to_healpix_level,
-        save_pyramid_to_s3,
     )
     from .log import setup_logging
     from .remap import (
@@ -56,11 +56,14 @@ if TYPE_CHECKING:
         regrid_to_healpix,
         regrid_unstructured_to_healpix,
     )
+    from .s3 import (
+        get_s3_options,
+        save_pyramid_to_s3,
+    )
     from .utils import (
         cached_open_dataset,
         cached_weights,
         chunk_for_target_store_size,
-        get_s3_options,
     )
 
 
@@ -90,6 +93,7 @@ __all__ = [
     "helpers",
     "log",
     "remap",
+    "s3",
     "utils",
     "apply_weight_file",
     "cached_open_dataset",
