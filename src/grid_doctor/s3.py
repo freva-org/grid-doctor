@@ -28,7 +28,6 @@ import time as _time
 from pathlib import Path
 from typing import Any, Callable, Literal
 
-import botocore.config as _bc_config
 import s3fs
 import xarray as xr
 
@@ -78,23 +77,22 @@ def get_s3_options(
     dict[str, Any]
         Options for `s3fs.S3FileSystem`.
     """
-    _boto_config = _bc_config.Config(
-        read_timeout=read_timeout,
-        connect_timeout=connect_timeout,
-        retries={"max_attempts": max_attempts, "mode": "adaptive"},
-    )
-    client_kwargs: dict[str, Any] = {"config": _boto_config}
     secrets_file = Path(secrets_file).expanduser()
     secrets: dict[str, str] = json.loads(secrets_file.read_text())
+    # config_kwargs is a plain dict passed to botocore.config.Config()
+    # internally by s3fs.  Using a plain dict (rather than a Config object)
+    # keeps the filesystem JSON-serialisable, which zarr requires when it
+    # reconstructs an async filesystem from an S3Map.
     options: dict[str, Any] = {
         "endpoint_url": endpoint_url,
         "secret": secrets["secretKey"],
         "key": secrets["accessKey"],
-        "client_kwargs": client_kwargs,
+        "config_kwargs": {
+            "read_timeout": read_timeout,
+            "connect_timeout": connect_timeout,
+            "retries": {"max_attempts": max_attempts, "mode": "adaptive"},
+        },
     }
-    # Allow callers to override or extend client_kwargs selectively.
-    extra_client_kwargs = kwargs.pop("client_kwargs", {})
-    options["client_kwargs"].update(extra_client_kwargs)
     options.update(kwargs)
     return options
 

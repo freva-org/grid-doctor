@@ -1,7 +1,7 @@
 """Tests for ``grid_doctor.s3``.
 
 Covers:
-- ``get_s3_options``        — credential loading and botocore config injection
+- ``get_s3_options``        — credential loading and S3 timeout configuration
 - ``_with_retry``           — exponential-backoff retry logic
 - ``_inspect_store``        — store introspection and ``WritePlan`` production
 - ``_execute_write_plan``   — two-step write decomposition
@@ -66,10 +66,9 @@ def _healpix_ds(
     )
 
 
-def _pyramid(
-    levels: tuple[int, ...] = (0, 1), n_time: int = 3
-) -> dict[int, xr.Dataset]:
+def _pyramid(levels: tuple[int, ...] = (0, 1), n_time: int = 3) -> dict[int, xr.Dataset]:
     return {level: _healpix_ds(level=level, n_time=n_time) for level in levels}
+
 
 
 def _existing_store_ds(
@@ -136,21 +135,26 @@ def _fs_mock(
 
 class TestGetS3Options:
     def test_returns_endpoint_key_and_secret(self, tmp_path: Path) -> None:
-        opts = get_s3_options("https://s3.example.com", _creds_file(tmp_path))
+        opts = get_s3_options(
+            "https://s3.example.com", _creds_file(tmp_path)
+        )
         assert opts["endpoint_url"] == "https://s3.example.com"
         assert opts["key"] == "AKID"
         assert opts["secret"] == "SECRET"
 
-    def test_client_kwargs_contains_botocore_config(self, tmp_path: Path) -> None:
-        pytest.importorskip("botocore")
+    def test_config_kwargs_are_json_serialisable(self, tmp_path: Path) -> None:
+        """config_kwargs must be a plain dict so fsspec can serialise the
+        filesystem to JSON (required by zarr when reconstructing async stores)."""
+        import json
         opts = get_s3_options("https://s3.example.com", _creds_file(tmp_path))
-        cfg = opts["client_kwargs"]["config"]
-        assert cfg.read_timeout == 300
-        assert cfg.connect_timeout == 90
-        assert cfg.retries == {"max_attempts": 10, "mode": "adaptive"}
+        cfg = opts["config_kwargs"]
+        assert cfg["read_timeout"] == 300
+        assert cfg["connect_timeout"] == 90
+        assert cfg["retries"] == {"max_attempts": 10, "mode": "adaptive"}
+        # Must be JSON-serialisable — no botocore.Config objects
+        json.dumps(cfg)  # raises if not serialisable
 
     def test_custom_timeout_values_forwarded(self, tmp_path: Path) -> None:
-        pytest.importorskip("botocore")
         opts = get_s3_options(
             "https://s3.example.com",
             _creds_file(tmp_path),
@@ -158,10 +162,10 @@ class TestGetS3Options:
             connect_timeout=30,
             max_attempts=3,
         )
-        cfg = opts["client_kwargs"]["config"]
-        assert cfg.read_timeout == 120
-        assert cfg.connect_timeout == 30
-        assert cfg.retries["max_attempts"] == 3
+        cfg = opts["config_kwargs"]
+        assert cfg["read_timeout"] == 120
+        assert cfg["connect_timeout"] == 30
+        assert cfg["retries"]["max_attempts"] == 3
 
     def test_extra_kwargs_merged(self, tmp_path: Path) -> None:
         opts = get_s3_options(
@@ -171,13 +175,6 @@ class TestGetS3Options:
         )
         assert opts["anon"] is False
 
-    def test_extra_client_kwargs_merged(self, tmp_path: Path) -> None:
-        opts = get_s3_options(
-            "https://s3.example.com",
-            _creds_file(tmp_path),
-            client_kwargs={"region_name": "eu-west-1"},
-        )
-        assert opts["client_kwargs"]["region_name"] == "eu-west-1"
 
 
 # ===================================================================
@@ -355,9 +352,7 @@ class TestInspectStore:
 
         chunk_keys = [k for k in checked_keys if "/tas/" in k]
         assert chunk_keys, "No chunk key was checked"
-        assert "." in chunk_keys[-1], (
-            f"Expected dot-separated v2 key, got {chunk_keys[-1]!r}"
-        )
+        assert "." in chunk_keys[-1], f"Expected dot-separated v2 key, got {chunk_keys[-1]!r}"
 
     def test_validate_uses_v3_chunk_key_format(self) -> None:
         """Validate path must use 'c/' prefix for v3 stores."""
@@ -394,6 +389,7 @@ class TestInspectStore:
         assert plan.n_existing_time is None
 
 
+
 class TestChunkKeyHelpers:
     """Unit tests for the chunk-key builder functions."""
 
@@ -407,9 +403,8 @@ class TestChunkKeyHelpers:
         assert _chunk_key_v3("s3://b/l.zarr", "time", [0]) == "s3://b/l.zarr/time/c/0"
 
     def test_v3_two_dims(self) -> None:
-        assert (
-            _chunk_key_v3("s3://b/l.zarr", "tas", [2, 0]) == "s3://b/l.zarr/tas/c/2/0"
-        )
+        assert _chunk_key_v3("s3://b/l.zarr", "tas", [2, 0]) == "s3://b/l.zarr/tas/c/2/0"
+
 
 
 class TestExecuteWritePlan:
@@ -525,17 +520,10 @@ class TestExecuteWritePlan:
             mock.patch.object(xr.Dataset, "to_zarr", _fake_to_zarr),
         ):
             _execute_write_plan(
-                ds,
-                store,
-                plan,
-                zarr_format=2,
-                compute=True,
-                max_retries=0,
-                retry_backoff=0.0,
+                ds, store, plan,
+                zarr_format=2, compute=True, max_retries=0, retry_backoff=0.0,
             )
-        assert sliced_times == [3], (
-            "New variable must be written for existing 3 time steps only"
-        )
+        assert sliced_times == [3], "New variable must be written for existing 3 time steps only"
 
     def test_append_time_only_uses_append_dim(self) -> None:
         ds = _healpix_ds(vars=["tas"], n_time=5)
@@ -575,13 +563,8 @@ class TestExecuteWritePlan:
             mock.patch.object(xr.Dataset, "to_zarr", _fake_to_zarr),
         ):
             _execute_write_plan(
-                ds,
-                store,
-                plan,
-                zarr_format=2,
-                compute=True,
-                max_retries=0,
-                retry_backoff=0.0,
+                ds, store, plan,
+                zarr_format=2, compute=True, max_retries=0, retry_backoff=0.0,
             )
         assert appended_times == [2], "Must append only the 2 new time steps"
 
@@ -621,13 +604,9 @@ class TestExecuteWritePlan:
             mock.patch.object(xr.Dataset, "to_zarr", _fake_to_zarr),
         ):
             _execute_write_plan(
-                ds,
-                store,
-                self._plan(mode="w"),
-                zarr_format=2,
-                compute=True,
-                max_retries=0,
-                retry_backoff=0.0,
+                ds, store, self._plan(mode="w"),
+                zarr_format=2, compute=True,
+                max_retries=0, retry_backoff=0.0,
                 encoding=enc,
             )
         assert calls[0]["encoding"] == enc
@@ -664,9 +643,7 @@ class TestSavePyramidToS3ExplicitModes:
         with mock.patch.object(xr.Dataset, "to_zarr"):
             save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w")
         calls = mock_s3map.call_args_list
-        roots = {
-            call.kwargs.get("root", call.args[0] if call.args else "") for call in calls
-        }
+        roots = {call.kwargs.get("root", call.args[0] if call.args else "") for call in calls}
         assert any("level_2" in r for r in roots)
         assert any("level_3" in r for r in roots)
 
@@ -741,9 +718,7 @@ class TestSavePyramidToS3Auto:
         with (
             mock.patch("grid_doctor.s3.s3fs.S3FileSystem"),
             mock.patch("grid_doctor.s3.s3fs.S3Map") as mock_s3map,
-            mock.patch(
-                "grid_doctor.s3._inspect_store", return_value=plan
-            ) as mock_inspect,
+            mock.patch("grid_doctor.s3._inspect_store", return_value=plan) as mock_inspect,
             mock.patch("grid_doctor.s3._execute_write_plan") as mock_execute,
         ):
             mock_s3map.return_value = mock.MagicMock()
@@ -779,18 +754,13 @@ class TestSavePyramidToS3Auto:
         with (
             mock.patch("grid_doctor.s3.s3fs.S3FileSystem"),
             mock.patch("grid_doctor.s3.s3fs.S3Map") as mock_s3map,
-            mock.patch(
-                "grid_doctor.s3._inspect_store", return_value=plan
-            ) as mock_inspect,
+            mock.patch("grid_doctor.s3._inspect_store", return_value=plan) as mock_inspect,
             mock.patch("grid_doctor.s3._execute_write_plan"),
         ):
             mock_s3map.return_value = mock.MagicMock()
             save_pyramid_to_s3(
-                pyramid,
-                "s3://bucket/test",
-                s3_options={},
-                mode="auto",
-                validate=True,
+                pyramid, "s3://bucket/test", s3_options={},
+                mode="auto", validate=True,
             )
         _, kwargs = mock_inspect.call_args
         assert kwargs.get("validate") is True
@@ -821,5 +791,7 @@ class TestSavePyramidToS3Auto:
             mock.patch.object(xr.Dataset, "to_zarr"),
         ):
             mock_s3map.return_value = mock.MagicMock()
-            save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w")
+            save_pyramid_to_s3(
+                pyramid, "s3://bucket/test", s3_options={}, mode="w"
+            )
         mock_inspect.assert_not_called()
