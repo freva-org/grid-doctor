@@ -43,28 +43,22 @@ WriteMode = Literal["w", "a", "r+", "auto"]
 """Zarr write mode.  ``"auto"`` inspects the existing store and infers the
 correct combination of operations to perform."""
 
-OnDirty = Literal["raise", "overwrite", "skip"]
-"""Policy when an existing store is detected as incomplete or inconsistent.
-
-``"raise"``
-    Abort with a :class:`RuntimeError` (default — prevents silent data loss).
-``"overwrite"``
-    Delete the store and write from scratch.
-``"skip"``
-    Leave the store untouched and move on to the next level.
-"""
-
 
 @dataclass
 class WritePlan:
     """Describes what operations are needed to bring a Zarr store up to date.
 
-    Produced by :func:`~grid_doctor.helpers._inspect_store` and consumed by
-    :func:`~grid_doctor.helpers._execute_write_plan`.
+    Produced by `grid_doctor.s3._inspect_store` and consumed by
+    `grid_doctor.s3._execute_write_plan`.
     """
 
     mode: Literal["w", "a", "r+"]
-    """Base write mode resolved for this store."""
+    """Base write mode resolved for this store.
+
+    ``"w"`` is used for both the "store absent" and "store inconsistent"
+    cases — in the latter, ``_inspect_store`` logs a warning and falls back
+    to a full overwrite.
+    """
 
     new_vars: List[str]
     """Data variables present in the incoming dataset but absent from the store."""
@@ -78,10 +72,6 @@ class WritePlan:
 
     append_time: bool
     """``True`` when the incoming dataset has more time steps than the store."""
-
-    dirty: bool
-    """``True`` when the store exists but its state is inconsistent (missing
-    consolidated metadata or missing expected chunks)."""
 
 
 class ZarrOptions(TypedDict, total=False):

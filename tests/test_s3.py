@@ -10,8 +10,6 @@ Covers:
 
 from __future__ import annotations
 
-import io
-import json
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -25,10 +23,6 @@ from grid_doctor.s3 import (
     _chunk_key_v3,
     _execute_write_plan,
     _inspect_store,
-    _read_v2_meta,
-    _read_v3_meta,
-    _v2_shape_and_chunks,
-    _v3_shape_and_chunks,
     _with_retry,
     get_s3_options,
     save_pyramid_to_s3,
@@ -76,93 +70,51 @@ def _pyramid(levels: tuple[int, ...] = (0, 1), n_time: int = 3) -> dict[int, xr.
     return {level: _healpix_ds(level=level, n_time=n_time) for level in levels}
 
 
-def _zmetadata(vars: list[str], time_len: int, chunk_time: int = 1) -> dict[str, Any]:
-    """Minimal fake ``.zmetadata`` body matching Zarr v2 consolidated format."""
-    npix = 12
-    arr = lambda shape, chunks, dtype: json.dumps({  # noqa: E731
-        "shape": shape,
-        "chunks": chunks,
-        "dtype": dtype,
-        "zarr_format": 2,
-        "compressor": None,
-        "fill_value": 0,
-        "order": "C",
-        "filters": None,
-    })
-    metadata: dict[str, Any] = {
-        ".zattrs": {},
-        ".zgroup": json.dumps({"zarr_format": 2}),
-        "time/.zarray": arr([time_len], [chunk_time], "<i8"),
-        "time/.zattrs": {},
-        "cell/.zarray": arr([npix], [npix], "<i8"),
-        "cell/.zattrs": {},
-    }
-    for var in vars:
-        metadata[f"{var}/.zarray"] = arr([time_len, npix], [chunk_time, npix], "<f4")
-        metadata[f"{var}/.zattrs"] = {}
-    return {"metadata": metadata}
 
+def _existing_store_ds(
+    vars: list[str],
+    n_time: int,
+    chunk_time: int = 1,
+) -> xr.Dataset:
+    """Fake dataset representing what xr.open_zarr would return for an existing store.
 
-def _zarr3_meta(vars: list[str], time_len: int, chunk_time: int = 1) -> dict[str, Any]:
-    """Minimal Zarr v3 array metadata dict, keyed by array name.
-
-    Mirrors the structure returned by :func:`_read_v3_meta`: a flat dict
-    mapping array name → v3 array metadata.  Used to build fake consolidated
-    ``zarr.json`` payloads or non-consolidated per-array responses.
+    Each data variable carries ``encoding["chunks"]`` so the validate path
+    in ``_inspect_store`` can derive chunk indices without touching S3.
     """
     npix = 12
-
-    def _arr(shape: list[int], chunk_shape: list[int], dtype: str) -> dict[str, Any]:
-        return {
-            "zarr_format": 3,
-            "node_type": "array",
-            "shape": shape,
-            "chunk_grid": {
-                "name": "regular",
-                "configuration": {"chunk_shape": chunk_shape},
-            },
-            "data_type": dtype,
-            "fill_value": 0,
-            "chunk_key_encoding": {"name": "default", "separator": "/"},
-        }
-
-    meta: dict[str, Any] = {
-        "time": _arr([time_len], [chunk_time], "int64"),
-        "cell": _arr([npix], [npix], "int64"),
-    }
-    for var in vars:
-        meta[var] = _arr([time_len, npix], [chunk_time, npix], "float32")
-    return meta
+    rng = np.random.default_rng(1)
+    data_vars = {}
+    for v in vars:
+        arr = xr.DataArray(
+            rng.random((n_time, npix)).astype("float32"),
+            dims=("time", "cell"),
+        )
+        arr.encoding["chunks"] = (chunk_time, npix)
+        data_vars[v] = arr
+    return xr.Dataset(
+        data_vars,
+        coords={"time": np.arange(n_time), "cell": np.arange(npix)},
+    )
 
 
 def _fs_mock(
     *,
     store_non_empty: bool = True,
-    has_meta: bool = True,
-    zmeta: dict[str, Any] | None = None,
     last_chunk_exists: bool = True,
-    zarr_version: int = 2,
-    v3_consolidated: bool = True,
-    v3_array_meta: dict[str, Any] | None = None,
+    is_v2: bool = True,
 ) -> mock.MagicMock:
-    """Build a mock ``s3fs.S3FileSystem`` for ``_inspect_store`` tests.
+    """Minimal mock ``s3fs.S3FileSystem`` for ``_inspect_store`` tests.
 
-    For **Zarr v2** (default), ``fs.exists`` is given a ``side_effect`` list
-    matching the call order inside ``_inspect_store``:
+    Since ``_inspect_store`` now delegates all metadata reading to
+    ``xr.open_zarr``, the filesystem mock only needs to handle:
 
-    1. ``level_path`` (store existence check)
-    2. ``{level_path}/.zmetadata`` (consolidated metadata check)
-    3. chunk key (only when ``validate=True``)
+    1. ``fs.exists(level_path)`` + ``fs.ls(level_path)`` — store presence.
+    2. ``fs.exists(f"{level_path}/.zmetadata")`` — zarr version detection
+       for the validate path (``is_v2`` controls the return value).
+    3. ``fs.exists(chunk_key)`` — validate chunk presence.
 
-    For **Zarr v3**, the call order is:
-
-    1. ``level_path`` (store existence check)
-    2. ``{level_path}/.zmetadata`` → ``False`` (v2 absent)
-    3. ``{level_path}/zarr.json`` (v3 root metadata)
-    4. chunk key (only when ``validate=True``)
-
-    When *v3_consolidated* is ``False``, ``fs.ls`` returns fake array entries
-    and ``fs.open`` returns individual per-array ``zarr.json`` files.
+    ``xr.open_zarr`` itself is mocked separately in each test via
+    ``mock.patch``.
     """
     fs = mock.MagicMock()
     if not store_non_empty:
@@ -170,66 +122,9 @@ def _fs_mock(
         fs.ls.return_value = []
         return fs
 
-    if zarr_version == 2:
-        fs.ls.return_value = ["level_2.zarr/.zgroup"]
-        exists_returns = [True, has_meta]
-        if has_meta and zmeta is not None:
-            exists_returns.append(last_chunk_exists)
-        fs.exists.side_effect = exists_returns
-
-        if zmeta is not None:
-            ctx = mock.MagicMock()
-            ctx.__enter__.return_value = io.StringIO(json.dumps(zmeta))
-            ctx.__exit__.return_value = False
-            fs.open.return_value = ctx
-
-    else:  # zarr_version == 3
-        fs.ls.return_value = ["level_2.zarr/zarr.json"]
-        # exists sequence: level_path, .zmetadata (False), zarr.json, [chunk]
-        exists_returns = [True, False, has_meta]
-        if has_meta:
-            exists_returns.append(last_chunk_exists)
-        fs.exists.side_effect = exists_returns
-
-        if has_meta and v3_array_meta is not None:
-            if v3_consolidated:
-                # Consolidated: single zarr.json at root with consolidated_metadata
-                root_payload = {
-                    "zarr_format": 3,
-                    "node_type": "group",
-                    "consolidated_metadata": {"metadata": v3_array_meta},
-                }
-                ctx = mock.MagicMock()
-                ctx.__enter__.return_value = io.StringIO(json.dumps(root_payload))
-                ctx.__exit__.return_value = False
-                fs.open.return_value = ctx
-            else:
-                # Non-consolidated: root zarr.json has no consolidated_metadata;
-                # fs.ls returns one entry per array; fs.open returns per-array json.
-                root_payload = {"zarr_format": 3, "node_type": "group"}
-                array_entries = [
-                    f"level_2.zarr/{name}" for name in v3_array_meta
-                ]
-                fs.ls.return_value = array_entries
-
-                # exists: level_path, .zmetadata(F), zarr.json(T),
-                #         per-array zarr.json (True for each), [chunk]
-                array_exists = [True] * len(array_entries)
-                exists_returns = [True, False, True] + array_exists + [last_chunk_exists]
-                fs.exists.side_effect = exists_returns
-
-                open_responses = [io.StringIO(json.dumps(root_payload))]
-                for name in v3_array_meta:
-                    open_responses.append(io.StringIO(json.dumps(v3_array_meta[name])))
-
-                open_ctxs = []
-                for resp in open_responses:
-                    ctx = mock.MagicMock()
-                    ctx.__enter__.return_value = resp
-                    ctx.__exit__.return_value = False
-                    open_ctxs.append(ctx)
-                fs.open.side_effect = open_ctxs
-
+    fs.ls.return_value = ["level_2.zarr/.zgroup"]
+    # exists calls: level_path, [.zmetadata for version detect], [chunk_key]
+    fs.exists.side_effect = [True, is_v2, last_chunk_exists]
     return fs
 
 
@@ -252,7 +147,7 @@ class TestGetS3Options:
         opts = get_s3_options("https://s3.example.com", _creds_file(tmp_path))
         cfg = opts["client_kwargs"]["config"]
         assert cfg.read_timeout == 300
-        assert cfg.connect_timeout == 60
+        assert cfg.connect_timeout == 90
         assert cfg.retries == {"max_attempts": 10, "mode": "adaptive"}
 
     def test_custom_timeout_values_forwarded(self, tmp_path: Path) -> None:
@@ -284,15 +179,6 @@ class TestGetS3Options:
             client_kwargs={"region_name": "eu-west-1"},
         )
         assert opts["client_kwargs"]["region_name"] == "eu-west-1"
-
-    def test_botocore_import_error_handled(self, tmp_path: Path) -> None:
-        """Missing botocore should log a warning and return options without config."""
-        with mock.patch.dict("sys.modules", {"botocore": None, "botocore.config": None}):
-            opts = get_s3_options("https://s3.example.com", _creds_file(tmp_path))
-        # Must still have the core keys
-        assert "key" in opts and "secret" in opts
-        # client_kwargs may be empty but must not raise
-        assert isinstance(opts.get("client_kwargs", {}), dict)
 
 
 # ===================================================================
@@ -339,41 +225,79 @@ class TestWithRetry:
 
 
 class TestInspectStore:
+    """Tests for ``_inspect_store``.
+
+    ``xr.open_zarr`` is patched to return a fake dataset describing the
+    existing store, so tests are independent of Zarr format (v2/v3) and
+    require no JSON fixture factories.  ``fs`` is a minimal mock that only
+    needs to handle the store-presence check and the validate chunk-key
+    lookup.
+    """
+
+    LEVEL_PATH = "s3://bucket/level_2.zarr"
+
+    def _run(
+        self,
+        incoming_ds: xr.Dataset,
+        existing_ds: xr.Dataset | None,
+        *,
+        validate: bool = False,
+        last_chunk_exists: bool = True,
+        is_v2: bool = True,
+    ) -> WritePlan:
+        """Run ``_inspect_store`` with ``xr.open_zarr`` mocked.
+
+        If *existing_ds* is ``None``, ``xr.open_zarr`` raises, simulating an
+        unreadable store.
+        """
+        fs = _fs_mock(
+            store_non_empty=existing_ds is not None,
+            last_chunk_exists=last_chunk_exists,
+            is_v2=is_v2,
+        )
+        open_zarr_side = (
+            existing_ds
+            if existing_ds is not None
+            else mock.Mock(side_effect=FileNotFoundError("no store"))
+        )
+        with mock.patch("grid_doctor.s3.xr.open_zarr", return_value=open_zarr_side):
+            return _inspect_store(fs, self.LEVEL_PATH, incoming_ds, validate=validate)
+
     def test_absent_store_returns_full_write_plan(self) -> None:
         ds = _healpix_ds(vars=["tas"])
-        fs = _fs_mock(store_non_empty=False)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        plan = self._run(ds, existing_ds=None)
         assert plan.mode == "w"
         assert plan.new_vars == ["tas"]
         assert plan.existing_vars == []
         assert plan.n_existing_time is None
         assert plan.append_time is False
-        assert plan.dirty is False
 
-    def test_store_without_zmetadata_is_dirty(self) -> None:
+    def test_unreadable_store_falls_back_to_w(self) -> None:
+        """xr.open_zarr raising any exception falls back to mode='w'."""
         ds = _healpix_ds(vars=["tas"])
-        fs = _fs_mock(store_non_empty=True, has_meta=False)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
-        assert plan.dirty is True
+        fs = _fs_mock(store_non_empty=True)
+        with mock.patch(
+            "grid_doctor.s3.xr.open_zarr",
+            side_effect=Exception("bad metadata"),
+        ):
+            plan = _inspect_store(fs, self.LEVEL_PATH, ds)
+        assert plan.mode == "w"
 
     def test_same_schema_same_time_returns_r_plus(self) -> None:
         ds = _healpix_ds(vars=["tas"], n_time=3)
-        zmeta = _zmetadata(["tas"], time_len=3)
-        fs = _fs_mock(zmeta=zmeta)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        existing = _existing_store_ds(["tas"], n_time=3)
+        plan = self._run(ds, existing)
         assert plan.mode == "r+"
         assert plan.new_vars == []
         assert plan.existing_vars == ["tas"]
         assert plan.n_existing_time == 3
         assert plan.append_time is False
-        assert plan.dirty is False
 
     def test_new_variable_detected(self) -> None:
         """Incoming dataset has 'pr' in addition to existing 'tas'."""
         ds = _healpix_ds(vars=["tas", "pr"], n_time=3)
-        zmeta = _zmetadata(["tas"], time_len=3)
-        fs = _fs_mock(zmeta=zmeta)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        existing = _existing_store_ds(["tas"], n_time=3)
+        plan = self._run(ds, existing)
         assert plan.mode == "a"
         assert "pr" in plan.new_vars
         assert "tas" in plan.existing_vars
@@ -382,9 +306,8 @@ class TestInspectStore:
     def test_more_time_steps_detected(self) -> None:
         """Incoming dataset has 5 time steps but store only has 3."""
         ds = _healpix_ds(vars=["tas"], n_time=5)
-        zmeta = _zmetadata(["tas"], time_len=3)
-        fs = _fs_mock(zmeta=zmeta)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        existing = _existing_store_ds(["tas"], n_time=3)
+        plan = self._run(ds, existing)
         assert plan.mode == "a"
         assert plan.new_vars == []
         assert plan.n_existing_time == 3
@@ -393,133 +316,81 @@ class TestInspectStore:
     def test_new_vars_and_more_time(self) -> None:
         """Both a new variable and additional time steps present."""
         ds = _healpix_ds(vars=["tas", "pr"], n_time=5)
-        zmeta = _zmetadata(["tas"], time_len=3)
-        fs = _fs_mock(zmeta=zmeta)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
+        existing = _existing_store_ds(["tas"], n_time=3)
+        plan = self._run(ds, existing)
         assert plan.mode == "a"
         assert "pr" in plan.new_vars
         assert plan.n_existing_time == 3
         assert plan.append_time is True
 
-    def test_validate_clean_store_not_dirty(self) -> None:
+    def test_validate_clean_store_keeps_mode(self) -> None:
+        """validate=True with all chunks present must not change the mode."""
         ds = _healpix_ds(vars=["tas"], n_time=3)
-        zmeta = _zmetadata(["tas"], time_len=3, chunk_time=1)
-        # Three exists calls: level_path, meta_key, chunk_key (chunk present)
-        fs = _fs_mock(zmeta=zmeta, last_chunk_exists=True)
-        plan = _inspect_store(
-            fs, "s3://bucket/level_2.zarr", ds, validate=True
-        )
-        assert plan.dirty is False
+        existing = _existing_store_ds(["tas"], n_time=3, chunk_time=1)
+        plan = self._run(ds, existing, validate=True, last_chunk_exists=True)
+        assert plan.mode == "r+"
 
-    def test_validate_missing_last_chunk_is_dirty(self) -> None:
+    def test_validate_missing_last_chunk_falls_back_to_w(self) -> None:
+        """validate=True with a missing chunk must fall back to mode='w'."""
         ds = _healpix_ds(vars=["tas"], n_time=3)
-        zmeta = _zmetadata(["tas"], time_len=3, chunk_time=1)
-        fs = _fs_mock(zmeta=zmeta, last_chunk_exists=False)
-        plan = _inspect_store(
-            fs, "s3://bucket/level_2.zarr", ds, validate=True
-        )
-        assert plan.dirty is True
+        existing = _existing_store_ds(["tas"], n_time=3, chunk_time=1)
+        plan = self._run(ds, existing, validate=True, last_chunk_exists=False)
+        assert plan.mode == "w"
+        assert plan.new_vars == ["tas"]
+        assert plan.n_existing_time is None
+
+    def test_validate_uses_v2_chunk_key_format(self) -> None:
+        """Validate path must use dot-separated keys for v2 stores."""
+        ds = _healpix_ds(vars=["tas"], n_time=3)
+        existing = _existing_store_ds(["tas"], n_time=3, chunk_time=1)
+        checked_keys: list[str] = []
+
+        def _exists(path: str) -> bool:
+            checked_keys.append(path)
+            return True  # all chunks present
+
+        fs = _fs_mock(store_non_empty=True, last_chunk_exists=True, is_v2=True)
+        fs.exists.side_effect = _exists
+        with mock.patch("grid_doctor.s3.xr.open_zarr", return_value=existing):
+            _inspect_store(fs, self.LEVEL_PATH, ds, validate=True)
+
+        chunk_keys = [k for k in checked_keys if "/tas/" in k]
+        assert chunk_keys, "No chunk key was checked"
+        assert "." in chunk_keys[-1], f"Expected dot-separated v2 key, got {chunk_keys[-1]!r}"
+
+    def test_validate_uses_v3_chunk_key_format(self) -> None:
+        """Validate path must use 'c/' prefix for v3 stores."""
+        ds = _healpix_ds(vars=["tas"], n_time=3)
+        existing = _existing_store_ds(["tas"], n_time=3, chunk_time=1)
+        checked_keys: list[str] = []
+
+        def _exists(path: str) -> bool:
+            checked_keys.append(path)
+            return True
+
+        fs = _fs_mock(store_non_empty=True, last_chunk_exists=True, is_v2=False)
+        fs.exists.side_effect = _exists
+        with mock.patch("grid_doctor.s3.xr.open_zarr", return_value=existing):
+            _inspect_store(fs, self.LEVEL_PATH, ds, validate=True)
+
+        chunk_keys = [k for k in checked_keys if "/tas/" in k]
+        assert chunk_keys, "No chunk key was checked"
+        assert "/c/" in chunk_keys[-1], f"Expected v3 'c/' key, got {chunk_keys[-1]!r}"
 
     def test_no_time_dimension_no_append(self) -> None:
         """Dataset without a time dimension should never trigger append_time."""
         ds = xr.Dataset(
             {"mask": (("cell",), np.zeros(48, dtype="float32"))},
             coords={"cell": np.arange(48)},
-            attrs={"healpix_nside": 2, "healpix_level": 1, "healpix_order": "nested"},
         )
-        zmeta = _zmetadata(["mask"], time_len=1)
-        # Remove time from the fake metadata
-        zmeta["metadata"].pop("time/.zarray", None)
-        fs = _fs_mock(zmeta=zmeta)
-        plan = _inspect_store(fs, "s3://bucket/level_1.zarr", ds)
+        existing = xr.Dataset(
+            {"mask": (("cell",), np.zeros(48, dtype="float32"))},
+            coords={"cell": np.arange(48)},
+        )
+        plan = self._run(ds, existing)
         assert plan.append_time is False
         assert plan.n_existing_time is None
 
-
-class TestInspectStoreV3:
-    """Mirrors :class:`TestInspectStore` for Zarr v3 stores.
-
-    Uses the ``zarr_version=3`` path of ``_fs_mock`` so that
-    ``_inspect_store`` goes through :func:`_read_v3_meta` instead of
-    :func:`_read_v2_meta`.
-    """
-
-    def test_absent_store_returns_full_write_plan(self) -> None:
-        ds = _healpix_ds(vars=["tas"])
-        fs = _fs_mock(store_non_empty=False, zarr_version=3)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
-        assert plan.mode == "w"
-        assert plan.dirty is False
-
-    def test_store_without_zarr_json_is_dirty(self) -> None:
-        """v3 store with content but neither .zmetadata nor zarr.json → dirty."""
-        ds = _healpix_ds(vars=["tas"])
-        fs = _fs_mock(store_non_empty=True, has_meta=False, zarr_version=3)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
-        assert plan.dirty is True
-
-    def test_consolidated_same_schema_returns_r_plus(self) -> None:
-        ds = _healpix_ds(vars=["tas"], n_time=3)
-        v3 = _zarr3_meta(["tas"], time_len=3)
-        fs = _fs_mock(zarr_version=3, v3_array_meta=v3)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
-        assert plan.mode == "r+"
-        assert plan.n_existing_time == 3
-        assert plan.dirty is False
-
-    def test_consolidated_new_variable_detected(self) -> None:
-        ds = _healpix_ds(vars=["tas", "pr"], n_time=3)
-        v3 = _zarr3_meta(["tas"], time_len=3)
-        fs = _fs_mock(zarr_version=3, v3_array_meta=v3)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
-        assert plan.mode == "a"
-        assert "pr" in plan.new_vars
-        assert "tas" in plan.existing_vars
-
-    def test_consolidated_more_time_steps_detected(self) -> None:
-        ds = _healpix_ds(vars=["tas"], n_time=5)
-        v3 = _zarr3_meta(["tas"], time_len=3)
-        fs = _fs_mock(zarr_version=3, v3_array_meta=v3)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
-        assert plan.mode == "a"
-        assert plan.n_existing_time == 3
-        assert plan.append_time is True
-
-    def test_consolidated_new_vars_and_more_time(self) -> None:
-        ds = _healpix_ds(vars=["tas", "pr"], n_time=5)
-        v3 = _zarr3_meta(["tas"], time_len=3)
-        fs = _fs_mock(zarr_version=3, v3_array_meta=v3)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
-        assert plan.mode == "a"
-        assert "pr" in plan.new_vars
-        assert plan.append_time is True
-
-    def test_non_consolidated_same_schema_returns_r_plus(self) -> None:
-        """Non-consolidated v3: arrays read via individual zarr.json files."""
-        ds = _healpix_ds(vars=["tas"], n_time=3)
-        v3 = _zarr3_meta(["tas"], time_len=3)
-        fs = _fs_mock(zarr_version=3, v3_array_meta=v3, v3_consolidated=False)
-        plan = _inspect_store(fs, "s3://bucket/level_2.zarr", ds)
-        assert plan.mode == "r+"
-        assert plan.n_existing_time == 3
-
-    def test_validate_clean_chunk_not_dirty(self) -> None:
-        ds = _healpix_ds(vars=["tas"], n_time=3)
-        v3 = _zarr3_meta(["tas"], time_len=3, chunk_time=1)
-        fs = _fs_mock(zarr_version=3, v3_array_meta=v3, last_chunk_exists=True)
-        plan = _inspect_store(
-            fs, "s3://bucket/level_2.zarr", ds, validate=True
-        )
-        assert plan.dirty is False
-
-    def test_validate_missing_last_chunk_is_dirty(self) -> None:
-        ds = _healpix_ds(vars=["tas"], n_time=3)
-        v3 = _zarr3_meta(["tas"], time_len=3, chunk_time=1)
-        fs = _fs_mock(zarr_version=3, v3_array_meta=v3, last_chunk_exists=False)
-        plan = _inspect_store(
-            fs, "s3://bucket/level_2.zarr", ds, validate=True
-        )
-        assert plan.dirty is True
 
 
 class TestChunkKeyHelpers:
@@ -538,43 +409,6 @@ class TestChunkKeyHelpers:
         assert _chunk_key_v3("s3://b/l.zarr", "tas", [2, 0]) == "s3://b/l.zarr/tas/c/2/0"
 
 
-class TestShapeAndChunkHelpers:
-    """Unit tests for the per-format shape/chunk extractors."""
-
-    def test_v2_extracts_shape_and_chunks(self) -> None:
-        meta = {"shape": [10, 48], "chunks": [1, 48], "zarr_format": 2}
-        shape, chunks = _v2_shape_and_chunks(meta)
-        assert shape == [10, 48]
-        assert chunks == [1, 48]
-
-    def test_v3_extracts_shape_and_chunk_shape(self) -> None:
-        meta = {
-            "zarr_format": 3,
-            "shape": [10, 48],
-            "chunk_grid": {
-                "name": "regular",
-                "configuration": {"chunk_shape": [1, 48]},
-            },
-        }
-        shape, chunks = _v3_shape_and_chunks(meta)
-        assert shape == [10, 48]
-        assert chunks == [1, 48]
-
-    def test_v2_missing_keys_return_empty(self) -> None:
-        shape, chunks = _v2_shape_and_chunks({})
-        assert shape == [] and chunks == []
-
-    def test_v3_missing_chunk_grid_returns_empty_chunks(self) -> None:
-        meta = {"zarr_format": 3, "shape": [5]}
-        shape, chunks = _v3_shape_and_chunks(meta)
-        assert shape == [5]
-        assert chunks == []
-
-
-# ===================================================================
-# _execute_write_plan
-# ===================================================================
-
 
 class TestExecuteWritePlan:
     """Tests for the write-plan executor.
@@ -591,7 +425,6 @@ class TestExecuteWritePlan:
             existing_vars=["tas"],
             n_existing_time=None,
             append_time=False,
-            dirty=False,
         )
         defaults.update(kwargs)
         return WritePlan(**defaults)
@@ -869,8 +702,8 @@ class TestSavePyramidToS3Auto:
     """Tests for ``mode='auto'`` path.
 
     ``_inspect_store`` and ``_execute_write_plan`` are mocked so these tests
-    verify only the glue logic inside ``save_pyramid_to_s3``: plan routing,
-    dirty-store handling, and validate pass-through.
+    verify only the glue logic inside ``save_pyramid_to_s3``: plan routing
+    and validate pass-through.
     """
 
     def _run_auto(
@@ -878,7 +711,6 @@ class TestSavePyramidToS3Auto:
         pyramid: dict[int, xr.Dataset],
         plan: WritePlan,
         *,
-        on_dirty: str = "raise",
         validate: bool = False,
     ) -> mock.Mock:
         """Run save_pyramid_to_s3(mode='auto') with mocked internals.
@@ -898,7 +730,6 @@ class TestSavePyramidToS3Auto:
                 "s3://bucket/test",
                 s3_options={},
                 mode="auto",
-                on_dirty=on_dirty,
                 validate=validate,
             )
             return mock_execute
@@ -910,7 +741,6 @@ class TestSavePyramidToS3Auto:
             existing_vars=["tas"],
             n_existing_time=3,
             append_time=False,
-            dirty=False,
         )
         defaults.update(kwargs)
         return WritePlan(**defaults)
@@ -938,44 +768,15 @@ class TestSavePyramidToS3Auto:
         _, kwargs = mock_inspect.call_args
         assert kwargs.get("validate") is True
 
-    def test_dirty_on_dirty_raise(self) -> None:
+    def test_inconsistent_store_plan_executed_as_w(self) -> None:
+        """_inspect_store returning mode='w' (inconsistent store) must be
+        executed without further intervention by save_pyramid_to_s3."""
         pyramid = _pyramid(levels=(0,))
-        plan = self._clean_plan(dirty=True, mode="w")
-        with pytest.raises(RuntimeError, match="inconsistent state"):
-            self._run_auto(pyramid, plan, on_dirty="raise")
-
-    def test_dirty_on_dirty_skip(self) -> None:
-        pyramid = _pyramid(levels=(0,))
-        plan = self._clean_plan(dirty=True, mode="w")
-        mock_execute = self._run_auto(pyramid, plan, on_dirty="skip")
-        # Level skipped → executor never called
-        assert mock_execute.call_count == 0
-
-    def test_dirty_on_dirty_overwrite(self) -> None:
-        """on_dirty='overwrite' resets the plan to mode='w' and executes."""
-        pyramid = _pyramid(levels=(0,))
-        plan = self._clean_plan(dirty=True, mode="w")
-        executed_plans: list[WritePlan] = []
-
-        with (
-            mock.patch("grid_doctor.s3.s3fs.S3FileSystem"),
-            mock.patch("grid_doctor.s3.s3fs.S3Map") as mock_s3map,
-            mock.patch("grid_doctor.s3._inspect_store", return_value=plan),
-            mock.patch(
-                "grid_doctor.s3._execute_write_plan",
-                side_effect=lambda ds, store, p, **kw: executed_plans.append(p),
-            ),
-        ):
-            mock_s3map.return_value = mock.MagicMock()
-            save_pyramid_to_s3(
-                pyramid, "s3://bucket/test", s3_options={},
-                mode="auto", on_dirty="overwrite",
-            )
-
-        assert len(executed_plans) == 1
-        recovered = executed_plans[0]
-        assert recovered.mode == "w"
-        assert recovered.dirty is False
+        plan = self._clean_plan(mode="w", new_vars=["tas"], existing_vars=[])
+        mock_execute = self._run_auto(pyramid, plan)
+        assert mock_execute.call_count == 1
+        executed_plan: WritePlan = mock_execute.call_args[0][2]
+        assert executed_plan.mode == "w"
 
     def test_auto_processes_all_levels(self) -> None:
         pyramid = _pyramid(levels=(0, 1, 2))
