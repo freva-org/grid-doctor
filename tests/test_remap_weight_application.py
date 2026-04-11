@@ -16,8 +16,8 @@ from grid_doctor.remap import (
     apply_weight_file,
     compute_healpix_weights,
 )
-from .helpers import _FakeHealpixModule
 
+from .helpers import _FakeHealpixModule
 
 # ===================================================================
 # Fake ESMPy objects for in-memory weight generation

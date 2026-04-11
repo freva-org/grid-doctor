@@ -11,6 +11,9 @@ import xarray as xr
 
 from grid_doctor import helpers
 from grid_doctor.helpers import (
+    save_pyramid_to_s3,  # re-exported from grid_doctor.s3 for backward compat
+)
+from grid_doctor.helpers import (
     _coarsen_array,
     _coarsen_array_mode,
     _get_latlon_arrays,
@@ -21,7 +24,6 @@ from grid_doctor.helpers import (
     get_latlon_resolution,
     latlon_to_healpix_pyramid,
     resolution_to_healpix_level,
-    save_pyramid_to_s3,  # re-exported from grid_doctor.s3 for backward compat
 )
 
 

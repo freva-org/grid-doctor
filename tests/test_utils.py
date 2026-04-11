@@ -15,8 +15,8 @@ from grid_doctor.utils import (
     cache_dir,
     cached_open_dataset,
     cached_weights,
-    get_s3_options,
     chunk_for_target_store_size,
+    get_s3_options,
 )
 
 
