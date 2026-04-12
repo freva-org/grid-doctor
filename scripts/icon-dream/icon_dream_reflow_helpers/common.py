@@ -103,7 +103,7 @@ def build_paths(run_dir: str | Path) -> dict[str, Path]:
         "run_dir": root,
         "plan_path": root / "plan.json",
         "grid_path": root / "shared" / "ICON-DREAM-Global_grid.nc",
-        "weights_path": root / "shared" / "healpix-weights.nc",
+        "weights_path": Path("/work/ks1387/healpix-weights"),
         "temp_root": root / "temp-healpix",
         "raw_root": root / "raw-input",
     }
@@ -256,7 +256,7 @@ def open_existing_target(
 
 def target_root(bucket: str, frequency: str) -> str:
     """Return the S3 root for a given bucket and frequency."""
-    return f"{bucket.rstrip('/')}/healpix/icon-dream-global/{frequency}"
+    return f"{bucket.rstrip('/')}/healpix/reanalysis/icon-dream-global/icon/{frequency}"
 
 
 def load_existing_target_info(
