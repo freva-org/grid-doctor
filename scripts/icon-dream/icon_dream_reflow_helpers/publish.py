@@ -263,18 +263,20 @@ def finalize_outputs(
 
     level = worker_results["level"]
     chunks = chunk_for_target_store_size(level=level)
+    print(f"Working on {worker_results['level_paths']}")
     candidate = xr.open_mfdataset(
-        worker_results["level_paths"],
+        sorted(worker_results["level_paths"]),
         preprocess=drop_surface_coords,
         combine="nested",
         concat_dim="time",
         chunks=chunks,
-        parallel=True,
+        parallel=False,
         data_vars="minimal",
         coords="minimal",
         compat="override",
         join="override",  # only if non-time dims really match
         combine_attrs="override",
+        engine="h5netcdf",
     ).sortby("time")
     candidate = candidate.drop_duplicates(dim="time", keep="first")
     return merge_level_dataset(
