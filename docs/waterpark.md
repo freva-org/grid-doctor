@@ -15,14 +15,14 @@ visualisation without per-dataset regridding at access time.
 
 | Dataset | Public Bucket | Data Access via |
 |---------|---------------|-----------------|
-| [CMIP6](https://wcrp-cmip.org/cmip-phase-6-cmip6)   | <https://eu-dkrz-3.dkrz.cloud/browser/cmip6> | `https://s3.eu-dkrz-3.dkrz.cloud/cimp6` |
+| [CMIP6](https://wcrp-cmip.org/cmip-phase-6-cmip6)   | <https://eu-dkrz-3.dkrz.cloud/browser/cmip6> | `https://s3.eu-dkrz-3.dkrz.cloud/cmip6` |
 | [DYAMOND](https://easy.gems.dkrz.de/DYAMOND/index.html)   | <https://eu-dkrz-3.dkrz.cloud/browser/dyamond> | `https://s3.eu-dkrz-3.dkrz.cloud/dyamond` |
 | [EERIE](https://dataviewer.eerie-project.eu/home/eddy-rich)   | <https://eu-dkrz-3.dkrz.cloud/browser/eerie> | `https://s3.eu-dkrz-3.dkrz.cloud/eerie` |
 | [ERA5](https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5)   | <https://eu-dkrz-3.dkrz.cloud/browser/era5> | `https://s3.eu-dkrz-3.dkrz.cloud/era5 `|
 | [ICDC](https://www.cen.uni-hamburg.de/en/icdc)   | <https://eu-dkrz-3.dkrz.cloud/browser/icdc> | `https://s3.eu-dkrz-3.dkrz.cloud/icdc` |
 | [ICON-DREAM](https://opendata.dwd.de/climate_environment/CDC/help/landing_pages/doi_landingpage_ICON-DREAM_v1-en.html)   | <https://eu-dkrz-3.dkrz.cloud/browser/icon-dream> | `https://s3.eu-dkrz-3.dkrz.cloud/icon-dream` |
 | [nextGEMS](https://nextgems-h2020.eu)   | <https://eu-dkrz-3.dkrz.cloud/browser/nextgems> | `https://s3.eu-dkrz-3.dkrz.cloud/nextgems` |
-| [ORCESTRA](https://orcestra-campaign.org/data.html)   | <https://eu-dkrz-3.dkrz.cloud/browser/orchestra> | `https://s3.eu-dkrz-3.dkrz.cloud/orchsestra`|
+| [ORCESTRA](https://orcestra-campaign.org/data.html)   | <https://eu-dkrz-3.dkrz.cloud/browser/orchestra> | `https://s3.eu-dkrz-3.dkrz.cloud/orchestra`|
 
 !!! note
     To browse the available datasets use the links in the Public Bucket columns,
