@@ -21,6 +21,8 @@ At runtime::
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Union, cast
 
 #: Verbosity ladder from least to most verbose.
@@ -43,6 +45,8 @@ _DEFAULT_DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 def _apply_level(level: int) -> None:
     """Set *level* on the root logger and every existing logger."""
     logging.root.setLevel(level)
+    for hdl in logging.root.handlers:
+        hdl.setLevel(level)
     for lgr in logging.Logger.manager.loggerDict.values():
         if isinstance(lgr, logging.Logger):
             lgr.setLevel(level)
@@ -78,9 +82,7 @@ def set_level(level: Union[int, str]) -> None:
     try:
         _current_index = _LEVELS.index(level)
     except ValueError:
-        _current_index = min(
-            range(len(_LEVELS)), key=lambda i: abs(_LEVELS[i] - level)
-        )
+        _current_index = min(range(len(_LEVELS)), key=lambda i: abs(_LEVELS[i] - level))
     _apply_level(_LEVELS[_current_index])
 
 
@@ -139,6 +141,7 @@ def setup_logging(
     level: Union[int, str, None] = None,
     fmt: str = _DEFAULT_FORMAT,
     datefmt: str = _DEFAULT_DATE_FORMAT,
+    log_dir: Path | str | None = None,
 ) -> None:
     """Configure the root handler and set the global log level.
 
@@ -155,10 +158,30 @@ def setup_logging(
         :mod:`logging` format string.
     datefmt : str, optional
         Date format string.
+    log_dir: str, pathlib.Path or None, optional
+        Directory of log files, if any.
     """
+    base_name = "grid-doctor.log"
+    log_format = logging.Formatter(fmt, datefmt=datefmt)
+    file_handle: RotatingFileHandler | None = None
+    if log_dir:
+        log_dir = Path(log_dir).expanduser().absolute()
+        log_dir.mkdir(exist_ok=True, parents=True)
+        file_handle = RotatingFileHandler(
+            log_dir / base_name,
+            mode="a",
+            maxBytes=5 * 1024**2,
+            backupCount=5,
+            encoding="utf-8",
+            delay=False,
+        )
+        file_handle.setFormatter(log_format)
+        file_handle.setLevel(level or _LEVELS[_DEFAULT_INDEX])
+        logging.root.addHandler(file_handle)
+
     if not logging.root.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
+        handler.setFormatter(log_format)
         logging.root.addHandler(handler)
 
     if level is not None:

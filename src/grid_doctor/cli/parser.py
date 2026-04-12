@@ -52,6 +52,9 @@ def get_parser(name: str, description: str | None = None) -> argparse.ArgumentPa
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
+        "--log-dir", type=Path, help="Log output to this directory.", default=None
+    )
+    group.add_argument(
         "-v",
         "--verbose",
         action="count",
@@ -74,4 +77,4 @@ def setup_logging_from_args(args: argparse.Namespace, **kwargs: Any) -> None:
     """
     import grid_doctor as gd
 
-    gd.setup_logging(verbosity=args.verbose, **kwargs)
+    gd.setup_logging(verbosity=args.verbose, log_dir=args.log_dir or None, **kwargs)
