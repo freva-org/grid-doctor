@@ -5,10 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from unittest import mock
-
-import numpy as np
+from tempfile import TemporaryDirectory
 import pytest
-import xarray as xr
 
 from grid_doctor.cli.parser import get_parser, setup_logging_from_args
 from grid_doctor.cli.script_utils import AutoRaiseSession, get_scratch
@@ -33,7 +31,8 @@ class TestGetParser:
 
 class TestSetupLoggingFromArgs:
     def test_sets_verbosity(self) -> None:
-        args = argparse.Namespace(verbose=2)
+        with TemporaryDirectory() as temp_dir:
+            args = argparse.Namespace(verbose=2, log_dir=temp_dir)
         setup_logging_from_args(args)
         import grid_doctor.log as log_mod
 
