@@ -503,6 +503,7 @@ def _get_or_create_client(
     cluster = LocalCluster(
         n_workers=n_workers,
         threads_per_worker=threads_per_worker,
+        processes=True,
     )
     new_client = Client(cluster)
     try:
