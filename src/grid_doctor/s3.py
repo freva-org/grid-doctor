@@ -480,6 +480,8 @@ def _get_or_create_client(
         n_workers: Number of workers for an auto-created ``LocalCluster``.
         threads_per_worker: Threads per worker for an auto-created cluster.
     """
+    for name in ("distributed.core", "distributed.nanny", "distributed.worker"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     if client is not None:
         # Case 1: caller supplied — use it, never close it.
         yield client
