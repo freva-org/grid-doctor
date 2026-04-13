@@ -387,12 +387,45 @@ def _execute_write_plan(
         base_opts["encoding"] = encoding
 
     def _zarr_write(ds_slice: xr.Dataset, **extra: Any) -> None:
+        """Write *ds_slice* to *store*, retrying on transient S3 failures.
+
+        For ``mode="w"``, the write is split into two phases to prevent
+        retries from wiping successfully-written chunks:
+
+        1. **Metadata initialisation** — ``to_zarr(compute=False, mode="w")``
+           creates the Zarr group and array metadata on S3 (small, fast,
+           runs once).  Opening a store with ``mode="w"`` is what clears
+           existing content, so we do this exactly once.
+        2. **Chunk writes** — ``to_zarr(compute=True, mode="r+")`` computes
+           the Dask graph and writes chunk data into the already-initialised
+           store.  ``mode="r+"`` overwrites chunk files in place without
+           clearing the store, so retries never lose successfully-written
+           chunks.
+
+        For ``mode="a"`` and ``mode="r+"`` the store is never cleared on
+        open, so a single retried call is safe.
+        """
+        write_mode: str = extra.get("mode", base_opts.get("mode", "w"))
         opts = {**base_opts, **extra}
-        _with_retry(
-            lambda: ds_slice.to_zarr(store, **opts),
-            max_retries=max_retries,
-            backoff=retry_backoff,
-        )
+
+        if write_mode == "w":
+            # Phase 1: initialise store metadata once (clears existing store).
+            init_opts = {**opts, "compute": False, "consolidated": False}
+            ds_slice.to_zarr(store, **init_opts)
+
+            # Phase 2: retry chunk writes without re-clearing the store.
+            data_opts = {**opts, "mode": "r+"}
+            _with_retry(
+                lambda: ds_slice.to_zarr(store, **data_opts),
+                max_retries=max_retries,
+                backoff=retry_backoff,
+            )
+        else:
+            _with_retry(
+                lambda: ds_slice.to_zarr(store, **opts),
+                max_retries=max_retries,
+                backoff=retry_backoff,
+            )
 
     mode = plan.mode
 
@@ -434,7 +467,7 @@ def _get_or_create_client(
 
     1. *client* was provided by the caller → yield it as-is, do not close.
     2. A distributed client already exists in the current context
-       (e.g. the caller started one for GPU compute) → reuse it, do not close.
+       (e.g. the caller started one for GPU compute), reuse it, do not close.
     3. No client available → create a :class:`~distributed.LocalCluster`
        with *n_workers* workers and *threads_per_worker* threads each,
        yield the client, and close both cluster and client on exit.

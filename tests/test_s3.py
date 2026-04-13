@@ -465,11 +465,17 @@ class TestExecuteWritePlan:
             )
         return calls
 
-    def test_mode_w_single_call(self) -> None:
+    def test_mode_w_two_phase_write(self) -> None:
+        """mode='w' produces two to_zarr calls: metadata init then chunk write."""
         ds = _healpix_ds()
         calls = self._run(ds, self._plan(mode="w"))
-        assert len(calls) == 1
+        assert len(calls) == 2
+        # Phase 1: metadata init — mode=w, compute=False, consolidated=False
         assert calls[0]["mode"] == "w"
+        assert calls[0]["compute"] is False
+        assert calls[0].get("consolidated") is False
+        # Phase 2: chunk write — mode=r+, never clears store
+        assert calls[1]["mode"] == "r+"
 
     def test_mode_r_plus_single_call(self) -> None:
         ds = _healpix_ds()
@@ -477,15 +483,21 @@ class TestExecuteWritePlan:
         assert len(calls) == 1
         assert calls[0]["mode"] == "r+"
 
-    def test_zarr_format_2_adds_consolidated(self) -> None:
+    def test_zarr_format_2_adds_consolidated_to_chunk_write(self) -> None:
+        """consolidated=True must appear on the chunk-write call (phase 2), not the metadata init."""
         ds = _healpix_ds()
         calls = self._run(ds, self._plan(mode="w"), zarr_format=2)
-        assert calls[0].get("consolidated") is True
+        # Phase 1 (metadata init) always uses consolidated=False
+        assert calls[0].get("consolidated") is False
+        # Phase 2 (chunk write) carries consolidated=True
+        assert calls[1].get("consolidated") is True
 
     def test_zarr_format_3_omits_consolidated(self) -> None:
         ds = _healpix_ds()
         calls = self._run(ds, self._plan(mode="w"), zarr_format=3)
-        assert "consolidated" not in calls[0]
+        # Neither call should have consolidated for v3
+        for call in calls:
+            assert "consolidated" not in call or call["consolidated"] is False
 
     def test_new_vars_only_single_append_call(self) -> None:
         ds = _healpix_ds(vars=["tas", "pr"], n_time=3)
@@ -618,6 +630,152 @@ class TestExecuteWritePlan:
             )
         assert calls[0]["encoding"] == enc
 
+
+    def test_mode_w_initialises_metadata_before_retry(self) -> None:
+        """mode='w' must write metadata once eagerly, then retry chunks with r+.
+
+        Verifies the two-phase approach that prevents retries from clearing
+        successfully-written chunks: the first to_zarr call uses mode='w'
+        with compute=False (metadata only), and the retried call uses mode='r+'
+        (chunk writes, no store clearing).
+        """
+        ds = _healpix_ds()
+        store = mock.MagicMock()
+        calls: list[dict[str, Any]] = []
+
+        def _fake_to_zarr(self_ds: xr.Dataset, store_arg: Any, **kwargs: Any) -> Any:
+            calls.append(dict(kwargs))
+            return mock.MagicMock()  # return a mock delayed
+
+        def _fake_retry(fn: Any, *, max_retries: int, backoff: float) -> None:
+            fn()
+
+        with (
+            mock.patch("grid_doctor.s3._with_retry", side_effect=_fake_retry),
+            mock.patch.object(xr.Dataset, "to_zarr", _fake_to_zarr),
+        ):
+            _execute_write_plan(
+                ds,
+                store,
+                self._plan(mode="w"),
+                zarr_format=2,
+                compute=True,
+                max_retries=3,
+                retry_backoff=2.0,
+            )
+
+        assert len(calls) == 2, f"Expected 2 to_zarr calls, got {len(calls)}"
+        # Phase 1: metadata init
+        assert calls[0]["mode"] == "w"
+        assert calls[0]["compute"] is False
+        assert calls[0]["consolidated"] is False
+        # Phase 2: chunk write (retried safely)
+        assert calls[1]["mode"] == "r+"
+        assert calls[1].get("compute") is not False  # compute=True (from base_opts)
+
+    def test_mode_w_retry_does_not_rewipe_store(self) -> None:
+        """Retrying mode='w' must use mode='r+', never mode='w' again."""
+        ds = _healpix_ds()
+        store = mock.MagicMock()
+        retry_modes: list[str] = []
+
+        def _capturing_retry(fn: Any, *, max_retries: int, backoff: float) -> None:
+            # Simulate one failure then success
+            try:
+                fn()
+            except Exception:
+                pass
+            fn()
+
+        def _fake_to_zarr(self_ds: xr.Dataset, store_arg: Any, **kwargs: Any) -> Any:
+            retry_modes.append(kwargs.get("mode", ""))
+            return mock.MagicMock()
+
+        with (
+            mock.patch("grid_doctor.s3._with_retry", side_effect=_capturing_retry),
+            mock.patch.object(xr.Dataset, "to_zarr", _fake_to_zarr),
+        ):
+            _execute_write_plan(
+                ds,
+                store,
+                self._plan(mode="w"),
+                zarr_format=2,
+                compute=True,
+                max_retries=3,
+                retry_backoff=2.0,
+            )
+
+        # All calls inside the retry loop must use r+, never w again
+        retry_call_modes = retry_modes[1:]  # skip the initial metadata init call
+        assert all(m == "r+" for m in retry_call_modes), (
+            f"Retry calls must use mode='r+', got: {retry_call_modes}"
+        )
+
+    def test_mode_r_plus_uses_single_retried_call(self) -> None:
+        """mode='r+' must use a single retried to_zarr call (no two-phase split)."""
+        ds = _healpix_ds()
+        calls: list[dict[str, Any]] = []
+
+        def _fake_retry(fn: Any, *, max_retries: int, backoff: float) -> None:
+            fn()
+
+        def _fake_to_zarr(self_ds: xr.Dataset, store_arg: Any, **kwargs: Any) -> Any:
+            calls.append(dict(kwargs))
+            return None
+
+        with (
+            mock.patch("grid_doctor.s3._with_retry", side_effect=_fake_retry),
+            mock.patch.object(xr.Dataset, "to_zarr", _fake_to_zarr),
+        ):
+            _execute_write_plan(
+                ds,
+                mock.MagicMock(),
+                self._plan(mode="r+"),
+                zarr_format=2,
+                compute=True,
+                max_retries=3,
+                retry_backoff=2.0,
+            )
+
+        assert len(calls) == 1
+        assert calls[0]["mode"] == "r+"
+
+    def test_mode_a_uses_single_retried_call(self) -> None:
+        """mode='a' must use a single retried to_zarr call (no two-phase split)."""
+        ds = _healpix_ds(vars=["tas"], n_time=5)
+        calls: list[dict[str, Any]] = []
+
+        def _fake_retry(fn: Any, *, max_retries: int, backoff: float) -> None:
+            fn()
+
+        def _fake_to_zarr(self_ds: xr.Dataset, store_arg: Any, **kwargs: Any) -> Any:
+            calls.append(dict(kwargs))
+            return None
+
+        plan = self._plan(
+            mode="a",
+            new_vars=[],
+            existing_vars=["tas"],
+            n_existing_time=3,
+            append_time=True,
+        )
+        with (
+            mock.patch("grid_doctor.s3._with_retry", side_effect=_fake_retry),
+            mock.patch.object(xr.Dataset, "to_zarr", _fake_to_zarr),
+        ):
+            _execute_write_plan(
+                ds,
+                mock.MagicMock(),
+                plan,
+                zarr_format=2,
+                compute=True,
+                max_retries=3,
+                retry_backoff=2.0,
+            )
+
+        assert all(c["mode"] == "a" for c in calls), (
+            "Append mode must never use mode='w' or mode='r+'"
+        )
 
 # ===================================================================
 # save_pyramid_to_s3 — explicit modes
