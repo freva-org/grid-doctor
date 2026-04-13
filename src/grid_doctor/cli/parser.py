@@ -50,10 +50,10 @@ def get_parser(name: str, description: str | None = None) -> argparse.ArgumentPa
         default=Path.home() / ".s3-credentials.json",
         help="Path to a JSON file with accessKey/secretKey.",
     )
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
+    parser.add_argument(
         "--log-dir", type=Path, help="Log output to this directory.", default=None
     )
+    group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "-v",
         "--verbose",
