@@ -454,6 +454,33 @@ def _execute_write_plan(
         _zarr_write(append_ds, mode="a", append_dim="time")
 
 
+def _is_gpu_backed(ds: xr.Dataset) -> bool:
+    """Return ``True`` if any data variable in *ds* is backed by CuPy arrays.
+
+    Detection is based on the Dask ``._meta`` attribute — a zero-size array
+    whose type reflects the actual chunk backend.  This works regardless of
+    whether CuPy is importable: it inspects the object that is already there
+    rather than trying to import anything.
+
+    Used by `_save_pyramid_parallel` to route GPU-backed levels to the local
+    threaded scheduler (``_execute_write_plan``) rather than distributed
+    workers, which lack GPU context and would trigger OOM on large datasets.
+
+    Args:
+        ds: Dataset to inspect.
+
+    Returns:
+        ``True`` if at least one data variable has CuPy-backed chunks.
+    """
+    for var in ds.data_vars.values():
+        data = var.data
+        # Dask arrays carry ._meta — a zero-size representative array.
+        meta = getattr(data, "_meta", data)
+        if type(meta).__module__.startswith("cupy"):
+            return True
+    return False
+
+
 @contextmanager
 def _get_or_create_client(
     client: Any | None,
@@ -543,6 +570,15 @@ def _save_pyramid_parallel(
     This eliminates the all-zero gaps observed between levels when uploads
     are sequential, without requiring any level to be fully persisted in RAM.
 
+    GPU-backed datasets (CuPy arrays) are routed to the sequential path
+    (``_execute_write_plan`` with the local threaded scheduler) rather than
+    distributed workers.  Workers lack GPU context and would OOM on large
+    datasets if asked to recompute CuPy tasks.  The threaded scheduler runs
+    in-process, has direct GPU access, and upload concurrency is handled by
+    aiobotocore's async I/O — no distributed cluster needed for that part.
+    On CPU-only architectures ``_is_gpu_backed`` returns ``False`` and all
+    levels go through the parallel path as normal.
+
     Levels whose `WritePlan` requires two ordered ``to_zarr`` calls (new
     variables *and* new time steps simultaneously) fall back to sequential
     execution after all parallelisable levels have completed.
@@ -568,6 +604,26 @@ def _save_pyramid_parallel(
         level_path = f"s3://{s3_path}/level_{level}.zarr"
         store = s3fs.S3Map(root=level_path, s3=fs)
         level_encoding = encoding[level] if encoding is not None else None
+
+        # GPU-backed levels go directly to the sequential path.
+        # Distributed workers lack GPU context and would blow recomputing
+        # CuPy tasks on big datasets. The local threaded scheduler
+        # runs in-process with direct GPU access; aiobotocore handles
+        # upload concurrency via async I/O.
+        if _is_gpu_backed(dataset):
+            logger.info("Level %d is GPU-backed, routing to sequential path.", level)
+            if mode == "auto":
+                plan = _inspect_store(fs, level_path, dataset, validate=validate)
+            else:
+                plan = WritePlan(
+                    mode=mode,
+                    new_vars=list(map(str, dataset.data_vars)),
+                    existing_vars=[],
+                    n_existing_time=None,
+                    append_time=False,
+                )
+            sequential_items.append((level, dataset, store, plan, level_encoding))
+            continue
 
         if mode == "auto":
             plan = _inspect_store(fs, level_path, dataset, validate=validate)
@@ -596,7 +652,7 @@ def _save_pyramid_parallel(
             sequential_items.append((level, dataset, store, plan, level_encoding))
         else:
             logger.info(
-                "Level %d metadata initialised — queued for parallel upload.", level
+                "Level %d metadata initialised, queued for parallel upload.", level
             )
             delayed_writes.append(delayed)
             parallel_stores.append(store)
