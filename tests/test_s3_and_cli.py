@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from unittest import mock
 from tempfile import TemporaryDirectory
+from unittest import mock
+
 import pytest
 
 from grid_doctor.cli.parser import get_parser, setup_logging_from_args

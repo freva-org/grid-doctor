@@ -362,6 +362,10 @@ def coarsen_healpix(
     result.attrs["healpix_level"] = target_level
     result.attrs["healpix_order"] = "nested"
     result.attrs["grid_doctor_coarsened_from_level"] = current_level
+    # Propagate backend so every pyramid level carries the same provenance.
+    # Used by save_pyramid_to_s3 to route GPU levels to the sequential path.
+    if "grid_doctor_backend" in ds.attrs:
+        result.attrs["grid_doctor_backend"] = ds.attrs["grid_doctor_backend"]
     return result
 
 

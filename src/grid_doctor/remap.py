@@ -25,6 +25,8 @@ import numpy as np
 import xarray as xr
 
 from .remap_apply import (
+    _HAS_CUPY,
+    _HAS_NUMBA,
     apply_weights_nd,
     extract_sparse_weights,
 )
@@ -481,11 +483,21 @@ def apply_weight_file(
 
     result = xr.Dataset(regridded, attrs=ds.attrs.copy())
     if level >= 0:
+        # Resolve which backend was actually used so it can be stamped
+        # on the dataset attrs for downstream routing (e.g. save_pyramid_to_s3).
+        resolved_backend: str
+        if backend == "cupy" or (backend == "auto" and _HAS_CUPY):
+            resolved_backend = "cupy"
+        elif backend == "numba" or (backend == "auto" and _HAS_NUMBA):
+            resolved_backend = "numba"
+        else:
+            resolved_backend = "scipy"
         result = _attach_healpix_coords(
             result,
             level=level,
             nest=(order == "nested"),
             method=method,
+            backend=resolved_backend,
         )
     return result
 
@@ -501,6 +513,7 @@ def _attach_healpix_coords(
     level: int,
     nest: bool,
     method: str | None = None,
+    backend: str | None = None,
 ) -> xr.Dataset:
     """Attach HEALPix cell-centre coordinates, CRS variable, and metadata.
 
@@ -512,6 +525,11 @@ def _attach_healpix_coords(
     - ``grid_mapping = "crs"`` on every data variable so that CF-aware
       tools can discover the projection automatically.
     - Global provenance attributes (``healpix_*``, ``grid_doctor_*``).
+
+    The ``grid_doctor_backend`` attribute records which compute backend
+    was used (``"cupy"``, ``"numba"``, or ``"scipy"``).  Downstream
+    tools such as `save_pyramid_to_s3` use this to decide whether to
+    route levels to GPU-aware code paths.
     """
     import grid_doctor as _gd
 
@@ -540,6 +558,8 @@ def _attach_healpix_coords(
     ds_hp.attrs["grid_doctor_version"] = _gd.__version__
     if method is not None:
         ds_hp.attrs["grid_doctor_method"] = method
+    if backend is not None:
+        ds_hp.attrs["grid_doctor_backend"] = backend
 
     return ds_hp
 

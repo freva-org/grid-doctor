@@ -25,12 +25,12 @@ import xarray as xr
 
 from grid_doctor.s3 import (
     _build_write_delayed,
-    _is_gpu_backed,
     _chunk_key_v2,
     _chunk_key_v3,
     _execute_write_plan,
     _get_or_create_client,
     _inspect_store,
+    _is_gpu_backed,
     _save_pyramid_parallel,
     _with_retry,
     get_s3_options,
@@ -423,54 +423,33 @@ class TestChunkKeyHelpers:
 class TestIsGpuBacked:
     """Tests for ``_is_gpu_backed``.
 
-    Mocks at the xarray Dataset level so ``_is_gpu_backed`` receives
-    data variables with fully-controlled ``.data._meta`` objects.
-    This avoids fighting dask internals — ``._meta`` assignment on real
-    dask arrays is unreliable across dask versions.
+    Now simply checks ``ds.attrs["grid_doctor_backend"] == "cupy"``,
+    so tests just need plain xarray datasets with the right attrs.
     """
 
-    @staticmethod
-    def _ds(*modules: str) -> mock.MagicMock:
-        """Return a mock Dataset whose variables have ._meta objects
-        whose type.__module__ matches each entry in *modules*."""
-        data_vars = []
-        for module in modules:
-            meta = type("ndarray", (), {"__module__": module})()
-            dask_arr = mock.MagicMock()
-            dask_arr._meta = meta
-            var = mock.MagicMock()
-            var.data = dask_arr
-            data_vars.append(var)
-        ds = mock.MagicMock(spec=xr.Dataset)
-        ds.data_vars.values.return_value = data_vars
-        return ds
+    def test_cupy_backend_returns_true(self) -> None:
+        ds = _healpix_ds()
+        ds.attrs["grid_doctor_backend"] = "cupy"
+        assert _is_gpu_backed(ds) is True
 
-    def test_numpy_backed_returns_false(self) -> None:
-        assert _is_gpu_backed(self._ds("numpy")) is False
-
-    def test_cupy_backed_returns_true(self) -> None:
-        assert _is_gpu_backed(self._ds("cupy")) is True
-
-    def test_cupy_submodule_returns_true(self) -> None:
-        assert _is_gpu_backed(self._ds("cupy.core")) is True
-
-    def test_one_gpu_var_among_cpu_vars_returns_true(self) -> None:
-        assert _is_gpu_backed(self._ds("numpy", "cupy", "numpy")) is True
-
-    def test_no_meta_attr_returns_false(self) -> None:
-        """Variable whose .data has no ._meta falls back to the array itself."""
-        import numpy as np
-        var = mock.MagicMock()
-        var.data = np.zeros(3)  # plain numpy — no ._meta attribute
-        ds = mock.MagicMock(spec=xr.Dataset)
-        ds.data_vars.values.return_value = [var]
+    def test_scipy_backend_returns_false(self) -> None:
+        ds = _healpix_ds()
+        ds.attrs["grid_doctor_backend"] = "scipy"
         assert _is_gpu_backed(ds) is False
 
-    def test_empty_dataset_returns_false(self) -> None:
-        ds = mock.MagicMock(spec=xr.Dataset)
-        ds.data_vars.values.return_value = []
+    def test_numba_backend_returns_false(self) -> None:
+        ds = _healpix_ds()
+        ds.attrs["grid_doctor_backend"] = "numba"
         assert _is_gpu_backed(ds) is False
 
+    def test_missing_attr_returns_false(self) -> None:
+        """Datasets not produced by grid-doctor have no backend attr."""
+        ds = _healpix_ds()
+        assert "grid_doctor_backend" not in ds.attrs
+        assert _is_gpu_backed(ds) is False
+
+    def test_real_healpix_ds_without_attr_returns_false(self) -> None:
+        assert _is_gpu_backed(_healpix_ds()) is False
 
 
 class TestExecuteWritePlan:
@@ -1327,15 +1306,9 @@ class TestSavePyramidParallel:
         """GPU-backed levels must bypass _build_write_delayed and go to
         _execute_write_plan.  Workers lack GPU context and would OOM on
         multi-TB datasets if they recomputed CuPy tasks."""
-        # Mock dataset with a CuPy-backed variable (same pattern as TestIsGpuBacked)
-        meta = type("ndarray", (), {"__module__": "cupy"})()
-        dask_arr = mock.MagicMock()
-        dask_arr._meta = meta
-        var = mock.MagicMock()
-        var.data = dask_arr
-        gpu_ds = mock.MagicMock(spec=xr.Dataset)
-        gpu_ds.data_vars.values.return_value = [var]
-        gpu_ds.data_vars.__iter__ = mock.Mock(return_value=iter(["tas"]))
+        # Dataset with grid_doctor_backend='cupy' attr — triggers GPU routing
+        gpu_ds = _healpix_ds(vars=["tas"])
+        gpu_ds.attrs["grid_doctor_backend"] = "cupy"
         pyramid = {0: gpu_ds}
 
         with (

@@ -455,30 +455,24 @@ def _execute_write_plan(
 
 
 def _is_gpu_backed(ds: xr.Dataset) -> bool:
-    """Return ``True`` if any data variable in *ds* is backed by CuPy arrays.
+    """Return ``True`` if *ds* was computed with the CuPy GPU backend.
 
-    Detection is based on the Dask ``._meta`` attribute — a zero-size array
-    whose type reflects the actual chunk backend.  This works regardless of
-    whether CuPy is importable: it inspects the object that is already there
-    rather than trying to import anything.
+    Reads the ``grid_doctor_backend`` attribute stamped on the dataset by
+    `regrid_to_healpix` and propagated through `coarsen_healpix`.  This is
+    reliable because the attribute is set at graph-construction time from the
+    resolved backend, not inferred from dask internals (which always report
+    numpy meta regardless of whether CuPy is used inside ``apply_ufunc``).
 
-    Used by `_save_pyramid_parallel` to route GPU-backed levels to the local
-    threaded scheduler (``_execute_write_plan``) rather than distributed
-    workers, which lack GPU context and would trigger OOM on large datasets.
+    Returns ``False`` for datasets that do not carry the attribute (e.g.
+    datasets not produced by grid-doctor).
 
     Args:
         ds: Dataset to inspect.
 
     Returns:
-        ``True`` if at least one data variable has CuPy-backed chunks.
+        ``True`` if ``ds.attrs["grid_doctor_backend"] == "cupy"``.
     """
-    for var in ds.data_vars.values():
-        data = var.data
-        # Dask arrays carry ._meta — a zero-size representative array.
-        meta = getattr(data, "_meta", data)
-        if type(meta).__module__.startswith("cupy"):
-            return True
-    return False
+    return ds.attrs.get("grid_doctor_backend") == "cupy"
 
 
 @contextmanager
