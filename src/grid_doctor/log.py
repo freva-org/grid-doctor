@@ -164,6 +164,17 @@ def setup_logging(
     base_name = "grid-doctor.log"
     log_format = logging.Formatter(fmt, datefmt=datefmt)
     file_handle: RotatingFileHandler | None = None
+    # Always add a stderr handler unless one is already present.
+    # This check is specific to StreamHandler so that adding a file handler
+    # below does not suppress stderr output.
+    if not any(
+        type(h) is logging.StreamHandler  # exact type, not FileHandler subclass
+        for h in logging.root.handlers
+    ):
+        handler = logging.StreamHandler()
+        handler.setFormatter(log_format)
+        logging.root.addHandler(handler)
+
     if log_dir:
         log_dir = Path(log_dir).expanduser().absolute()
         log_dir.mkdir(exist_ok=True, parents=True)
@@ -178,11 +189,6 @@ def setup_logging(
         file_handle.setFormatter(log_format)
         file_handle.setLevel(level or _LEVELS[_DEFAULT_INDEX])
         logging.root.addHandler(file_handle)
-
-    if not logging.root.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(log_format)
-        logging.root.addHandler(handler)
 
     if level is not None:
         set_level(level)
