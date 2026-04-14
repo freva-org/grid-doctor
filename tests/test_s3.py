@@ -32,6 +32,7 @@ from grid_doctor.s3 import (
     _inspect_store,
     _is_gpu_backed,
     _save_pyramid_parallel,
+    _save_pyramid_sequential,
     _with_retry,
     get_s3_options,
     save_pyramid_to_s3,
@@ -1390,6 +1391,122 @@ class TestSavePyramidParallel:
 # ===================================================================
 
 
+
+class TestSavePyramidToS3GpuShortCircuit:
+    """Tests that a fully GPU-backed pyramid bypasses _get_or_create_client
+    and routes directly to _save_pyramid_sequential."""
+
+    def _gpu_pyramid(self, levels: tuple[int, ...] = (0, 1)) -> dict[int, xr.Dataset]:
+        pyramid = {}
+        for level in levels:
+            ds = _healpix_ds(level=level)
+            ds.attrs["grid_doctor_backend"] = "cupy"
+            pyramid[level] = ds
+        return pyramid
+
+    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
+    @mock.patch("grid_doctor.s3._save_pyramid_sequential")
+    @mock.patch("grid_doctor.s3._get_or_create_client")
+    def test_gpu_pyramid_skips_distributed(
+        self,
+        mock_ctx: mock.Mock,
+        mock_sequential: mock.Mock,
+        mock_fs: mock.Mock,
+    ) -> None:
+        """All-GPU pyramid must call _save_pyramid_sequential without
+        entering _get_or_create_client."""
+        pyramid = self._gpu_pyramid()
+        save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w")
+        mock_sequential.assert_called_once()
+        mock_ctx.assert_not_called()
+
+    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
+    @mock.patch("grid_doctor.s3._save_pyramid_sequential")
+    @mock.patch("grid_doctor.s3._get_or_create_client")
+    def test_mixed_pyramid_uses_distributed(
+        self,
+        mock_ctx: mock.Mock,
+        mock_sequential: mock.Mock,
+        mock_fs: mock.Mock,
+    ) -> None:
+        """A pyramid with at least one non-GPU level must go through
+        _get_or_create_client, not the GPU short-circuit."""
+        from contextlib import contextmanager
+        mock_client = mock.MagicMock()
+
+        @contextmanager
+        def _fake_ctx(*a: Any, **kw: Any):  # type: ignore[no-untyped-def]
+            yield mock_client
+
+        mock_ctx.side_effect = _fake_ctx
+        pyramid = self._gpu_pyramid(levels=(0,))
+        cpu_ds = _healpix_ds(level=1)  # no backend attr
+        pyramid[1] = cpu_ds
+
+        with mock.patch("grid_doctor.s3._save_pyramid_parallel"):
+            save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w")
+        mock_ctx.assert_called_once()
+
+    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
+    @mock.patch("grid_doctor.s3._save_pyramid_sequential")
+    @mock.patch("grid_doctor.s3._get_or_create_client")
+    def test_parallel_execution_true_uses_distributed_for_cpu(
+        self,
+        mock_ctx: mock.Mock,
+        mock_sequential: mock.Mock,
+        mock_fs: mock.Mock,
+    ) -> None:
+        """CPU pyramid with parallel_execution=True (default) must not
+        trigger the GPU short-circuit."""
+        from contextlib import contextmanager
+        mock_client = mock.MagicMock()
+
+        @contextmanager
+        def _fake_ctx(*a: Any, **kw: Any):  # type: ignore[no-untyped-def]
+            yield mock_client
+
+        mock_ctx.side_effect = _fake_ctx
+        pyramid = _pyramid(levels=(0,))  # CPU-backed, no backend attr
+        with mock.patch("grid_doctor.s3._save_pyramid_parallel"):
+            save_pyramid_to_s3(
+                pyramid, "s3://bucket/test", s3_options={},
+                mode="w", parallel_execution=True,
+            )
+        mock_sequential.assert_not_called()
+        mock_ctx.assert_called_once()
+
+    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
+    @mock.patch("grid_doctor.s3._save_pyramid_sequential")
+    @mock.patch("grid_doctor.s3._get_or_create_client")
+    def test_gpu_short_circuit_forwards_params(
+        self,
+        mock_ctx: mock.Mock,
+        mock_sequential: mock.Mock,
+        mock_fs: mock.Mock,
+    ) -> None:
+        """Parameters must be forwarded correctly to _save_pyramid_sequential."""
+        pyramid = self._gpu_pyramid(levels=(0,))
+        enc = {0: {"tas": {"dtype": "float32"}}}
+        save_pyramid_to_s3(
+            pyramid,
+            "s3://bucket/test",
+            s3_options={},
+            mode="auto",
+            zarr_format=2,
+            encoding=enc,
+            validate=True,
+            max_retries=7,
+            retry_backoff=3.0,
+        )
+        kw = mock_sequential.call_args[1]
+        assert kw["mode"] == "auto"
+        assert kw["zarr_format"] == 2
+        assert kw["encoding"] == enc
+        assert kw["validate"] is True
+        assert kw["max_retries"] == 7
+        assert kw["retry_backoff"] == 3.0
+
+
 class TestGetOrCreateClient:
     """Tests for the ``_get_or_create_client`` context manager."""
 
@@ -1513,17 +1630,22 @@ class TestSavePyramidToS3ClientParam:
         assert mock_parallel.called
 
     @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
+    @mock.patch("grid_doctor.s3._save_pyramid_sequential")
     @mock.patch("grid_doctor.s3._save_pyramid_parallel")
-    def test_sequential_fallback_when_no_distributed(
-        self, mock_parallel: mock.Mock, mock_fs: mock.Mock
+    def test_parallel_execution_false_uses_sequential(
+        self,
+        mock_parallel: mock.Mock,
+        mock_sequential: mock.Mock,
+        mock_fs: mock.Mock,
     ) -> None:
-        """When context manager yields None, sequential path must be used."""
-        pyramid = _pyramid(levels=(0,))
-        with (
-            self._mock_context(None),
-            mock.patch.object(xr.Dataset, "to_zarr"),
-        ):
-            save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w")
+        """parallel_execution=False must bypass distributed and call
+        _save_pyramid_sequential directly, regardless of GPU backend."""
+        pyramid = _pyramid(levels=(0,))  # CPU-backed
+        save_pyramid_to_s3(
+            pyramid, "s3://bucket/test", s3_options={},
+            mode="w", parallel_execution=False,
+        )
+        mock_sequential.assert_called_once()
         mock_parallel.assert_not_called()
 
     @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")

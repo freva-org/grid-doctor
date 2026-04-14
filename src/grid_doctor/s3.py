@@ -30,6 +30,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Generator, Literal
 
+import dask.config
 import s3fs
 import xarray as xr
 import zarr
@@ -686,6 +687,117 @@ def _save_pyramid_parallel(
             zarr.consolidate_metadata(store)
 
 
+def _save_pyramid_sequential(
+    pyramid: dict[int, xr.Dataset],
+    fs: s3fs.S3FileSystem,
+    s3_path: str,
+    *,
+    mode: WriteMode,
+    compute: bool,
+    region: Literal["auto"] | dict[str, slice],
+    zarr_format: Literal[2, 3],
+    encoding: dict[int, dict[str, dict[str, Any]]] | None,
+    validate: bool,
+    max_retries: int,
+    retry_backoff: float,
+) -> None:
+    """Write all pyramid levels sequentially, level by level.
+
+    Used in two situations:
+
+    1. **GPU-backed pyramids** — all levels carry
+       ``grid_doctor_backend="cupy"``.  The synchronous Dask scheduler is
+       forced for each level so that CuPy kernels never run concurrently
+       in multiple threads, which would exhaust GPU memory.
+
+    2. **Distributed not available** — fallback when the ``distributed``
+       package is not installed or when no workers are reachable.
+
+    Args:
+        pyramid: Mapping of HEALPix level to dataset.
+        fs: Authenticated S3 filesystem.
+        s3_path: Normalised S3 prefix (no ``s3://`` prefix, no trailing slash).
+        mode: Write mode — same semantics as `save_pyramid_to_s3`.
+        compute: Trigger Dask execution immediately when ``True``.
+        region: Region writes for partial updates.
+        zarr_format: Zarr format version.
+        encoding: Per-level encoding dictionaries.
+        validate: Whether to validate last chunks in existing stores.
+        max_retries: Maximum retry attempts per ``to_zarr`` call.
+        retry_backoff: Exponential backoff multiplier between retries.
+    """
+    for level, dataset in pyramid.items():
+        level_path = f"s3://{s3_path}/level_{level}.zarr"
+        logger.info("Writing HEALPix level %s to %s", level, level_path)
+        store = s3fs.S3Map(root=level_path, s3=fs)
+        level_encoding = encoding[level] if encoding is not None else None
+
+        if mode == "auto":
+            plan = _inspect_store(fs, level_path, dataset, validate=validate)
+        else:
+            plan = WritePlan(
+                mode=mode,
+                new_vars=list(map(str, dataset.data_vars)),
+                existing_vars=[],
+                n_existing_time=None,
+                append_time=False,
+            )
+
+        if mode != "auto" and region != "auto":
+            region_keys = set(region)
+            to_drop = (
+                {
+                    name
+                    for name, var in dataset.data_vars.items()
+                    if region_keys.isdisjoint(map(str, var.dims))
+                }
+                | {str(dim) for dim in dataset.dims}
+                | {str(coord) for coord in dataset.coords}
+            )
+            sliced = dataset.drop_vars(to_drop, errors="ignore").isel(region)
+            zarr_options: dict[str, Any] = dict(
+                compute=compute,
+                mode=plan.mode,
+                zarr_format=zarr_format,
+                region=region,
+            )
+            if zarr_format == 2:
+                zarr_options["consolidated"] = True
+            if level_encoding is not None:
+                zarr_options["encoding"] = level_encoding
+            _with_retry(
+                lambda: sliced.to_zarr(store, **zarr_options),
+                max_retries=max_retries,
+                backoff=retry_backoff,
+            )
+            continue
+
+        # GPU-backed levels must use the synchronous (single-threaded) Dask
+        # scheduler to prevent concurrent CuPy allocations across threads.
+        dask_cfg: dict[str, Any] = (
+            {"scheduler": "synchronous"} if _is_gpu_backed(dataset) else {}
+        )
+        with dask.config.set(**dask_cfg):
+            _execute_write_plan(
+                dataset,
+                store,
+                plan,
+                zarr_format=zarr_format,
+                compute=compute,
+                max_retries=max_retries,
+                retry_backoff=retry_backoff,
+                encoding=level_encoding,
+            )
+
+        if mode == "w" and not compute:
+            coord_opts: dict[str, Any] = dict(
+                compute=compute, mode="w", zarr_format=zarr_format
+            )
+            if zarr_format == 2:
+                coord_opts["consolidated"] = True
+            dataset[list(dataset.coords)].to_zarr(store, **coord_opts)
+
+
 def save_pyramid_to_s3(
     pyramid: dict[int, xr.Dataset],
     s3_path: str,
@@ -702,6 +814,7 @@ def save_pyramid_to_s3(
     client: Client | None = None,
     n_workers: int = min(os.cpu_count() or 4, 16),
     threads_per_worker: int = 2,
+    parallel_execution: bool = True,
 ) -> None:
     """Write a HEALPix pyramid to S3-backed Zarr stores.
 
@@ -773,97 +886,55 @@ def save_pyramid_to_s3(
     threads_per_worker:
         Threads per worker for an auto-created ``LocalCluster``.  Ignored
         when *client* is provided or an existing client is reused.
+    parallel_execution:
+        True writes of the HEALPix pyramid in parallel. False forces sequential
+        writes. This case is useful for GPU applications where dask-distrbuted
+        lacks GPU context.
     """
     fs = s3fs.S3FileSystem(**s3_options)
     s3_path = s3_path.rstrip("/").removeprefix("s3://")
 
-    # --- Parallel path (always attempted when distributed is available) -
+    # --- GPU short-circuit: bypass distributed entirely ----------------
+    # Spinning up a LocalCluster for GPU pyramids wastes resources and
+    # generates noise.  GPU work must run single-threaded in-process;
+    # the distributed scheduler would only recompute CuPy tasks on
+    # workers that lack GPU context.
+    if (
+        all(_is_gpu_backed(ds) for ds in pyramid.values())
+        or parallel_execution is False
+    ):
+        logger.info("Skipping distributed, using sequential synchronous path.")
+        _save_pyramid_sequential(
+            pyramid,
+            fs,
+            s3_path,
+            mode=mode,
+            compute=compute,
+            region=region,
+            zarr_format=zarr_format,
+            encoding=encoding,
+            validate=validate,
+            max_retries=max_retries,
+            retry_backoff=retry_backoff,
+        )
+        return
+
+    # --- Parallel path ---
     with _get_or_create_client(
         client, n_workers=n_workers, threads_per_worker=threads_per_worker
     ) as active_client:
-        if active_client is not None:
-            _save_pyramid_parallel(
-                pyramid,
-                fs,
-                s3_path,
-                mode=mode,
-                zarr_format=zarr_format,
-                encoding=encoding,
-                validate=validate,
-                max_retries=max_retries,
-                retry_backoff=retry_backoff,
-                client=active_client,
-            )
-            return
-
-    # --- Sequential fallback (distributed not installed) ----------------
-    for level, dataset in pyramid.items():
-        level_path = f"s3://{s3_path}/level_{level}.zarr"
-        logger.info("Writing HEALPix level %s to %s", level, level_path)
-        store = s3fs.S3Map(root=level_path, s3=fs)
-        level_encoding = encoding[level] if encoding is not None else None
-
-        if mode == "auto":
-            plan = _inspect_store(fs, level_path, dataset, validate=validate)
-        else:
-            # Explicit mode: build a minimal plan that just records the mode.
-            # _execute_write_plan handles "w" and "r+" as single calls, and
-            # "a" without decomposition (caller's responsibility).
-            plan = WritePlan(
-                mode=mode,
-                new_vars=list(map(str, dataset.data_vars)),
-                existing_vars=[],
-                n_existing_time=None,
-                append_time=False,
-            )
-
-        if mode != "auto" and region != "auto":
-            region_keys = set(region)
-            to_drop = (
-                {
-                    name
-                    for name, var in dataset.data_vars.items()
-                    if region_keys.isdisjoint(map(str, var.dims))
-                }
-                | {str(dim) for dim in dataset.dims}
-                | {str(coord) for coord in dataset.coords}
-            )
-            sliced = dataset.drop_vars(to_drop, errors="ignore").isel(region)
-            zarr_options: dict[str, Any] = dict(
-                compute=compute,
-                mode=plan.mode,
-                zarr_format=zarr_format,
-                region=region,
-            )
-            if zarr_format == 2:
-                zarr_options["consolidated"] = True
-            if level_encoding is not None:
-                zarr_options["encoding"] = level_encoding
-            _with_retry(
-                lambda: sliced.to_zarr(store, **zarr_options),
-                max_retries=max_retries,
-                backoff=retry_backoff,
-            )
-            continue
-
-        _execute_write_plan(
-            dataset,
-            store,
-            plan,
+        _save_pyramid_parallel(
+            pyramid,
+            fs,
+            s3_path,
+            mode=mode,
             zarr_format=zarr_format,
-            compute=compute,
+            encoding=encoding,
+            validate=validate,
             max_retries=max_retries,
             retry_backoff=retry_backoff,
-            encoding=level_encoding,
+            client=active_client,
         )
-
-        if mode == "w" and not compute:
-            coord_opts: dict[str, Any] = dict(
-                compute=compute, mode="w", zarr_format=zarr_format
-            )
-            if zarr_format == 2:
-                coord_opts["consolidated"] = True
-            dataset[list(dataset.coords)].to_zarr(store, **coord_opts)
 
 
 __all__ = [
