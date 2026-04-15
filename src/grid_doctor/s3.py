@@ -253,10 +253,11 @@ def _inspect_store(
             chunk_key = chunk_key_fn(level_path, var, chunk_indices)
             if not fs.exists(chunk_key):
                 logger.warning(
-                    "Store at %s appears incomplete (missing chunk %s) — "
+                    "Store at %s appears incomplete (missing chunk %s for variable %s) — "
                     "falling back to full overwrite.",
                     level_path,
                     chunk_key,
+                    var,
                 )
                 return WritePlan(
                     mode="w",
