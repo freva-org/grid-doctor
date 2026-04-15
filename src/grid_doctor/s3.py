@@ -24,19 +24,17 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import time as _time
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Generator, Literal
+from typing import Any, Callable, Literal
 
+import dask
 import dask.config
 import s3fs
 import xarray as xr
 import zarr
-from distributed import Client, LocalCluster
-from distributed import get_client as _get_distributed_client
 
+from .helpers import get_latlon_resolution, resolution_to_healpix_level
 from .types import WriteMode, WritePlan
 
 logger = logging.getLogger(__name__)
@@ -287,68 +285,6 @@ def _inspect_store(
     )
 
 
-def _build_write_delayed(
-    dataset: xr.Dataset,
-    store: s3fs.S3Map,
-    plan: WritePlan,
-    *,
-    zarr_format: Literal[2, 3],
-    encoding: dict[str, dict[str, Any]] | None,
-) -> Any | None:
-    """Initialise Zarr store metadata and return a Dask delayed for data writes.
-
-    Calls ``to_zarr(compute=False)`` which writes Zarr group and array
-    metadata to S3 immediately (small, fast) and returns a
-    :class:`dask.delayed.Delayed` representing all chunk writes.
-
-    When the plan requires two ordered ``to_zarr`` calls (new variables
-    *and* new time steps simultaneously), ``None`` is returned — the caller
-    must fall back to the sequential path for that level.
-
-    Args:
-        dataset: Incoming dataset.
-        store: Initialised Zarr store.
-        plan: Write plan produced by `_inspect_store`.
-        zarr_format: Zarr format version (2 or 3).
-        encoding: Variable-level encoding forwarded to ``to_zarr``.
-
-    Returns:
-        A Dask delayed representing all chunk writes, or ``None`` for
-        two-step append plans.
-    """
-    # consolidated=False — we consolidate manually after client.gather()
-    # so that metadata is written only once all chunks are confirmed done.
-    base_opts: dict[str, Any] = dict(
-        zarr_format=zarr_format,
-        consolidated=False,
-        compute=False,
-    )
-    if encoding is not None:
-        base_opts["encoding"] = encoding
-
-    mode = plan.mode
-
-    if mode in {"w", "r+"}:
-        return dataset.to_zarr(store, mode=mode, **base_opts)
-
-    # "a" with both new variables and more time steps requires two sequential
-    # to_zarr calls — signal to the caller to handle this level sequentially.
-    if plan.new_vars and plan.append_time:
-        return None
-
-    if plan.new_vars:
-        new_var_ds = dataset[plan.new_vars]
-        if plan.n_existing_time is not None:
-            new_var_ds = new_var_ds.isel(time=slice(0, plan.n_existing_time))
-        return new_var_ds.to_zarr(store, mode="a", **base_opts)
-
-    if plan.append_time and plan.n_existing_time is not None:
-        append_ds = dataset.isel(time=slice(plan.n_existing_time, None))
-        return append_ds.to_zarr(store, mode="a", append_dim="time", **base_opts)
-
-    return None
-
-
 def _execute_write_plan(
     dataset: xr.Dataset,
     store: s3fs.S3Map,
@@ -476,217 +412,6 @@ def _is_gpu_backed(ds: xr.Dataset) -> bool:
     return ds.attrs.get("grid_doctor_backend") == "cupy"
 
 
-@contextmanager
-def _get_or_create_client(
-    client: Any | None,
-    *,
-    n_workers: int,
-    threads_per_worker: int,
-) -> Generator[Any, None, None]:
-    """Yield a Dask distributed client, creating one if necessary.
-
-    Three cases, in order of priority:
-
-    1. *client* was provided by the caller → yield it as-is, do not close.
-    2. A distributed client already exists in the current context
-       (e.g. the caller started one for GPU compute), reuse it, do not close.
-    3. No client available → create a :class:`~distributed.LocalCluster`
-       with *n_workers* workers and *threads_per_worker* threads each,
-       yield the client, and close both cluster and client on exit.
-
-    If the ``distributed`` package is not installed, yields ``None`` so the
-    caller can fall back to the sequential upload path.
-
-    Args:
-        client: Caller-supplied client, or ``None``.
-        n_workers: Number of workers for an auto-created ``LocalCluster``.
-        threads_per_worker: Threads per worker for an auto-created cluster.
-    """
-    for name in ("distributed.core", "distributed.nanny", "distributed.worker"):
-        logging.getLogger(name).setLevel(logging.WARNING)
-    if client is not None:
-        # Case 1: caller supplied — use it, never close it.
-        yield client
-        return
-
-    try:
-        # Case 2: existing client in context — reuse it, don't close it.
-        existing = _get_distributed_client()
-        logger.debug("Reusing existing distributed client: %s", existing)
-        yield existing
-        return
-    except ValueError:
-        pass  # No client in context — fall through to case 3.
-
-    # Case 3: create a LocalCluster, yield, then clean up.
-    logger.info(
-        "Creating LocalCluster (n_workers=%d, threads_per_worker=%d).",
-        n_workers,
-        threads_per_worker,
-    )
-    cluster = LocalCluster(
-        n_workers=n_workers,
-        threads_per_worker=threads_per_worker,
-        processes=True,
-    )
-    new_client = Client(cluster)
-    try:
-        yield new_client
-    finally:
-        new_client.close()
-        cluster.close()
-        logger.debug("LocalCluster closed.")
-
-
-def _save_pyramid_parallel(
-    pyramid: dict[int, xr.Dataset],
-    fs: s3fs.S3FileSystem,
-    s3_path: str,
-    *,
-    mode: WriteMode,
-    zarr_format: Literal[2, 3],
-    encoding: dict[int, dict[str, dict[str, Any]]] | None,
-    validate: bool,
-    max_retries: int,
-    retry_backoff: float,
-    client: Any,
-) -> None:
-    """Write all pyramid levels in parallel using a Dask distributed client.
-
-    Submits delayed writes for all levels to the distributed scheduler in a
-    single ``client.compute`` call.  Because the scheduler sees the full
-    cross-level Dask graph, it pipelines chunk computation with upload:
-
-    - A level N chunk is computed once on the GPU.
-    - It is written to the level N Zarr store.
-    - It is immediately coarsened and written to the level N-1 store.
-    - Memory is released as soon as all consumers of that chunk are done.
-
-    This eliminates the all-zero gaps observed between levels when uploads
-    are sequential, without requiring any level to be fully persisted in RAM.
-
-    GPU-backed datasets (CuPy arrays) are routed to the sequential path
-    (``_execute_write_plan`` with the local threaded scheduler) rather than
-    distributed workers.  Workers lack GPU context and would OOM on large
-    datasets if asked to recompute CuPy tasks.  The threaded scheduler runs
-    in-process, has direct GPU access, and upload concurrency is handled by
-    aiobotocore's async I/O — no distributed cluster needed for that part.
-    On CPU-only architectures ``_is_gpu_backed`` returns ``False`` and all
-    levels go through the parallel path as normal.
-
-    Levels whose `WritePlan` requires two ordered ``to_zarr`` calls (new
-    variables *and* new time steps simultaneously) fall back to sequential
-    execution after all parallelisable levels have completed.
-
-    Args:
-        pyramid: Mapping of HEALPix level to dataset.
-        fs: Authenticated S3 filesystem.
-        s3_path: Normalised S3 prefix (no ``s3://`` prefix, no trailing slash).
-        mode: Write mode — same semantics as `save_pyramid_to_s3`.
-        zarr_format: Zarr format version.
-        encoding: Per-level encoding dictionaries.
-        validate: Whether to validate last chunks in existing stores.
-        max_retries: Retry count forwarded to ``client.compute``.
-        retry_backoff: Backoff multiplier for sequential fallback levels.
-        client: Active :class:`distributed.Client`.
-    """
-    parallel_stores: list[s3fs.S3Map] = []
-    delayed_writes: list[Any] = []
-    sequential_items: list[tuple[int, xr.Dataset, s3fs.S3Map, WritePlan, Any]] = []
-
-    # --- Phase 1: inspect stores, initialise metadata, collect delayed ------
-    for level, dataset in pyramid.items():
-        level_path = f"s3://{s3_path}/level_{level}.zarr"
-        store = s3fs.S3Map(root=level_path, s3=fs)
-        level_encoding = encoding[level] if encoding is not None else None
-
-        # GPU-backed levels go directly to the sequential path.
-        # Distributed workers lack GPU context and would blow recomputing
-        # CuPy tasks on big datasets. The local threaded scheduler
-        # runs in-process with direct GPU access; aiobotocore handles
-        # upload concurrency via async I/O.
-        if _is_gpu_backed(dataset):
-            logger.info("Level %d is GPU-backed, routing to sequential path.", level)
-            if mode == "auto":
-                plan = _inspect_store(fs, level_path, dataset, validate=validate)
-            else:
-                plan = WritePlan(
-                    mode=mode,
-                    new_vars=list(map(str, dataset.data_vars)),
-                    existing_vars=[],
-                    n_existing_time=None,
-                    append_time=False,
-                )
-            sequential_items.append((level, dataset, store, plan, level_encoding))
-            continue
-
-        if mode == "auto":
-            plan = _inspect_store(fs, level_path, dataset, validate=validate)
-        else:
-            plan = WritePlan(
-                mode=mode,
-                new_vars=list(map(str, dataset.data_vars)),
-                existing_vars=[],
-                n_existing_time=None,
-                append_time=False,
-            )
-
-        delayed = _build_write_delayed(
-            dataset,
-            store,
-            plan,
-            zarr_format=zarr_format,
-            encoding=level_encoding,
-        )
-
-        if delayed is None:
-            # Two-step append: queue for sequential fallback
-            logger.info(
-                "Level %d queued for sequential write (two-step append).", level
-            )
-            sequential_items.append((level, dataset, store, plan, level_encoding))
-        else:
-            logger.info(
-                "Level %d metadata initialised, queued for parallel upload.", level
-            )
-            delayed_writes.append(delayed)
-            parallel_stores.append(store)
-
-    # --- Phase 2: submit full graph to distributed scheduler ----------------
-    # The scheduler sees cross-level dependencies: an level N chunk is computed
-    # once, written to S3, then immediately coarsened for level N-1, no idle gaps.
-    if delayed_writes:
-        logger.info(
-            "Submitting %d level(s) to distributed scheduler (retries=%d).",
-            len(delayed_writes),
-            max_retries,
-        )
-        futures = client.compute(delayed_writes, retries=max_retries)
-        client.gather(futures)  # blocks; propagates any worker exceptions
-
-        # Zarr v2 consolidated metadata must be written after all chunks land.
-        if zarr_format == 2:
-            for store in parallel_stores:
-                logger.debug("Consolidating metadata for %s", store.root)
-                zarr.consolidate_metadata(store)
-
-    # --- Phase 3: sequential fallback for two-step append levels ------------
-    for level, dataset, store, plan, level_encoding in sequential_items:
-        logger.info("Writing level %d sequentially (two-step append).", level)
-        _execute_write_plan(
-            dataset,
-            store,
-            plan,
-            zarr_format=zarr_format,
-            compute=True,
-            max_retries=max_retries,
-            retry_backoff=retry_backoff,
-            encoding=level_encoding,
-        )
-        if zarr_format == 2:
-            zarr.consolidate_metadata(store)
-
-
 def _save_pyramid_sequential(
     pyramid: dict[int, xr.Dataset],
     fs: s3fs.S3FileSystem,
@@ -811,10 +536,6 @@ def save_pyramid_to_s3(
     validate: bool = False,
     max_retries: int = 5,
     retry_backoff: float = 2.0,
-    client: Client | None = None,
-    n_workers: int = min(os.cpu_count() or 4, 16),
-    threads_per_worker: int = 2,
-    parallel_execution: bool = True,
 ) -> None:
     """Write a HEALPix pyramid to S3-backed Zarr stores.
 
@@ -870,74 +591,159 @@ def save_pyramid_to_s3(
         Multiplicative factor for the exponential back-off between retries.
         With the default of ``2.0`` and a 2 s base delay, the waits are
         2 s, 4 s, 8 s, … up to *max_retries* attempts.
-    client:
-        Optional :class:`distributed.Client`.  When ``None`` (default),
-        the function attempts to reuse an existing distributed client
-        from the current context; if none exists, a
-        :class:`~distributed.LocalCluster` is created automatically and
-        closed on completion.  Pass an explicit client to reuse a cluster
-        started for GPU compute, avoiding the overhead of a second cluster.
-        If ``distributed`` is not installed, falls back to sequential
-        upload.
-    n_workers:
-        Number of workers for an auto-created ``LocalCluster``.  Ignored
-        when *client* is provided or an existing client is reused.
-        Defaults to ``min(os.cpu_count(), 16)``.
-    threads_per_worker:
-        Threads per worker for an auto-created ``LocalCluster``.  Ignored
-        when *client* is provided or an existing client is reused.
-    parallel_execution:
-        True writes of the HEALPix pyramid in parallel. False forces sequential
-        writes. This case is useful for GPU applications where dask-distrbuted
-        lacks GPU context.
     """
     fs = s3fs.S3FileSystem(**s3_options)
     s3_path = s3_path.rstrip("/").removeprefix("s3://")
+    _save_pyramid_sequential(
+        pyramid,
+        fs,
+        s3_path,
+        mode=mode,
+        compute=compute,
+        region=region,
+        zarr_format=zarr_format,
+        encoding=encoding,
+        validate=validate,
+        max_retries=max_retries,
+        retry_backoff=retry_backoff,
+    )
 
-    # --- GPU short-circuit: bypass distributed entirely ----------------
-    # Spinning up a LocalCluster for GPU pyramids wastes resources and
-    # generates noise.  GPU work must run single-threaded in-process;
-    # the distributed scheduler would only recompute CuPy tasks on
-    # workers that lack GPU context.
-    if (
-        all(_is_gpu_backed(ds) for ds in pyramid.values())
-        or parallel_execution is False
-    ):
-        logger.info("Skipping distributed, using sequential synchronous path.")
-        _save_pyramid_sequential(
-            pyramid,
-            fs,
-            s3_path,
-            mode=mode,
-            compute=compute,
-            region=region,
-            zarr_format=zarr_format,
-            encoding=encoding,
-            validate=validate,
-            max_retries=max_retries,
-            retry_backoff=retry_backoff,
-        )
-        return
 
-    # --- Parallel path ---
-    with _get_or_create_client(
-        client, n_workers=n_workers, threads_per_worker=threads_per_worker
-    ) as active_client:
-        _save_pyramid_parallel(
-            pyramid,
-            fs,
-            s3_path,
-            mode=mode,
-            zarr_format=zarr_format,
-            encoding=encoding,
-            validate=validate,
-            max_retries=max_retries,
-            retry_backoff=retry_backoff,
-            client=active_client,
+def create_and_upload_healpix_pyramid(
+    ds: xr.Dataset,
+    s3_path: str,
+    s3_options: dict[str, Any],
+    *,
+    max_level: int | None = None,
+    min_level: int = 0,
+    zarr_format: Literal[2, 3] = 2,
+    encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
+    max_retries: int = 5,
+    retry_backoff: float = 2.0,
+    **kwargs: Any,
+) -> None:
+    """Remap a source dataset to HEALPix and upload each pyramid level to S3.
+
+    This is the recommended entry point for GPU and large-data workflows.
+    Rather than building the full pyramid in memory and then uploading,
+    it pipelines computation and upload level by level:
+
+    1. Remap the source dataset to *max_level*.
+    2. Upload the finest level to S3.
+    3. Read the uploaded data back from S3 lazily (via ``xr.open_zarr``).
+    4. Coarsen to the next level using the S3-backed data.
+    5. Upload and repeat down to *min_level*.
+
+    Reading back from S3 after each upload breaks the Dask computation
+    graph — the coarsening input has no upstream GPU tasks, so workers
+    never recompute expensive remapping kernels.  This eliminates the
+    GPU OOM errors that occur when a lazy CuPy graph is submitted to
+    a distributed scheduler whose workers lack GPU context.
+
+    The network round-trip cost is small relative to GPU compute time
+    (level 7 ≈ 100 GB at ~10 GB/s IB = ~10 s) and the approach works
+    identically on CPU-only machines.
+
+    Parameters
+    ----------
+    ds:
+        Source dataset on any supported grid (regular, curvilinear,
+        or unstructured).
+    s3_path:
+        S3 prefix such as ``"s3://bucket/pyramid"``.
+    s3_options:
+        Options forwarded to `s3fs.S3FileSystem`.  Build with
+        [`get_s3_options`][get_s3_options].
+    max_level:
+        Finest HEALPix level to generate.  When omitted, estimated
+        from the source-grid resolution.
+    min_level:
+        Coarsest HEALPix level to keep.  Default ``0``.
+    zarr_format:
+        Zarr format version (2 or 3).
+    encoding:
+        Per-level encoding dictionaries, keyed by level number.
+    max_retries:
+        Maximum retry attempts per ``to_zarr`` call.
+    retry_backoff:
+        Exponential backoff multiplier between retries.
+    **kwargs:
+        Forwarded to
+        [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix]
+        (e.g. ``method``, ``backend``, ``weights_path``).
+    """
+    # Lazy imports to avoid circular dependency — helpers imports s3.
+    from .helpers import coarsen_healpix
+    from .remap import regrid_to_healpix
+
+    fs = s3fs.S3FileSystem(**s3_options)
+    s3_path = s3_path.rstrip("/").removeprefix("s3://")
+
+    if max_level is None:
+        max_level = resolution_to_healpix_level(get_latlon_resolution(ds))
+
+    logger.info("Remapping source dataset to HEALPix level %d.", max_level)
+    finest = regrid_to_healpix(ds, max_level, **kwargs)
+
+    # Upload finest level, then iterate downwards using S3-backed data
+    # for coarsening so the GPU graph is not retained across levels.
+    current_ds = finest
+
+    for level in range(max_level, min_level - 1, -1):
+        level_path = f"s3://{s3_path}/level_{level}.zarr"
+        store = s3fs.S3Map(root=level_path, s3=fs)
+        level_encoding = encoding[level] if encoding is not None else None
+
+        logger.info("Uploading HEALPix level %d to %s.", level, level_path)
+        plan = WritePlan(
+            mode="w",
+            new_vars=list(map(str, current_ds.data_vars)),
+            existing_vars=[],
+            n_existing_time=None,
+            append_time=False,
         )
+
+        # Force synchronous Dask scheduler to prevent concurrent CuPy
+        # allocations across threads when using the GPU backend.
+        dask_cfg: dict[str, Any] = (
+            {"scheduler": "synchronous"}
+            if current_ds.attrs.get("grid_doctor_backend") == "cupy"
+            else {}
+        )
+        with dask.config.set(**dask_cfg):
+            _execute_write_plan(
+                current_ds,
+                store,
+                plan,
+                zarr_format=zarr_format,
+                compute=True,
+                max_retries=max_retries,
+                retry_backoff=retry_backoff,
+                encoding=level_encoding,
+            )
+
+        if zarr_format == 2:
+            zarr.consolidate_metadata(store)
+
+        if level == min_level:
+            break
+
+        # Read back from S3 lazily — severs the upstream Dask graph so
+        # coarsening has no GPU tasks and workers never OOM.
+        logger.debug("Reading level %d back from S3 for coarsening.", level)
+        current_ds = xr.open_zarr(
+            store,
+            chunks={},
+            consolidated=(zarr_format == 2),
+        )
+
+        next_level = level - 1
+        logger.info("Coarsening level %d -> %d.", level, next_level)
+        current_ds = coarsen_healpix(current_ds, next_level)
 
 
 __all__ = [
+    "create_and_upload_healpix_pyramid",
     "get_s3_options",
     "save_pyramid_to_s3",
 ]

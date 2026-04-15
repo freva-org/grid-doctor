@@ -9,7 +9,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-__version__ = "2604.0.0"
+__version__ = "2604.1.0"
 
 _SUBMODULES: dict[str, str] = {
     "helpers": ".helpers",
@@ -31,6 +31,7 @@ _ATTRS: dict[str, str] = {
     "cached_weights": ".utils",
     "get_latlon_resolution": ".helpers",
     "get_s3_options": ".s3",
+    "create_and_upload_healpix_pyramid": ".s3",
     "latlon_to_healpix_pyramid": ".helpers",
     "regrid_to_healpix": ".remap",
     "regrid_unstructured_to_healpix": ".remap",
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
         regrid_unstructured_to_healpix,
     )
     from .s3 import (
+        create_and_upload_healpix_pyramid,
         get_s3_options,
         save_pyramid_to_s3,
     )
@@ -98,6 +100,7 @@ __all__ = [
     "apply_weight_file",
     "cached_open_dataset",
     "cached_weights",
+    "create_and_upload_healpix_pyramid",
     "chunk_for_target_store_size",
     "coarsen_healpix",
     "compute_healpix_weights",

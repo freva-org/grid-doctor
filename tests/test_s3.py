@@ -6,15 +6,12 @@ Covers:
 - ``_inspect_store``        — store introspection and ``WritePlan`` production
 - ``_execute_write_plan``   — two-step write decomposition
 - ``save_pyramid_to_s3``    — public API, explicit modes and ``mode="auto"``
-- ``_build_write_delayed``  — delayed write construction and two-step fallback
-- ``_save_pyramid_parallel``— parallel upload via distributed client
-- ``_get_or_create_client`` — context manager for client lifecycle management
+- ``create_and_upload_healpix_pyramid`` — combined remap + level-by-level upload
 """
 
 from __future__ import annotations
 
 import json
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -24,16 +21,13 @@ import pytest
 import xarray as xr
 
 from grid_doctor.s3 import (
-    _build_write_delayed,
     _chunk_key_v2,
     _chunk_key_v3,
     _execute_write_plan,
-    _get_or_create_client,
     _inspect_store,
-    _is_gpu_backed,
-    _save_pyramid_parallel,
     _save_pyramid_sequential,
     _with_retry,
+    create_and_upload_healpix_pyramid,
     get_s3_options,
     save_pyramid_to_s3,
 )
@@ -416,42 +410,6 @@ class TestChunkKeyHelpers:
 
 
 
-# ===================================================================
-# _is_gpu_backed
-# ===================================================================
-
-
-class TestIsGpuBacked:
-    """Tests for ``_is_gpu_backed``.
-
-    Now simply checks ``ds.attrs["grid_doctor_backend"] == "cupy"``,
-    so tests just need plain xarray datasets with the right attrs.
-    """
-
-    def test_cupy_backend_returns_true(self) -> None:
-        ds = _healpix_ds()
-        ds.attrs["grid_doctor_backend"] = "cupy"
-        assert _is_gpu_backed(ds) is True
-
-    def test_scipy_backend_returns_false(self) -> None:
-        ds = _healpix_ds()
-        ds.attrs["grid_doctor_backend"] = "scipy"
-        assert _is_gpu_backed(ds) is False
-
-    def test_numba_backend_returns_false(self) -> None:
-        ds = _healpix_ds()
-        ds.attrs["grid_doctor_backend"] = "numba"
-        assert _is_gpu_backed(ds) is False
-
-    def test_missing_attr_returns_false(self) -> None:
-        """Datasets not produced by grid-doctor have no backend attr."""
-        ds = _healpix_ds()
-        assert "grid_doctor_backend" not in ds.attrs
-        assert _is_gpu_backed(ds) is False
-
-    def test_real_healpix_ds_without_attr_returns_false(self) -> None:
-        assert _is_gpu_backed(_healpix_ds()) is False
-
 
 class TestExecuteWritePlan:
     """Tests for the write-plan executor.
@@ -824,10 +782,8 @@ class TestExecuteWritePlan:
 class TestSavePyramidToS3ExplicitModes:
     """Tests for save_pyramid_to_s3 with explicit modes.
 
-    Since save_pyramid_to_s3 now always routes through _save_pyramid_parallel,
-    these tests verify that the correct arguments are forwarded.  Write-level
-    behaviour (consolidated, encoding, to_zarr call count) is already tested
-    in TestBuildWriteDelayed and TestSavePyramidParallel.
+    Since save_pyramid_to_s3 now always routes through _save_pyramid_sequential,
+    these tests verify that the correct arguments are forwarded.
     """
 
     def _run(
@@ -837,54 +793,47 @@ class TestSavePyramidToS3ExplicitModes:
         mode: str = "w",
         **kwargs: Any,
     ) -> mock.MagicMock:
-        """Call save_pyramid_to_s3 and return the mock for _save_pyramid_parallel."""
-        mock_client = mock.MagicMock()
-
-        @contextmanager
-        def _fake_ctx(*args: Any, **kw: Any):  # type: ignore[no-untyped-def]
-            yield mock_client
-
+        """Call save_pyramid_to_s3 and return the mock for _save_pyramid_sequential."""
         with (
             mock.patch("grid_doctor.s3.s3fs.S3FileSystem"),
-            mock.patch("grid_doctor.s3._get_or_create_client", side_effect=_fake_ctx),
-            mock.patch("grid_doctor.s3._save_pyramid_parallel") as mock_parallel,
+            mock.patch("grid_doctor.s3._save_pyramid_sequential") as mock_seq,
         ):
             save_pyramid_to_s3(
                 pyramid, "s3://bucket/test", s3_options={}, mode=mode, **kwargs
             )
-        return mock_parallel
+        return mock_seq
 
-    def test_parallel_path_called_for_explicit_mode(self) -> None:
-        mock_parallel = self._run(_pyramid(levels=(0, 1)), mode="w")
-        assert mock_parallel.called
+    def test_sequential_called_for_explicit_mode(self) -> None:
+        mock_seq = self._run(_pyramid(levels=(0, 1)), mode="w")
+        assert mock_seq.called
 
-    def test_mode_forwarded_to_parallel(self) -> None:
-        mock_parallel = self._run(_pyramid(levels=(0,)), mode="w")
-        assert mock_parallel.call_args[1]["mode"] == "w"
+    def test_mode_forwarded_to_sequential(self) -> None:
+        mock_seq = self._run(_pyramid(levels=(0,)), mode="w")
+        assert mock_seq.call_args[1]["mode"] == "w"
 
     def test_s3_path_normalised(self) -> None:
         """s3:// prefix and trailing slash must be stripped before handoff."""
-        mock_parallel = self._run(_pyramid(levels=(0,)))
-        passed_path = mock_parallel.call_args[0][2]
+        mock_seq = self._run(_pyramid(levels=(0,)))
+        passed_path = mock_seq.call_args[0][2]
         assert not passed_path.startswith("s3://")
         assert not passed_path.endswith("/")
 
     def test_zarr_format_2_forwarded(self) -> None:
-        mock_parallel = self._run(_pyramid(levels=(0,)), zarr_format=2)
-        assert mock_parallel.call_args[1]["zarr_format"] == 2
+        mock_seq = self._run(_pyramid(levels=(0,)), zarr_format=2)
+        assert mock_seq.call_args[1]["zarr_format"] == 2
 
     def test_zarr_format_3_forwarded(self) -> None:
-        mock_parallel = self._run(_pyramid(levels=(0,)), zarr_format=3)
-        assert mock_parallel.call_args[1]["zarr_format"] == 3
+        mock_seq = self._run(_pyramid(levels=(0,)), zarr_format=3)
+        assert mock_seq.call_args[1]["zarr_format"] == 3
 
     def test_per_level_encoding_forwarded(self) -> None:
         enc = {0: {"tas": {"dtype": "float32"}}}
-        mock_parallel = self._run(_pyramid(levels=(0,)), encoding=enc)
-        assert mock_parallel.call_args[1]["encoding"] == enc
+        mock_seq = self._run(_pyramid(levels=(0,)), encoding=enc)
+        assert mock_seq.call_args[1]["encoding"] == enc
 
     def test_max_retries_forwarded(self) -> None:
-        mock_parallel = self._run(_pyramid(levels=(0,)), max_retries=7)
-        assert mock_parallel.call_args[1]["max_retries"] == 7
+        mock_seq = self._run(_pyramid(levels=(0,)), max_retries=7)
+        assert mock_seq.call_args[1]["max_retries"] == 7
 
 
 # ===================================================================
@@ -896,8 +845,8 @@ class TestSavePyramidToS3Auto:
     """Tests for save_pyramid_to_s3 with mode='auto'.
 
     With the parallel-first design, 'auto' mode is forwarded to
-    _save_pyramid_parallel.  Inspect logic and plan routing within the
-    parallel path are tested in TestSavePyramidParallel.
+    _save_pyramid_sequential.  Inspect logic and plan routing are tested
+    in integration via _run_auto.
     """
 
     def _run_auto(
@@ -906,787 +855,260 @@ class TestSavePyramidToS3Auto:
         *,
         validate: bool = False,
     ) -> mock.MagicMock:
-        """Call save_pyramid_to_s3(mode='auto') and return the _save_pyramid_parallel mock."""
-        mock_client = mock.MagicMock()
-
-        @contextmanager
-        def _fake_ctx(*args: Any, **kw: Any):  # type: ignore[no-untyped-def]
-            yield mock_client
-
+        """Call save_pyramid_to_s3(mode='auto') and return the _save_pyramid_sequential mock."""
         with (
             mock.patch("grid_doctor.s3.s3fs.S3FileSystem"),
-            mock.patch("grid_doctor.s3._get_or_create_client", side_effect=_fake_ctx),
-            mock.patch("grid_doctor.s3._save_pyramid_parallel") as mock_parallel,
+            mock.patch("grid_doctor.s3._save_pyramid_sequential") as mock_seq,
         ):
             save_pyramid_to_s3(
                 pyramid, "s3://bucket/test", s3_options={},
                 mode="auto", validate=validate,
             )
-        return mock_parallel
+        return mock_seq
 
-    def test_auto_mode_forwarded_to_parallel(self) -> None:
-        mock_parallel = self._run_auto(_pyramid(levels=(0,)))
-        assert mock_parallel.call_args[1]["mode"] == "auto"
+    def test_auto_mode_forwarded_to_sequential(self) -> None:
+        mock_seq = self._run_auto(_pyramid(levels=(0,)))
+        assert mock_seq.call_args[1]["mode"] == "auto"
 
     def test_validate_forwarded_to_parallel(self) -> None:
-        mock_parallel = self._run_auto(_pyramid(levels=(0,)), validate=True)
-        assert mock_parallel.call_args[1]["validate"] is True
+        mock_seq = self._run_auto(_pyramid(levels=(0,)), validate=True)
+        assert mock_seq.call_args[1]["validate"] is True
 
-    def test_parallel_called_once_with_full_pyramid(self) -> None:
-        """_save_pyramid_parallel receives the entire pyramid in one call."""
+    def test_sequential_called_once_with_full_pyramid(self) -> None:
+        """_save_pyramid_sequential receives the entire pyramid in one call."""
         pyramid = _pyramid(levels=(0, 1, 2))
-        mock_parallel = self._run_auto(pyramid)
-        assert mock_parallel.call_count == 1
-        assert mock_parallel.call_args[0][0] is pyramid
+        mock_seq = self._run_auto(pyramid)
+        assert mock_seq.call_count == 1
+        assert mock_seq.call_args[0][0] is pyramid
 
     def test_explicit_mode_bypasses_inspect(self) -> None:
         """_inspect_store must not be called by save_pyramid_to_s3 directly."""
-        mock_client = mock.MagicMock()
-
-        @contextmanager
-        def _fake_ctx(*args: Any, **kw: Any):  # type: ignore[no-untyped-def]
-            yield mock_client
-
         with (
             mock.patch("grid_doctor.s3.s3fs.S3FileSystem"),
-            mock.patch("grid_doctor.s3._get_or_create_client", side_effect=_fake_ctx),
-            mock.patch("grid_doctor.s3._save_pyramid_parallel"),
+            mock.patch("grid_doctor.s3._save_pyramid_sequential"),
             mock.patch("grid_doctor.s3._inspect_store") as mock_inspect,
         ):
             save_pyramid_to_s3(
                 _pyramid(levels=(0,)), "s3://bucket/test", s3_options={}, mode="w"
             )
-        # _inspect_store is called inside _save_pyramid_parallel, not here
+        # _inspect_store is delegated to _save_pyramid_sequential, not called here
         mock_inspect.assert_not_called()
 
 
+
 # ===================================================================
-# _build_write_delayed
+# create_and_upload_healpix_pyramid
 # ===================================================================
 
 
-class TestBuildWriteDelayed:
-    """Tests for ``_build_write_delayed``.
+class TestCreateAndUploadHealpixPyramid:
+    """Tests for ``create_and_upload_healpix_pyramid``.
 
-    ``xr.Dataset.to_zarr`` is patched to return a sentinel value and record
-    call kwargs, so tests can assert on what arguments were passed without
-    touching S3 or Dask.
+    The key design under test is the level-by-level pipeline:
+    remap → upload → read-back-from-S3 → coarsen → upload → ...
+
+    Reading back from S3 severs the upstream Dask graph so CuPy tasks
+    are never re-executed by downstream coarsening steps.
     """
-
-    def _plan(self, **kwargs: Any) -> WritePlan:
-        defaults: dict[str, Any] = dict(
-            mode="w",
-            new_vars=[],
-            existing_vars=["tas"],
-            n_existing_time=None,
-            append_time=False,
-        )
-        defaults.update(kwargs)
-        return WritePlan(**defaults)
 
     def _run(
         self,
-        ds: xr.Dataset,
-        plan: WritePlan,
-        *,
-        zarr_format: int = 2,
-        encoding: dict[str, Any] | None = None,
-    ) -> tuple[Any, list[dict[str, Any]]]:
-        """Call _build_write_delayed and return (return_value, list_of_to_zarr_kwargs)."""
-        store = mock.MagicMock()
-        calls: list[dict[str, Any]] = []
-        sentinel = object()
-
-        def _fake_to_zarr(self_ds: xr.Dataset, store_arg: Any, **kwargs: Any) -> Any:
-            calls.append({"ds": self_ds, **kwargs})
-            return sentinel
-
-        with mock.patch.object(xr.Dataset, "to_zarr", _fake_to_zarr):
-            result = _build_write_delayed(
-                ds,
-                store,
-                plan,
-                zarr_format=zarr_format,
-                encoding=encoding,
-            )
-        return result, calls
-
-    def test_mode_w_returns_delayed(self) -> None:
-        ds = _healpix_ds()
-        result, calls = self._run(ds, self._plan(mode="w"))
-        assert result is not None
-        assert len(calls) == 1
-        assert calls[0]["mode"] == "w"
-
-    def test_mode_r_plus_returns_delayed(self) -> None:
-        ds = _healpix_ds()
-        result, calls = self._run(ds, self._plan(mode="r+"))
-        assert result is not None
-        assert calls[0]["mode"] == "r+"
-
-    def test_always_uses_compute_false(self) -> None:
-        ds = _healpix_ds()
-        _, calls = self._run(ds, self._plan(mode="w"))
-        assert calls[0]["compute"] is False
-
-    def test_always_uses_consolidated_false(self) -> None:
-        """Consolidated metadata must be written manually after gather."""
-        ds = _healpix_ds()
-        _, calls = self._run(ds, self._plan(mode="w"))
-        assert calls[0]["consolidated"] is False
-
-    def test_new_vars_only_single_append_call(self) -> None:
-        ds = _healpix_ds(vars=["tas", "pr"], n_time=3)
-        plan = self._plan(
-            mode="a",
-            new_vars=["pr"],
-            existing_vars=["tas"],
-            n_existing_time=3,
-            append_time=False,
-        )
-        result, calls = self._run(ds, plan)
-        assert result is not None
-        assert len(calls) == 1
-        assert calls[0]["mode"] == "a"
-        assert "append_dim" not in calls[0]
-
-    def test_new_vars_sliced_to_existing_time(self) -> None:
-        """New variable write must cover only existing time range."""
-        ds = _healpix_ds(vars=["tas", "pr"], n_time=5)
-        plan = self._plan(
-            mode="a",
-            new_vars=["pr"],
-            existing_vars=["tas"],
-            n_existing_time=3,
-            append_time=False,
-        )
-        _, calls = self._run(ds, plan)
-        assert calls[0]["ds"].sizes["time"] == 3
-
-    def test_append_time_only_uses_append_dim(self) -> None:
-        ds = _healpix_ds(vars=["tas"], n_time=5)
-        plan = self._plan(
-            mode="a",
-            new_vars=[],
-            existing_vars=["tas"],
-            n_existing_time=3,
-            append_time=True,
-        )
-        result, calls = self._run(ds, plan)
-        assert result is not None
-        assert calls[0].get("append_dim") == "time"
-
-    def test_append_time_sliced_to_new_steps(self) -> None:
-        """Append write must contain only the new time steps."""
-        ds = _healpix_ds(vars=["tas"], n_time=5)
-        plan = self._plan(
-            mode="a",
-            new_vars=[],
-            existing_vars=["tas"],
-            n_existing_time=3,
-            append_time=True,
-        )
-        _, calls = self._run(ds, plan)
-        assert calls[0]["ds"].sizes["time"] == 2
-
-    def test_new_vars_and_append_time_returns_none(self) -> None:
-        """Two-step append must return None to trigger sequential fallback."""
-        ds = _healpix_ds(vars=["tas", "pr"], n_time=5)
-        plan = self._plan(
-            mode="a",
-            new_vars=["pr"],
-            existing_vars=["tas"],
-            n_existing_time=3,
-            append_time=True,
-        )
-        result, calls = self._run(ds, plan)
-        assert result is None
-        assert calls == []  # to_zarr must not be called
-
-    def test_encoding_forwarded(self) -> None:
-        ds = _healpix_ds()
-        enc = {"tas": {"dtype": "float32"}}
-        _, calls = self._run(ds, self._plan(mode="w"), encoding=enc)
-        assert calls[0]["encoding"] == enc
-
-    def test_zarr_format_forwarded(self) -> None:
-        ds = _healpix_ds()
-        _, calls = self._run(ds, self._plan(mode="w"), zarr_format=3)
-        assert calls[0]["zarr_format"] == 3
-
-
-# ===================================================================
-# _save_pyramid_parallel
-# ===================================================================
-
-
-class TestSavePyramidParallel:
-    """Tests for ``_save_pyramid_parallel``.
-
-    The distributed client and zarr.consolidate_metadata are mocked so
-    tests run without a real cluster or S3 connection.
-    ``_build_write_delayed`` is also mocked to return a sentinel delayed
-    object, isolating the orchestration logic from the write decomposition
-    (which is already tested in TestBuildWriteDelayed).
-    """
-
-    SENTINEL_DELAYED = object()
-
-    def _run(
-        self,
-        pyramid: dict[int, xr.Dataset],
-        *,
-        mode: str = "w",
-        zarr_format: int = 2,
-        encoding: dict[int, Any] | None = None,
-        two_step_levels: set[int] | None = None,
+        levels: tuple[int, ...] = (2, 1, 0),
+        backend: str = "scipy",
+        **kwargs: Any,
     ) -> tuple[mock.MagicMock, mock.MagicMock, mock.MagicMock]:
-        """Run _save_pyramid_parallel with mocked client and internals.
+        """Run create_and_upload_healpix_pyramid with mocked internals.
 
-        Returns (mock_client, mock_build_delayed, mock_consolidate).
-        *two_step_levels* controls which levels return None from
-        _build_write_delayed (simulating the two-step append fallback).
+        Returns (mock_regrid, mock_coarsen, mock_execute).
         """
-        two_step_levels = two_step_levels or set()
-        client = mock.MagicMock()
-        client.compute.return_value = [mock.MagicMock()]
-        client.gather.return_value = None
-        fs = mock.MagicMock()
+        max_level = max(levels)
+        min_level = min(levels)
+        finest = _healpix_ds(level=max_level)
+        finest.attrs["grid_doctor_backend"] = backend
 
-        def _fake_build(ds: Any, store: Any, plan: Any, **kw: Any) -> Any:
-            # Identify level from store root path
-            root: str = store.root if hasattr(store, "root") else ""
-            for lvl in two_step_levels:
-                if f"level_{lvl}" in root:
-                    return None
-            return self.SENTINEL_DELAYED
+        def _fake_coarsen(ds: xr.Dataset, target_level: int, **kw: Any) -> xr.Dataset:
+            result = _healpix_ds(level=target_level)
+            result.attrs["grid_doctor_backend"] = backend
+            return result
+
+        def _fake_open_zarr(store: Any, **kw: Any) -> xr.Dataset:
+            # Return a fresh dataset as if read from S3
+            level = int(store.root.split("level_")[1].replace(".zarr", ""))
+            ds = _healpix_ds(level=level)
+            ds.attrs["grid_doctor_backend"] = backend
+            return ds
 
         with (
+            mock.patch("grid_doctor.s3.s3fs.S3FileSystem"),
             mock.patch("grid_doctor.s3.s3fs.S3Map") as mock_s3map,
-            mock.patch(
-                "grid_doctor.s3._build_write_delayed", side_effect=_fake_build
-            ) as mock_build,
+            mock.patch("grid_doctor.remap.regrid_to_healpix", return_value=finest) as mock_regrid,
+            mock.patch("grid_doctor.helpers.coarsen_healpix", side_effect=_fake_coarsen) as mock_coarsen,
+            mock.patch("grid_doctor.s3.xr.open_zarr", side_effect=_fake_open_zarr),
             mock.patch("grid_doctor.s3._execute_write_plan") as mock_execute,
-            mock.patch("grid_doctor.s3._inspect_store") as mock_inspect,
-            mock.patch("grid_doctor.s3.zarr") as mock_zarr,
+            mock.patch("grid_doctor.s3.zarr.consolidate_metadata"),
         ):
-            mock_s3map.return_value = mock.MagicMock()
-            mock_s3map.return_value.root = "s3://bucket/test/level_X.zarr"
-            # Make S3Map return a store whose root contains the level number
+            mock_s3map.side_effect = lambda *a, **kw: mock.MagicMock(
+                root=kw.get("root", "s3://bucket/test/level_X.zarr")
+            )
+            create_and_upload_healpix_pyramid(
+                _healpix_ds(),
+                "s3://bucket/test",
+                s3_options={},
+                max_level=max_level,
+                min_level=min_level,
+                **kwargs,
+            )
+        return mock_regrid, mock_coarsen, mock_execute
+
+    def test_regrid_called_once_at_max_level(self) -> None:
+        mock_regrid, _, _ = self._run(levels=(2, 1, 0))
+        assert mock_regrid.call_count == 1
+        assert mock_regrid.call_args[0][1] == 2  # max_level positional arg
+
+    def test_coarsen_called_for_each_lower_level(self) -> None:
+        """One coarsen call per level below max."""
+        _, mock_coarsen, _ = self._run(levels=(2, 1, 0))
+        assert mock_coarsen.call_count == 2  # level 2→1, 1→0
+
+    def test_upload_called_for_every_level(self) -> None:
+        """_execute_write_plan must be called once per level."""
+        _, _, mock_execute = self._run(levels=(2, 1, 0))
+        assert mock_execute.call_count == 3
+
+    def test_coarsen_not_called_when_max_equals_min(self) -> None:
+        """Single-level pyramid: remap and upload, no coarsening."""
+        _, mock_coarsen, mock_execute = self._run(levels=(2,))
+        mock_coarsen.assert_not_called()
+        assert mock_execute.call_count == 1
+
+    def test_level_paths_contain_level_number(self) -> None:
+        """S3Map must be called with the correct level path for each level."""
+        max_level, min_level = 2, 0
+        finest = _healpix_ds(level=max_level)
+
+        store_roots: list[str] = []
+
+        def _fake_open_zarr(store: Any, **kw: Any) -> xr.Dataset:
+            level = int(store.root.split("level_")[1].replace(".zarr", ""))
+            return _healpix_ds(level=level)
+
+        with (
+            mock.patch("grid_doctor.s3.s3fs.S3FileSystem"),
+            mock.patch("grid_doctor.s3.s3fs.S3Map") as mock_s3map,
+            mock.patch("grid_doctor.remap.regrid_to_healpix", return_value=finest),
+            mock.patch("grid_doctor.helpers.coarsen_healpix", side_effect=lambda ds, lvl, **kw: _healpix_ds(level=lvl)),
+            mock.patch("grid_doctor.s3.xr.open_zarr", side_effect=_fake_open_zarr),
+            mock.patch("grid_doctor.s3._execute_write_plan"),
+            mock.patch("grid_doctor.s3.zarr.consolidate_metadata"),
+        ):
             def _s3map_factory(*a: Any, **kw: Any) -> mock.MagicMock:
                 m = mock.MagicMock()
                 root = kw.get("root", "")
                 m.root = root
+                store_roots.append(root)
                 return m
             mock_s3map.side_effect = _s3map_factory
-
-            mock_inspect.return_value = WritePlan(
-                mode=mode if mode != "auto" else "w",
-                new_vars=["tas"],
-                existing_vars=[],
-                n_existing_time=None,
-                append_time=False,
+            create_and_upload_healpix_pyramid(
+                _healpix_ds(), "s3://bucket/test", s3_options={},
+                max_level=max_level, min_level=min_level,
             )
 
-            _save_pyramid_parallel(
-                pyramid,
-                fs,
-                "bucket/test",
-                mode=mode,
-                zarr_format=zarr_format,
-                encoding=encoding,
-                validate=False,
-                max_retries=3,
-                retry_backoff=2.0,
-                client=client,
-            )
+        assert any("level_2" in r for r in store_roots)
+        assert any("level_1" in r for r in store_roots)
+        assert any("level_0" in r for r in store_roots)
 
-        return client, mock_build, mock_zarr
+    def test_gpu_backend_uses_synchronous_scheduler(self) -> None:
+        """GPU-backed datasets must trigger synchronous Dask scheduler."""
+        import dask
+        scheduler_used: list[str] = []
 
-    def test_client_compute_called(self) -> None:
-        pyramid = _pyramid(levels=(0, 1))
-        client, _, _ = self._run(pyramid)
-        assert client.compute.called
+        original_set = dask.config.set
 
-    def test_client_gather_called_after_compute(self) -> None:
-        pyramid = _pyramid(levels=(0, 1))
-        client, _, _ = self._run(pyramid)
-        assert client.gather.called
-        # gather must be called with the result of compute
-        gather_arg = client.gather.call_args[0][0]
-        assert gather_arg is client.compute.return_value
+        def _capture_set(**kw: Any) -> Any:
+            if "scheduler" in kw:
+                scheduler_used.append(kw["scheduler"])
+            return original_set(**kw)
 
-    def test_all_parallelisable_levels_submitted(self) -> None:
-        """All non-two-step levels must appear in client.compute call."""
-        pyramid = _pyramid(levels=(0, 1, 2))
-        client, _, _ = self._run(pyramid)
-        delayed_list = client.compute.call_args[0][0]
-        assert len(delayed_list) == 3
+        finest = _healpix_ds(level=1)
+        finest.attrs["grid_doctor_backend"] = "cupy"
 
-    def test_max_retries_forwarded_to_client_compute(self) -> None:
-        pyramid = _pyramid(levels=(0,))
-        client, _, _ = self._run(pyramid)
-        kwargs = client.compute.call_args[1]
-        assert kwargs.get("retries") == 3
-
-    def test_two_step_level_not_in_parallel_batch(self) -> None:
-        """Level with new_vars AND append_time must not be passed to client.compute."""
-        pyramid = _pyramid(levels=(0, 1))
-        client, _, _ = self._run(pyramid, two_step_levels={1})
-        delayed_list = client.compute.call_args[0][0]
-        # Only level 0 is parallelisable
-        assert len(delayed_list) == 1
-
-    def test_two_step_level_executed_sequentially(self) -> None:
-        """Level falling back to sequential must go through _execute_write_plan."""
-        pyramid = _pyramid(levels=(0, 1))
         with (
+            mock.patch("grid_doctor.s3.s3fs.S3FileSystem"),
             mock.patch("grid_doctor.s3.s3fs.S3Map") as mock_s3map,
-            mock.patch(
-                "grid_doctor.s3._build_write_delayed",
-                side_effect=lambda ds, store, plan, **kw: (
-                    None if "level_1" in store.root else object()
-                ),
-            ),
-            mock.patch("grid_doctor.s3._execute_write_plan") as mock_execute,
-            mock.patch("grid_doctor.s3._inspect_store") as mock_inspect,
-            mock.patch("grid_doctor.s3.zarr"),
-        ):
-            def _s3map_factory(*a: Any, **kw: Any) -> mock.MagicMock:
-                m = mock.MagicMock()
-                m.root = kw.get("root", "")
-                return m
-            mock_s3map.side_effect = _s3map_factory
-            client = mock.MagicMock()
-            client.compute.return_value = [mock.MagicMock()]
-            mock_inspect.return_value = WritePlan(
-                mode="w", new_vars=["tas"], existing_vars=[],
-                n_existing_time=None, append_time=False,
-            )
-            _save_pyramid_parallel(
-                pyramid, mock.MagicMock(), "bucket/test",
-                mode="w", zarr_format=2, encoding=None,
-                validate=False, max_retries=3, retry_backoff=2.0, client=client,
-            )
-        assert mock_execute.call_count == 1
-
-    def test_consolidate_metadata_called_for_v2(self) -> None:
-        """zarr.consolidate_metadata must be called once per parallelised store for v2."""
-        pyramid = _pyramid(levels=(0, 1))
-        _, _, mock_zarr = self._run(pyramid, zarr_format=2)
-        assert mock_zarr.consolidate_metadata.call_count == 2
-
-    def test_consolidate_metadata_not_called_for_v3(self) -> None:
-        pyramid = _pyramid(levels=(0, 1))
-        _, _, mock_zarr = self._run(pyramid, zarr_format=3)
-        mock_zarr.consolidate_metadata.assert_not_called()
-
-    def test_inspect_store_called_for_auto_mode(self) -> None:
-        pyramid = _pyramid(levels=(0,))
-        with (
-            mock.patch("grid_doctor.s3.s3fs.S3Map") as mock_s3map,
-            mock.patch("grid_doctor.s3._build_write_delayed", return_value=object()),
-            mock.patch("grid_doctor.s3._inspect_store") as mock_inspect,
-            mock.patch("grid_doctor.s3.zarr"),
+            mock.patch("grid_doctor.remap.regrid_to_healpix", return_value=finest),
+            mock.patch("grid_doctor.helpers.coarsen_healpix",
+                       side_effect=lambda ds, lvl, **kw: _healpix_ds(level=lvl)),
+            mock.patch("grid_doctor.s3.xr.open_zarr",
+                       return_value=_healpix_ds(level=0)),
+            mock.patch("grid_doctor.s3._execute_write_plan"),
+            mock.patch("grid_doctor.s3.zarr.consolidate_metadata"),
+            mock.patch("grid_doctor.s3.dask.config.set", side_effect=_capture_set),
         ):
             mock_s3map.side_effect = lambda *a, **kw: mock.MagicMock(root=kw.get("root",""))
-            mock_inspect.return_value = WritePlan(
-                mode="w", new_vars=["tas"], existing_vars=[],
-                n_existing_time=None, append_time=False,
+            create_and_upload_healpix_pyramid(
+                _healpix_ds(), "s3://bucket/test", s3_options={},
+                max_level=1, min_level=0,
             )
-            client = mock.MagicMock()
-            client.compute.return_value = [mock.MagicMock()]
-            _save_pyramid_parallel(
-                pyramid, mock.MagicMock(), "bucket/test",
-                mode="auto", zarr_format=2, encoding=None,
-                validate=False, max_retries=3, retry_backoff=2.0, client=client,
-            )
-        assert mock_inspect.called
 
-    def test_gpu_backed_dataset_routed_to_sequential(self) -> None:
-        """GPU-backed levels must bypass _build_write_delayed and go to
-        _execute_write_plan.  Workers lack GPU context and would OOM on
-        multi-TB datasets if they recomputed CuPy tasks."""
-        # Dataset with grid_doctor_backend='cupy' attr — triggers GPU routing
-        gpu_ds = _healpix_ds(vars=["tas"])
-        gpu_ds.attrs["grid_doctor_backend"] = "cupy"
-        pyramid = {0: gpu_ds}
+        assert "synchronous" in scheduler_used
+
+    def test_cpu_backend_does_not_force_synchronous(self) -> None:
+        """CPU-backed datasets must not force the synchronous scheduler."""
+        import dask
+        scheduler_used: list[str] = []
+
+        original_set = dask.config.set
+
+        def _capture_set(**kw: Any) -> Any:
+            if "scheduler" in kw:
+                scheduler_used.append(kw["scheduler"])
+            return original_set(**kw)
+
+        finest = _healpix_ds(level=1)
+        finest.attrs["grid_doctor_backend"] = "scipy"
 
         with (
+            mock.patch("grid_doctor.s3.s3fs.S3FileSystem"),
             mock.patch("grid_doctor.s3.s3fs.S3Map") as mock_s3map,
-            mock.patch("grid_doctor.s3._build_write_delayed") as mock_build,
-            mock.patch("grid_doctor.s3._execute_write_plan") as mock_execute,
-            mock.patch("grid_doctor.s3._inspect_store") as mock_inspect,
-            mock.patch("grid_doctor.s3.zarr"),
-        ):
-            mock_s3map.side_effect = lambda *a, **kw: mock.MagicMock(root=kw.get("root", ""))
-            mock_inspect.return_value = WritePlan(
-                mode="w", new_vars=["tas"], existing_vars=[],
-                n_existing_time=None, append_time=False,
-            )
-            client = mock.MagicMock()
-            client.compute.return_value = [mock.MagicMock()]
-            _save_pyramid_parallel(
-                pyramid, mock.MagicMock(), "bucket/test",
-                mode="auto", zarr_format=2, encoding=None,
-                validate=False, max_retries=3, retry_backoff=2.0, client=client,
-            )
-
-        # GPU level must go to _execute_write_plan, never to _build_write_delayed
-        mock_build.assert_not_called()
-        assert mock_execute.call_count == 1
-        # client.compute must not be called for GPU-only pyramid
-        client.compute.assert_not_called()
-
-    def test_cpu_backed_dataset_routed_to_parallel(self) -> None:
-        """CPU-backed levels must go through _build_write_delayed and client.compute."""
-        import dask.array as da
-        pyramid = _pyramid(levels=(0,))
-
-        with (
-            mock.patch("grid_doctor.s3.s3fs.S3Map") as mock_s3map,
-            mock.patch("grid_doctor.s3._build_write_delayed", return_value=object()) as mock_build,
-            mock.patch("grid_doctor.s3._execute_write_plan") as mock_execute,
-            mock.patch("grid_doctor.s3._inspect_store") as mock_inspect,
-            mock.patch("grid_doctor.s3.zarr"),
-        ):
-            mock_s3map.side_effect = lambda *a, **kw: mock.MagicMock(root=kw.get("root", ""))
-            mock_inspect.return_value = WritePlan(
-                mode="w", new_vars=["tas"], existing_vars=[],
-                n_existing_time=None, append_time=False,
-            )
-            client = mock.MagicMock()
-            client.compute.return_value = [mock.MagicMock()]
-            _save_pyramid_parallel(
-                pyramid, mock.MagicMock(), "bucket/test",
-                mode="auto", zarr_format=2, encoding=None,
-                validate=False, max_retries=3, retry_backoff=2.0, client=client,
-            )
-
-        mock_build.assert_called_once()
-        mock_execute.assert_not_called()
-        client.compute.assert_called_once()
-
-    def test_inspect_store_not_called_for_explicit_mode(self) -> None:
-        pyramid = _pyramid(levels=(0,))
-        with (
-            mock.patch("grid_doctor.s3.s3fs.S3Map") as mock_s3map,
-            mock.patch("grid_doctor.s3._build_write_delayed", return_value=object()),
-            mock.patch("grid_doctor.s3._inspect_store") as mock_inspect,
-            mock.patch("grid_doctor.s3.zarr"),
+            mock.patch("grid_doctor.remap.regrid_to_healpix", return_value=finest),
+            mock.patch("grid_doctor.helpers.coarsen_healpix",
+                       side_effect=lambda ds, lvl, **kw: _healpix_ds(level=lvl)),
+            mock.patch("grid_doctor.s3.xr.open_zarr",
+                       return_value=_healpix_ds(level=0)),
+            mock.patch("grid_doctor.s3._execute_write_plan"),
+            mock.patch("grid_doctor.s3.zarr.consolidate_metadata"),
+            mock.patch("grid_doctor.s3.dask.config.set", side_effect=_capture_set),
         ):
             mock_s3map.side_effect = lambda *a, **kw: mock.MagicMock(root=kw.get("root",""))
-            client = mock.MagicMock()
-            client.compute.return_value = [mock.MagicMock()]
-            _save_pyramid_parallel(
-                pyramid, mock.MagicMock(), "bucket/test",
-                mode="w", zarr_format=2, encoding=None,
-                validate=False, max_retries=3, retry_backoff=2.0, client=client,
+            create_and_upload_healpix_pyramid(
+                _healpix_ds(), "s3://bucket/test", s3_options={},
+                max_level=1, min_level=0,
             )
-        mock_inspect.assert_not_called()
 
+        assert "synchronous" not in scheduler_used
 
-# ===================================================================
-# save_pyramid_to_s3 — client parameter
-# ===================================================================
+    def test_kwargs_forwarded_to_regrid(self) -> None:
+        """Extra kwargs (method, backend, …) must reach regrid_to_healpix."""
+        mock_regrid, _, _ = self._run(levels=(1, 0), method="nearest")
+        assert mock_regrid.call_args[1].get("method") == "nearest"
 
-
-
-class TestSavePyramidToS3GpuShortCircuit:
-    """Tests that a fully GPU-backed pyramid bypasses _get_or_create_client
-    and routes directly to _save_pyramid_sequential."""
-
-    def _gpu_pyramid(self, levels: tuple[int, ...] = (0, 1)) -> dict[int, xr.Dataset]:
-        pyramid = {}
-        for level in levels:
-            ds = _healpix_ds(level=level)
-            ds.attrs["grid_doctor_backend"] = "cupy"
-            pyramid[level] = ds
-        return pyramid
-
-    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.s3._save_pyramid_sequential")
-    @mock.patch("grid_doctor.s3._get_or_create_client")
-    def test_gpu_pyramid_skips_distributed(
-        self,
-        mock_ctx: mock.Mock,
-        mock_sequential: mock.Mock,
-        mock_fs: mock.Mock,
-    ) -> None:
-        """All-GPU pyramid must call _save_pyramid_sequential without
-        entering _get_or_create_client."""
-        pyramid = self._gpu_pyramid()
-        save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w")
-        mock_sequential.assert_called_once()
-        mock_ctx.assert_not_called()
-
-    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.s3._save_pyramid_sequential")
-    @mock.patch("grid_doctor.s3._get_or_create_client")
-    def test_mixed_pyramid_uses_distributed(
-        self,
-        mock_ctx: mock.Mock,
-        mock_sequential: mock.Mock,
-        mock_fs: mock.Mock,
-    ) -> None:
-        """A pyramid with at least one non-GPU level must go through
-        _get_or_create_client, not the GPU short-circuit."""
-        from contextlib import contextmanager
-        mock_client = mock.MagicMock()
-
-        @contextmanager
-        def _fake_ctx(*a: Any, **kw: Any):  # type: ignore[no-untyped-def]
-            yield mock_client
-
-        mock_ctx.side_effect = _fake_ctx
-        pyramid = self._gpu_pyramid(levels=(0,))
-        cpu_ds = _healpix_ds(level=1)  # no backend attr
-        pyramid[1] = cpu_ds
-
-        with mock.patch("grid_doctor.s3._save_pyramid_parallel"):
-            save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w")
-        mock_ctx.assert_called_once()
-
-    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.s3._save_pyramid_sequential")
-    @mock.patch("grid_doctor.s3._get_or_create_client")
-    def test_parallel_execution_true_uses_distributed_for_cpu(
-        self,
-        mock_ctx: mock.Mock,
-        mock_sequential: mock.Mock,
-        mock_fs: mock.Mock,
-    ) -> None:
-        """CPU pyramid with parallel_execution=True (default) must not
-        trigger the GPU short-circuit."""
-        from contextlib import contextmanager
-        mock_client = mock.MagicMock()
-
-        @contextmanager
-        def _fake_ctx(*a: Any, **kw: Any):  # type: ignore[no-untyped-def]
-            yield mock_client
-
-        mock_ctx.side_effect = _fake_ctx
-        pyramid = _pyramid(levels=(0,))  # CPU-backed, no backend attr
-        with mock.patch("grid_doctor.s3._save_pyramid_parallel"):
-            save_pyramid_to_s3(
-                pyramid, "s3://bucket/test", s3_options={},
-                mode="w", parallel_execution=True,
+    def test_zarr_v2_consolidates_metadata(self) -> None:
+        """zarr.consolidate_metadata must be called for every level with v2."""
+        finest = _healpix_ds(level=1)
+        with (
+            mock.patch("grid_doctor.s3.s3fs.S3FileSystem"),
+            mock.patch("grid_doctor.s3.s3fs.S3Map") as mock_s3map,
+            mock.patch("grid_doctor.remap.regrid_to_healpix", return_value=finest),
+            mock.patch("grid_doctor.helpers.coarsen_healpix",
+                       side_effect=lambda ds, lvl, **kw: _healpix_ds(level=lvl)),
+            mock.patch("grid_doctor.s3.xr.open_zarr",
+                       return_value=_healpix_ds(level=0)),
+            mock.patch("grid_doctor.s3._execute_write_plan"),
+            mock.patch("grid_doctor.s3.zarr.consolidate_metadata") as mock_cons,
+        ):
+            mock_s3map.side_effect = lambda *a, **kw: mock.MagicMock(root=kw.get("root",""))
+            create_and_upload_healpix_pyramid(
+                _healpix_ds(), "s3://bucket/test", s3_options={},
+                max_level=1, min_level=0, zarr_format=2,
             )
-        mock_sequential.assert_not_called()
-        mock_ctx.assert_called_once()
-
-    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.s3._save_pyramid_sequential")
-    @mock.patch("grid_doctor.s3._get_or_create_client")
-    def test_gpu_short_circuit_forwards_params(
-        self,
-        mock_ctx: mock.Mock,
-        mock_sequential: mock.Mock,
-        mock_fs: mock.Mock,
-    ) -> None:
-        """Parameters must be forwarded correctly to _save_pyramid_sequential."""
-        pyramid = self._gpu_pyramid(levels=(0,))
-        enc = {0: {"tas": {"dtype": "float32"}}}
-        save_pyramid_to_s3(
-            pyramid,
-            "s3://bucket/test",
-            s3_options={},
-            mode="auto",
-            zarr_format=2,
-            encoding=enc,
-            validate=True,
-            max_retries=7,
-            retry_backoff=3.0,
-        )
-        kw = mock_sequential.call_args[1]
-        assert kw["mode"] == "auto"
-        assert kw["zarr_format"] == 2
-        assert kw["encoding"] == enc
-        assert kw["validate"] is True
-        assert kw["max_retries"] == 7
-        assert kw["retry_backoff"] == 3.0
-
-
-class TestGetOrCreateClient:
-    """Tests for the ``_get_or_create_client`` context manager."""
-
-    def test_yields_provided_client_unchanged(self) -> None:
-        """A caller-supplied client must be yielded as-is without closing."""
-        client = mock.MagicMock()
-        with _get_or_create_client(client, n_workers=4, threads_per_worker=2) as c:
-            assert c is client
-        client.close.assert_not_called()
-
-    def test_reuses_existing_distributed_client(self) -> None:
-        """If a distributed client already exists in context, reuse it."""
-        existing = mock.MagicMock()
-        with mock.patch("grid_doctor.s3._get_distributed_client", return_value=existing):
-            with _get_or_create_client(
-                None, n_workers=4, threads_per_worker=2
-            ) as c:
-                assert c is existing
-        existing.close.assert_not_called()
-
-    def test_creates_local_cluster_when_none_exists(self) -> None:
-        """No client + no existing cluster → create LocalCluster and Client."""
-        mock_cluster = mock.MagicMock()
-        mock_client = mock.MagicMock()
-        with (
-            mock.patch(
-                "grid_doctor.s3._get_distributed_client",
-                side_effect=ValueError("no client"),
-            ),
-            mock.patch("grid_doctor.s3.LocalCluster", return_value=mock_cluster),
-            mock.patch("grid_doctor.s3.Client", return_value=mock_client),
-        ):
-            with _get_or_create_client(
-                None, n_workers=4, threads_per_worker=2
-            ) as c:
-                assert c is mock_client
-            mock_client.close.assert_called_once()
-            mock_cluster.close.assert_called_once()
-
-    def test_cluster_closed_even_on_exception(self) -> None:
-        """LocalCluster must be closed even when the body raises."""
-        mock_cluster = mock.MagicMock()
-        mock_client = mock.MagicMock()
-        with (
-            mock.patch(
-                "grid_doctor.s3._get_distributed_client",
-                side_effect=ValueError("no client"),
-            ),
-            mock.patch("grid_doctor.s3.LocalCluster", return_value=mock_cluster),
-            mock.patch("grid_doctor.s3.Client", return_value=mock_client),
-        ):
-            with pytest.raises(RuntimeError):
-                with _get_or_create_client(
-                    None, n_workers=4, threads_per_worker=2
-                ):
-                    raise RuntimeError("upload failed")
-            mock_client.close.assert_called_once()
-            mock_cluster.close.assert_called_once()
-
-    def test_no_existing_client_creates_cluster(self) -> None:
-        """When no existing client exists, a LocalCluster must be created."""
-        with (
-            mock.patch(
-                "grid_doctor.s3._get_distributed_client",
-                side_effect=ValueError("no client"),
-            ),
-            mock.patch("grid_doctor.s3.LocalCluster") as mock_lc,
-            mock.patch("grid_doctor.s3.Client") as mock_cl,
-        ):
-            mock_lc.return_value = mock.MagicMock()
-            mock_cl.return_value = mock.MagicMock()
-            with _get_or_create_client(None, n_workers=4, threads_per_worker=2):
-                pass
-        assert mock_lc.called
-        assert mock_cl.called
-
-    def test_n_workers_forwarded_to_local_cluster(self) -> None:
-        mock_cluster = mock.MagicMock()
-        with (
-            mock.patch(
-                "grid_doctor.s3._get_distributed_client",
-                side_effect=ValueError("no client"),
-            ),
-            mock.patch(
-                "grid_doctor.s3.LocalCluster", return_value=mock_cluster
-            ) as mock_lc,
-            mock.patch("grid_doctor.s3.Client"),
-        ):
-            with _get_or_create_client(None, n_workers=8, threads_per_worker=3):
-                pass
-        _, kwargs = mock_lc.call_args
-        assert kwargs["n_workers"] == 8
-        assert kwargs["threads_per_worker"] == 3
-
-
-class TestSavePyramidToS3ClientParam:
-    """Tests that ``save_pyramid_to_s3`` correctly routes through
-    ``_get_or_create_client`` and into the parallel or sequential path."""
-
-    def _mock_context(
-        self, active_client: Any | None
-    ) -> mock.MagicMock:
-        """Return a mock that makes _get_or_create_client yield active_client."""
-        from contextlib import contextmanager
-
-        @contextmanager
-        def _ctx(*args: Any, **kwargs: Any):  # type: ignore[no-untyped-def]
-            yield active_client
-
-        return mock.patch("grid_doctor.s3._get_or_create_client", side_effect=_ctx)
-
-    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.s3._save_pyramid_parallel")
-    def test_parallel_path_used_when_client_available(
-        self, mock_parallel: mock.Mock, mock_fs: mock.Mock
-    ) -> None:
-        client = mock.MagicMock()
-        pyramid = _pyramid(levels=(0,))
-        with self._mock_context(client):
-            save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w")
-        assert mock_parallel.called
-
-    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.s3._save_pyramid_sequential")
-    @mock.patch("grid_doctor.s3._save_pyramid_parallel")
-    def test_parallel_execution_false_uses_sequential(
-        self,
-        mock_parallel: mock.Mock,
-        mock_sequential: mock.Mock,
-        mock_fs: mock.Mock,
-    ) -> None:
-        """parallel_execution=False must bypass distributed and call
-        _save_pyramid_sequential directly, regardless of GPU backend."""
-        pyramid = _pyramid(levels=(0,))  # CPU-backed
-        save_pyramid_to_s3(
-            pyramid, "s3://bucket/test", s3_options={},
-            mode="w", parallel_execution=False,
-        )
-        mock_sequential.assert_called_once()
-        mock_parallel.assert_not_called()
-
-    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.s3._save_pyramid_parallel")
-    def test_s3_path_normalised_before_parallel(
-        self, mock_parallel: mock.Mock, mock_fs: mock.Mock
-    ) -> None:
-        client = mock.MagicMock()
-        pyramid = _pyramid(levels=(0,))
-        with self._mock_context(client):
-            save_pyramid_to_s3(
-                pyramid, "s3://bucket/test/", s3_options={}, mode="w"
-            )
-        passed_path = mock_parallel.call_args[0][2]
-        assert not passed_path.startswith("s3://")
-        assert not passed_path.endswith("/")
-
-    @mock.patch("grid_doctor.s3.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.s3._save_pyramid_parallel")
-    def test_all_params_forwarded_to_parallel(
-        self, mock_parallel: mock.Mock, mock_fs: mock.Mock
-    ) -> None:
-        client = mock.MagicMock()
-        pyramid = _pyramid(levels=(0,))
-        enc = {0: {"tas": {"dtype": "float32"}}}
-        with self._mock_context(client):
-            save_pyramid_to_s3(
-                pyramid,
-                "s3://bucket/test",
-                s3_options={},
-                mode="auto",
-                zarr_format=2,
-                encoding=enc,
-                validate=True,
-                max_retries=7,
-                retry_backoff=3.0,
-            )
-        kw = mock_parallel.call_args[1]
-        assert kw["mode"] == "auto"
-        assert kw["zarr_format"] == 2
-        assert kw["encoding"] == enc
-        assert kw["validate"] is True
-        assert kw["max_retries"] == 7
-        assert kw["retry_backoff"] == 3.0
+        assert mock_cons.call_count == 2  # one per level
