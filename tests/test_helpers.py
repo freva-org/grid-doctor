@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest import mock
 
 import numpy as np
 import pytest
 import xarray as xr
 
 from grid_doctor import helpers
-from grid_doctor.helpers import (
-    save_pyramid_to_s3,  # re-exported from grid_doctor.s3 for backward compat
-)
 from grid_doctor.helpers import (
     _coarsen_array,
     _coarsen_array_mode,
@@ -411,9 +407,7 @@ class TestPyramidBuilders:
                 },
             )
 
-        def fake_coarsen(
-            ds: xr.Dataset, level: int, **kwargs: Any
-        ) -> xr.Dataset:
+        def fake_coarsen(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
             coarsen_calls.append(kwargs)
             npix = 12 * (4**level)
             return xr.Dataset(
@@ -439,20 +433,3 @@ class TestPyramidBuilders:
         for call in coarsen_calls:
             assert call["coarsen_mode"] == "mode"
             assert call["min_valid_fraction"] == 0.75
-
-
-class TestSavePyramidToS3BackwardCompat:
-    """Smoke tests confirming that save_pyramid_to_s3 is still importable from
-    grid_doctor.helpers (re-exported for backward compatibility).
-
-    Functional behaviour is fully tested in ``test_s3.py``.
-    """
-
-    def test_reexport_is_callable(self) -> None:
-        from grid_doctor.helpers import save_pyramid_to_s3 as fn
-        assert callable(fn)
-
-    def test_reexport_is_same_object_as_canonical(self) -> None:
-        from grid_doctor.helpers import save_pyramid_to_s3 as from_helpers
-        from grid_doctor.s3 import save_pyramid_to_s3 as from_s3
-        assert from_helpers is from_s3
