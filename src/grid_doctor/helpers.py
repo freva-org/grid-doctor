@@ -488,9 +488,6 @@ def latlon_to_healpix_pyramid(
     )
 
 
-# Re-exported for callers that import directly from this submodule.
-from .s3 import save_pyramid_to_s3  # noqa: E402, F401
-
 __all__ = [
     "coarsen_healpix",
     "create_healpix_pyramid",
@@ -499,5 +496,4 @@ __all__ = [
     "regrid_to_healpix",
     "regrid_unstructured_to_healpix",
     "resolution_to_healpix_level",
-    "save_pyramid_to_s3",
 ]
