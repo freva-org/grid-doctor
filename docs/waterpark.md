@@ -13,28 +13,28 @@ visualisation without per-dataset regridding at access time.
 
 ### Currently available Datasets
 
-| Dataset | Public Bucket | Data Access via |
-|---------|---------------|-----------------|
-| [CMIP6](https://wcrp-cmip.org/cmip-phase-6-cmip6)   | <https://eu-dkrz-3.dkrz.cloud/browser/cmip6> | `https://s3.eu-dkrz-3.dkrz.cloud/cimp6` |
-| [DYAMOND](https://easy.gems.dkrz.de/DYAMOND/index.html)   | <https://eu-dkrz-3.dkrz.cloud/browser/dyamond> | `https://s3.eu-dkrz-3.dkrz.cloud/dyamond` |
-| [EERIE](https://dataviewer.eerie-project.eu/home/eddy-rich)   | <https://eu-dkrz-3.dkrz.cloud/browser/eerie> | `https://s3.eu-dkrz-3.dkrz.cloud/eerie` |
-| [ERA5](https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5)   | <https://eu-dkrz-3.dkrz.cloud/browser/era5> | `https://s3.eu-dkrz-3.dkrz.cloud/era5 `|
-| [ICDC](https://www.cen.uni-hamburg.de/en/icdc)   | <https://eu-dkrz-3.dkrz.cloud/browser/icdc> | `https://s3.eu-dkrz-3.dkrz.cloud/icdc` |
-| [ICON-DREAM](https://opendata.dwd.de/climate_environment/CDC/help/landing_pages/doi_landingpage_ICON-DREAM_v1-en.html)   | <https://eu-dkrz-3.dkrz.cloud/browser/icon-dream> | `https://s3.eu-dkrz-3.dkrz.cloud/icon-dream` |
-| [nextGEMS](https://nextgems-h2020.eu)   | <https://eu-dkrz-3.dkrz.cloud/browser/nextgems> | `https://s3.eu-dkrz-3.dkrz.cloud/nextgems` |
-| [ORCESTRA](https://orcestra-campaign.org/data.html)   | <https://eu-dkrz-3.dkrz.cloud/browser/orchestra> | `https://s3.eu-dkrz-3.dkrz.cloud/orchsestra`|
+| Dataset | Data Access via |
+|---------|-----------------|
+| [CMIP6](https://wcrp-cmip.org/cmip-phase-6-cmip6)   | `s3://cimp6` |
+| [DYAMOND](https://easy.gems.dkrz.de/DYAMOND/index.html)   | `s3://dyamond` |
+| [EERIE](https://dataviewer.eerie-project.eu/home/eddy-rich)   | `s3://eerie` |
+| [ERA5](https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5)   | `s3://era5 `|
+| [ICDC](https://www.cen.uni-hamburg.de/en/icdc) | `s3://icdc` |
+| [ICON-DREAM](https://opendata.dwd.de/climate_environment/CDC/help/landing_pages/doi_landingpage_ICON-DREAM_v1-en.html) | `s3://icon-dream` |
+| [nextGEMS](https://nextgems-h2020.eu) | `s3://nextgems` |
+| [ORCESTRA](https://orcestra-campaign.org/data.html) |`s3://orchsestra`|
 
-!!! note
-    To browse the available datasets use the links in the Public Bucket columns,
-    `https://eu-dkrz-3.dkrz.cloud/browser/<bucket>`. To access the
-    data use the `https://s3.eu-dkrz-3.dkrz.cloud/<bucket>/<sub-dirs>/level_X.zarr`
-    for example
 
-    ```python
-    import xarray as xr
+!!! warning "Preliminary test data"
+    The data shown here is part of a test/prototype setup and must be
+    considered **preliminary**.
 
-    ds = xr.open_zarr("https://s3.eu-dkrz-3.dkrz.cloud/dyamond/icon-sap-5km/PT15M/level_9.zarr")
-    ```
+    It may be changed or deleted at any time. There is no guarantee of
+    availability, persistence, completeness, or long-term access.
+
+    The underlying S3 buckets are **not intended or approved for public
+    access**. Bucket URLs must therefore not be published, shared, or linked
+    from public documentation.
 
 ---
 
@@ -124,7 +124,7 @@ nanmean), not by repeated remapping.
 
     # --- 5. Write to S3 ---
     s3_options = gd.get_s3_options(
-        "https://s3.eu-dkrz-3.dkrz.cloud",
+        "https://s3-example.org",
         Path("~/.s3-credentials.json").expanduser(),
     )
     %time gd.save_pyramid_to_s3(
@@ -136,10 +136,7 @@ nanmean), not by repeated remapping.
     # Wall time: ~1 h 25 min (Hopper GPU)
     ```
 
-    The result can be inspected in
-    [gridlook](https://gridlook.pages.dev/#https://s3.eu-dkrz-3.dkrz.cloud/icon-dream/healpix/icdc/modis/aqua/level_10.zarr),
-    for comparison the original grid can be opened following this
-    [link (no firefox)](https://gridlook.pages.dev/#https://s3.eu-dkrz-3.dkrz.cloud/icon-dream/healpix/icdc/modis/og.zarr) or below:
+    The result is displayed below:
 
     <figure markdown="span">
         ![MODIS SST on HEALPix](assets/gridlook-healpix.png){ width="600" }
@@ -170,7 +167,7 @@ nanmean), not by repeated remapping.
     | Temporal coverage | 2002 – present (daily) |
     | Variables | TBD |
 
-    **S3 store:** [`icdc`](https://eu-dkrz-3.dkrz.cloud/browser/icdc)
+    **S3 store:** `s3://icdc`
     ??? quote "Example: icdc/healpix/atmosphere/IMERG/PT30M/level_9"
         ```python
             <xarray.Dataset> Size: 587GB
@@ -220,7 +217,7 @@ nanmean), not by repeated remapping.
     | Temporal coverage | 1940 – present (hourly) |
     | Variables | T2m, Precip, |
 
-    **S3 store:** [`era5/`](https://eu-dkrz-3.dkrz.cloud/browser/era5)
+    **S3 store:** `s3://era5`
     **Notes:** time freq: cmor, level.zarr
     ??? quote "Example: era5/PT1H/level_7"
         ```python
@@ -268,8 +265,9 @@ nanmean), not by repeated remapping.
     | Source resolution | ~5 km (model-dependent) |
     | HEALPix level | 9 |
     | Models | TBD |
+    | Variables | T2m, Precip, |
 
-    **S3 store:** [`eerie/`](https://eu-dkrz-3.dkrz.cloud/browser/eerie)
+    **S3 store:** `s3://eerie`
     **Notes:** Pseudo directory for experiments. More metadata
     ??? quote "Example eerie/eerie-hist-1950-v20240618_P1M_mean_9.zarr"
         ```python
@@ -300,8 +298,9 @@ nanmean), not by repeated remapping.
     | Source resolution | 2.5–5 km |
     | HEALPix level | 10–11 |
     | Temporal coverage | 40-day windows (summer 2016, winter 2020) |
+    | Variables | T2m, Precip, |
 
-    **S3 store:** [`dyamond/`](https://eu-dkrz-3.dkrz.cloud/browser/dyamond)
+    **S3 store:** `s3://dyamond`
     ??? quote "Example dyamond/icon-sap-5km/PT15M/level_10.zarr"
         ```python
             <xarray.Dataset> Size: 399GB
@@ -346,8 +345,9 @@ nanmean), not by repeated remapping.
     | Source resolution | ~5–10 km |
     | HEALPix level | 10 |
     | Models | ICON |
+    | Variables | T2m, Precip, |
 
-    **S3 store:** [`nextgems/`](https://eu-dkrz-3.dkrz.cloud/browser/nextgems)
+    **S3 store:** `s3://nextgems/`
     **Notes:*** Subfolder for time frequencies, more metadata
     ??? quote "Example nextgems/ngc4008_PT15M_10.zarr"
         ```python
@@ -372,8 +372,9 @@ nanmean), not by repeated remapping.
     |---|---|
     | Source grid | ICON unstructured (triangular) |
     | HEALPix level | 8 |
+    | Variables | T2m, Precip, |
 
-    **S3 store:** [`icon-dream/`](https://eu-dkrz-3.dkrz.cloud/browser/icon-dream)
+    **S3 store:** `s3://icon-dream`
     **Notes:*** Consistent places
     ??? quote "Example /icon-dream/healpix/icon-dream-global/hourly/level_8.zarr"
         ```python
@@ -416,7 +417,7 @@ nanmean), not by repeated remapping.
     | Source resolution | Campaign-dependent |
     | HEALPix level | TBD |
 
-    **S3 store:** [`orchestra/`](https://eu-dkrz-3.dkrz.cloud/browser/orchstra)
+    **S3 store:** `s3://orchestra`
     **Notes:** More sub folders
     ??? quote "Example /orchestra/Basic_Halo_Measurement_and_Sensor_System_BAHAMAS_data.zarr"
         ```python
@@ -464,7 +465,8 @@ nanmean), not by repeated remapping.
     |---|---|
     | Source resolution | ~25–250 km (model-dependent) |
     | HEALPix level | 5 - 6 |
-    **S3 store:** [`orchestra/`](https://eu-dkrz-3.dkrz.cloud/browser/orchstra)
+    | Variables | T2m, Precip, |
+    **S3 store:** `s3://cmip6`
     ??? quote "Example cmip6/healpix/cmip6/historical-r1i1p1f1/noresm2-mm/PT6H/level_5.zarr"
         ```python
             <xarray.Dataset> Size: 19GB
