@@ -53,7 +53,7 @@ pyramid = gd.create_healpix_pyramid(
     weights_path=weights_dir,
     max_level=max_level
 )
-gd.save_pyramid_to_s3(
+gd.save_pyramid(
     pyramid,
     "s3://my-bucket/dataset.zarr",
     s3_options=gd.get_s3_options(
@@ -112,7 +112,7 @@ gd_cli.setup_logging_from_args(args)
 
 ds = gd.cached_open_dataset(["path/to/*.nc"])
 pyramid = gd.create_healpix_pyramid(ds)
-gd.save_pyramid_to_s3(
+gd.save_pyramid(
     chunked,
     f"s3://{args.s3_bucket}/my-dataset.zarr",
     s3_options=gd.get_s3_options(args.s3_endpoint, args.s3_credentials_file),

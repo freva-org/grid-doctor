@@ -11,7 +11,7 @@ from os import getenv
 
 from grid_doctor import (
     cached_open_dataset,
-    save_pyramid_to_s3,
+    save_pyramid,
     latlon_to_healpix_pyramid,
 )
 
@@ -101,7 +101,7 @@ def convert(init=False, region={"time": slice(0, 96)}):
 
         if init:
             logging.info("Initializing store %s", dst_url)
-            save_pyramid_to_s3(ds_hp, dst_url, mode="w", compute=False, s3_options=opts)
+            save_pyramid(ds_hp, dst_url, mode="w", compute=False, s3_options=opts)
 
         else:
             region = {
@@ -110,7 +110,7 @@ def convert(init=False, region={"time": slice(0, 96)}):
             }
 
             logging.info("Writting to existing store on region: %s", str(region))
-            save_pyramid_to_s3(
+            save_pyramid(
                 ds_hp, dst_url, mode="r+", region=region, s3_options=opts
             )
 

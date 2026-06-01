@@ -45,7 +45,7 @@ pyramid = gd.create_healpix_pyramid(
     ds, max_level=max_level, weights_path=weights_file,
 )
 
-gd.save_pyramid_to_s3(
+gd.save_pyramid(
     pyramid,
     "s3://my-bucket/healpix/icon-dream/hourly",
     s3_options=gd.get_s3_options(

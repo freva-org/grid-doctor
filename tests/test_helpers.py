@@ -21,7 +21,7 @@ from grid_doctor.helpers import (
     get_latlon_resolution,
     latlon_to_healpix_pyramid,
     resolution_to_healpix_level,
-    save_pyramid_to_s3,
+    save_pyramid,
 )
 
 
@@ -461,7 +461,7 @@ class TestSavePyramidToS3:
         pyramid = self._make_pyramid()
         mock_s3map.return_value = mock.MagicMock()
         with mock.patch.object(xr.Dataset, "to_zarr") as mock_zarr:
-            save_pyramid_to_s3(pyramid, "s3://bucket/test", s3_options={}, mode="w")
+            save_pyramid(pyramid, "s3://bucket/test", s3_options={}, mode="w")
             assert mock_zarr.call_count == 2
 
     @mock.patch("grid_doctor.helpers.s3fs.S3FileSystem")
@@ -473,7 +473,7 @@ class TestSavePyramidToS3:
         pyramid = self._make_pyramid()
         mock_s3map.return_value = mock.MagicMock()
         with mock.patch.object(xr.Dataset, "to_zarr") as mock_zarr:
-            save_pyramid_to_s3(
+            save_pyramid(
                 pyramid, "s3://bucket/test", s3_options={}, zarr_format=3
             )
             for call in mock_zarr.call_args_list:

@@ -29,7 +29,7 @@ weights_file = gd.cached_weights(
 pyramid = gd.create_healpix_pyramid(ds)
 
 # 3. Upload
-gd.save_pyramid_to_s3(
+gd.save_pyramid(
     pyramid,
     "s3://my-bucket/era5/2t",
     s3_options=gd.get_s3_options(
@@ -78,7 +78,7 @@ weights_file = gd.cached_weights(
     prefer_offline=True
 )
 pyramid = gd.create_healpix_pyramid(ds)
-gd.save_pyramid_to_s3(
+gd.save_pyramid(
     pyramid,
     f"s3://{args.s3_bucket}/era5",
     s3_options=gd.get_s3_options(args.s3_endpoint, args.s3_credentials_file),

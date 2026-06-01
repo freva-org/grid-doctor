@@ -9,7 +9,7 @@ efficient IO and scalable data layout decisions.
 Once a pyramid has been created, it can be written to object storage for
 cloud-native access and downstream analysis.
 
-::: grid_doctor.save_pyramid_to_s3
+::: grid_doctor.save_pyramid
     options:
       show_root_heading: true
       show_root_full_path: false
