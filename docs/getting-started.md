@@ -59,6 +59,15 @@ gd.save_pyramid_to_s3(
 !!! warning "Do not commit S3 credentials"
     Always read secrets from environment variables or a credentials file.
 
+!!! tip "Writing to local disk"
+    `save_pyramid_to_s3` also writes to local disk. Pass a plain directory
+    path (no `s3://` scheme) and omit `s3_options`:
+
+```python
+    gd.save_pyramid_to_s3(pyramid, "/work/ks1387", mode="w")
+```
+
+    The same `level_<n>.zarr` layout is written under that directory.
 ## Logging / Verbosity
 
 Every script that uses `gd_cli.get_parser` automatically gets a `-v` flag.

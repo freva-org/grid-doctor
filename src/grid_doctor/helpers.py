@@ -13,6 +13,7 @@ Remapping itself lives in [`grid_doctor.remap`][grid_doctor.remap].
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Literal, cast
 
 import numpy as np
@@ -447,7 +448,7 @@ def create_healpix_pyramid(
 def save_pyramid_to_s3(
     pyramid: dict[int, xr.Dataset],
     s3_path: str,
-    s3_options: dict[str, Any],
+    s3_options: dict[str, Any] | None = None,
     *,
     mode: Literal["a", "w", "r+"] = "a",
     compute: bool = True,
@@ -455,7 +456,7 @@ def save_pyramid_to_s3(
     zarr_format: Literal[2, 3] = 2,
     encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
 ) -> None:
-    """Write a HEALPix pyramid to S3-backed Zarr stores.
+    """Write a HEALPix pyramid to Zarr stores on S3 or local disk.
 
     Each level is stored below ``"<s3_path>/level_<level>.zarr"``.
 
@@ -464,9 +465,11 @@ def save_pyramid_to_s3(
     pyramid:
         Mapping of HEALPix level to dataset.
     s3_path:
-        S3 prefix such as ``"s3://bucket/pyramid"``.
+        Target prefix.  An ``"s3://bucket/pyramid"`` URL writes to S3; any
+        other value is treated as a local directory path.
     s3_options:
-        Options forwarded to :class:`s3fs.S3FileSystem`.
+        Options forwarded to :class:`s3fs.S3FileSystem`.  Only used for S3
+        targets; ignored (and optional) for local paths.
     mode:
         Zarr write mode.
     compute:
@@ -478,11 +481,17 @@ def save_pyramid_to_s3(
     encoding:
         Per-level encoding dictionaries.
     """
-    fs = s3fs.S3FileSystem(**s3_options)
+    is_s3 = s3_path.startswith("s3://")
+    fs = s3fs.S3FileSystem(**(s3_options or {})) if is_s3 else None
     for level, dataset in pyramid.items():
         level_path = f"{s3_path}/level_{level}.zarr"
         logger.info("Writing HEALPix level %s to %s", level, level_path)
-        store = s3fs.S3Map(root=level_path, s3=fs)
+        store: Any
+        if is_s3:
+            store = s3fs.S3Map(root=level_path, s3=fs)
+        else:
+            Path(level_path).parent.mkdir(parents=True, exist_ok=True)
+            store = level_path
         zarr_options = ZarrOptions(compute=compute, mode=mode, zarr_format=zarr_format)
         if zarr_format == 2:
             zarr_options["consolidated"] = True
