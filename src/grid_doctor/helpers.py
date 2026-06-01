@@ -447,7 +447,7 @@ def create_healpix_pyramid(
 
 def save_pyramid(
     pyramid: dict[int, xr.Dataset],
-    s3_path: str,
+    path: str,
     s3_options: dict[str, Any] | None = None,
     *,
     mode: Literal["a", "w", "r+"] = "a",
@@ -458,13 +458,13 @@ def save_pyramid(
 ) -> None:
     """Write a HEALPix pyramid to Zarr stores on S3 or local disk.
 
-    Each level is stored below ``"<s3_path>/level_<level>.zarr"``.
+    Each level is stored below ``"<path>/level_<level>.zarr"``.
 
     Parameters
     ----------
     pyramid:
         Mapping of HEALPix level to dataset.
-    s3_path:
+    path:
         Target prefix.  An ``"s3://bucket/pyramid"`` URL writes to S3; any
         other value is treated as a local directory path.
     s3_options:
@@ -481,10 +481,10 @@ def save_pyramid(
     encoding:
         Per-level encoding dictionaries.
     """
-    is_s3 = s3_path.startswith("s3://")
+    is_s3 = path.startswith("s3://")
     fs = s3fs.S3FileSystem(**(s3_options or {})) if is_s3 else None
     for level, dataset in pyramid.items():
-        level_path = f"{s3_path}/level_{level}.zarr"
+        level_path = f"{path}/level_{level}.zarr"
         logger.info("Writing HEALPix level %s to %s", level, level_path)
         store: Any
         if is_s3:
