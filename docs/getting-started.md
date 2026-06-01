@@ -49,7 +49,7 @@ gd_cli.setup_logging_from_args(args)
 ds = gd.cached_open_dataset(["path/to/*.nc"])
 weights_file = gd.cached_weights("~/weights/", nproc=4)
 pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_path)
-gd.save_pyramid_to_s3(
+gd.save_pyramid(
     pyramid,
     f"s3://{args.s3_bucket}/my-dataset.zarr",
     s3_options=gd.get_s3_options(args.s3_endpoint, args.s3_credentials_file),
@@ -60,11 +60,11 @@ gd.save_pyramid_to_s3(
     Always read secrets from environment variables or a credentials file.
 
 !!! tip "Writing to local disk"
-    `save_pyramid_to_s3` also writes to local disk. Pass a plain directory
+    `save_pyramid` also writes to local disk. Pass a plain directory
     path (no `s3://` scheme) and omit `s3_options`:
 
 ```python
-    gd.save_pyramid_to_s3(pyramid, "/work/ks1387", mode="w")
+    gd.save_pyramid(pyramid, "/work/ks1387", mode="w")
 ```
 
     The same `level_<n>.zarr` layout is written under that directory.

@@ -31,7 +31,7 @@ import grid_doctor as gd
 ds = gd.cached_open_dataset(["data/*.nc"])
 weights_file = gd.cached_weights("/path/to/weights/", nproc=4)
 pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_file)
-gd.save_pyramid_to_s3(
+gd.save_pyramid(
     pyramid,
     "s3://my-bucket/era5",
     s3_options=gd.get_s3_options(

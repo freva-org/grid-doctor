@@ -34,7 +34,7 @@ _ATTRS: dict[str, str] = {
     "regrid_to_healpix": ".remap",
     "regrid_unstructured_to_healpix": ".remap",
     "resolution_to_healpix_level": ".helpers",
-    "save_pyramid_to_s3": ".helpers",
+    "save_pyramid": ".helpers",
     "setup_logging": ".log",
 }
 
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
         get_latlon_resolution,
         latlon_to_healpix_pyramid,
         resolution_to_healpix_level,
-        save_pyramid_to_s3,
+        save_pyramid,
     )
     from .log import setup_logging
     from .remap import (
@@ -104,6 +104,6 @@ __all__ = [
     "regrid_to_healpix",
     "regrid_unstructured_to_healpix",
     "resolution_to_healpix_level",
-    "save_pyramid_to_s3",
+    "save_pyramid",
     "setup_logging",
 ]

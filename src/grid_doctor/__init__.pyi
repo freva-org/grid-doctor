@@ -7,7 +7,7 @@ from .helpers import create_healpix_pyramid as create_healpix_pyramid
 from .helpers import get_latlon_resolution as get_latlon_resolution
 from .helpers import latlon_to_healpix_pyramid as latlon_to_healpix_pyramid
 from .helpers import resolution_to_healpix_level as resolution_to_healpix_level
-from .helpers import save_pyramid_to_s3 as save_pyramid_to_s3
+from .helpers import save_pyramid as save_pyramid
 from .log import setup_logging as setup_logging
 from .remap import apply_weight_file as apply_weight_file
 from .remap import compute_healpix_weights as compute_healpix_weights

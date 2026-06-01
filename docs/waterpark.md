@@ -127,7 +127,7 @@ nanmean), not by repeated remapping.
         "https://s3-example.org",
         Path("~/.s3-credentials.json").expanduser(),
     )
-    %time gd.save_pyramid_to_s3(
+    %time gd.save_pyramid(
         pyramid,
         "/icon-dream/healpix/icdc/modis/aqua",
         s3_options,

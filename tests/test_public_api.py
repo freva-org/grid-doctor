@@ -40,7 +40,7 @@ class TestPublicCallables:
             "regrid_to_healpix",
             "regrid_unstructured_to_healpix",
             "resolution_to_healpix_level",
-            "save_pyramid_to_s3",
+            "save_pyramid",
             "setup_logging",
         ],
     )

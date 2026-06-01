@@ -445,7 +445,7 @@ def create_healpix_pyramid(
 # ===================================================================
 
 
-def save_pyramid_to_s3(
+def save_pyramid(
     pyramid: dict[int, xr.Dataset],
     s3_path: str,
     s3_options: dict[str, Any] | None = None,
@@ -577,5 +577,5 @@ __all__ = [
     "regrid_to_healpix",
     "regrid_unstructured_to_healpix",
     "resolution_to_healpix_level",
-    "save_pyramid_to_s3",
+    "save_pyramid",
 ]

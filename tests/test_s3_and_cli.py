@@ -12,7 +12,7 @@ import xarray as xr
 
 from grid_doctor.cli.parser import get_parser, setup_logging_from_args
 from grid_doctor.cli.script_utils import AutoRaiseSession, get_scratch
-from grid_doctor.helpers import save_pyramid_to_s3
+from grid_doctor.helpers import save_pyramid
 
 
 def _tiny_pyramid() -> dict[int, xr.Dataset]:
@@ -81,14 +81,14 @@ class TestSavePyramidToS3Local:
     def test_writes_levels_to_disk(self, tmp_path: Path) -> None:
         pyramid = _tiny_pyramid()
         out = tmp_path / "pyramid"
-        save_pyramid_to_s3(pyramid, str(out), mode="w")
+        save_pyramid(pyramid, str(out), mode="w")
         for level in pyramid:
             assert (out / f"level_{level}.zarr").is_dir()
 
     def test_round_trips_values(self, tmp_path: Path) -> None:
         pyramid = _tiny_pyramid()
         out = tmp_path / "pyramid"
-        save_pyramid_to_s3(pyramid, str(out), mode="w")
+        save_pyramid(pyramid, str(out), mode="w")
         for level, dataset in pyramid.items():
             reloaded = xr.open_zarr(out / f"level_{level}.zarr")
             xr.testing.assert_allclose(reloaded[["tas"]], dataset[["tas"]])
@@ -96,7 +96,7 @@ class TestSavePyramidToS3Local:
     def test_creates_missing_parent_directories(self, tmp_path: Path) -> None:
         pyramid = _tiny_pyramid()
         out = tmp_path / "nested" / "deeper" / "pyramid"
-        save_pyramid_to_s3(pyramid, str(out), mode="w")
+        save_pyramid(pyramid, str(out), mode="w")
         assert (out / "level_0.zarr").is_dir()
 
     def test_s3_options_optional_for_local(self, tmp_path: Path) -> None:
@@ -104,7 +104,7 @@ class TestSavePyramidToS3Local:
         # not construct an S3 client.
         out = tmp_path / "pyramid"
         with mock.patch("grid_doctor.helpers.s3fs.S3FileSystem") as fs:
-            save_pyramid_to_s3(_tiny_pyramid(), str(out), mode="w")
+            save_pyramid(_tiny_pyramid(), str(out), mode="w")
         fs.assert_not_called()
 
 
@@ -123,7 +123,7 @@ class TestSavePyramidToS3Remote:
                 "grid_doctor.helpers.s3fs.S3Map", return_value="s3-store"
             ) as s3_map,
         ):
-            save_pyramid_to_s3(
+            save_pyramid(
                 {0: dataset},  # type: ignore[dict-item]
                 "s3://bucket/pyr",
                 {"key": "x", "secret": "y"},
