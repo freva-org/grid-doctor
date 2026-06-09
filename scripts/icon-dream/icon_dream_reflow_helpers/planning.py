@@ -238,14 +238,16 @@ def prepare_shared_assets(
         if max_level is None
         else int(max_level)
     )
-    gd.cached_weights(grid_ds, level=resolved_level, cache_path=paths["weights_path"])
+    weight_file = gd.cached_weights(
+        grid_ds, level=resolved_level, cache_path=paths["weights_path"]
+    )
     plan.update(
         grid_path=str(downloaded_grid),
-        weights_path=str(paths["weights_path"]),
+        weights_path=str(weight_file),
         max_level=resolved_level,
     )
     save_plan(plan, paths["plan_path"])
-    return str(paths["weights_path"])
+    return str(weight_file)
 
 
 def download_source_item(

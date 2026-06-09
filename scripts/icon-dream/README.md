@@ -5,7 +5,22 @@
 Icon dream is a reanalysis product from the German Weather Service.
 
 
+
 ## How to run:
+
+There are two main modes:
+
+1. the "normal" slurm mode that uses [`reflow`](https://www.reflow.docs.org)
+ to split the remap jobs into smaller chunks that can be handled within the
+ maximum wall time of 8 hours. The file `convert.py` hosts the "slurm" mode.
+1. the "simple" mode doesn't split the tasks into smaller chunks. It calculates
+   the HEALPix pyramid using the `cupy` backend and pushes the results directly
+   to S3. This mode is not slurm "friendly" but can be directly and easily
+   applied on servers without resource restrictions such as the DRKZ
+   Grace-Hopper nodes. The file `convert_gh.py` hosts the "simple" mode.
+
+
+Follow these steps to apply the *slurm mode*:
 
 1. Create and download your s3-secrets file from [https://eu-dkrz-3.dkrz.cloud/access-keys](https://eu-dkrz-3.dkrz.cloud/access-keys)
 2. Put the secrets files somewhere into your home on levante.
@@ -92,6 +107,32 @@ to check the job status or
 ```console
 python convert.py runs
 python convert.py status <run-id>
+```
+
+To apply the *simple mode* use the `convert_gh.py` script:
+
+```console
+python convert_gh.py --help
+Usage: convert-icon-dream [-h] --s3-bucket S3_BUCKET [--s3-endpoint S3_ENDPOINT] [--s3-credentials-file S3_CREDENTIALS_FILE] [-v] [--variables VARIABLES [VARIABLES ...]]
+                          [--freq FREQ] [--run-dir RUN_DIR] [--override]
+
+Convert ICON-DREAM
+
+Options:
+  -h, --help            show this help message and exit
+  --s3-bucket S3_BUCKET
+                        S3 target bucket. (default: None)
+  --s3-endpoint S3_ENDPOINT
+                        S3 endpoint URL. (default: https://s3.eu-dkrz-3.dkrz.cloud)
+  --s3-credentials-file S3_CREDENTIALS_FILE
+                        Path to a JSON file with accessKey/secretKey. (default: /home/wilfred/.s3-credentials.json)
+  -v, --verbose         Increase verbosity with repeated flags such as -v or -vv. (default: 0)
+  --variables VARIABLES [VARIABLES ...]
+                        Variables to process (default: ['t_2m', 'tot_prec'])
+  --freq, -f FREQ       ICON-DREAM data frequency (default: hourly)
+  --run-dir RUN_DIR     The run directory (default: /scratch/w/wilfred/grid-doctor/icon-dream/)
+  --override, -o        Override existing files. (default: False)
+
 ```
 
 > [!IMPORTANT]

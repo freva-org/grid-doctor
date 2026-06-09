@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Sequence
 
@@ -11,8 +10,9 @@ import numpy as np
 
 import grid_doctor as gd
 
-from .common import (build_paths, load_plan, maybe_start_local_client,
-                     open_source_dataset, to_time_strings)
+from .common import (build_paths, drop_surface_coords, load_plan,
+                     maybe_start_local_client, open_source_dataset,
+                     to_time_strings)
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -37,7 +37,7 @@ def flatten_forecast_time(ds: "xr.Dataset") -> "xr.Dataset":
         return ds
     if ds.sizes.get("step", 1) == 1:
         ds = ds.isel(step=0, drop=True)
-    return ds.load()
+    return ds
 
 
 def normalise_time_axis(ds: "xr.Dataset") -> "xr.Dataset":
@@ -58,7 +58,9 @@ def normalise_time_axis(ds: "xr.Dataset") -> "xr.Dataset":
 
 def prepare_dataset_for_regridding(ds: "xr.Dataset") -> "xr.Dataset":
     """Apply the minimal normalisation needed for regridding."""
-    return normalise_time_axis(rename_values_dim(ds)).rename({"values": "cell"})
+    return drop_surface_coords(
+        normalise_time_axis(rename_values_dim(ds)).rename({"values": "cell"})
+    )
 
 
 def chunk_healpix_dataset(
@@ -97,7 +99,7 @@ def write_temp_pyramid(
     for level, level_ds in pyramid.items():
         target = level_output_path(output_root, level).with_suffix(".nc")
         if target.exists():
-            shutil.rmtree(target)
+            target.unlink()
         chunked = chunk_healpix_dataset(
             level_ds, time_chunk=time_chunk, cell_chunk=cell_chunk
         )
