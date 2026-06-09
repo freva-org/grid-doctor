@@ -10,11 +10,26 @@ from typing import Any, Sequence
 import grid_doctor as gd
 import grid_doctor.cli as gd_cli
 
-from .common import (DATE_TOKEN_RE, DEFAULT_GRID_URL, DEFAULT_INVARIANT_URL,
-                     DEFAULT_SOURCE_ROOT, ICON_DREAM_VARIABLES, TIME_FREQUENCY,
-                     UTC, HrefParser, build_paths, download_one, isoformat_utc,
-                     load_existing_target_info, load_plan, open_grid_dataset,
-                     parse_datetime, read_json_text, save_plan, target_root)
+from .common import (
+    DATE_TOKEN_RE,
+    DEFAULT_GRID_URL,
+    DEFAULT_INVARIANT_URL,
+    DEFAULT_SOURCE_ROOT,
+    ICON_DREAM_VARIABLES,
+    TIME_FREQUENCY,
+    UTC,
+    HrefParser,
+    build_paths,
+    download_one,
+    isoformat_utc,
+    load_existing_target_info,
+    load_plan,
+    open_grid_dataset,
+    parse_datetime,
+    read_json_text,
+    save_plan,
+    target_root,
+)
 
 
 class IconDreamSource:
@@ -154,7 +169,7 @@ class IconDreamSource:
 
 def build_plan(
     *,
-    s3_bucket: str,
+    uri: str,
     start: str,
     end: str,
     variables: Sequence[str],
@@ -165,6 +180,7 @@ def build_plan(
     source_engine: str,
     source_backend_kwargs_json: str,
     update_only: bool,
+    fs_type: str,
     run_dir: str | Path,
 ) -> dict[str, Any]:
     """Discover source files and create the persisted run plan."""
@@ -175,8 +191,13 @@ def build_plan(
         raise ValueError(f"Unsupported variables: {invalid}")
 
     paths = build_paths(run_dir)
-    s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
-    existing = load_existing_target_info(target_root(s3_bucket, freq), s3_options)
+    if fs_type.lower() == "s3":
+        s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
+    elif fs_type.lower() in ["posix", "file"]:
+        s3_options = None
+    else:
+        raise ValueError(f"No such file system type: {fs_type}")
+    existing = load_existing_target_info(target_root(uri, freq), s3_options)
     existing_max = (
         parse_datetime(existing["max_time"]) if existing["max_time"] else None
     )
@@ -192,7 +213,7 @@ def build_plan(
     )
     plan = {
         "run_dir": str(paths["run_dir"]),
-        "target_root": target_root(s3_bucket, freq),
+        "target_root": target_root(uri, freq),
         "frequency": freq,
         "variables": list(variables),
         "requested_time": [start, end],
@@ -209,6 +230,7 @@ def build_plan(
         "source_backend_kwargs": read_json_text(source_backend_kwargs_json),
         "existing_target": existing,
         "max_level": None,
+        "fs_type": fs_type,
     }
     save_plan(plan, paths["plan_path"])
     return plan

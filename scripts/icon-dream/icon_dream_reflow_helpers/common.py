@@ -201,7 +201,10 @@ def save_plan(plan: dict[str, Any], path: Path) -> None:
 
 def load_plan(run_dir: str | Path) -> dict[str, Any]:
     """Load the persisted run plan for a run directory."""
-    return json.loads(build_paths(run_dir)["plan_path"].read_text(encoding="utf-8"))
+    data: dict[str, Any] = json.loads(
+        build_paths(run_dir)["plan_path"].read_text(encoding="utf-8")
+    )
+    return data
 
 
 def read_json_text(value: str) -> dict[str, Any]:
@@ -236,20 +239,24 @@ def download_one(
     )
 
 
-def s3_map(path: str, s3_options: dict[str, str]) -> s3fs.S3Map:
+def s3_map(path: str, s3_options: dict[str, str] | None) -> s3fs.S3Map | str:
     """Return an S3-backed mutable mapping for a Zarr store."""
+    if s3_options is None:
+        return path
     return s3fs.S3Map(root=path, s3=s3fs.S3FileSystem(**s3_options), check=False)
 
 
 def open_existing_target(
-    target_path: str, s3_options: dict[str, str]
+    target_path: str,
+    s3_options: dict[str, str] | None,
 ) -> "xr.Dataset | None":
     """Open an existing target Zarr dataset from S3 if it exists."""
     import xarray as xr
 
     mapper = s3_map(target_path, s3_options)
     try:
-        return xr.open_zarr(mapper, consolidated=True)
+        ds: xr.Dataset = xr.open_zarr(mapper, consolidated=True)
+        return ds
     except (FileNotFoundError, KeyError, OSError, ValueError):
         return None
 
@@ -260,7 +267,7 @@ def target_root(bucket: str, frequency: str) -> str:
 
 
 def load_existing_target_info(
-    target_root_path: str, s3_options: dict[str, str]
+    target_root_path: str, s3_options: dict[str, str] | None
 ) -> dict[str, Any]:
     """Inspect the existing target and return a compact summary."""
     variables: set[str] = set()

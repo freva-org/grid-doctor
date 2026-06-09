@@ -4,15 +4,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Sequence
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
 import grid_doctor as gd
 
-from .common import (build_paths, drop_surface_coords, load_plan,
-                     maybe_start_local_client, open_source_dataset,
-                     to_time_strings)
+from .common import (
+    build_paths,
+    drop_surface_coords,
+    load_plan,
+    maybe_start_local_client,
+    open_source_dataset,
+    to_time_strings,
+)
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -87,7 +92,7 @@ def level_output_path(output_root: Path, level: int) -> Path:
 
 
 def write_temp_pyramid(
-    pyramid: Sequence["xr.Dataset"],
+    pyramid: dict[int, "xr.Dataset"],
     *,
     output_root: Path,
     time_chunk: int,
@@ -134,7 +139,7 @@ def convert_downloaded_item(
             )
         )
         max_level = (
-            None if plan.get("max_level") is None else int(plan.get("max_level"))
+            None if plan.get("max_level") is None else int(plan.get("max_level"))  # type: ignore
         )
         pyramid = gd.create_healpix_pyramid(
             ds, max_level=max_level, weights_path=plan["weights_path"]

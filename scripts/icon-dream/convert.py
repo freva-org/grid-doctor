@@ -4,12 +4,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
-from icon_dream_reflow_helpers import (DEFAULT_SOURCE_ROOT, TIME_FREQUENCY,
-                                       build_plan, convert_downloaded_item,
-                                       download_source_item, finalize_outputs,
-                                       prepare_shared_assets)
+from icon_dream_reflow_helpers import (
+    DEFAULT_SOURCE_ROOT,
+    TIME_FREQUENCY,
+    build_plan,
+    convert_downloaded_item,
+    download_source_item,
+    finalize_outputs,
+    prepare_shared_assets,
+)
 from reflow import Param, Result, RunDir, Workflow
 
 wf = Workflow("icon_dream_healpix")
@@ -17,7 +22,7 @@ wf = Workflow("icon_dream_healpix")
 
 @wf.job(cpus=2, time="00:20:00", mem="0", partition="compute")
 def gather_sources(
-    s3_bucket: Annotated[str, Param(help="Target S3 bucket")],
+    path: Annotated[str, Param(help="Target S3 path/s3 bucket.")],
     start: Annotated[str, Param(help="Requested UTC start time")] = "2010-01-01T00:00",
     end: Annotated[str, Param(help="Requested UTC end time")] = "now",
     variables: Annotated[list[str], Param(help="Variables to process")] = [
@@ -34,6 +39,10 @@ def gather_sources(
     s3_credentials_file: Annotated[
         str, Param(help="Path to S3 credentials JSON")
     ] = str(Path.home() / ".s3-credentials.json"),
+    fs_type: Annotated[
+        Literal["posix", "s3"],
+        Param(help="File system type"),
+    ] = "s3",
     source_engine: Annotated[
         str, Param(help="Xarray backend engine for source files")
     ] = "cfgrib",
@@ -46,8 +55,8 @@ def gather_sources(
     run_dir: RunDir = RunDir(),
 ) -> list[dict[str, Any]]:
     """Discover source files that still need processing and persist the run plan."""
-    return build_plan(
-        s3_bucket=s3_bucket,
+    plan: list[dict[str, Any]] = build_plan(
+        uri=path,
         start=start,
         end=end,
         variables=variables,
@@ -58,8 +67,10 @@ def gather_sources(
         source_engine=source_engine,
         source_backend_kwargs_json=source_backend_kwargs_json,
         update_only=update_only,
-        run_dir=run_dir,
+        fs_type=fs_type,
+        run_dir=cast(Path, run_dir),
     )["source_items"]
+    return plan
 
 
 @wf.job(
@@ -84,7 +95,7 @@ def prepare_shared(
         download_timeout=download_timeout,
         download_chunk_size=download_chunk_size,
         overwrite_downloads=overwrite_downloads,
-        run_dir=run_dir,
+        run_dir=cast(Path, run_dir),
     )
 
 
@@ -108,7 +119,7 @@ def download_source(
         download_timeout=download_timeout,
         download_chunk_size=download_chunk_size,
         overwrite_downloads=overwrite_downloads,
-        run_dir=run_dir,
+        run_dir=cast(Path, run_dir),
     )
 
 
@@ -142,7 +153,7 @@ def convert_source(
         cell_chunk=cell_chunk,
         zarr_format=zarr_format,
         local_dask_workers=local_dask_workers,
-        run_dir=run_dir,
+        run_dir=cast(Path, run_dir),
     )
 
 
@@ -186,6 +197,10 @@ def finalize(
     s3_credentials_file: Annotated[
         str, Param(help="Path to S3 credentials JSON")
     ] = str(Path.home() / ".s3-credentials.json"),
+    fs_type: Annotated[
+        Literal["posix", "s3"],
+        Param(help="File system type"),
+    ] = "s3",
     overwrite_static: Annotated[
         bool, Param(help="Overwrite an existing static target store")
     ] = False,
@@ -216,7 +231,8 @@ def finalize(
         access_pattern=access_pattern,
         strict_access_pattern=strict_access_pattern,
         zarr_format=zarr_format,
-        run_dir=run_dir,
+        fs_type=fs_type,
+        run_dir=str(cast(Path, run_dir)),
     )
 
 

@@ -3,14 +3,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 
 import grid_doctor as gd
 
-from .common import (chunk_for_target_store_size, drop_surface_coords,
-                     load_plan, open_existing_target, s3_map)
+from .common import (
+    chunk_for_target_store_size,
+    drop_surface_coords,
+    load_plan,
+    open_existing_target,
+    s3_map,
+)
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -58,7 +63,7 @@ def write_new_variables_full_axis(
     existing: "xr.Dataset",
     candidate: "xr.Dataset",
     target_path: str,
-    s3_options: dict[str, str],
+    s3_options: dict[str, str] | None,
     *,
     compression_level: int,
     access_pattern: str,
@@ -84,7 +89,7 @@ def append_time_block(
     existing: "xr.Dataset",
     candidate: "xr.Dataset",
     target_path: str,
-    s3_options: dict[str, str],
+    s3_options: dict[str, str] | None,
     *,
     compression_level: int,
     access_pattern: str,
@@ -117,7 +122,7 @@ def append_time_block(
 def write_static_dataset(
     candidate: "xr.Dataset",
     target_path: str,
-    s3_options: dict[str, str],
+    s3_options: dict[str, str] | None,
     *,
     compression_level: int,
     access_pattern: str,
@@ -137,7 +142,7 @@ def write_static_dataset(
 def merge_level_dataset(
     candidate: "xr.Dataset",
     target_path: str,
-    s3_options: dict[str, str],
+    s3_options: dict[str, str] | None,
     *,
     overwrite_static: bool,
     replace_existing_times: bool,
@@ -217,12 +222,6 @@ def merge_level_dataset(
                 mode="a",
                 consolidated=True,
                 zarr_format=zarr_format,
-                encoding=dataset_encoding(
-                    rewrite_ds,
-                    compression_level=compression_level,
-                    access_pattern=access_pattern,
-                    strict_access_pattern=strict_access_pattern,
-                ),
                 align_chunks=True,
             )
             summary["overlapping_times_rewritten"] = len(overlap_times)
@@ -235,10 +234,11 @@ def combine_worker_level_outputs(level_paths: list[str]) -> "xr.Dataset":
     import xarray as xr
 
     datasets = [xr.open_dataset(path) for path in level_paths]
-    return (
+    return cast(
+        xr.Dataset,
         datasets[0]
         if len(datasets) == 1
-        else xr.combine_by_coords(datasets, combine_attrs="drop_conflicts")
+        else xr.combine_by_coords(datasets, combine_attrs="drop_conflicts"),
     )
 
 
@@ -253,13 +253,19 @@ def finalize_outputs(
     access_pattern: Literal["map", "time_series"],
     strict_access_pattern: bool,
     zarr_format: Literal[2, 3],
+    fs_type: str,
     run_dir: str,
 ) -> dict[str, Any]:
     """Merge all temporary outputs and publish them to the final S3 target."""
     import xarray as xr
 
+    if fs_type.lower() == "s3":
+        s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
+    elif fs_type.lower() in ["posix", "file"]:
+        s3_options = None
+    else:
+        raise ValueError(f"No such file system type: {fs_type}")
     plan = load_plan(run_dir)
-    s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
 
     level = worker_results["level"]
     chunks = chunk_for_target_store_size(level=level)
