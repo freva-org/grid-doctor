@@ -386,7 +386,7 @@ def group_for_upload(
 )
 def combine_and_upload(
     group: Annotated[dict, Result(step="group_for_upload")],
-    s3_bucket: Annotated[str, Param(help="Target S3 bucket")] = "cmip6",
+    uri: Annotated[str, Param(help="Target S3 bucket or path to disk")] = "s3://cmip6",
     s3_endpoint: Annotated[
         str, Param(help="S3 endpoint URL")
     ] = "https://s3.eu-dkrz-3.dkrz.cloud",
@@ -421,10 +421,10 @@ def combine_and_upload(
         )
 
     s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
-    gd.save_pyramid_to_s3(
+    gd.save_pyramid(
         pyramid,
-        f"{s3_bucket}/{s3_path}",
-        s3_options,
+        f"{uri}/{s3_path}",
+        s3_options if uri.startswith("s3://") else None,
         mode="w",
     )
     print(f"Uploaded {s3_path}")
