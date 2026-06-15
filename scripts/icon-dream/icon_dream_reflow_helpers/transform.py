@@ -113,6 +113,138 @@ def write_temp_pyramid(
     return level_paths
 
 
+# Peak working-set budget per dask block, in bytes. The HEALPix kernels
+# accumulate in float64, so the bound is computed against an 8-byte
+# itemsize. ~1.5 GiB keeps a single finest-level time block well within
+# a worker's share of node memory even at level 11.
+_BLOCK_BUDGET_BYTES = 1536 * 1024 * 1024
+
+
+def _safe_time_chunk(
+    level: int,
+    ntime: int,
+    *,
+    user_cap: int,
+    budget_bytes: int = _BLOCK_BUDGET_BYTES,
+    itemsize: int = 8,
+) -> int:
+    """Largest time chunk that keeps one HEALPix time block within budget.
+
+    The number of cells at a level is ``12 * 4**level``, so the finest
+    levels force a small time chunk while coarse levels are capped by the
+    user-requested ``time_chunk`` and the total number of time steps.
+    """
+    npix = 12 * (4 ** int(level))
+    budget_chunk = max(1, budget_bytes // (npix * itemsize))
+    return max(1, min(int(ntime), int(user_cap), int(budget_chunk)))
+
+
+def _downcast_floats(ds: "xr.Dataset", dtype: str = "float32") -> "xr.Dataset":
+    """Cast floating data variables to *dtype* to halve memory and storage.
+
+    The kernels compute in float64 for accuracy; the result is stored as
+    float32, matching the chunking assumptions used when publishing.
+    """
+    for name in list(ds.data_vars):
+        if np.issubdtype(ds[name].dtype, np.floating):
+            ds[name] = ds[name].astype(dtype)
+    return ds
+
+
+def _write_level(
+    level_ds: "xr.Dataset",
+    target: Path,
+    *,
+    time_chunk: int,
+    cell_chunk: int,
+) -> None:
+    """Stream one HEALPix level to a temporary netCDF file.
+
+    The dataset is (re)chunked to the on-disk layout immediately before
+    writing; xarray derives the netCDF chunking from the dask chunks, so
+    the write proceeds block-by-block with a bounded working set.
+    """
+    if target.exists():
+        target.unlink()
+    chunk_map: dict[str, int] = {}
+    if "time" in level_ds.dims:
+        chunk_map["time"] = min(time_chunk, int(level_ds.sizes["time"]))
+    if "cell" in level_ds.dims:
+        chunk_map["cell"] = min(cell_chunk, int(level_ds.sizes["cell"]))
+    out = level_ds.chunk(chunk_map) if chunk_map else level_ds
+    out.to_netcdf(target, mode="w", engine="h5netcdf")
+
+
+def _build_pyramid_streaming(
+    ds: "xr.Dataset",
+    *,
+    max_level: int | None,
+    weights_path: str,
+    output_root: Path,
+    user_time_chunk: int,
+    cell_chunk: int,
+) -> dict[str, str]:
+    """Regrid once at the finest level, then coarsen level-by-level on disk.
+
+    Unlike building the whole pyramid in memory, this:
+
+    * regrids only to ``max_level`` and streams it straight to disk, and
+    * derives every coarser level by reading the previously written
+      (finer) level back from disk and coarsening a single step.
+
+    The expensive remap therefore runs exactly once, no level is ever
+    fully resident in memory, and coarse levels do not re-trigger the
+    finest regrid graph.
+    """
+    import xarray as xr
+
+    output_root.mkdir(parents=True, exist_ok=True)
+    if max_level is None:
+        max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
+
+    level_paths: dict[str, str] = {}
+
+    # --- Finest level: single streamed regrid. ---
+    finest = _downcast_floats(
+        gd.regrid_to_healpix(ds, max_level, weights_path=weights_path)
+    )
+    finest_target = level_output_path(output_root, max_level).with_suffix(".nc")
+    _write_level(
+        finest,
+        finest_target,
+        time_chunk=user_time_chunk,
+        cell_chunk=cell_chunk,
+    )
+    level_paths[str(max_level)] = str(finest_target)
+    del finest
+
+    # --- Coarser levels: read the finer level from disk, coarsen one step. ---
+    prev_target = finest_target
+    for level in range(max_level - 1, -1, -1):
+        prev = xr.open_dataset(prev_target, engine="h5netcdf", chunks={})
+        # The coarsening core dimension is ``cell`` and must be a single
+        # chunk; only ``time`` is chunked, sized against the finer level.
+        rechunk: dict[str, int] = {"cell": -1}
+        if "time" in prev.dims:
+            rechunk["time"] = _safe_time_chunk(
+                level + 1, int(prev.sizes["time"]), user_cap=user_time_chunk
+            )
+        prev = prev.chunk(rechunk)
+        coarse = _downcast_floats(gd.coarsen_healpix(prev, level))
+        target = level_output_path(output_root, level).with_suffix(".nc")
+        _write_level(
+            coarse,
+            target,
+            time_chunk=user_time_chunk,
+            cell_chunk=cell_chunk,
+        )
+        prev.close()
+        level_paths[str(level)] = str(target)
+        prev_target = target
+
+    return level_paths
+
+
 def convert_downloaded_item(
     downloaded: dict[str, Any],
     *,
@@ -122,37 +254,63 @@ def convert_downloaded_item(
     local_dask_workers: int,
     run_dir: str | Path,
 ) -> dict[str, Any]:
-    """Convert one raw input file into temporary per-level netCDF file."""
+    """Convert one raw input file into temporary per-level netCDF files.
+
+    The source is opened lazily (dask) and chunked along ``time`` only,
+    so the remap to the finest HEALPix level and every coarsening step
+    stream block-by-block. Peak memory is therefore bounded by one time
+    block rather than scaling with the full target grid, which is what
+    previously caused out-of-memory failures at high HEALPix levels.
+    """
 
     plan = load_plan(run_dir)
     source_path = Path(downloaded["local_path"])
     if not source_path.exists():
         raise FileNotFoundError(f"Missing raw input file: {source_path}")
 
+    max_level = (
+        None if plan.get("max_level") is None else int(plan.get("max_level"))  # type: ignore[arg-type]
+    )
+
     client = maybe_start_local_client(local_dask_workers)
     try:
+        # ``chunks={}`` returns a dask-backed dataset (engine-preferred
+        # chunking); the actual time chunking is applied after the dims
+        # are normalised to ``(time, cell)``.
         ds = prepare_dataset_for_regridding(
             open_source_dataset(
                 source_path,
                 engine=plan["source_engine"],
                 backend_kwargs=plan["source_backend_kwargs"],
+                chunks={},
             )
         )
-        max_level = (
-            None if plan.get("max_level") is None else int(plan.get("max_level"))  # type: ignore
-        )
-        pyramid = gd.create_healpix_pyramid(
-            ds, max_level=max_level, weights_path=plan["weights_path"]
-        )
-        level_paths = write_temp_pyramid(
-            pyramid,
+
+        time_values = to_time_strings(ds["time"].values) if "time" in ds.dims else []
+        if "time" in ds.dims:
+            finest_level = (
+                max_level
+                if max_level is not None
+                else gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
+            )
+            ds = ds.chunk(
+                {
+                    "time": _safe_time_chunk(
+                        finest_level, len(time_values), user_cap=time_chunk
+                    )
+                }
+            )
+
+        level_paths = _build_pyramid_streaming(
+            ds,
+            max_level=max_level,
+            weights_path=plan["weights_path"],
             output_root=worker_output_root(
                 build_paths(run_dir), int(downloaded["item_index"])
             ),
-            time_chunk=time_chunk,
+            user_time_chunk=time_chunk,
             cell_chunk=cell_chunk,
         )
-        time_values = to_time_strings(ds["time"].values) if "time" in ds.dims else []
         return {
             "item_index": int(downloaded["item_index"]),
             "variable": downloaded["variable"],

@@ -23,6 +23,65 @@ if TYPE_CHECKING:
 BAD = ["heightAboveGround", "surface"]
 
 
+def _build_compressor(compression_level: int, zarr_format: Literal[2, 3]) -> Any:
+    """Return a zstd compressor for the requested Zarr format.
+
+    ``compression_level <= 0`` disables explicit compression (the store
+    default is used). The codec object differs between Zarr v2
+    (``numcodecs``) and v3 (``zarr.codecs``).
+    """
+    if compression_level <= 0:
+        return None
+    if zarr_format == 2:
+        from numcodecs import Blosc
+
+        return Blosc(
+            cname="zstd", clevel=int(compression_level), shuffle=Blosc.SHUFFLE
+        )
+    from zarr.codecs import BloscCodec, BloscShuffle
+
+    return BloscCodec(
+        cname="zstd", clevel=int(compression_level), shuffle=BloscShuffle.shuffle
+    )
+
+
+def _store_encoding(
+    ds: "xr.Dataset",
+    chunks: dict[str, int],
+    *,
+    compression_level: int,
+    zarr_format: Literal[2, 3],
+    names: list[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build per-variable Zarr encoding (chunk shape + compressor).
+
+    Only variables in *names* are encoded when given; otherwise every
+    non-scalar variable and coordinate is encoded. Encoding may only be
+    supplied for variables being created (a fresh ``mode="w"`` write or
+    brand-new variables on ``mode="a"``); never for variables that
+    already exist in the target store.
+    """
+    compressor = _build_compressor(compression_level, zarr_format)
+    selected = ds.variables if names is None else {n: ds[n] for n in names}
+
+    encoding: dict[str, dict[str, Any]] = {}
+    for name, var in selected.items():
+        if var.ndim == 0:  # scalar (e.g. crs) needs no chunking/compression
+            continue
+        var_chunks = tuple(
+            int(min(chunks.get(str(dim), ds.sizes[dim]), ds.sizes[dim]))
+            for dim in var.dims
+        )
+        var_encoding: dict[str, Any] = {"chunks": var_chunks}
+        if compressor is not None:
+            if zarr_format == 2:
+                var_encoding["compressor"] = compressor
+            else:
+                var_encoding["compressors"] = (compressor,)
+        encoding[str(name)] = var_encoding
+    return encoding
+
+
 def fill_value_for_dtype(dtype: np.dtype[Any]) -> Any:
     """Return a sensible fill value for a dtype."""
     if np.issubdtype(dtype, np.floating):
@@ -65,6 +124,7 @@ def write_new_variables_full_axis(
     target_path: str,
     s3_options: dict[str, str] | None,
     *,
+    chunks: dict[str, int],
     compression_level: int,
     access_pattern: str,
     strict_access_pattern: bool,
@@ -81,6 +141,13 @@ def write_new_variables_full_axis(
         consolidated=True,
         zarr_format=zarr_format,
         align_chunks=True,
+        encoding=_store_encoding(
+            add_ds,
+            chunks,
+            compression_level=compression_level,
+            zarr_format=zarr_format,
+            names=missing,
+        ),
     )
     return len(missing)
 
@@ -124,6 +191,7 @@ def write_static_dataset(
     target_path: str,
     s3_options: dict[str, str] | None,
     *,
+    chunks: dict[str, int],
     compression_level: int,
     access_pattern: str,
     strict_access_pattern: bool,
@@ -136,6 +204,12 @@ def write_static_dataset(
         consolidated=True,
         zarr_format=zarr_format,
         align_chunks=True,
+        encoding=_store_encoding(
+            candidate,
+            chunks,
+            compression_level=compression_level,
+            zarr_format=zarr_format,
+        ),
     )
 
 
@@ -144,6 +218,7 @@ def merge_level_dataset(
     target_path: str,
     s3_options: dict[str, str] | None,
     *,
+    chunks: dict[str, int],
     overwrite_static: bool,
     replace_existing_times: bool,
     compression_level: int,
@@ -165,6 +240,7 @@ def merge_level_dataset(
             candidate,
             target_path,
             s3_options,
+            chunks=chunks,
             compression_level=compression_level,
             access_pattern=access_pattern,
             strict_access_pattern=strict_access_pattern,
@@ -180,6 +256,7 @@ def merge_level_dataset(
                 candidate,
                 target_path,
                 s3_options,
+                chunks=chunks,
                 compression_level=compression_level,
                 access_pattern=access_pattern,
                 strict_access_pattern=strict_access_pattern,
@@ -193,6 +270,7 @@ def merge_level_dataset(
         candidate,
         target_path,
         s3_options,
+        chunks=chunks,
         compression_level=compression_level,
         access_pattern=access_pattern,
         strict_access_pattern=strict_access_pattern,
@@ -229,16 +307,68 @@ def merge_level_dataset(
     return summary
 
 
-def combine_worker_level_outputs(level_paths: list[str]) -> "xr.Dataset":
-    """Open and combine all temporary outputs for one HEALPix level."""
-    import xarray as xr
+def combine_worker_level_outputs(
+    level_paths: list[str],
+    *,
+    chunks: dict[str, int] | None = None,
+) -> "xr.Dataset":
+    """Open and combine all temporary outputs for one HEALPix level.
 
-    datasets = [xr.open_dataset(path) for path in level_paths]
+    Each temporary file holds a single variable for one source period.
+    Files are therefore grouped by variable, concatenated along ``time``
+    within a variable (the periods are disjoint), and only then merged
+    across variables by aligning on the shared time axis.
+
+    This avoids a data-loss pattern where concatenating *different*
+    variables along ``time`` produces duplicate timestamps (each with the
+    other variable NaN-filled) that a subsequent
+    ``drop_duplicates("time")`` would collapse, silently discarding one
+    variable per overlapping timestamp.
+    """
+    import xarray as xr
+    from collections import defaultdict
+
+    per_variable: dict[str, list[xr.Dataset]] = defaultdict(list)
+    for path in sorted(level_paths):
+        ds = drop_surface_coords(
+            xr.open_dataset(path, engine="h5netcdf", chunks=chunks)
+        )
+        names = [str(name) for name in ds.data_vars]
+        if len(names) == 1:
+            per_variable[names[0]].append(ds)
+        else:
+            for name in names:
+                per_variable[name].append(ds[[name]])
+
+    combined_per_variable: list[xr.Dataset] = []
+    for name, datasets in per_variable.items():
+        if len(datasets) == 1:
+            combined = datasets[0]
+        else:
+            combined = xr.concat(
+                datasets,
+                dim="time",
+                data_vars="minimal",
+                coords="minimal",
+                compat="override",
+                combine_attrs="override",
+            )
+        if "time" in combined.dims:
+            combined = combined.sortby("time").drop_duplicates(
+                dim="time", keep="first"
+            )
+        combined_per_variable.append(combined)
+
+    if len(combined_per_variable) == 1:
+        return combined_per_variable[0]
     return cast(
-        xr.Dataset,
-        datasets[0]
-        if len(datasets) == 1
-        else xr.combine_by_coords(datasets, combine_attrs="drop_conflicts"),
+        "xr.Dataset",
+        xr.merge(
+            combined_per_variable,
+            compat="override",
+            join="outer",
+            combine_attrs="override",
+        ),
     )
 
 
@@ -254,11 +384,10 @@ def finalize_outputs(
     strict_access_pattern: bool,
     zarr_format: Literal[2, 3],
     fs_type: str,
+    target_chunk_mib: float = 16.0,
     run_dir: str,
 ) -> dict[str, Any]:
     """Merge all temporary outputs and publish them to the final S3 target."""
-    import xarray as xr
-
     if fs_type.lower() == "s3":
         s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
     elif fs_type.lower() in ["posix", "file"]:
@@ -268,27 +397,30 @@ def finalize_outputs(
     plan = load_plan(run_dir)
 
     level = worker_results["level"]
-    chunks = chunk_for_target_store_size(level=level)
     print(f"Working on {worker_results['level_paths']}")
-    candidate = xr.open_mfdataset(
+    # A coarse map-layout chunking is fine for the lazy read of the temp files.
+    candidate = combine_worker_level_outputs(
         sorted(worker_results["level_paths"]),
-        preprocess=drop_surface_coords,
-        combine="nested",
-        concat_dim="time",
-        chunks=chunks,
-        parallel=False,
-        data_vars="minimal",
-        coords="minimal",
-        compat="override",
-        join="override",  # only if non-time dims really match
-        combine_attrs="override",
-        engine="h5netcdf",
-    ).sortby("time")
-    candidate = candidate.drop_duplicates(dim="time", keep="first")
+        chunks=chunk_for_target_store_size(level=level),
+    )
+
+    # Store chunking targets ~target_chunk_mib on disk and follows the chosen
+    # access pattern; time_series needs the time length, so fall back to map
+    # for static (timeless) levels.
+    ntime = int(candidate.sizes.get("time", 0)) or None
+    access = access_pattern if ntime else "map"
+    store_chunks = chunk_for_target_store_size(
+        level=level,
+        access=access,
+        ntime=ntime,
+        target_stored_mib=target_chunk_mib,
+    )
+
     return merge_level_dataset(
-        candidate.chunk(chunks),
+        candidate.chunk(store_chunks),
         f"{plan['target_root']}/level_{level}.zarr",
         s3_options,
+        chunks=store_chunks,
         overwrite_static=overwrite_static,
         replace_existing_times=replace_existing_times,
         compression_level=compression_level,

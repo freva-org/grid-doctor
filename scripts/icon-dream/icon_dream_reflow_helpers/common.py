@@ -98,12 +98,20 @@ def default_run_dir() -> Path:
 
 def build_paths(run_dir: str | Path) -> dict[str, Path]:
     """Return the standard file layout under a run directory."""
+    import os
+
     root = Path(run_dir)
+    # Shared HEALPix weight cache. Overridable so the pipeline is not
+    # pinned to one user's /work allocation; falls back to the original
+    # default when the env var is unset.
+    weights_dir = Path(
+        os.environ.get("ICON_DREAM_WEIGHTS_DIR", "/work/ks1387/healpix-weights")
+    )
     return {
         "run_dir": root,
         "plan_path": root / "plan.json",
         "grid_path": root / "shared" / "ICON-DREAM-Global_grid.nc",
-        "weights_path": Path("/work/ks1387/healpix-weights"),
+        "weights_path": weights_dir,
         "temp_root": root / "temp-healpix",
         "raw_root": root / "raw-input",
     }
@@ -288,12 +296,26 @@ def load_existing_target_info(
 
 
 def open_source_dataset(
-    path: str | Path, *, engine: str, backend_kwargs: dict[str, Any]
+    path: str | Path,
+    *,
+    engine: str,
+    backend_kwargs: dict[str, Any],
+    chunks: dict[str, int] | str | None = None,
 ) -> "xr.Dataset":
-    """Open one ICON-DREAM source file."""
+    """Open one ICON-DREAM source file.
+
+    Passing ``chunks`` (e.g. ``{}`` for engine-preferred dask chunks)
+    returns a lazy, dask-backed dataset so that the downstream
+    ``apply_ufunc(dask="parallelized")`` regridding/coarsening stream
+    block-by-block instead of materialising the full target grid in
+    memory.  The default ``chunks=None`` preserves the previous eager
+    behaviour.
+    """
     import xarray as xr
 
-    return xr.open_dataset(path, engine=engine, backend_kwargs=backend_kwargs)
+    return xr.open_dataset(
+        path, engine=engine, backend_kwargs=backend_kwargs, chunks=chunks
+    )
 
 
 def open_grid_dataset(path: str | Path) -> "xr.Dataset":
