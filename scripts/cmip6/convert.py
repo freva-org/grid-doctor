@@ -17,222 +17,74 @@ gather_sources → create_weights → plan_regrid → regrid_file → group_for_
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Iterable
+from typing import Annotated
 
-import requests
 from reflow import Param, Result, RunDir, Workflow
 
 import grid_doctor as gd
 
+from cmip6_matrix import (
+    DEFAULT_ENSEMBLE,
+    DEFAULT_INSTANCE,
+    DatabrowserClient,
+    FacetMatrix,
+)
+
+
 wf = Workflow("cmip6_healpix")
-
-CMOR_MAP = {
-    "fx": None,
-    "subhr": "PT1M",
-    "subdaily": "PT1M",
-    "30min": "PT30M",
-    "15min": "PT15M",
-    "1hr": "PT1H",
-    "hour": "PT1H",
-    "hr": "PT1H",
-    "3hr": "PT3H",
-    "6hr": "PT6H",
-    "12hr": "PT12H",
-    "day": "P1D",
-    "1d": "P1D",
-    "daily": "P1D",
-    "mon": "P1M",
-    "monthly": "P1M",
-    "season": "P3M",
-    "seasonal": "P3M",
-    "yr": "P1Y",
-    "year": "P1Y",
-    "annual": "P1Y",
-    "monClim": "P1M",
-    "dayClim": "P1D",
-}
-
-
-def cmor_to_iso8601(freq):
-    f = str(freq).strip()
-    if not f:
-        return None
-    key = f.lower()
-    if key in CMOR_MAP:
-        return CMOR_MAP[key]
-    m = re.match(r"^(\d+)\s*([a-zA-Z]+)$", key)
-    if m:
-        n, u = m.groups()
-        if u in ("min", "minute", "m", "minutes"):
-            return f"PT{n}M"
-        if u in ("s", "sec", "second", "seconds"):
-            return f"PT{n}S"
-        if u in ("h", "hr", "hour", "hours"):
-            return f"PT{n}H"
-        if u in ("d", "day", "days"):
-            return f"P{n}D"
-        if u in ("mo", "mon", "month", "months"):
-            return f"P{n}M"
-        if u in ("y", "yr", "year", "years"):
-            return f"P{n}Y"
-    if key.startswith("p") or key.startswith("pt"):
-        return freq
-    if "mon" in key:
-        return "P1M"
-    if "day" in key:
-        return "P1D"
-    if "hr" in key or "hour" in key:
-        return "PT1H"
-    return None
-
-
-@dataclass
-class Cmip6Config:
-    realm: str = "atmos"
-    product: tuple[str, ...] = ("cmip", "scenariomip")
-    time_frequency: str = "6hr"
-    variable: tuple[str, ...] = ("pr", "tas")
-    experiment: tuple[str, ...] = ("ssp585", "ssp245", "ssp370", "historical")
-    ensemble: str = "r1i1p1f1"
-    freva_instance: str = "https://nextgems.dkrz.de/api/freva-nextgen/databrowser"
-    timeout: int = 120
-
-    @property
-    def path(self) -> str:
-        return "healpix/cmip6/{experiment}-{ensemble}/{model}/{frequency}"
-
-    def _metadata_search(self, **params) -> dict:
-        res = requests.get(
-            f"{self.freva_instance}/metadata-search/freva/file",
-            params=params,
-            timeout=self.timeout,
-        )
-        res.raise_for_status()
-        return res.json()
-
-    def _data_search(self, **params) -> list[str]:
-        res = requests.get(
-            f"{self.freva_instance}/data-search/freva/file",
-            params=params,
-            stream=True,
-            timeout=self.timeout,
-        )
-        res.raise_for_status()
-        return sorted(line for line in res.iter_lines(decode_unicode=True) if line)
-
-    @property
-    def model(self) -> list[str]:
-        payload = self._metadata_search(
-            realm=self.realm,
-            product=self.product,
-            experiment=self.experiment,
-            ensemble=self.ensemble,
-            time_frequency=self.time_frequency,
-            variable=self.variable,
-        )
-        model = payload.get("facets", {}).get("model", [])
-        return sorted([m for m, n in zip(model[::2], model[1::2]) if n > 0])
-
-    def has_variable(self, model: str, experiment: str, variable: str) -> bool:
-        payload = self._metadata_search(
-            realm=self.realm,
-            model=model,
-            experiment=experiment,
-            variable=variable,
-            ensemble=self.ensemble,
-            time_frequency=self.time_frequency,
-        )
-        return payload.get("total_count", 0) > 0
-
-    def files_for_variable(
-        self, model: str, experiment: str, variable: str
-    ) -> list[str]:
-        return self._data_search(
-            realm=self.realm,
-            model=model,
-            experiment=experiment,
-            variable=variable,
-            ensemble=self.ensemble,
-            time_frequency=self.time_frequency,
-        )
-
-    def combinations(
-        self,
-        experiments: Iterable[str] | None = None,
-        models: Iterable[str] | None = None,
-        require_all_experiments: bool = False,
-        debug: bool = False,
-    ) -> dict[str, list[str]]:
-        experiments = tuple(experiments or self.experiment)
-        models = tuple(models or self.model)
-        result: dict[str, list[str]] = {}
-
-        for model_name in models:
-            per_model: dict[str, list[str]] = {}
-            for experiment_name in experiments:
-                _files: list[str] = []
-                valid = True
-                for variable_name in self.variable:
-                    exists = self.has_variable(
-                        model=model_name,
-                        experiment=experiment_name,
-                        variable=variable_name,
-                    )
-                    if not exists:
-                        valid = False
-                        break
-                    files = self.files_for_variable(
-                        model=model_name,
-                        experiment=experiment_name,
-                        variable=variable_name,
-                    )
-                    if not files:
-                        valid = False
-                        if debug:
-                            print(
-                                f"SKIP model={model_name} "
-                                f"experiment={experiment_name} "
-                                f"variable={variable_name} "
-                                f"reason=data-search returned no files"
-                            )
-                        break
-                    _files += files
-                if not valid:
-                    continue
-                key = self.path.format(
-                    experiment=experiment_name,
-                    ensemble=self.ensemble,
-                    model=model_name,
-                    frequency=cmor_to_iso8601(self.time_frequency),
-                )
-                per_model[key] = sorted(_files)
-
-            if require_all_experiments:
-                if len(per_model) == len(experiments):
-                    result.update(per_model)
-            else:
-                result.update(per_model)
-        return result
 
 
 # ---------------------------------------------------------------------------
 # Step 1: Discover source files
 # ---------------------------------------------------------------------------
-@wf.job(cpus=2, time="00:05:00", mem="1GB", partition="shared", version="3")
+@wf.job(cpus=2, time="00:10:00", mem="1GB", partition="shared", version="4")  # noqa: F821
 def gather_sources(
-    variable: Annotated[list[str], Param(help="Select the variables")] = list(
-        Cmip6Config.variable
-    ),
-    freq: Annotated[
-        str, Param(help="Target time frequency", short="-f")
-    ] = Cmip6Config.time_frequency,
+    variable: Annotated[
+        list[str], Param(help="Variables every dataset must contain", short="-v")
+    ] = ["tas", "pr"],
+    experiment: Annotated[
+        list[str],
+        Param(help="Experiments; one dataset group per experiment", short="-e"),
+    ] = ["ssp585", "ssp245", "ssp370", "historical"],
+    freq: Annotated[list[str], Param(help="Time frequencies", short="-f")] = ["6hr"],
+    models: Annotated[
+        list[str],
+        Param(help="Explicit model list; empty discovers all complete models"),
+    ] = [],
+    max_models: Annotated[
+        int, Param(help="Cap on discovered models (0 = no limit)")
+    ] = 0,
+    ensemble: Annotated[
+        str,
+        Param(help="Preferred ensemble; falls back to the first complete one"),
+    ] = DEFAULT_ENSEMBLE,
+    instance: Annotated[str, Param(help="Databrowser base URL")] = DEFAULT_INSTANCE,
+    flavour: Annotated[str, Param(help="DRS flavour")] = "freva",
 ) -> list[tuple[str, list[str]]]:
-    """Gather all files that need working on."""
-    cfg = Cmip6Config(variable=variable, time_frequency=freq)
-    return list(cfg.combinations(require_all_experiments=False).items())
+    """Build the (experiment, frequency, model) dataset matrix.
+
+    Every emitted dataset is guaranteed to contain all requested
+    variables, with a single ensemble member chosen per combination
+    (the default if it carries all variables, else the first that does).
+    """
+    matrix = FacetMatrix(
+        variables=variable,
+        experiments=experiment,
+        frequencies=freq,
+        models=models or None,
+        max_models=max_models or None,
+        default_ensemble=ensemble,
+    )
+    client = DatabrowserClient(instance, flavour=flavour)
+
+    entries = matrix.build(client)
+    print(f"Matrix produced {len(entries)} complete datasets:")
+    for entry in entries:
+        counts = {v: len(f) for v, f in entry.files_by_variable.items()}
+        print(f"  {entry.key}  (ensemble={entry.ensemble})  files={counts}")
+
+    return [(entry.key, entry.files) for entry in entries]
 
 
 # ---------------------------------------------------------------------------
