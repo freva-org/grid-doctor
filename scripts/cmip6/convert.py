@@ -148,7 +148,16 @@ def create_weights(
         for key, ds in rep_datasets.items():
             normalized = normalize_for_weights(ds)
             weight_file = gd.cached_weights(
-                normalized, level=target_level, cache_path=weights_dir
+                normalized,
+                level=target_level,
+                cache_path=weights_dir,
+                # HEALPix is a global target. Ocean / partial source grids
+                # (e.g. tos) do not cover land or the poles, so some HEALPix
+                # destination cells overlap no source cell. Ignore them (those
+                # cells become missing/NaN) instead of letting ESMF abort with
+                # rc=513. Fully global atmosphere grids map every cell, so this
+                # is harmless for them.
+                ignore_unmapped=True,
             )
             group_weights["::".join(key)] = str(weight_file)
             print(
