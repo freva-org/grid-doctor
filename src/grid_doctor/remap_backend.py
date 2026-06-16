@@ -1061,6 +1061,32 @@ def _curvilinear_grid_mesh(
     )
 
 
+def _collapse_repeated_corners(face_nodes: "np.ndarray") -> "np.ndarray":
+    """Remove cyclically consecutive duplicate node ids within each face.
+
+    ``face_nodes`` has shape ``(n_face, max_corners)`` with ``-1`` padding.
+    Cell count and order are preserved (so source indexing stays aligned
+    with the data); only repeated corner references are dropped and the
+    freed slots re-padded with ``-1``.
+    """
+    n_face, max_nodes = face_nodes.shape
+    out = np.full_like(face_nodes, -1)
+    for f in range(n_face):
+        row = face_nodes[f]
+        ids = row[row >= 0]
+        if ids.size == 0:
+            continue
+        kept: list[int] = [int(ids[0])]
+        for node in ids[1:]:
+            if int(node) != kept[-1]:
+                kept.append(int(node))
+        # Drop a closing duplicate (last vertex repeats the first).
+        if len(kept) > 1 and kept[-1] == kept[0]:
+            kept.pop()
+        out[f, : len(kept)] = kept
+    return out
+
+
 def _corner_mesh_from_arrays(
     cell_lon: FloatArray,
     cell_lat: FloatArray,
@@ -1120,6 +1146,24 @@ def _corner_mesh_from_arrays(
 
     face_nodes = np.full(cell_lon.shape, -1, dtype=np.int32)
     face_nodes.ravel()[flat_mask] = inverse.astype(np.int32, copy=False)
+
+    # Unstructured grids (e.g. FESOM) often pad each cell to a fixed vertex
+    # count by repeating vertices. After node de-duplication those repeats
+    # become the *same* node id within a face, which ESMF rejects at mesh
+    # creation ("repeated points" in triangulate_warea). Collapse cyclically
+    # consecutive duplicate node ids per face, preserving cell order/count so
+    # the source indexing still matches the data array.
+    face_nodes = _collapse_repeated_corners(face_nodes)
+    remaining = (face_nodes >= 0).sum(axis=1)
+    if np.any(remaining < 3):
+        n_bad = int(np.count_nonzero(remaining < 3))
+        first = int(np.flatnonzero(remaining < 3)[0])
+        raise ValueError(
+            f"{n_bad} source cell(s) have fewer than three distinct vertices "
+            f"after de-duplication (first: cell {first}). The source grid has "
+            f"degenerate cells that cannot form polygons for conservative "
+            f"remapping."
+        )
 
     face_lon, face_lat = _vectorized_polygon_centres(canonical, cell_lat)
 
@@ -1670,7 +1714,7 @@ def describe_source(
     resolved_kind = _classify_source_kind(geometry_ds, explicit_kind=effective_kind)
     source_mesh, source_dims = _source_mesh(geometry_ds, source_units=source_units)
 
-    # The HEALPix target is a complete global tiling. A source that
+    # The HEALPix target is a complete global tessellation. A source that
     # does not fully tile the sphere -- ocean/land-masked grids, regional
     # domains, polar gaps -- leaves some destination cells with no
     # overlapping source cell. Those cells must become missing values, not

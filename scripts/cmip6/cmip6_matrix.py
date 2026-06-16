@@ -498,3 +498,56 @@ def pick_target_level(native_levels: dict, override: int | None) -> int:
     if not native_levels:
         raise ValueError("no native levels to choose a target from")
     return max(int(v) for v in native_levels.values())
+
+
+def build_group_weights(
+    source_paths,
+    *,
+    level: int,
+    open_dataset,
+    resolution_level,
+    make_weights,
+    normalize=normalize_for_weights,
+):
+    """Build one weight file per source grid for a single dataset.
+
+    Pure orchestration (the grid_doctor / xarray calls are injected) so it
+    is unit-testable and so a failure for one dataset can be caught by the
+    caller and that dataset skipped without aborting the whole run.
+
+    Parameters
+    ----------
+    source_paths:
+        All files of one output dataset (mixed variables/grids).
+    level:
+        Target HEALPix level, or 0 for auto (finest native grid).
+    open_dataset(path) -> ds:
+        Opens a representative file per grid.
+    resolution_level(ds) -> int:
+        Native HEALPix level for a grid.
+    make_weights(ds, target_level) -> path:
+        Generates (or fetches cached) weights for a grid at *target_level*.
+    normalize(ds) -> ds:
+        Grid-coordinate normalization applied before weight generation.
+
+    Returns
+    -------
+    (target_level, native_levels, group_weights)
+        ``native_levels`` and ``group_weights`` are keyed by
+        :func:`group_key_str`.
+    """
+    groups: dict[str, list[str]] = {}
+    for src in sorted(source_paths):
+        groups.setdefault(group_key_str(src), []).append(src)
+
+    representatives = {key: files[0] for key, files in groups.items()}
+    rep_datasets = {key: open_dataset(rep) for key, rep in representatives.items()}
+    native_levels = {
+        key: int(resolution_level(ds)) for key, ds in rep_datasets.items()
+    }
+    target_level = pick_target_level(native_levels, level)
+    group_weights = {
+        key: str(make_weights(normalize(ds), target_level))
+        for key, ds in rep_datasets.items()
+    }
+    return target_level, native_levels, group_weights

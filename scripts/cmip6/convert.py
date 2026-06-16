@@ -29,10 +29,8 @@ from cmip6_matrix import (
     DEFAULT_INSTANCE,
     DatabrowserClient,
     FacetMatrix,
-    grid_group_key,
+    build_group_weights,
     group_key_str,
-    normalize_for_weights,
-    pick_target_level,
 )
 
 
@@ -126,40 +124,32 @@ def create_weights(
     out: list[dict] = []
 
     for s3_path, source_paths in paths:
-        # Group files that share a source grid (variable + grid_label).
-        groups: dict[tuple[str, str], list[str]] = {}
-        for src in sorted(source_paths):
-            groups.setdefault(grid_group_key(src), []).append(src)
-
-        # Open one representative file per grid and find its native level.
-        representatives = {key: files[0] for key, files in groups.items()}
-        rep_datasets = {
-            key: xr.open_dataset(rep) for key, rep in representatives.items()
-        }
-        native_levels = {
-            key: gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
-            for key, ds in rep_datasets.items()
-        }
-        target_level = pick_target_level(native_levels, level)
-
-        # One weight file per grid, at the shared target level. grid_doctor's
-        # cache deduplicates identical grids across datasets automatically.
-        group_weights: dict[str, str] = {}
-        for key, ds in rep_datasets.items():
-            normalized = normalize_for_weights(ds)
-            weight_file = gd.cached_weights(
-                normalized,
-                level=target_level,
-                cache_path=weights_dir,
-                # HEALPix is a global target. Ocean / partial source grids
-                # (e.g. tos) do not cover land or the poles, so some HEALPix
-                # destination cells overlap no source cell. Ignore them (those
-                # cells become missing/NaN) instead of letting ESMF abort with
-                # rc=513. Fully global atmosphere grids map every cell, so this
-                # is harmless for them.
-                ignore_unmapped=True,
+        try:
+            target_level, native_levels, group_weights = build_group_weights(
+                source_paths,
+                level=level,
+                open_dataset=xr.open_dataset,
+                resolution_level=lambda ds: gd.resolution_to_healpix_level(
+                    gd.get_latlon_resolution(ds)
+                ),
+                make_weights=lambda ds, lvl: gd.cached_weights(
+                    ds,
+                    level=lvl,
+                    cache_path=weights_dir,
+                    # See note in module docs: HEALPix is a global target,
+                    # ocean/partial grids leave land/pole cells unmapped.
+                    ignore_unmapped=True,
+                ),
             )
-            group_weights["::".join(key)] = str(weight_file)
+        except Exception as exc:
+            # One bad grid (e.g. an unstructured ocean grid ESMF cannot
+            # triangulate) must not abort weight generation for every other
+            # dataset. Skip this dataset; it will be dropped downstream
+            # because it is missing from the weights result.
+            print(f"SKIP dataset {s3_path}: weight generation failed: {exc!r}")
+            continue
+
+        for key, weight_file in group_weights.items():
             print(
                 f"{s3_path} grid={key} "
                 f"native_level={native_levels[key]} target_level={target_level} "
@@ -192,7 +182,12 @@ def plan_regrid(
     items: list[dict] = []
 
     for s3_path, source_files in sources:
-        info = lookup[s3_path]
+        info = lookup.get(s3_path)
+        if info is None:
+            # Dataset was skipped in create_weights (e.g. a source grid that
+            # could not produce weights). Drop it here too rather than fail.
+            print(f"SKIP dataset {s3_path}: no weights (incomplete), not regridding")
+            continue
         group_weights = info["group_weights"]
         max_level = info["max_level"]
         safe_dir = s3_path.replace("/", "__")
