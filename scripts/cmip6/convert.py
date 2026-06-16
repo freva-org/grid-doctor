@@ -224,7 +224,7 @@ def plan_regrid(
     time="02:00:00",
     mem="0",
     partition="compute",
-    array_parallelism=16,
+    array_parallelism=6,
 )
 def regrid_file(
     item: Annotated[dict, Result(step="plan_regrid")],
