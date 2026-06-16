@@ -29,6 +29,10 @@ from cmip6_matrix import (
     DEFAULT_INSTANCE,
     DatabrowserClient,
     FacetMatrix,
+    grid_group_key,
+    group_key_str,
+    normalize_for_weights,
+    pick_target_level,
 )
 
 
@@ -95,24 +99,71 @@ def gather_sources(
     time="08:00:00",
     partition="compute",
     mem="0",
+    version="2",
 )
 def create_weights(
     paths: Annotated[list[tuple[str, list[str]]], Result(step="gather_sources")],
     weights_dir: Annotated[
         Path, Param(help="Path to the grid weight directory")
     ] = Path("/work/ks1387/healpix-weights"),
-) -> list[tuple[str, str, int]]:
-    """Create the weight files."""
+    level: Annotated[
+        int,
+        Param(help="Target HEALPix level; 0 = auto (finest source grid per dataset)"),
+    ] = 0,
+) -> list[dict]:
+    """Create one ESMF weight file per distinct source grid per dataset.
+
+    A dataset may mix source grids (e.g. ``tos`` on an ocean grid,
+    ``tas``/``pr``/``uas`` on an atmosphere grid). Files are grouped by
+    grid (variable + grid_label); each grid gets its own weight file,
+    generated at one shared HEALPix level so the per-level NetCDFs still
+    combine into a single pyramid. CMIP6 unstructured corner coordinates
+    are normalised first so ocean grids (e.g. FESOM/AWI-CM) work too.
+    """
     import xarray as xr
 
-    out = []
+    weights_dir.mkdir(exist_ok=True, parents=True)
+    out: list[dict] = []
+
     for s3_path, source_paths in paths:
-        print("Opening ", source_paths[0])
-        dset = xr.open_dataset(source_paths[0])
-        max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(dset))
-        weights_dir.mkdir(exist_ok=True, parents=True)
-        weight_file = gd.cached_weights(dset, level=max_level, cache_path=weights_dir)
-        out.append([s3_path, weight_file, max_level])
+        # Group files that share a source grid (variable + grid_label).
+        groups: dict[tuple[str, str], list[str]] = {}
+        for src in sorted(source_paths):
+            groups.setdefault(grid_group_key(src), []).append(src)
+
+        # Open one representative file per grid and find its native level.
+        representatives = {key: files[0] for key, files in groups.items()}
+        rep_datasets = {
+            key: xr.open_dataset(rep) for key, rep in representatives.items()
+        }
+        native_levels = {
+            key: gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
+            for key, ds in rep_datasets.items()
+        }
+        target_level = pick_target_level(native_levels, level)
+
+        # One weight file per grid, at the shared target level. grid_doctor's
+        # cache deduplicates identical grids across datasets automatically.
+        group_weights: dict[str, str] = {}
+        for key, ds in rep_datasets.items():
+            normalized = normalize_for_weights(ds)
+            weight_file = gd.cached_weights(
+                normalized, level=target_level, cache_path=weights_dir
+            )
+            group_weights["::".join(key)] = str(weight_file)
+            print(
+                f"{s3_path} grid={key} "
+                f"native_level={native_levels[key]} target_level={target_level} "
+                f"weights={weight_file}"
+            )
+
+        out.append(
+            {
+                "s3_path": s3_path,
+                "max_level": target_level,
+                "group_weights": group_weights,
+            }
+        )
     return out
 
 
@@ -122,28 +173,35 @@ def create_weights(
 @wf.job(cpus=1, time="00:05:00", mem="1GB", partition="shared")
 def plan_regrid(
     sources: Annotated[list[tuple[str, list[str]]], Result(step="gather_sources")],
-    weights: Annotated[list[tuple[str, str, int]], Result(step="create_weights")],
+    weights: Annotated[list[dict], Result(step="create_weights")],
     run_dir: RunDir,
 ) -> list[dict]:
-    """Flatten (s3_path, [files]) pairs into one work item per file."""
-    weight_lookup: dict[str, tuple[str, int]] = {
-        s3_path: (wf, ml) for s3_path, wf, ml in weights
-    }
+    """Flatten into one work item per file, attaching its per-grid weight."""
+    lookup = {w["s3_path"]: w for w in weights}
 
     staging = run_dir / "staging"
     items: list[dict] = []
 
     for s3_path, source_files in sources:
-        w_file, max_level = weight_lookup[s3_path]
+        info = lookup[s3_path]
+        group_weights = info["group_weights"]
+        max_level = info["max_level"]
         safe_dir = s3_path.replace("/", "__")
         out_dir = str(staging / safe_dir)
 
         for idx, src in enumerate(sorted(source_files)):
+            key = group_key_str(src)
+            weight_file = group_weights.get(key)
+            if weight_file is None:
+                raise KeyError(
+                    f"No weight file for grid group {key!r} of {src}; "
+                    f"available groups: {sorted(group_weights)}"
+                )
             items.append(
                 {
                     "s3_path": s3_path,
                     "source_file": src,
-                    "weight_file": w_file,
+                    "weight_file": weight_file,
                     "max_level": max_level,
                     "output_dir": out_dir,
                     "file_index": idx,

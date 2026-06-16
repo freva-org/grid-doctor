@@ -11,6 +11,12 @@ The realm is deliberately *not* constrained, so ocean variables (e.g.
 ``tos``) and atmosphere variables (e.g. ``tas``, ``pr``, ``uas``) can be
 requested together.
 
+This module also provides grid helpers used when regridding mixed-realm
+datasets: ``grid_group_key`` / ``group_key_str`` group a dataset's files
+by source grid (so one ESMF weight file is built per grid), and
+``normalize_for_weights`` renames CMIP6 unstructured cell-corner
+coordinates to the names grid_doctor expects.
+
 REST API reference:
 https://freva-nextgen.readthedocs.io/en/latest/developers/databrowser.html
 """
@@ -20,8 +26,10 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Mapping, Sequence
 
+import numpy as np
 import requests
 
 logger = logging.getLogger(__name__)
@@ -352,3 +360,141 @@ class FacetMatrix:
     ) -> list[tuple[str, list[str]]]:
         """``[(output_key, [files...]), ...]`` for the regrid pipeline."""
         return [(entry.key, entry.files) for entry in self.build(client)]
+
+
+# ===========================================================================
+# Grid helpers for regridding mixed-realm CMIP6 datasets to HEALPix
+# ===========================================================================
+#
+# A single output dataset can mix variables that live on *different* source
+# grids (e.g. ``tos`` on an ocean grid, ``tas``/``pr``/``uas`` on an
+# atmosphere grid). ESMF weights are grid-specific, so weights must be
+# generated per grid and matched to each file at regrid time.
+
+# CMIP6 unstructured cell-corner coordinate names, in priority order, each a
+# 2-D array of shape (n_cell, n_vertex). Mapped to the grid_doctor names.
+_VERTEX_ALIASES: tuple[tuple[str, str, str], ...] = (
+    ("vertices_longitude", "vertices_latitude", "cmip6"),
+    ("bounds_lon", "bounds_lat", "bounds"),
+    ("lon_bnds", "lat_bnds", "bnds"),
+    ("longitude_bnds", "latitude_bnds", "bnds_long"),
+)
+
+_GRID_DOCTOR_LON_VERTEX = "clon_vertices"
+_GRID_DOCTOR_LAT_VERTEX = "clat_vertices"
+
+# Matches CMIP6 grid_label DRS tokens: gn, gr, gr1, gr2, gm, ...
+_GRID_LABEL_RE = re.compile(r"^g[a-z]\w*$")
+
+
+def variable_of(path: str | Path) -> str | None:
+    """Return the CMIP6 variable id from a file path.
+
+    CMIP6 filenames are ``<variable_id>_<table_id>_<source_id>_...nc``.
+    """
+    name = Path(path).name
+    if "_" in name:
+        token = name.split("_", 1)[0]
+        if token:
+            return token
+    return None
+
+
+def grid_label_of(path: str | Path) -> str | None:
+    """Return the CMIP6 grid_label from a file path.
+
+    DRS layout: ``.../<table>/<variable>/<grid_label>/<version>/<file>``,
+    so the grid_label is the third path component from the end.
+    """
+    parts = Path(path).parts
+    if len(parts) >= 3:
+        candidate = parts[-3]
+        if _GRID_LABEL_RE.match(candidate):
+            return candidate
+    return None
+
+
+def grid_group_key(path: str | Path) -> tuple[str, str]:
+    """Return a key for files sharing one source grid.
+
+    Uses ``(variable, grid_label)``. When the path cannot be parsed it
+    falls back to the file path itself, which yields one weight file per
+    file -- still correct, just less sharing (grid_doctor's weight cache
+    deduplicates identical grids across keys anyway).
+    """
+    variable = variable_of(path)
+    grid_label = grid_label_of(path)
+    if variable is not None and grid_label is not None:
+        return (variable, grid_label)
+    return ("__file__", str(path))
+
+
+def group_key_str(path: str | Path) -> str:
+    """Stable string form of :func:`grid_group_key` for dict storage."""
+    return "::".join(grid_group_key(path))
+
+
+def _clean_vertex_values(values: "np.ndarray", fill: float | None) -> "np.ndarray":
+    """Return float64 vertex array with fills / absurd values set to NaN."""
+    data = np.asarray(values, dtype=np.float64)
+    if fill is not None and np.isfinite(fill):
+        data = np.where(data == fill, np.nan, data)
+    # Guard against padding sentinels (e.g. 1e20) in ragged polygons.
+    return np.where(np.abs(data) > 720.0, np.nan, data)
+
+
+def _fill_value(var) -> float | None:
+    for source in (var.attrs, getattr(var, "encoding", {})):
+        for name in ("_FillValue", "missing_value"):
+            if name in source:
+                try:
+                    return float(source[name])
+                except (TypeError, ValueError):
+                    return None
+    return None
+
+
+def normalize_for_weights(ds):
+    """Return a dataset whose grid coords grid_doctor can read.
+
+    Only unstructured (1-D cell) CMIP6 corner coordinates are remapped;
+    curvilinear and regular grids are returned unchanged. The input is
+    not mutated.
+    """
+    if _GRID_DOCTOR_LON_VERTEX in ds or "lon_vertices" in ds:
+        return ds  # already in a recognised form
+
+    lon_src = lat_src = None
+    for lon_name, lat_name, _tag in _VERTEX_ALIASES:
+        if lon_name in ds and lat_name in ds:
+            # Unstructured corners are 2-D: (n_cell, n_vertex).
+            if ds[lon_name].ndim == 2 and ds[lat_name].ndim == 2:
+                lon_src, lat_src = lon_name, lat_name
+                break
+    if lon_src is None:
+        return ds  # nothing to do (curvilinear/regular handled elsewhere)
+
+    out = ds.copy()
+    lon_dims = out[lon_src].dims
+    lat_dims = out[lat_src].dims
+    lon_vals = _clean_vertex_values(out[lon_src].values, _fill_value(out[lon_src]))
+    lat_vals = _clean_vertex_values(out[lat_src].values, _fill_value(out[lat_src]))
+    out = out.drop_vars([lon_src, lat_src], errors="ignore")
+    out[_GRID_DOCTOR_LON_VERTEX] = (lon_dims, lon_vals)
+    out[_GRID_DOCTOR_LAT_VERTEX] = (lat_dims, lat_vals)
+    return out
+
+
+def pick_target_level(native_levels: dict, override: int | None) -> int:
+    """Choose one HEALPix level for a whole (multi-grid) dataset.
+
+    A dataset is published as one pyramid, so every variable must target
+    the same level. ``override > 0`` forces a fixed level (recommended
+    for cross-model comparability); otherwise the finest native level
+    among the dataset's grids is used so no variable is downsampled.
+    """
+    if override:
+        return int(override)
+    if not native_levels:
+        raise ValueError("no native levels to choose a target from")
+    return max(int(v) for v in native_levels.values())
