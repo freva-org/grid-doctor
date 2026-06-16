@@ -255,6 +255,17 @@ def cached_weights(
     digest.update(
         f"level={level};method={method};nest={nest};units={source_units}".encode()
     )
+    # Weight coverage/values also depend on these. Fold them into the key so
+    # files generated under different settings do not collide. Appended only
+    # when non-default so existing default-keyed cache files stay valid.
+    extra: list[str] = []
+    if kwargs.get("ignore_unmapped") is not None:
+        extra.append(f"ignore_unmapped={kwargs['ignore_unmapped']}")
+    source_kind = kwargs.get("source_kind", "auto")
+    if source_kind != "auto":
+        extra.append(f"source_kind={source_kind}")
+    if extra:
+        digest.update((";" + ";".join(extra)).encode())
     key = digest.hexdigest()[:16]
 
     if cache_path is None:

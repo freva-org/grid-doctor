@@ -1669,13 +1669,32 @@ def describe_source(
     geometry_ds = grid if grid is not None else dataset
     resolved_kind = _classify_source_kind(geometry_ds, explicit_kind=effective_kind)
     source_mesh, source_dims = _source_mesh(geometry_ds, source_units=source_units)
-    ignore_unmapped = not _looks_global(geometry_ds, source_units=source_units)
+
+    # The HEALPix target is a complete global tiling. A source that
+    # does not fully tile the sphere -- ocean/land-masked grids, regional
+    # domains, polar gaps -- leaves some destination cells with no
+    # overlapping source cell. Those cells must become missing values, not
+    # abort weight generation, so unmapped destinations are ignored by
+    # default. Callers can pass ignore_unmapped=False to require full
+    # coverage (e.g. for a source that is expected to be globally complete).
+    #
+    # _looks_global is retained as a diagnostic: a source that *does* look
+    # global yet still leaves cells unmapped may indicate a grid problem
+    # (e.g. NaN coordinates or broken corner inference) rather than a mask.
+    looks_global = _looks_global(geometry_ds, source_units=source_units)
+    ignore_unmapped = True
+    if not looks_global:
+        logger.debug(
+            "Source grid does not look global (lon/lat extent below "
+            "thresholds); unmapped HEALPix destinations are expected."
+        )
 
     metadata: dict[str, str | int | float | bool] = {
         "grid_doctor_source_kind": resolved_kind,
         "grid_doctor_source_dims": json.dumps(list(source_dims)),
         "grid_doctor_source_size": source_mesh.face_count,
         "grid_doctor_source_units": source_units,
+        "grid_doctor_source_looks_global": int(looks_global),
     }
 
     return SourceDescription(
