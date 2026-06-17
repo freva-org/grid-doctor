@@ -47,7 +47,7 @@ def main() -> None:
 
     buckets = list_buckets(args.endpoint, key, secret)
 
-    # chec if the JSON is already there.
+    # check if the JSON is already there.
     existing: dict = {}
     if args.out.exists():
         try:
