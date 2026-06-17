@@ -67,6 +67,8 @@
     
       <link rel="stylesheet" href="../assets/styles.css">
     
+      <link rel="stylesheet" href="../assets/waterpark-tree.css">
+    
     <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
@@ -927,48 +929,12 @@ them as multi-resolution Zarr pyramids from S3 object storage.  The unified grid
 enables efficient cross-dataset analysis, ML training pipelines, and interactive
 visualisation without per-dataset regridding at access time.</p>
 <h3 id="currently-available-datasets">Currently available Datasets<a class="headerlink" href="#currently-available-datasets" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Dataset</th>
-<th>Data Access via</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="https://wcrp-cmip.org/cmip-phase-6-cmip6">CMIP6</a></td>
-<td><code>s3://cimp6</code></td>
-</tr>
-<tr>
-<td><a href="https://easy.gems.dkrz.de/DYAMOND/index.html">DYAMOND</a></td>
-<td><code>s3://dyamond</code></td>
-</tr>
-<tr>
-<td><a href="https://dataviewer.eerie-project.eu/home/eddy-rich">EERIE</a></td>
-<td><code>s3://eerie</code></td>
-</tr>
-<tr>
-<td><a href="https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5">ERA5</a></td>
-<td><code>s3://era5</code></td>
-</tr>
-<tr>
-<td><a href="https://www.cen.uni-hamburg.de/en/icdc">ICDC</a></td>
-<td><code>s3://icdc</code></td>
-</tr>
-<tr>
-<td><a href="https://opendata.dwd.de/climate_environment/CDC/help/landing_pages/doi_landingpage_ICON-DREAM_v1-en.html">ICON-DREAM</a></td>
-<td><code>s3://icon-dream</code></td>
-</tr>
-<tr>
-<td><a href="https://nextgems-h2020.eu">nextGEMS</a></td>
-<td><code>s3://nextgems</code></td>
-</tr>
-<tr>
-<td><a href="https://orcestra-campaign.org/data.html">ORCESTRA</a></td>
-<td><code>s3://orchsestra</code></td>
-</tr>
-</tbody>
-</table>
+<div class="wp" data-waterpark
+     data-mode="live"
+     data-endpoint="https://s3.waterpark.dkrz.de"
+     data-buckets="cmip6,cordex,dyamond,earthcare,eerie,era5,icdc,icon-dream,nextgems,orchestra,palmod"
+     data-meta="https://raw.githubusercontent.com/freva-org/grid-doctor/main/docs/assets/waterpark-datasets.json"></div>
+
 <div class="admonition warning">
 <p class="admonition-title">Preliminary test data</p>
 <p>The data shown here is part of a test/prototype setup and must be
@@ -1725,6 +1691,10 @@ until gridlook supports v3.</p>
       <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
       
         <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="../assets/waterpark-tree.js"></script>
+      
+        <script src="../assets/waterpark-inspector.js"></script>
       
     
   </body>
