@@ -25,8 +25,8 @@ def list_buckets(endpoint: str, key: str, secret: str) -> list[str]:
             names = [i.strip("/").split("/")[-1] for i in items if i.strip("/")]
             if names:
                 break
-        except Exception as exc:
-            last = exc
+        except Exception:
+            continue
     if not names:
         raise SystemExit(f"could not list buckets from {endpoint} "
                          f"(check admin credentials / gateway permissions)")
@@ -70,6 +70,7 @@ def main() -> None:
         print(f"added (no description): {', '.join(added)}", file=sys.stderr)
     if removed:
         print(f"removed: {', '.join(removed)}", file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()
