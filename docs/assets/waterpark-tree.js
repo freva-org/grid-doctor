@@ -222,13 +222,41 @@
         if (!res.ok) throw new Error("HTTP " + res.status);
         return res.json();
       }
-      // optional shared metadata map
-      let meta = {};
-      if (host.dataset.meta) {
-        try { const r = await fetch(host.dataset.meta); if (r.ok) { const m = await r.json(); meta = m.datasets || m || {}; } } catch (_) { /* metadata is optional */ }
+      // Shared metadata
+      async function fetchMeta(url, timeoutMs) {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), timeoutMs || 2500);
+        try {
+          const r = await fetch(url, { signal: ctrl.signal });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return await r.json();
+        } finally {
+          clearTimeout(t);
+        }
       }
+  
+      let metaRaw = {};
+      // first fetch raw GitHub, then automatically fall back to the 
+      // same-named file shipped locally in assets/ then get the bucket
+      // only names from md file
+      const metaSources = [];
+      if (host.dataset.meta) {
+        metaSources.push(host.dataset.meta);
+        const localName = host.dataset.meta.split("/").pop().split("?")[0];
+        if (localName) metaSources.push("../assets/" + localName);
+      }
+      for (const url of metaSources) {
+        try { metaRaw = await fetchMeta(url, 2500); break; }
+        catch (_) { /* try the next source */ }
+      }
+      const meta = metaRaw.datasets || metaRaw || {};
+
       // lazy modes: build the bucket list, children load on expand
-      let buckets = (host.dataset.buckets || "").split(",").map((s) => s.trim()).filter(Boolean);
+      let buckets = (Array.isArray(metaRaw.buckets) ? metaRaw.buckets : [])
+        .map((s) => String(s).trim()).filter(Boolean);
+      if (!buckets.length) {
+        buckets = (host.dataset.buckets || "").split(",").map((s) => s.trim()).filter(Boolean);
+      }
       if (!buckets.length) {
         if (ctx.mode === "live") buckets = await s3ListBuckets(ctx.endpoint);
         else {

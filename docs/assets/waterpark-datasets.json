@@ -3,13 +3,12 @@
     "cmip6",
     "cordex",
     "dyamond",
-    "earthcare",
     "eerie",
     "era5",
     "icdc",
     "icon-dream",
     "nextgems",
-    "orchestra",
+    "obs",
     "palmod"
   ],
   "datasets": {
@@ -29,12 +28,6 @@
       "title": "DYAMOND",
       "label": "Global storm-resolving intercomparison",
       "href": "https://easy.gems.dkrz.de/DYAMOND/index.html",
-      "status": "available"
-    },
-    "earthcare": {
-      "title": "EarthCARE",
-      "label": "Earth Cloud, Aerosol and Radiation Explorer (ESA/JAXA)",
-      "href": "https://www.esa.int/Applications/Observing_the_Earth/EarthCARE",
       "status": "available"
     },
     "eerie": {
@@ -67,11 +60,8 @@
       "href": "https://nextgems-h2020.eu",
       "status": "available"
     },
-    "orchestra": {
-      "title": "ORCESTRA",
-      "label": "Tropical Atlantic field campaign (2024)",
-      "href": "https://orcestra-campaign.org/data.html",
-      "status": "available"
+    "obs": {
+      "title": "obs"
     },
     "palmod": {
       "title": "PalMod",
