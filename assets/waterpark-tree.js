@@ -6,11 +6,10 @@
       chevron: '<svg class="wp__chev" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
       dir:     '<svg class="wp__icon wp__icon--dir" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 3.5A1.25 1.25 0 013 2.25h3l1.5 1.5h4.5A1.25 1.25 0 0113.25 5v6.75A1.25 1.25 0 0112 13H3a1.25 1.25 0 01-1.25-1.25V3.5z"/></svg>',
       store:   '<svg class="wp__icon wp__icon--store" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.2l6 3v7.6l-6 3-6-3V4.2l6-3zM8 2.9L3.6 5.1 8 7.3l4.4-2.2L8 2.9zM3 6.3v5l4.4 2.2V8.5L3 6.3zm5.6 7.2L13 11.3v-5L8.6 8.5v5z"/></svg>',
+      file:    '<svg class="wp__icon wp__icon--file" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.75h5L13 5.5v8.75A.75.75 0 0112.25 15h-8.5A.75.75 0 013 14.25V2.5A.75.75 0 014 1.75z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 1.75V5.5h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
       link:    '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6.5 9.5l3-3M7 4h3a2 2 0 012 2v0M9 12H6a2 2 0 01-2-2v0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
       search:  '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
     };
-    const BADGE = { available: ["wp__badge--ok", "available"], "in-progress": ["wp__badge--wip", "in progress"], planned: ["wp__badge--wip", "planned"] };
-  
     const humanBytes = (n) => {
       if (n == null || isNaN(n)) return "";
       const u = ["B", "KB", "MB", "GB", "TB", "PB"]; let i = 0; n = Number(n);
@@ -51,13 +50,14 @@
           const p = xmlText(cp, "Prefix");
           const name = p.replace(/\/$/, "").split("/").pop();
           const base = { name, bucket, prefix: p, path: bucket + "/" + p.replace(/\/$/, "") };
-          if (/\.zarr$/i.test(name)) stores.push({ ...base, type: "store", meta: {} });
+          if (/\.zarr$/i.test(name)) stores.push({ ...base, type: "store", zarr: true, meta: {} });
           else dirs.push({ ...base, type: "dir" });
         }
         for (const c of xml.getElementsByTagName("Contents")) {
           const key = xmlText(c, "Key");
           if (!key || key === prefix || /\/$/.test(key)) continue;
-          stores.push({ type: "store", name: key.split("/").pop(), path: bucket + "/" + key, size: +(xmlText(c, "Size") || 0), meta: {} });
+          const fname = key.split("/").pop();
+          stores.push({ type: "store", name: fname, path: bucket + "/" + key, size: +(xmlText(c, "Size") || 0), zarr: /\.zarr$/i.test(fname), meta: {} });
         }
         const trunc = xmlText(xml, "IsTruncated") === "true";
         token = trunc ? xmlText(xml, "NextContinuationToken") : null;
@@ -74,24 +74,72 @@
       return { dirs: (j.dirs || []).map((d) => ({ ...d, type: "dir" })), stores: (j.stores || []).map((s) => ({ ...s, type: "store", meta: s.meta || {} })) };
     }
   
+    // Cheap liveness probe: does the bucket contain at least one object right now?
+    async function s3HasObjects(endpoint, bucket) {
+      try {
+        const u = new URL(endpoint + "/" + bucket);
+        u.searchParams.set("list-type", "2");
+        u.searchParams.set("max-keys", "1");
+        const res = await fetch(u.toString(), { cache: "no-store" });
+        if (!res.ok) return null;
+        const xml = new DOMParser().parseFromString(await res.text(), "application/xml");
+        const keyCount = xmlText(xml, "KeyCount");
+        if (keyCount != null) return Number(keyCount) > 0;
+        // fallback: any Contents or CommonPrefixes means non-empty
+        return xml.getElementsByTagName("Contents").length > 0 ||
+               xml.getElementsByTagName("CommonPrefixes").length > 0;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function setNoData(row, hasData) {
+      const existing = row.querySelector(".wp__badge--nodata");
+      if (hasData === false) {
+        if (!existing) {
+          const e = h("span", "wp__badge wp__badge--nodata");
+          e.innerHTML = '<span class="wp__badge-dot"></span>no data yet';
+          row.appendChild(e);
+        }
+      } else if (existing) {
+        existing.remove();
+      }
+    }
+
+    async function probeBuckets(rootUl, ctx) {
+      // only the direct-S3 mode can probe cheaply
+      if (ctx.mode !== "live") return;
+      const items = [...rootUl.children].filter((li) => li._bucketRow && li.dataset.bucket);
+      await Promise.all(items.map(async (li) => {
+        const has = await s3HasObjects(ctx.endpoint, li.dataset.bucket);
+        // null (probe failed); leave unlabeled
+        if (has !== null) setNoData(li._bucketRow, has);
+      }));
+    }
+
     function listChildren(ctx, node) {
       if (ctx.mode === "api") return apiList(ctx.api, node.type === "bucket" ? node.bucket : node.path);
       return s3List(ctx.endpoint, node.bucket, node.prefix || "");
     }
-  
+
+
     // node rendering
     function nodeEl(node, ctx) {
       const li = h("li");
       const isStore = node.type === "store";
       const isBucket = node.type === "bucket";
+      // loose file, not a .zarr store
+      const nonZarr = isStore && node.zarr === false;
       const expandable = !isStore;
   
       const row = h("button", "wp__row"); row.type = "button";
       row.innerHTML = SVG.chevron;
       if (!expandable) row.querySelector(".wp__chev").classList.add("wp__chev--leaf");
-      row.insertAdjacentHTML("beforeend", isStore ? SVG.store : SVG.dir);
+      row.insertAdjacentHTML("beforeend", nonZarr ? SVG.file : (isStore ? SVG.store : SVG.dir));
   
       const name = h("span", "wp__name" + (isStore ? " wp__name--store" : ""));
+      // Non-.zarr loose files are shown but de-emphasised
+      if (nonZarr) { li.classList.add("wp__nonzarr"); row.classList.add("wp__row--nonzarr"); }
       if (isBucket) {
         name.classList.add("wp__bucket-title");
         name.textContent = node.title || node.name;
@@ -106,7 +154,8 @@
         row.appendChild(a);
       }
       row.appendChild(h("span", "wp__spacer"));
-      if (isBucket && node.status && BADGE[node.status]) { const [c, t] = BADGE[node.status]; const b = h("span", "wp__badge " + c); b.textContent = t; row.appendChild(b); }
+      // "no data yet" is determined by a live probe after mount
+      if (isBucket) { li._bucketRow = row; li.dataset.bucket = node.bucket; }
       if (isStore) {
         const lvl = node.meta && node.meta.healpix_level;
         if (lvl != null) { const l = h("span", "wp__lvl"); l.textContent = "HP " + lvl; row.appendChild(l); }
@@ -116,6 +165,8 @@
       li._node = node; li._row = row; li._name = (node.title || node.name || "").toLowerCase();
   
       if (isStore) {
+        //inert: hoverable row, but no detail/actions/click
+        if (nonZarr) return li;
         const detail = buildDetail(node, ctx); detail.hidden = true; li.appendChild(detail);
         row.setAttribute("aria-expanded", "false");
         row.addEventListener("click", () => { const open = detail.hidden; detail.hidden = !open; row.setAttribute("aria-expanded", String(open)); });
@@ -161,7 +212,7 @@
       const cb = h("button", "wp__copy"); cb.type = "button"; cb.textContent = "Copy path";
       cb.addEventListener("click", () => copy(s3path, cb));
       actions.append(fname, h("span", "wp__spacer"), cb);
-      if (httpUrl && typeof window.WATERPARK_INSPECT === "function") {
+      if (httpUrl && node.zarr !== false && typeof window.WATERPARK_INSPECT === "function") {
         const ib = h("button", "wp__copy wp__inspect"); ib.type = "button"; ib.textContent = "Inspect";
         ib.addEventListener("click", () => window.WATERPARK_INSPECT({ url: httpUrl, name: node.name, path: node.path }));
         actions.append(ib);
@@ -222,7 +273,7 @@
         if (!res.ok) throw new Error("HTTP " + res.status);
         return res.json();
       }
-      // Shared metadata
+      // Shared metadata:
       async function fetchMeta(url, timeoutMs) {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), timeoutMs || 2500);
@@ -239,19 +290,21 @@
       // first fetch raw GitHub, then automatically fall back to the 
       // same-named file shipped locally in assets/ then get the bucket
       // only names from md file
+      const DEFAULT_META = "../assets/waterpark-datasets.json";
       const metaSources = [];
       if (host.dataset.meta) {
         metaSources.push(host.dataset.meta);
         const localName = host.dataset.meta.split("/").pop().split("?")[0];
         if (localName) metaSources.push("../assets/" + localName);
       }
+      metaSources.push(DEFAULT_META);
       for (const url of metaSources) {
         try { metaRaw = await fetchMeta(url, 2500); break; }
         catch (_) { /* try the next source */ }
       }
       const meta = metaRaw.datasets || metaRaw || {};
 
-      // lazy modes: build the bucket list, children load on expand
+      // lazy modes: build the bucket list, children load on expand.
       let buckets = (Array.isArray(metaRaw.buckets) ? metaRaw.buckets : [])
         .map((s) => String(s).trim()).filter(Boolean);
       if (!buckets.length) {
@@ -261,10 +314,10 @@
         if (ctx.mode === "live") buckets = await s3ListBuckets(ctx.endpoint);
         else {
           const top = await apiList(ctx.api, "");
-          return { endpoint: ctx.endpoint, datasets: top.dirs.map((d) => { const b = d.bucket || d.name; return { type: "bucket", bucket: b, name: b, title: b, path: b, prefix: "", status: "available", ...d, ...(meta[b] || {}) }; }) };
+          return { endpoint: ctx.endpoint, datasets: top.dirs.map((d) => { const b = d.bucket || d.name; return { type: "bucket", bucket: b, name: b, title: b, path: b, prefix: "", ...d, ...(meta[b] || {}) }; }) };
         }
       }
-      return { endpoint: ctx.endpoint, datasets: buckets.map((b) => ({ type: "bucket", bucket: b, name: b, title: b, path: b, prefix: "", status: "available", ...(meta[b] || {}) })) };
+      return { endpoint: ctx.endpoint, datasets: buckets.map((b) => ({ type: "bucket", bucket: b, name: b, title: b, path: b, prefix: "", ...(meta[b] || {}) })) };
     }
   
     async function mount(host) {
@@ -297,7 +350,11 @@
         rootUl.appendChild(nodeEl(node, ctx));
       });
   
-      // Footer
+      // Live "no data yet" labelling: probe each bucket in the background (one cheap
+      // max-keys=1 request, no-store) and fill in badges without blocking the tree.
+      probeBuckets(rootUl, ctx);
+
+      // Footer:
       const fbadge = h("span", "wp__mode " + (liveMode ? "wp__mode--live" : "wp__mode--snap"),
         '<span class="wp__dot"></span>' + (liveMode ? "LIVE" : "SNAPSHOT"));
       const fdesc = h("span", "wp__foot-desc");
