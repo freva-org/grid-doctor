@@ -13,16 +13,11 @@ visualisation without per-dataset regridding at access time.
 
 ### Currently available Datasets
 
-| Dataset | Data Access via |
-|---------|-----------------|
-| [CMIP6](https://wcrp-cmip.org/cmip-phase-6-cmip6)   | `s3://cimp6` |
-| [DYAMOND](https://easy.gems.dkrz.de/DYAMOND/index.html)   | `s3://dyamond` |
-| [EERIE](https://dataviewer.eerie-project.eu/home/eddy-rich)   | `s3://eerie` |
-| [ERA5](https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5)   | `s3://era5 `|
-| [ICDC](https://www.cen.uni-hamburg.de/en/icdc) | `s3://icdc` |
-| [ICON-DREAM](https://opendata.dwd.de/climate_environment/CDC/help/landing_pages/doi_landingpage_ICON-DREAM_v1-en.html) | `s3://icon-dream` |
-| [nextGEMS](https://nextgems-h2020.eu) | `s3://nextgems` |
-| [ORCESTRA](https://orcestra-campaign.org/data.html) |`s3://orchsestra`|
+<div class="wp" data-waterpark
+     data-mode="live"
+     data-endpoint="https://s3.waterpark.dkrz.de"
+     data-buckets="cmip6,cordex,dyamond,earthcare,eerie,era5,icdc,icon-dream,nextgems,orchestra,palmod"
+     data-meta="https://raw.githubusercontent.com/freva-org/grid-doctor/main/docs/assets/waterpark-datasets.json"></div>
 
 
 !!! warning "Preliminary test data"

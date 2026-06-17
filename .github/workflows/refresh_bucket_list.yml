@@ -1,0 +1,67 @@
+name: Refresh Waterpark bucket list
+
+# Regenerates docs/assets/waterpark-datasets.json (the bucket list)
+
+
+on:
+  schedule:
+    - cron: "0 4 * * *"  # every 24h at 4am UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-buckets
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install s3fs
+
+      - name: Refresh bucket list
+        env:
+          WATERPARK_S3_KEY: ${{ secrets.WATERPARK_S3_KEY }}
+          WATERPARK_S3_SECRET: ${{ secrets.WATERPARK_S3_SECRET }}
+        run: |
+          if [ -z "$WATERPARK_S3_KEY" ] || [ -z "$WATERPARK_S3_SECRET" ]; then
+            echo "::error::WATERPARK_S3_KEY / WATERPARK_S3_SECRET secrets are not set."
+            exit 1
+          fi
+          python docs/scripts/refresh_buckets.py \
+            --endpoint https://s3.waterpark.dkrz.de \
+            --out docs/assets/waterpark-datasets.json
+
+      - name: Open a PR if the bucket list changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          add-paths: docs/assets/waterpark-datasets.json
+          branch: bump-waterpark-buckets
+          delete-branch: true
+          commit-message: "chore(waterpark): refresh bucket list"
+          committer: "freva-bot[bot] <freva-bot@users.noreply.github.com>"
+          author: "freva-bot[bot] <freva-bot@users.noreply.github.com>"
+          base: main
+          title: "chore(waterpark): refresh dataset bucket list"
+          body: |
+            Automated refresh of `docs/assets/waterpark-datasets.json`
+            the bucket list (and labels) the live dataset tree reads.
+
+            The live page fetches this JSON directly from GitHub,
+            so the tree updates as soon as this lands on `main`.
+          labels: |
+            automated
+            waterpark
