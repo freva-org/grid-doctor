@@ -20,17 +20,6 @@ visualisation without per-dataset regridding at access time.
      data-meta="https://raw.githubusercontent.com/freva-org/grid-doctor/main/docs/assets/waterpark-datasets.json"></div>
 
 
-!!! warning "Preliminary test data"
-    The data shown here is part of a test/prototype setup and must be
-    considered **preliminary**.
-
-    It may be changed or deleted at any time. There is no guarantee of
-    availability, persistence, completeness, or long-term access.
-
-    The underlying S3 buckets are **not intended or approved for public
-    access**. Bucket URLs must therefore not be published, shared, or linked
-    from public documentation.
-
 ---
 
 ## Remapping methodology
