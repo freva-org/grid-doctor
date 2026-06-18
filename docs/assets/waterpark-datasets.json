@@ -1,0 +1,64 @@
+{
+  "buckets": [
+    "cmip6",
+    "cordex",
+    "dyamond",
+    "eerie",
+    "era5",
+    "icdc",
+    "icon-dream",
+    "nextgems",
+    "obs",
+    "palmod"
+  ],
+  "datasets": {
+    "cmip6": {
+      "title": "CMIP6",
+      "label": "Coupled Model Intercomparison Project Phase 6",
+      "href": "https://wcrp-cmip.org/cmip-phase-6-cmip6"
+    },
+    "cordex": {
+      "title": "CORDEX",
+      "label": "Coordinated Regional Climate Downscaling Experiment",
+      "href": "https://cordex.org"
+    },
+    "dyamond": {
+      "title": "DYAMOND",
+      "label": "Global storm-resolving intercomparison",
+      "href": "https://easy.gems.dkrz.de/DYAMOND/index.html"
+    },
+    "eerie": {
+      "title": "EERIE",
+      "label": "Eddy-Rich Earth System Models",
+      "href": "https://dataviewer.eerie-project.eu/home/eddy-rich"
+    },
+    "era5": {
+      "title": "ERA5",
+      "label": "ECMWF Reanalysis v5",
+      "href": "https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5"
+    },
+    "icdc": {
+      "title": "ICDC",
+      "label": "Integrated Climate Data Center",
+      "href": "https://www.cen.uni-hamburg.de/en/icdc"
+    },
+    "icon-dream": {
+      "title": "ICON-DREAM",
+      "label": "DWD ICON Reanalysis",
+      "href": "https://opendata.dwd.de/climate_environment/CDC/help/landing_pages/doi_landingpage_ICON-DREAM_v1-en.html"
+    },
+    "nextgems": {
+      "title": "nextGEMS",
+      "label": "next Generation Earth Modelling Systems",
+      "href": "https://nextgems-h2020.eu"
+    },
+    "obs": {
+      "title": "obs",
+      "label": "Observations"
+    },
+    "palmod": {
+      "title": "PalMod",
+      "label": "Paleoclimate Modelling initiative"
+    }
+  }
+}
