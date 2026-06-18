@@ -552,3 +552,17 @@ nanmean), not by repeated remapping.
 - [ ] STAC catalogue integration for data discoverability
 - [ ] Freva databrowser registration
 - [ ] Documentation of the full process and methodology
+
+ ## User Documentation
+
+ ### Data/simulations/observations
+
+ ### Processing
+
+HEALPix data is a specialized format for mapping the globe or celestial sphere. It stands for Hierarchical Equal Area isoLatitude Pixelization. Instead of a more generalised approach of stretching a sphere flat like a standard map, it divides the surface into equal-area, grid-aligned shapes. This makes it highly efficient for storing and running statistics on massive, full-sphere datasets. 
+In the context of global atmospheric and ocean modeling, HealPix or equal-area pixels prevent numerical smoothing and rounding errors at the poles. Additionally, Healpix ensures fair sampling since every grid cell represents the exact same surface area (in square kilometers). This ensures that global averages, as well as the individual climate parameters are completely unbiased.
+
+
+ ### Jupyter notebook snippets
+
+ ### Further references
