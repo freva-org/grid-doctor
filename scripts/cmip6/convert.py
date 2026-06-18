@@ -332,6 +332,7 @@ def combine_and_upload(
             nc_files,
             parallel=False,
             combine="by_coords",
+            compat="override",
         )
 
     s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
