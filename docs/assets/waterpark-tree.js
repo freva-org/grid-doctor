@@ -9,6 +9,7 @@
       file:    '<svg class="wp__icon wp__icon--file" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.75h5L13 5.5v8.75A.75.75 0 0112.25 15h-8.5A.75.75 0 013 14.25V2.5A.75.75 0 014 1.75z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 1.75V5.5h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
       link:    '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6.5 9.5l3-3M7 4h3a2 2 0 012 2v0M9 12H6a2 2 0 01-2-2v0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
       search:  '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+      info:    '<svg class="wp__info" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.4"/><path d="M8 7.1v3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="5" r=".95" fill="currentColor"/></svg>',
     };
     const humanBytes = (n) => {
       if (n == null || isNaN(n)) return "";
@@ -24,6 +25,29 @@
       else { const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); done(); }
     }
   
+    /* Python highlighter */
+    function pyHighlight(src) {
+      const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const rules = [
+        [/^#[^\n]*/, "c"],
+        [/^"(?:[^"\\]|\\.)*"|^'(?:[^'\\]|\\.)*'/, "s"],
+        [/^\b(?:import|from|as|return|with|for|in|if|else|def|class|lambda|and|or|not)\b/, "k"],
+        [/^\b(?:True|False|None)\b/, "b"],
+        [/^[A-Za-z_][\w.]*(?=\s*\()/, "f"],
+        [/^[A-Za-z_][\w.]*/, "n"],
+        [/^\d[\d_]*(?:\.\d+)?/, "m"],
+      ];
+      let out = "", i = 0;
+      while (i < src.length) {
+        const rest = src.slice(i);
+        let hit = null;
+        for (const [re, cls] of rules) { const m = re.exec(rest); if (m) { hit = [m[0], cls]; break; } }
+        if (hit) { out += '<span class="wp__t-' + hit[1] + '">' + esc(hit[0]) + "</span>"; i += hit[0].length; }
+        else { out += esc(src[i]); i++; }
+      }
+      return out;
+    }
+
     /*listing back-ends: each returns {dirs:[node], stores:[node]} */
     const xmlText = (el, tag) => { const n = el.getElementsByTagName(tag)[0]; return n ? n.textContent : null; };
   
@@ -57,7 +81,18 @@
           const key = xmlText(c, "Key");
           if (!key || key === prefix || /\/$/.test(key)) continue;
           const fname = key.split("/").pop();
-          stores.push({ type: "store", name: fname, path: bucket + "/" + key, size: +(xmlText(c, "Size") || 0), zarr: /\.zarr$/i.test(fname), meta: {} });
+          // A symlinked directory is returned as a Contents object (not a CommonPrefix),
+          // with Size = the byte-length of the link target. We can't see "symlink" over S3,
+          // so treat an extension-less object as a directory and let listing it (which the
+          // gateway resolves through the link) be the source of truth. .zarr stays a store;
+          // a name with a real file extension stays a leaf file.
+          if (/\.zarr$/i.test(fname)) {
+            stores.push({ type: "store", name: fname, path: bucket + "/" + key, zarr: true, meta: {} });
+          } else if (/\.[^/]+$/.test(fname)) {
+            stores.push({ type: "store", name: fname, path: bucket + "/" + key, size: +(xmlText(c, "Size") || 0), zarr: false, meta: {} });
+          } else {
+            dirs.push({ name: fname, bucket, prefix: key + "/", path: bucket + "/" + key, type: "dir" });
+          }
         }
         const trunc = xmlText(xml, "IsTruncated") === "true";
         token = trunc ? xmlText(xml, "NextContinuationToken") : null;
@@ -87,7 +122,7 @@
         if (keyCount != null) return Number(keyCount) > 0;
         // fallback: any Contents or CommonPrefixes means non-empty
         return xml.getElementsByTagName("Contents").length > 0 ||
-               xml.getElementsByTagName("CommonPrefixes").length > 0;
+            xml.getElementsByTagName("CommonPrefixes").length > 0;
       } catch (_) {
         return null;
       }
@@ -121,7 +156,6 @@
       if (ctx.mode === "api") return apiList(ctx.api, node.type === "bucket" ? node.bucket : node.path);
       return s3List(ctx.endpoint, node.bucket, node.prefix || "");
     }
-
 
     // node rendering
     function nodeEl(node, ctx) {
@@ -222,6 +256,64 @@
       // Full-width path pill that scrolls horizontally on its own
       const path = h("div", "wp__path", `<code>${s3path}</code>`);
       wrap.appendChild(path);
+  
+      // "How to access"
+      if (httpUrl && node.zarr !== false) {
+        const endpoint = ctx.endpoint.replace(/\/$/, "");
+        const recipes = {
+          http: 'import xarray as xr\n\n' +
+                'ds = xr.open_dataset(\n' +
+                '    "' + httpUrl + '",\n' +
+                '    engine="zarr", chunks={},\n' +
+                ')',
+          s3:   'import s3fs, xarray as xr\n\n' +
+                'store = s3fs.S3Map(\n' +
+                '    root="/' + node.path + '",\n' +
+                '    s3=s3fs.S3FileSystem(endpoint_url="' + endpoint + '", anon=True),\n' +
+                ')\n' +
+                'ds = xr.open_zarr(store)',
+        };
+        const load = h("div", "wp__load");
+  
+        const head = h("button", "wp__disclose"); head.type = "button";
+        head.setAttribute("aria-expanded", "false");
+        head.innerHTML = SVG.info + '<span class="wp__loadlabel">How to access</span>' + SVG.chevron;
+  
+        const body = h("div", "wp__loadbody"); body.hidden = true;
+        const bar = h("div", "wp__loadbar");
+        const tabs = h("div", "wp__tabs");
+        const tHttp = h("button", "wp__tab is-active"); tHttp.type = "button"; tHttp.textContent = "HTTP";
+        const tS3 = h("button", "wp__tab"); tS3.type = "button"; tS3.textContent = "s3fs";
+        tabs.append(tHttp, tS3);
+        const lcb = h("button", "wp__copy"); lcb.type = "button"; lcb.textContent = "Copy code";
+        bar.append(tabs, h("span", "wp__spacer"), lcb);
+        const codeBox = h("pre", "wp__code"); const code = h("code"); codeBox.appendChild(code);
+        const card = h("div", "wp__codecard");
+        const chead = h("div", "wp__codehead");
+        chead.innerHTML = '<span class="wp__dots"><i></i><i></i><i></i></span><span class="wp__lang">python</span>';
+        card.append(chead, codeBox);
+        body.append(bar, card);
+  
+        let current = "http";
+        const select = (which) => {
+          current = which;
+          tHttp.classList.toggle("is-active", which === "http");
+          tS3.classList.toggle("is-active", which === "s3");
+          code.innerHTML = pyHighlight(recipes[which]);
+        };
+        tHttp.addEventListener("click", () => select("http"));
+        tS3.addEventListener("click", () => select("s3"));
+        lcb.addEventListener("click", () => copy(recipes[current], lcb));
+        head.addEventListener("click", () => {
+          const open = body.hidden;
+          body.hidden = !open;
+          head.setAttribute("aria-expanded", String(open));
+          head.classList.toggle("is-open", open);
+        });
+        select("http");
+        load.append(head, body);
+        wrap.appendChild(load);
+      }
   
       const m = node.meta || {}; const meta = h("div", "wp__meta");
       if (m.dims && Object.keys(m.dims).length) {
