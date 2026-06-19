@@ -260,6 +260,7 @@ Claim a patient, write a script, and turn that frown into 😎.
 | ORCHESTRA | 😎 | 😎 |
 | PalMod | 😢 | 😢 |
 | Dyamond| 😎 | 😎 |
+| EarthCARE| 😎 | 😎 |
 > [!TIP]
 > To claim a dataset, open a PR adding your script to `scripts/<dataset>/`
 > and update this table. See [Getting Started](#writing-a-conversion-script)
