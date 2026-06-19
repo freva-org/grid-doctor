@@ -1,0 +1,83 @@
+theme:
+  name: material
+  logo: assets/logo-512.png
+  favicon: assets/favicon.ico
+  icon:
+    admonition:
+      example: material/database
+    previous: fontawesome/solid/angle-left
+    next: fontawesome/solid/angle-right
+
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.expand
+    - navigation.footer
+    - toc.integrate
+    - search.highlight
+    - search.suggest
+
+plugins:
+  - search
+  - social:
+      cards_layout_options:
+        background_image: docs/assets/modis-aqua.png
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: true
+            show_root_heading: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            merge_init_into_class: true
+            scoped_crossrefs: true
+            relative_crossrefs: true
+
+markdown_extensions:
+  - admonition
+  - footnotes
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tasklist:
+      custom_checkbox: true  # clickable checkboxes in roadmap
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.arithmatex:
+      generic: true
+  - tables
+  - attr_list
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.blocks.caption
+  - toc:
+      permalink: true
+
+extra_css:
+  - assets/styles.css
+  - assets/waterpark-tree.css
+
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+  - assets/waterpark-tree.js
+  - assets/waterpark-inspector.js

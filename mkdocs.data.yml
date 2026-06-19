@@ -1,0 +1,12 @@
+INHERIT: mkdocs.base.yml
+site_name: Waterpark
+site_description: The HEALPix Data Hub on s3
+site_url: https://waterpark.dkrz.de
+site_dir: site-data
+docs_dir: .build/data
+
+nav:
+  - Overview: index.md
+  - Technical decisions: technical-decisions.md
+exclude_docs: |
+  technical/**
