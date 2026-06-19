@@ -5,13 +5,11 @@ permissions:
   pages: write
   id-token: write
 
-# Only deploy on pushes to main (i.e. after merge)
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# Prevent concurrent deployments
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -19,6 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -43,29 +42,35 @@ jobs:
           python -m pip install -e .[dev]
           pip install tox
 
-      - name: Build docs
+      - name: Build technical docs
         shell: bash -l {0}
-        run: tox -e docs
+        run: tox -e docs -- tech
 
-      - name: Upload pages artifact
+      - name: Upload technical docs artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site/
+          path: site-tech/
 
-      - name: Deploy to gh-pages branch
+      - name: Build data docs
+        shell: bash -l {0}
+        run: tox -e docs -- data
+
+      - name: Deploy data docs to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./site
+          publish_dir: ./site-data
           publish_branch: gh-pages
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy technical docs to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
