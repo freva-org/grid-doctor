@@ -6,10 +6,12 @@ Sea surface temperature seen by MODIS AQUA, remapped to HEALPix level 10.
 
 Waterpark is a task force effort at DKRZ to convert climate and Earth observation
 datasets onto a common [HEALPix](https://healpix.jpl.nasa.gov/) grid and serve
-them as multi-resolution Zarr pyramids from S3 object storage.  The unified grid
+them as multi-resolution Zarr pyramids[^zarr] from S3 object storage.  The unified grid
 enables efficient cross-dataset analysis, ML training pipelines, and interactive
 visualisation without per-dataset regridding at access time.
 
+
+[^zarr]: Zarr stores multidimensional arrays in chunked form, which works well with object storage.
 
 ### Currently available Datasets
 
