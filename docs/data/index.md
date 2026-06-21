@@ -42,9 +42,9 @@ Waterpark combines three technical decisions:
 
 | Choice | What it gives us | Read more |
 |---|---|---|
-| **HEALPix** | A global equal-area grid with a natural multi-resolution hierarchy. | [Why HEALPix?](why-healpix.md) |
-| **Zarr** | Chunked, compressed, lazy arrays that work well with xarray and dask. | [Why Zarr and S3?](zarr-and-s3.md) |
-| **S3-compatible object storage** | HTTP-based access without requiring a mounted filesystem. | [Why Zarr and S3?](zarr-and-s3.md) |
+| **HEALPix** | A global equal-area grid with a natural multi-resolution hierarchy. | [Why HEALPix?](storage_concepts/why-healpix.md) |
+| **Zarr** | Chunked, compressed, lazy arrays that work well with xarray and dask. | [Why Zarr and S3?](storage_concepts/zarr-and-s3.md) |
+| **S3-compatible object storage** | HTTP-based access without requiring a mounted filesystem. | [Why Zarr and S3?](storage_concepts/zarr-and-s3.md) |
 
 The combination matters more than any single component. HEALPix gives Waterpark
 a common geometry, Zarr gives partial array access, and S3 makes those chunks

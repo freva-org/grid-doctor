@@ -71,11 +71,11 @@ tests = [
     "healpy",
 ]
 docs = [
-    "mkdocs>=1.6",
+    "mkdocs>=1.6,<2",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.27",
     "pymdown-extensions>=10.0",
-    "mkdocs-material[imaging]",
+    "mkdocs-material[imaging]>=9.7",
     "pillow",
 
 ]
@@ -223,7 +223,7 @@ commands_pre =
     {[docs-prep]serve}
 commands =
     codespell --quiet-level=2 docs
-    mkdocs serve -f mkdocs.{posargs:tech}.yml -a localhost:8000 --watch docs
+    mkdocs serve -f mkdocs.{posargs:tech}.yml --strict -a localhost:8000 --watch docs
 
 [testenv:types]
 description = Run mypy in strict mode
