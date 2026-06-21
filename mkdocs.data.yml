@@ -7,6 +7,12 @@ docs_dir: .build/data
 
 nav:
   - Overview: index.md
-  - Technical decisions: technical-decisions.md
+  - Storage Concepts:
+      - " ": storage_concepts/index.md
+      - Why HEALPix?: storage_concepts/why-healpix.md
+      - Why Zarr and S3?: storage_concepts/zarr-and-s3.md
+  - Technical Desicions: technical-decisions.md
+  - Operations :
+      - Remapping and benchmark: appendix-remapping-benchmark.md
 exclude_docs: |
   technical/**

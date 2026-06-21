@@ -10,6 +10,7 @@ nav:
   - Overview: index.md
   - Technical decisions: technical-decisions.md
   - Grid-doctor software: getting-started.md
+  - Discussion: roadmap.md
   - API Reference:
       - High Level API: api/helpers.md
       - Regridding: api/remap.md

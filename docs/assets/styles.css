@@ -15,3 +15,14 @@
   display: block;
   margin: 0 auto;
 }
+
+.mermaid-center {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.mermaid-center .mermaid {
+  width: fit-content;
+  max-width: 100%;
+}

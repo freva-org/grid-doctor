@@ -1,8 +1,6 @@
-# Technical decisions
-
 This document records the design rationale behind the significant
-technical choices in the remapping software that is applied to create all
-data sets [Grid doctor](https://freva-org.github.io/grid-doctor)[^1].  It is intended as a reference for
+technical choices in the remapping process that is applied to create all
+data sets[^1].  It is intended as a reference for
 contributors, reviewers, and downstream consumers of the produced
 HEALPix pyramids.
 
