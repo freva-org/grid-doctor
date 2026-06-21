@@ -1,3 +1,19 @@
+This page documents the open design decisions, areas that require particular
+care, and the remaining roadmap for completing the Waterpark project.
+
+Waterpark is more than a collection of converted datasets. It combines data
+transformation, storage layout, public access, catalogue integration, and
+operational workflows. Some parts of this system are already working as a
+prototype, while others still need to be refined before the service can become
+reliable, maintainable, and useful for a broader user community.
+
+The goal is to make the remaining decisions explicit, document the reasoning
+behind them, and identify where extra caution is needed before
+scaling Waterpark from a prototype into a production-ready data hub.
+
+---
+
+
 ## Open decisions
 
 !!! question "Can we define an appropriate naming convention?"
