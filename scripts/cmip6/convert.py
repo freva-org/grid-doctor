@@ -375,7 +375,7 @@ def combine_and_upload(
             nc_files,
             parallel=False,
             combine="by_coords",
-            coords="minimal"
+            coords="minimal",
             data_vars="minimal",
             compat="override",
         )
