@@ -36,6 +36,49 @@ from cmip6_matrix import (
 
 wf = Workflow("cmip6_healpix")
 
+TARGET_CHUNK_BYTES = 16 * 1024**2  # 16 MiB
+
+_CELL_DIM_CANDIDATES = ("cell", "cells", "value", "values", "pix", "ipix")
+
+
+def _spatial_dim(ds) -> str | None:
+    for name in _CELL_DIM_CANDIDATES:
+        if name in ds.dims:
+            return name
+    non_time = {d: s for d, s in ds.sizes.items() if d != "time"}
+    return max(non_time, key=non_time.get) if non_time else None
+
+
+def _chunk_plan(ds, target_bytes: int = TARGET_CHUNK_BYTES) -> dict:
+    """Chunk sizes so each chunk is ~target_bytes.
+
+    Keeps the HEALPix cell dimension contiguous while a single map fits
+    the budget (best for the nested layout); past that point it splits
+    the cell dimension and writes one timestep per chunk.
+    """
+    cell = _spatial_dim(ds)
+    itemsize = max((v.dtype.itemsize for v in ds.data_vars.values()), default=4)
+    ncell = ds.sizes.get(cell, 1)
+    other = 1
+    for d, s in ds.sizes.items():
+        if d not in ("time", cell):
+            other *= s
+    map_bytes = ncell * other * itemsize  # bytes for one full timestep
+
+    plan: dict = {}
+    if map_bytes <= target_bytes:
+        if cell is not None:
+            plan[cell] = -1
+        if "time" in ds.dims:
+            plan["time"] = max(1, target_bytes // map_bytes)
+    else:
+        if "time" in ds.dims:
+            plan["time"] = 1
+        if cell is not None:
+            n = -(-map_bytes // target_bytes)  # ceil
+            plan[cell] = max(1, ncell // n)
+    return plan
+
 
 # ---------------------------------------------------------------------------
 # Step 1: Discover source files
@@ -328,12 +371,19 @@ def combine_and_upload(
             raise FileNotFoundError(
                 f"No staging files for {s3_path} level {level} in {out_dir}"
             )
-        pyramid[level] = xr.open_mfdataset(
+        ds = xr.open_mfdataset(
             nc_files,
             parallel=False,
             combine="by_coords",
             compat="override",
         )
+        # Drop the NetCDF chunk hints so they don't clash with the dask
+        # chunks that zarr will use as its on-disk chunking.
+        for v in ds.variables.values():
+            v.encoding.pop("chunks", None)
+            v.encoding.pop("preferred_chunks", None)
+
+        pyramid[level] = ds.chunk(_chunk_plan(ds))
 
     s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
     gd.save_pyramid(
