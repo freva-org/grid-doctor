@@ -375,6 +375,8 @@ def combine_and_upload(
             nc_files,
             parallel=False,
             combine="by_coords",
+            coords="minimal"
+            data_vars="minimal",
             compat="override",
         )
         # Drop the NetCDF chunk hints so they don't clash with the dask
