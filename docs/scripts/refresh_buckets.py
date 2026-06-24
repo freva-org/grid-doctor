@@ -47,6 +47,11 @@ def main() -> None:
 
     buckets = list_buckets(args.endpoint, key, secret)
 
+    # Blacklist
+    blacklist = {b.strip() for b in os.environ.get("WATERPARK_BUCKET_BLACKLIST", "").split(",") if b.strip()}
+    if blacklist:
+        buckets = [b for b in buckets if b not in blacklist]
+
     # check if the JSON is already there.
     existing: dict = {}
     if args.out.exists():
