@@ -119,13 +119,14 @@ def _drop_source_grid(ds: xr.Dataset) -> xr.Dataset:
     orphaned = [
         d
         for d in ds.dims
-        if str(d) not in keep
-        and not any(d in ds[name].dims for name in ds.variables)
+        if str(d) not in keep and not any(d in ds[name].dims for name in ds.variables)
     ]
     return ds.drop_dims(orphaned, errors="ignore")
 
 
-def _chunk_plan(ds: xr.Dataset, target_bytes: int = TARGET_CHUNK_BYTES) -> dict[str, int]:
+def _chunk_plan(
+    ds: xr.Dataset, target_bytes: int = TARGET_CHUNK_BYTES
+) -> dict[str, int]:
     """Chunk sizes so each chunk is ~target_bytes.
 
     Sizes the estimate on the largest *data variable's* per-timestep
@@ -160,6 +161,14 @@ def _chunk_plan(ds: xr.Dataset, target_bytes: int = TARGET_CHUNK_BYTES) -> dict[
         if cell is not None:
             n = -(-map_bytes // target_bytes)  # ceil
             plan[cell] = max(1, ncell // n)
+
+    # A chunk plan must cover *every* dimension in the dataset. Side-cars
+    # like time_bnds carry a dim (bnds) that is neither time nor cell;
+    # leaving it unspecified yields a per-variable chunk spec shorter than
+    # the variable's rank, which this xarray rejects with a strict-zip
+    # error. Default any uncovered dim to a single full chunk.
+    for d in ds.dims:
+        plan.setdefault(str(d), -1)
     return plan
 
 
@@ -471,8 +480,9 @@ def combine_and_upload(
         for v in ds.variables.values():
             v.encoding.pop("chunks", None)
             v.encoding.pop("preferred_chunks", None)
-
-        pyramid[level] = ds.chunk(_chunk_plan(ds))
+        plan = _chunk_plan(ds)
+        print("uncovered dims:", {str(d) for d in ds.dims} - set(plan))
+        pyramid[level] = ds.chunk(plan)
 
     s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
     gd.save_pyramid(
