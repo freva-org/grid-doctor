@@ -18,7 +18,7 @@ gather_sources → create_weights → plan_regrid → regrid_file → group_for_
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, TypedDict
 
 from reflow import Param, Result, RunDir, Workflow
 
@@ -33,6 +33,11 @@ from cmip6_matrix import (
     group_key_str,
 )
 
+if TYPE_CHECKING:
+    # Imported only for type checking; the real import is lazy and lives
+    # inside each job so worker startup stays cheap on the login node.
+    import xarray as xr
+
 
 wf = Workflow("cmip6_healpix")
 
@@ -41,31 +46,109 @@ TARGET_CHUNK_BYTES = 16 * 1024**2  # 16 MiB
 _CELL_DIM_CANDIDATES = ("cell", "cells", "value", "values", "pix", "ipix")
 
 
-def _spatial_dim(ds) -> str | None:
+# ---------------------------------------------------------------------------
+# Inter-step payload contracts
+#
+# reflow serialises each step's result and feeds it to the next, so these
+# records cross a JSON boundary: paths arrive as ``str``. TypedDicts make
+# the contract explicit and let mypy check every key access downstream.
+# ---------------------------------------------------------------------------
+class WeightInfo(TypedDict):
+    """One entry per dataset emitted by ``create_weights``."""
+
+    s3_path: str
+    max_level: int
+    group_weights: dict[str, str]  # grid-group key -> weight file path
+
+
+class RegridItem(TypedDict):
+    """One regrid work item (one source file) emitted by ``plan_regrid``."""
+
+    s3_path: str
+    source_file: str
+    weight_file: str
+    max_level: int
+    output_dir: str
+    file_index: int
+
+
+class RegridResult(TypedDict):
+    """Per-file output of ``regrid_file``.
+
+    ``group_for_upload`` de-duplicates these to one record per dataset and
+    passes the same shape on to ``combine_and_upload``.
+    """
+
+    s3_path: str
+    output_dir: str
+    max_level: int
+
+
+def _spatial_dim(ds: xr.Dataset) -> str | None:
+    """Return the HEALPix cell dimension, or the largest non-time dim."""
     for name in _CELL_DIM_CANDIDATES:
         if name in ds.dims:
             return name
     non_time = {d: s for d, s in ds.sizes.items() if d != "time"}
-    return max(non_time, key=non_time.get) if non_time else None
+    if not non_time:
+        return None
+    return str(max(non_time, key=lambda d: non_time[d]))
 
 
-def _chunk_plan(ds, target_bytes: int = TARGET_CHUNK_BYTES) -> dict:
-    """Chunk sizes so each chunk is ~target_bytes.
+def _drop_source_grid(ds: xr.Dataset) -> xr.Dataset:
+    """Strip stale source-grid coords/bounds left over from regridding.
 
-    Keeps the HEALPix cell dimension contiguous while a single map fits
-    the budget (best for the nested layout); past that point it splits
-    the cell dimension and writes one timestep per chunk.
+    Name-agnostic: the regridded data lives on (time, cell). Anything
+    carrying a different dimension — lat/lon and their bounds (atmos
+    grids), or vertices/vertices_latitude/longitude (unstructured ocean
+    grids) — is source debris that differs between grids and only
+    confuses the combine. Keep only vars whose dims fit (time, cell, bnds).
     """
     cell = _spatial_dim(ds)
-    itemsize = max((v.dtype.itemsize for v in ds.data_vars.values()), default=4)
-    ncell = ds.sizes.get(cell, 1)
-    other = 1
-    for d, s in ds.sizes.items():
-        if d not in ("time", cell):
-            other *= s
-    map_bytes = ncell * other * itemsize  # bytes for one full timestep
+    keep: set[str] = {"time", "bnds"}
+    if cell is not None:
+        keep.add(cell)
 
-    plan: dict = {}
+    drop = [
+        name
+        for name, var in ds.variables.items()
+        if not {str(d) for d in var.dims} <= keep
+    ]
+    ds = ds.drop_vars(drop, errors="ignore")
+
+    orphaned = [
+        d
+        for d in ds.dims
+        if str(d) not in keep
+        and not any(d in ds[name].dims for name in ds.variables)
+    ]
+    return ds.drop_dims(orphaned, errors="ignore")
+
+
+def _chunk_plan(ds: xr.Dataset, target_bytes: int = TARGET_CHUNK_BYTES) -> dict[str, int]:
+    """Chunk sizes so each chunk is ~target_bytes.
+
+    Sizes the estimate on the largest *data variable's* per-timestep
+    footprint, so the presence of tiny side-cars like time_bnds doesn't
+    skew the budget. Keeps the cell dimension contiguous while one map
+    fits target_bytes; past that, splits cell with one timestep per chunk.
+    """
+    cell = _spatial_dim(ds)
+
+    def per_step_bytes(var: xr.DataArray) -> int:
+        n = var.dtype.itemsize
+        for dim, size in var.sizes.items():
+            if dim != "time":
+                n *= size
+        return n
+
+    data_vars = [v for v in ds.data_vars.values() if "time" in v.dims]
+    if not data_vars:
+        return {}
+    map_bytes = max(1, max(per_step_bytes(v) for v in data_vars))
+    ncell = ds.sizes.get(cell, 1) if cell is not None else 1
+
+    plan: dict[str, int] = {}
     if map_bytes <= target_bytes:
         if cell is not None:
             plan[cell] = -1
@@ -151,7 +234,7 @@ def create_weights(
         int,
         Param(help="Target HEALPix level; 0 = auto (finest source grid per dataset)"),
     ] = 0,
-) -> list[dict]:
+) -> list[WeightInfo]:
     """Create one ESMF weight file per distinct source grid per dataset.
 
     A dataset may mix source grids (e.g. ``tos`` on an ocean grid,
@@ -164,7 +247,7 @@ def create_weights(
     import xarray as xr
 
     weights_dir.mkdir(exist_ok=True, parents=True)
-    out: list[dict] = []
+    out: list[WeightInfo] = []
 
     for s3_path, source_paths in paths:
         try:
@@ -215,14 +298,14 @@ def create_weights(
 @wf.job(cpus=1, time="00:05:00", mem="1GB", partition="shared")
 def plan_regrid(
     sources: Annotated[list[tuple[str, list[str]]], Result(step="gather_sources")],
-    weights: Annotated[list[dict], Result(step="create_weights")],
+    weights: Annotated[list[WeightInfo], Result(step="create_weights")],
     run_dir: RunDir,
-) -> list[dict]:
+) -> list[RegridItem]:
     """Flatten into one work item per file, attaching its per-grid weight."""
-    lookup = {w["s3_path"]: w for w in weights}
+    lookup: dict[str, WeightInfo] = {w["s3_path"]: w for w in weights}
 
     staging = run_dir / "staging"
-    items: list[dict] = []
+    items: list[RegridItem] = []
 
     for s3_path, source_files in sources:
         info = lookup.get(s3_path)
@@ -270,8 +353,8 @@ def plan_regrid(
     array_parallelism=6,
 )
 def regrid_file(
-    item: Annotated[dict, Result(step="plan_regrid")],
-) -> dict:
+    item: Annotated[RegridItem, Result(step="plan_regrid")],
+) -> RegridResult:
     """Regrid a single source file and write every pyramid level to NetCDF.
 
     Produces one NetCDF per level::
@@ -313,19 +396,20 @@ def regrid_file(
 # ---------------------------------------------------------------------------
 @wf.job(cpus=1, time="00:05:00", mem="1GB", partition="shared")
 def group_for_upload(
-    results: Annotated[list[dict], Result(step="regrid_file")],
-) -> list[dict]:
+    results: Annotated[list[RegridResult], Result(step="regrid_file")],
+) -> list[RegridResult]:
     """Gather per-file outputs and group by target S3 path."""
-    groups: dict[str, dict] = {}
+    groups: dict[str, RegridResult] = {}
     for r in results:
         key = r["s3_path"]
         if key not in groups:
             groups[key] = {
+                "s3_path": key,
                 "output_dir": r["output_dir"],
                 "max_level": r["max_level"],
             }
 
-    out = [{"s3_path": k, **v} for k, v in sorted(groups.items())]
+    out = sorted(groups.values(), key=lambda g: g["s3_path"])
     for g in out:
         print(f"  {g['s3_path']}: level 0-{g['max_level']}")
     return out
@@ -342,7 +426,7 @@ def group_for_upload(
     array_parallelism=8,
 )
 def combine_and_upload(
-    group: Annotated[dict, Result(step="group_for_upload")],
+    group: Annotated[RegridResult, Result(step="group_for_upload")],
     uri: Annotated[str, Param(help="Target S3 bucket or path to disk")] = "s3://cmip6",
     s3_endpoint: Annotated[
         str, Param(help="S3 endpoint URL")
@@ -351,7 +435,7 @@ def combine_and_upload(
         Path, Param(help="Path to S3 credentials JSON")
     ] = Path.home() / ".s3-credentials.json",
 ) -> None:
-    """Open per-file NetCDFs at each level, concatenate, and upload."""
+    """Open per-file NetCDFs at each level, concatenate, rechunk, and upload."""
     from glob import glob
 
     import xarray as xr
@@ -362,8 +446,9 @@ def combine_and_upload(
 
     print(f"Combining and uploading {s3_path}")
 
-    # Reassemble the pyramid: for each level, open all per-file
-    # NetCDFs and concatenate along time.
+    # Reassemble the pyramid: for each level, open all per-file NetCDFs,
+    # strip the source-grid debris, concatenate along time, and rechunk to
+    # the 16 MiB target so Blosc never sees a > 2 GiB buffer.
     pyramid: dict[int, xr.Dataset] = {}
     for level in range(max_level + 1):
         nc_files = sorted(glob(f"{out_dir}/*_level_{level}.nc"))
@@ -375,9 +460,11 @@ def combine_and_upload(
             nc_files,
             parallel=False,
             combine="by_coords",
+            preprocess=_drop_source_grid,
+            compat="override",
             coords="minimal",
             data_vars="minimal",
-            compat="override",
+            join="override",
         )
         # Drop the NetCDF chunk hints so they don't clash with the dask
         # chunks that zarr will use as its on-disk chunking.

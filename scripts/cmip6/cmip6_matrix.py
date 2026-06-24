@@ -131,7 +131,7 @@ class DatabrowserClient:
 
     def metadata_search(
         self, *, facets: Sequence[str] | None = None, **search: object
-    ) -> dict:
+    ) -> dict[str, str]:
         """Return the JSON metadata-search response (facets + counts)."""
         params: dict[str, object] = dict(search)
         params["multi-version"] = str(self.multi_version).lower()
@@ -173,9 +173,7 @@ class DatabrowserClient:
             stream=True,
         )
         resp.raise_for_status()
-        return sorted(
-            line for line in resp.iter_lines(decode_unicode=True) if line
-        )
+        return sorted(line for line in resp.iter_lines(decode_unicode=True) if line)
 
 
 @dataclass(frozen=True)
@@ -355,9 +353,7 @@ class FacetMatrix:
                     )
         return entries
 
-    def as_source_pairs(
-        self, client: DatabrowserClient
-    ) -> list[tuple[str, list[str]]]:
+    def as_source_pairs(self, client: DatabrowserClient) -> list[tuple[str, list[str]]]:
         """``[(output_key, [files...]), ...]`` for the regrid pipeline."""
         return [(entry.key, entry.files) for entry in self.build(client)]
 
@@ -542,9 +538,7 @@ def build_group_weights(
 
     representatives = {key: files[0] for key, files in groups.items()}
     rep_datasets = {key: open_dataset(rep) for key, rep in representatives.items()}
-    native_levels = {
-        key: int(resolution_level(ds)) for key, ds in rep_datasets.items()
-    }
+    native_levels = {key: int(resolution_level(ds)) for key, ds in rep_datasets.items()}
     target_level = pick_target_level(native_levels, level)
     group_weights = {
         key: str(make_weights(normalize(ds), target_level))
