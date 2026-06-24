@@ -35,6 +35,7 @@ jobs:
         env:
           WATERPARK_S3_KEY: ${{ secrets.WATERPARK_S3_KEY }}
           WATERPARK_S3_SECRET: ${{ secrets.WATERPARK_S3_SECRET }}
+          WATERPARK_BUCKET_BLACKLIST: ${{ vars.WATERPARK_BUCKET_BLACKLIST }}
         run: |
           if [ -z "$WATERPARK_S3_KEY" ] || [ -z "$WATERPARK_S3_SECRET" ]; then
             echo "::error::WATERPARK_S3_KEY / WATERPARK_S3_SECRET secrets are not set."
