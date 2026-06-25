@@ -131,30 +131,39 @@ def _open_level(nc_files: list[str]) -> xr.Dataset:
     group the files by variable, concatenate each group along time, then
     merge across variables. This is deterministic and avoids
     ``combine_by_coords``' coordinate-ordering inference, which cannot
-    order two files that share an identical time axis (it raises "Could
-    not find any dimension coordinates to use ...").
+    order two files that share an identical time axis.
+
+    Files are opened with ``use_cftime=True`` so every time axis decodes
+    to the same type regardless of calendar or out-of-range dates (some
+    CMIP6 runs extend past the datetime64[ns] limit). Ordering is taken
+    from the zero-padded staging filename, not the time values, so we
+    never compare timestamps whose decoded type can vary between files
+    (cftime vs. an undecodable raw integer axis).
 
     A duplicate-timestamp guard turns the overlapping/stale-staging case
     into a loud error rather than a silently doubled time axis.
     """
     import xarray as xr
 
-    per_var: dict[str, list[xr.Dataset]] = {}
-    for f in nc_files:
-        ds = _drop_source_grid(xr.open_dataset(f, chunks={}))
+    per_var: dict[str, list[tuple[str, xr.Dataset]]] = {}
+    for f in sorted(nc_files):
+        ds = _drop_source_grid(xr.open_dataset(f, chunks={}, use_cftime=True))
         for name in ds.data_vars:
             # Selecting a single data var keeps its associated coords
             # (cell, latitude, longitude, crs, time) and drops the others.
-            per_var.setdefault(str(name), []).append(ds[[str(name)]])
+            per_var.setdefault(str(name), []).append((f, ds[[str(name)]]))
 
     merged: list[xr.Dataset] = []
-    for var_name, parts in per_var.items():
-        if len(parts) == 1:
-            merged.append(parts[0])
+    for var_name, items in per_var.items():
+        if len(items) == 1:
+            merged.append(items[0][1])
             continue
-        parts.sort(key=lambda d: d["time"].values[0])
+        # file_{idx:05d}_level_{lvl}.nc: the zero-padded index sorts
+        # lexicographically into chronological order, so we order by name
+        # and never touch the (possibly mixed-type) time values.
+        items.sort(key=lambda item: item[0])
         combined = xr.concat(
-            parts,
+            [d for _, d in items],
             dim="time",
             coords="minimal",
             data_vars="minimal",
@@ -162,7 +171,7 @@ def _open_level(nc_files: list[str]) -> xr.Dataset:
         )
         if "time" in combined.indexes and not combined.indexes["time"].is_unique:
             raise ValueError(
-                f"Duplicate timestamps after concatenating {len(parts)} files "
+                f"Duplicate timestamps after concatenating {len(items)} files "
                 f"for variable {var_name!r}; the staging dir likely contains "
                 f"overlapping or stale files. Clean it before re-running "
                 f"(or add .drop_duplicates('time') if overlaps are expected)."
