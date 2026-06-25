@@ -1,0 +1,48 @@
+{
+  "_env_file": "../../.env",
+  "source": {
+    "default_kind": "grib",
+    "kind": {
+      "grib": {
+        "path": "/pool/data/ERA5/{dataset}/{stream}/{type}/{time_freq}/{parameter}/*.grb",
+        "engine": "cfgrib",
+        "backend_kwargs": {
+          "indexpath": ""
+        },
+        "chunks": {
+          "time": 48
+        },
+        "multi_file_kwargs": {
+          "combine": "by_coords",
+          "parallel": false
+        }
+      },
+      "kerchunk": {
+        "path": "/work/bm1344/DKRZ/kerchunks_single/testera",
+        "kerchunk_open_dataset_options": {
+          "chunks": {}
+        },
+        "kerchunk_storage_options": {}
+      }
+    },
+    "fallback_to_grib": true
+  },
+  "destination": {
+    "path": "s3://icdc/healpix/era5/era5land/",
+    "zarr_format": 2,
+    "endpoint_url": "https://s3.eu-dkrz-1.dkrz.cloud",
+    "access_key": null,
+    "secret_key": null
+  },
+  "test_destination": {
+    "path": "{scratch}/era5land-preview"
+  },
+  "variables": [
+    "tas",
+    "pr"
+  ],
+  "conversion_table": "variable_map.json",
+  "source_units": "auto",
+  "method": "conservative",
+  "time_chunk": 48
+}

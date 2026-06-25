@@ -1,0 +1,10 @@
+channels:
+ - conda-forge
+dependencies:
+  - cfgrib
+  - eccodes
+  - kerchunk
+  - pyarrow
+  - python-dotenv
+  - pip:
+    - reflow-hpc

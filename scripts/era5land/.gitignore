@@ -1,0 +1,26 @@
+# Local secrets
+.env
+
+# Local conda/mamba environments
+.conda-env/
+
+# Downloaded/generated ERA5 CMOR tables
+tables/era5-cmor-tables
+
+# Python caches
+**/__pycache__/
+*.py[cod]
+
+# cfgrib/eccodes indexes and local data products
+*.idx
+*.grib
+*.grb
+*.nc
+*.zarr/
+
+# Local run output
+run/
+runs/
+work/
+scratch/
+tmp/

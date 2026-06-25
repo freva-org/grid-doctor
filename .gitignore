@@ -158,6 +158,8 @@ venv.bak/
 /site-*
 .build
 
+# local assistants
+**/.codex
 
 # mypy
 .mypy_cache/
