@@ -5,7 +5,7 @@
    (function () {
     "use strict";
     var CDN_PKG = "@freva-org/" + "data-inspector";
-    var CDN_VER = "3.1.0";
+    var CDN_VER = "latest";
     var MODULE_URL = window.WATERPARK_INSPECTOR_SRC ||
       ("https://cdn.jsdelivr.net/npm/" + CDN_PKG + "@" + CDN_VER + "/+esm");
   
