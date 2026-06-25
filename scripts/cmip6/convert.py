@@ -124,6 +124,54 @@ def _drop_source_grid(ds: xr.Dataset) -> xr.Dataset:
     return ds.drop_dims(orphaned, errors="ignore")
 
 
+def _open_level(nc_files: list[str]) -> xr.Dataset:
+    """Assemble one pyramid level from its per-file NetCDFs.
+
+    Each staging file holds a single data variable on (time, cell). We
+    group the files by variable, concatenate each group along time, then
+    merge across variables. This is deterministic and avoids
+    ``combine_by_coords``' coordinate-ordering inference, which cannot
+    order two files that share an identical time axis (it raises "Could
+    not find any dimension coordinates to use ...").
+
+    A duplicate-timestamp guard turns the overlapping/stale-staging case
+    into a loud error rather than a silently doubled time axis.
+    """
+    import xarray as xr
+
+    per_var: dict[str, list[xr.Dataset]] = {}
+    for f in nc_files:
+        ds = _drop_source_grid(xr.open_dataset(f, chunks={}))
+        for name in ds.data_vars:
+            # Selecting a single data var keeps its associated coords
+            # (cell, latitude, longitude, crs, time) and drops the others.
+            per_var.setdefault(str(name), []).append(ds[[str(name)]])
+
+    merged: list[xr.Dataset] = []
+    for var_name, parts in per_var.items():
+        if len(parts) == 1:
+            merged.append(parts[0])
+            continue
+        parts.sort(key=lambda d: d["time"].values[0])
+        combined = xr.concat(
+            parts,
+            dim="time",
+            coords="minimal",
+            data_vars="minimal",
+            compat="override",
+        )
+        if "time" in combined.indexes and not combined.indexes["time"].is_unique:
+            raise ValueError(
+                f"Duplicate timestamps after concatenating {len(parts)} files "
+                f"for variable {var_name!r}; the staging dir likely contains "
+                f"overlapping or stale files. Clean it before re-running "
+                f"(or add .drop_duplicates('time') if overlaps are expected)."
+            )
+        merged.append(combined)
+
+    return xr.merge(merged, compat="override", join="override")
+
+
 def _chunk_plan(
     ds: xr.Dataset, target_bytes: int = TARGET_CHUNK_BYTES
 ) -> dict[str, int]:
@@ -447,8 +495,6 @@ def combine_and_upload(
     """Open per-file NetCDFs at each level, concatenate, rechunk, and upload."""
     from glob import glob
 
-    import xarray as xr
-
     s3_path = group["s3_path"]
     out_dir = group["output_dir"]
     max_level = group["max_level"]
@@ -456,8 +502,8 @@ def combine_and_upload(
     print(f"Combining and uploading {s3_path}")
 
     # Reassemble the pyramid: for each level, open all per-file NetCDFs,
-    # strip the source-grid debris, concatenate along time, and rechunk to
-    # the 16 MiB target so Blosc never sees a > 2 GiB buffer.
+    # strip the source-grid debris, concatenate along time per variable,
+    # and rechunk to the 16 MiB target so Blosc never sees a > 2 GiB buffer.
     pyramid: dict[int, xr.Dataset] = {}
     for level in range(max_level + 1):
         nc_files = sorted(glob(f"{out_dir}/*_level_{level}.nc"))
@@ -465,24 +511,15 @@ def combine_and_upload(
             raise FileNotFoundError(
                 f"No staging files for {s3_path} level {level} in {out_dir}"
             )
-        ds = xr.open_mfdataset(
-            nc_files,
-            parallel=False,
-            combine="by_coords",
-            preprocess=_drop_source_grid,
-            compat="override",
-            coords="minimal",
-            data_vars="minimal",
-            join="override",
-        )
+        ds = _open_level(nc_files)
+
         # Drop the NetCDF chunk hints so they don't clash with the dask
         # chunks that zarr will use as its on-disk chunking.
         for v in ds.variables.values():
             v.encoding.pop("chunks", None)
             v.encoding.pop("preferred_chunks", None)
-        plan = _chunk_plan(ds)
-        print("uncovered dims:", {str(d) for d in ds.dims} - set(plan))
-        pyramid[level] = ds.chunk(plan)
+
+        pyramid[level] = ds.chunk(_chunk_plan(ds))
 
     s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
     gd.save_pyramid(
