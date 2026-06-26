@@ -62,7 +62,9 @@
       "label": "Paleoclimate Modelling initiative"
     },
     "xspies": {
-      "title": "xspies"
+      "title": "xspies",
+      "label": "XSPIES simulations",
+      "locked": "coming soon"
     }
   }
 }
