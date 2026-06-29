@@ -1,10 +1,12 @@
 channels:
- - conda-forge
+  - conda-forge
 dependencies:
   - cfgrib
   - eccodes
   - kerchunk
   - pyarrow
   - python-dotenv
+  - "esmf=*=mpi_openmpi_*"
+  - esmpy
   - pip:
     - reflow-hpc
