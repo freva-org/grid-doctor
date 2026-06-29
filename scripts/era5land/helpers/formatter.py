@@ -1,15 +1,36 @@
-"""Output formatting helpers for ERA5/ERA5-Land HEALPix Zarr products.
+"""Output formatting helpers for ERA5/ERA5-Land HEALPix Zarr products."""
 
-This module will own CF metadata normalization, frequency grouping decisions,
-and writes to filesystem or S3 targets. The concrete dataset layout is still a
-design choice: one consolidated store for all frequencies, or one store per
-frequency.
-"""
+from collections import defaultdict
+from pathlib import Path
+from typing import Dict, Iterable, List, Tuple
 
-from typing import Iterable, Tuple
+from .file_fetcher import SourceRecord, load_json
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / ".." / "assets" / "source_mapper.json"
 
 def normalise_frequencies(frequencies: Iterable[str]) -> Tuple[str, ...]:
     """Return a stable tuple of requested output frequencies."""
 
-    return tuple(dict.fromkeys(frequencies))
+    return tuple(dict.fromkeys(str(frequency) for frequency in frequencies))
+
+
+def group_records_by_frequency(
+    records: Iterable[SourceRecord],
+) -> Dict[str, List[SourceRecord]]:
+    """Group only resolved records by source frequency."""
+
+    grouped: Dict[str, List[SourceRecord]] = defaultdict(list)
+    for record in records:
+        if record.files:
+            grouped[record.frequency].append(record)
+    return dict(grouped)
+
+def destination_for_level(frequency: str, zoom_number: int) -> str:
+    """Return the concrete Zarr store path for one frequency and HEALPix level."""
+
+    source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
+    return source_mapper["output_path"].format(
+        output_frequency=source_mapper["output_frequency"][frequency],
+        zoom_number=zoom_number,
+    )

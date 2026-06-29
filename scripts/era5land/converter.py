@@ -16,10 +16,12 @@ from helpers.file_fetcher import (
     split_csv_list,
     unresolved_records,
 )
+from helpers.formatter import normalise_frequencies
+from helpers.mapper import map_grib_to_healpix
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_VAR_TABLE = SCRIPT_DIR / "assets" / "default_variables.csv"
-DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / "assets" /"source_mapper.json"
+DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / "assets" / "source_mapper.json"
 DEFAULT_CMOR_TABLES = SCRIPT_DIR / "tables" / "era5-cmor-tables" / "Tables"
 FREQUENCIES = ("1hr", "day", "mon", "fx")
 UNRESOLVED_REASON = (
@@ -78,25 +80,86 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exit non-zero if any resolved source has no matching files.",
     )
+
+    convert = subparsers.add_parser(
+        "convert-healpix",
+        help="Resolve GRIB files and convert them to HEALPix Zarr pyramids.",
+    )
+    convert.add_argument("--dataset", choices=("era5land", "era5"), default="era5land")
+    convert.add_argument("--var", dest="variables", help="Comma-separated variables.")
+    convert.add_argument(
+        "--freq",
+        default="all",
+        help="Comma-separated frequencies: 1hr,day,mon,fx. Default: all.",
+    )
+    convert.add_argument(
+        "--interval",
+        help="Date interval as yyyymmdd1,yyyymmdd2. Empty end means today.",
+    )
+    convert.add_argument(
+        "--root",
+        help="Override /pool/data/ERA5 for tests or alternate mounts.",
+    )
+    convert.add_argument(
+        "--time-chunk",
+        type=int,
+        default=48,
+        help="Optional time chunk size before remapping.",
+    )
+    convert.add_argument(
+        "--zarr-format",
+        type=int,
+        choices=(2, 3),
+        default=2,
+        help="Zarr format version for the output pyramid.",
+    )
+    convert.add_argument(
+        "--use-cache",
+        action="store_true",
+        help="Reuse cached GRIB inventories and cached multi-file opens.",
+    )
     return parser
+
+
+def parse_frequencies(value: str) -> Tuple[str, ...]:
+    """Parse and validate a frequency CLI option."""
+
+    frequencies = (
+        normalise_frequencies(FREQUENCIES)
+        if value == "all"
+        else normalise_frequencies(split_csv_list(value))
+    )
+    unknown_freqs = sorted(set(frequencies) - set(FREQUENCIES))
+    if unknown_freqs:
+        raise ValueError(f"Unsupported frequencies: {', '.join(unknown_freqs)}")
+    return tuple(frequencies)
+
+
+def selected_requests(
+    *,
+    dataset: str,
+    variables: Optional[Tuple[str, ...]],
+):
+    """Resolve the requested variables for one dataset selection."""
+
+    source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
+    dataset_codes = tuple(
+        str(code) for code in source_mapper["datasets"][dataset]["priority"]
+    )
+    requests = selected_variables(
+        load_variable_requests(DEFAULT_VAR_TABLE),
+        allowed_codes=dataset_codes,
+        variables=variables,
+    )
+    return source_mapper, requests
 
 
 def run_fetch_files(args: argparse.Namespace) -> int:
     """Resolve source files and print either JSON records or paths."""
 
     variables = parse_arg_list(args.variables)
-    frequencies = FREQUENCIES if args.freq == "all" else split_csv_list(args.freq)
-    unknown_freqs = sorted(set(frequencies) - set(FREQUENCIES))
-    if unknown_freqs:
-        raise ValueError(f"Unsupported frequencies: {', '.join(unknown_freqs)}")
-
-    source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
-    dataset_codes = tuple(str(code) for code in source_mapper["datasets"][args.dataset]["priority"])
-    requests = selected_variables(
-        load_variable_requests(DEFAULT_VAR_TABLE),
-        allowed_codes=dataset_codes,
-        variables=variables,
-    )
+    frequencies = parse_frequencies(args.freq)
+    _, requests = selected_requests(dataset=args.dataset, variables=variables)
     records = resolve_records(
         var_table=DEFAULT_VAR_TABLE,
         cmor_tables_dir=DEFAULT_CMOR_TABLES,
@@ -148,6 +211,36 @@ def run_fetch_files(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_convert_healpix(args: argparse.Namespace) -> int:
+    """Resolve source files, remap them with grid_doctor, and write Zarr output."""
+
+    variables = parse_arg_list(args.variables)
+    frequencies = parse_frequencies(args.freq)
+    _, requests = selected_requests(dataset=args.dataset, variables=variables)
+
+    records = resolve_records(
+        var_table=DEFAULT_VAR_TABLE,
+        cmor_tables_dir=DEFAULT_CMOR_TABLES,
+        mapper_path=DEFAULT_SOURCE_MAPPER,
+        dataset=args.dataset,
+        variables=variables,
+        frequencies=frequencies,
+        interval=parse_interval(args.interval),
+        root=args.root,
+        glob_files=True,
+    )
+
+    map_grib_to_healpix(
+        records,
+        frequencies=frequencies,
+        time_chunk=args.time_chunk,
+        zarr_format=args.zarr_format,
+        use_cache=args.use_cache,
+    )
+
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """Run the ERA5-Land converter."""
 
@@ -158,6 +251,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     if args.command == "fetch-files":
         return run_fetch_files(args)
+    if args.command == "convert-healpix":
+        return run_convert_healpix(args)
     parser.error(f"Unsupported command {args.command!r}")
     return 2
 

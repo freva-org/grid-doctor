@@ -1,5 +1,5 @@
 {
-  "path": "/pool/data/ERA5/{dataset}/{stream}/{type}/{time_freq}/{parameter}/*.grb",
+  "source_path": "/pool/data/ERA5/{dataset}/{stream}/{type}/{time_freq}/{parameter}/*.grb",
   "datasets": {
     "era5land": {
       "priority": ["EL"],
@@ -34,5 +34,14 @@
     "day": "1D",
     "mon": "1M",
     "fx": "IV"
-  }
+  },
+  "output_frequency": {
+    "1hr": "PT1H",
+    "day": "P1D",
+    "mon": "P1M",
+    "fx": "fx"
+  },  
+  "output_path": "/work/ks1387/gw/data/era5/era5land/{output_frequency}/level_{zoom_number}.zarr"
 }
+
+

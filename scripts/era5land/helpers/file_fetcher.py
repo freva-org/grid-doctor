@@ -334,7 +334,7 @@ def resolve_records(
             for dataset_code in dataset_priority:
                 path_fields = dict(fields)
                 path_fields["dataset"] = dataset_code
-                pattern_template = str(mapper["path"])
+                pattern_template = str(mapper["source_path"])
                 if root:
                     pattern_template = pattern_template.replace("/pool/data/ERA5", root.rstrip("/"))
                 pattern = pattern_template.format(**path_fields)
