@@ -20,5 +20,7 @@ But note that ~450K files will be loaded as a single datas. The job took about 4
 
  - In parallel using array jobs:
     ```
-    sbatch -p compute -Ak20200 --mem 16G --array=0-100 <(echo -e '#!/bin/sh\n~/micromamba/envs/grid-doctor/bin/python3 scripts/icdc/main.py write --batch-size=128  /work/ks1387/gw/data/icdc/healpix/atmosphere/IMERG/PT30M/')
+    sbatch -p compute -Ak20200 --mem 16G --array=0-1000 <(echo -e '#!/bin/sh\n~/micromamba/envs/grid-doctor/bin/python3 scripts/icdc/main.py write --batch-size=443  /work/ks1387/gw/data/icdc/healpix/atmosphere/IMERG/PT30M/')
     ```
+    Given the time axis is 442669 long, the batch size was set to 443 because one can only submit a maximum of 1000 jobs using the array option. 
+    Each invidual job is taking roughly 10 minutes to write its region (consisting of 443 timesteps)
