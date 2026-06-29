@@ -12,6 +12,9 @@ from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple, Union
 DAY_RE = re.compile(r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})")
 MONTH_RE = re.compile(r"(?P<year>\d{4})-(?P<month>\d{2})(?!-\d{2})")
 YEAR_RE = re.compile(r"(?<!\d)(?P<year>\d{4})(?!\d)")
+DATE_VALUE_RE = re.compile(
+    r"^(?P<year>\d{4})(?:-?(?P<month>\d{2})(?:-?(?P<day>\d{2}))?)?$"
+)
 
 
 class VariableRequest(NamedTuple):
@@ -145,16 +148,16 @@ def find_variable_entry(
 
 
 def parse_interval(value: Optional[str]) -> Tuple[Optional[date], Optional[date]]:
-    """Parse ``yyyymmdd1,yyyymmdd2`` where an empty end means today."""
+    """Parse ``start,end`` where each value can be YYYY, YYYYMM, or YYYYMMDD."""
 
     if value in (None, ""):
         return None, None
     parts = value.split(",", maxsplit=1)
-    start = parse_date(parts[0]) if parts[0].strip() else None
+    start = parse_date_value(parts[0], bound="start") if parts[0].strip() else None
     if len(parts) == 1 or not parts[1].strip():
         end = date.today()
     else:
-        end = parse_date(parts[1])
+        end = parse_date_value(parts[1], bound="end")
     if start is not None and end is not None and start > end:
         raise ValueError("--interval start date must be before or equal to end date")
     return start, end
@@ -166,6 +169,34 @@ def parse_date(value: str) -> date:
     value = value.strip()
     fmt = "%Y-%m-%d" if "-" in value else "%Y%m%d"
     return datetime.strptime(value, fmt).date()
+
+
+def parse_date_value(value: str, *, bound: str) -> date:
+    """Parse YYYY, YYYYMM, or YYYYMMDD in compact or dashed form."""
+
+    text = value.strip()
+    match = DATE_VALUE_RE.match(text)
+    if match is None:
+        raise ValueError(
+            "Unsupported date value {!r}; use YYYY, YYYYMM, YYYYMMDD, "
+            "YYYY-MM, or YYYY-MM-DD.".format(value)
+        )
+
+    year = int(match.group("year"))
+    month_text = match.group("month")
+    day_text = match.group("day")
+
+    if month_text is None:
+        return date(year, 1, 1) if bound == "start" else date(year, 12, 31)
+
+    month = int(month_text)
+    if day_text is None:
+        if bound == "start":
+            return date(year, month, 1)
+        next_month = date(year + int(month == 12), 1 if month == 12 else month + 1, 1)
+        return date.fromordinal(next_month.toordinal() - 1)
+
+    return date(year, month, int(day_text))
 
 
 def file_interval(path: str, frequency: str) -> Optional[Tuple[date, date]]:
