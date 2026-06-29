@@ -1,0 +1,38 @@
+{
+  "path": "/pool/data/ERA5/{dataset}/{stream}/{type}/{time_freq}/{parameter}/*.grb",
+  "datasets": {
+    "era5land": {
+      "priority": ["EL"],
+      "allowed_streams": ["sf"],
+      "frequencies_by_stream": {
+        "sf": ["1hr", "day", "mon", "fx"]
+      },
+      "table_prefix": "ERA5Land"
+    },
+    "era5": {
+      "priority": ["E1", "E5", "ET"],
+      "allowed_streams": ["sf", "pl"],
+      "frequencies_by_stream": {
+        "sf": ["1hr", "day", "mon", "fx"],
+        "pl": ["1hr", "day", "mon"]
+      },
+      "table_prefix": "ERA5"
+    }
+  },
+  "level_type": {
+    "stream": {
+      "sfc": "sf",
+      "pl": "pl"
+    },
+    "type": {
+      "an": "an",
+      "fc": "fc"
+    }
+  },
+  "frequency": {
+    "1hr": "1H",
+    "day": "1D",
+    "mon": "1M",
+    "fx": "IV"
+  }
+}
