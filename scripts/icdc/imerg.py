@@ -15,7 +15,7 @@ dask.config.set(scheduler="single-threaded")
 
 @dataclass
 class IMERGConfig:
-    pattern: str = "/pool/data/ICDC/atmosphere/imerg/DATA/2025/IMERG_precipitationrate__V07B__halfhourly__0.1degree__*.nc"
+    pattern: str = "/pool/data/ICDC/atmosphere/imerg/DATA/*/IMERG_precipitationrate__V07B__halfhourly__0.1degree__*.nc"
     store_path: str = "icdc/healpix/atmosphere/IMERG/PT30M/"  # relative path!
     weights_path: str = "/work/ks1387/healpix_weights/imerg.nc"
 
