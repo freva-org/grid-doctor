@@ -1,3 +1,4 @@
+import dask
 from dataclasses import dataclass
 import glob
 import zarr
@@ -8,7 +9,6 @@ from os import environ
 
 logger = logging.getLogger(__name__)
 
-import dask
 
 dask.config.set(scheduler="single-threaded")
 
@@ -92,6 +92,9 @@ class IMERGConfig:
             yield {"time": slice(i, min(i + size, end))}
 
     def write(self, start=0, batch_size=1):
+        """Writes data in batches of ``batch_size``, using the xr.Dataset.to_zarr `region` option.
+        - If in a SLURM array job, each index will write its independed slice slice.
+        - Otherwise, regions will be writen sequentially"""
         array_id = int(environ.get("SLURM_ARRAY_TASK_ID", -1))
         if array_id > -1:
             if start > 0:
