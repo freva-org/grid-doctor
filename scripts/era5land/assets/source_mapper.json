@@ -56,6 +56,7 @@
         "positive",
         "standard_name",
         "units",
+        "conversion",
         "valid_max",
         "valid_min",
         "grib_table",

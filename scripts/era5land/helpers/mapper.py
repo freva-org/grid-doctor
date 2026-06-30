@@ -184,11 +184,7 @@ def open_source_record_dataset(
     if record.conversion_factor != 1.0:
         data = data * record.conversion_factor
 
-    attrs = dict(record.output_attrs)
-    if record.conversion_factor != 1.0:
-        attrs["conversion_factor"] = str(record.conversion_factor)
-
-    data.attrs = _clean_output_attrs(attrs)
+    data.attrs = _clean_output_attrs(dict(record.output_attrs))
     ds_var[record.variable] = data
     return ds_var
 
