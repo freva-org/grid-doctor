@@ -127,6 +127,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(source_mapper["weights_path"]),
         help="Directory where HEALPix weight files are stored and reused.",
     )
+    convert.add_argument(
+        "--clean",
+        action="store_true",
+        help="Overwrite existing Zarr outputs instead of updating them incrementally.",
+    )
     return parser
 
 
@@ -225,6 +230,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
 
     variables = parse_arg_list(args.variables)
     frequencies = parse_frequencies(args.freq)
+    interval = parse_interval(args.interval)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
 
     records = resolve_records(
@@ -234,7 +240,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         dataset=args.dataset,
         variables=variables,
         frequencies=frequencies,
-        interval=parse_interval(args.interval),
+        interval=interval,
         root=args.root,
         glob_files=True,
     )
@@ -242,10 +248,12 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
     map_grib_to_healpix(
         records,
         frequencies=frequencies,
+        interval=interval,
         time_chunk=args.time_chunk,
         zarr_format=args.zarr_format,
         use_cache=args.use_cache,
         weights_dir=args.weights_dir,
+        clean=args.clean,
     )
 
     return 0
