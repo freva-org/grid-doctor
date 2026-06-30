@@ -11,6 +11,8 @@ from glob import glob
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple, Union
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / ".." / "assets" / "source_mapper.json"
 DAY_RE = re.compile(r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})")
 MONTH_RE = re.compile(r"(?P<year>\d{4})-(?P<month>\d{2})(?!-\d{2})")
 YEAR_RE = re.compile(r"(?<!\d)(?P<year>\d{4})(?!\d)")
@@ -18,6 +20,16 @@ DATE_VALUE_RE = re.compile(
     r"^(?P<year>\d{4})(?:-?(?P<month>\d{2})(?:-?(?P<day>\d{2}))?)?$"
 )
 
+def load_json(path: Union[str, Path]) -> Dict[str, Any]:
+    """Load a JSON object from disk."""
+
+    with Path(path).open(encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise TypeError(f"Expected JSON object in {path}")
+    return data
+
+SOURCE_MAPPER = load_json(DEFAULT_SOURCE_MAPPER)
 
 class VariableRequest(NamedTuple):
     """One requested CMOR variable and the reanalysis sources allowed for it."""
@@ -50,16 +62,6 @@ class UnresolvedRecord(NamedTuple):
     variable: str
     frequency: str
     reason: str
-
-
-def load_json(path: Union[str, Path]) -> Dict[str, Any]:
-    """Load a JSON object from disk."""
-
-    with Path(path).open(encoding="utf-8") as handle:
-        data = json.load(handle)
-    if not isinstance(data, dict):
-        raise TypeError(f"Expected JSON object in {path}")
-    return data
 
 
 def _safe_eval_numeric_expression(expression: str) -> float:
@@ -100,34 +102,7 @@ def parse_conversion_factor(entry: Dict[str, Any]) -> float:
 def extract_output_attrs(entry: Dict[str, Any]) -> Dict[str, str]:
     """Extract relevant output metadata from one CMOR entry."""
 
-    keys = (
-        "cell_measures", #
-        "cell_methods",#
-        "comment",#
-        # "dimensions",
-        "frequency",
-        "long_name",#
-        "modeling_realm",
-        "ok_max_mean_abs",
-        "ok_min_mean_abs",
-        "out_name",
-        "positive",#
-        "standard_name",#
-        "units",#
-        "valid_max",
-        "valid_min",
-        "grib_table",
-        "grib_paramID",
-        "orig_short_name",
-        "orig_name",
-        "orig_units",
-        "grib_description",
-        "orig_grid",
-        "level_type",
-        # "conversion",#
-        "table",
-        "DKRZ_ID",
-    )
+    keys = tuple(SOURCE_MAPPER.get("var_attrs", []))
     attrs: Dict[str, str] = {}
     for key in keys:
         value = str(entry.get(key, "")).strip()

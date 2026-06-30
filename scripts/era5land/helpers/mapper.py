@@ -12,7 +12,7 @@ import zarr
 
 import grid_doctor as gd
 
-from .file_fetcher import SourceRecord
+from .file_fetcher import SourceRecord, SOURCE_MAPPER
 from .formatter import (
     destination_for_level,
     existing_destinations_for_frequency,
@@ -20,36 +20,11 @@ from .formatter import (
 )
 from .grib import get_vars, open_dataset
 
+OUTPUT_ATTR_KEYS = tuple(SOURCE_MAPPER.get("var_attrs", []))
 LAT_COORD_NAMES = ("latitude", "lat", "Latitude", "LATITUDE", "y", "Y")
 LON_COORD_NAMES = ("longitude", "lon", "Longitude", "LONGITUDE", "x", "X")
-OUTPUT_ATTR_KEYS = (
-    "cell_measures", #
-    "cell_methods",#
-    "comment",#
-    # "dimensions",
-    "frequency",
-    "long_name",#
-    "modeling_realm",
-    "ok_max_mean_abs",
-    "ok_min_mean_abs",
-    "out_name",
-    "positive",#
-    "standard_name",#
-    "units",#
-    "valid_max",
-    "valid_min",
-    "grib_table",
-    "grib_paramID",
-    "orig_short_name",
-    "orig_name",
-    "orig_units",
-    "grib_description",
-    "orig_grid",
-    "level_type",
-    # "conversion",#
-    "table",
-    "DKRZ_ID",
-)
+STATIC_COORD_NAMES = ("cell", "time", "crs", "surface")
+
 def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> Optional[str]:
     """Return the first matching coordinate name from *candidates*."""
 
@@ -67,6 +42,20 @@ def _clean_output_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
         for key, value in attrs.items()
         if key in OUTPUT_ATTR_KEYS and value not in ("", None)
     }
+
+
+def _normalise_published_dataset(ds: xr.Dataset) -> xr.Dataset:
+    """Keep published coord/data-variable classification stable across writes."""
+
+    coord_names = set(ds.coords)
+    coord_names.update(
+        name
+        for name in (*STATIC_COORD_NAMES, *LAT_COORD_NAMES, *LON_COORD_NAMES)
+        if name in ds
+    )
+    if not coord_names:
+        return ds
+    return ds.set_coords(sorted(coord_names))
 
 
 def _circular_lon_bounds(lon_values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -297,6 +286,7 @@ def _write_dataset(
 ) -> None:
     """Write one dataset to a Zarr store with consistent options."""
 
+    dataset = _normalise_published_dataset(dataset)
     options: dict[str, Any] = {
         "mode": mode,
         "zarr_format": zarr_format,
@@ -315,6 +305,7 @@ def _rewrite_dataset_via_temp(
 ) -> None:
     """Rewrite a store via a temporary path to avoid reading and writing it in place."""
 
+    dataset = _normalise_published_dataset(dataset)
     destination_path = Path(destination)
     temp_path = destination_path.parent / (
         f".{destination_path.name}.tmp-{uuid.uuid4().hex}"
@@ -335,16 +326,36 @@ def _rewrite_dataset_via_temp(
             shutil.rmtree(temp_path, ignore_errors=True)
 
 
+def _replace_public_attrs(zarr_array, attrs: dict[str, Any]) -> bool:
+    keep = {}
+    for key in ("_ARRAY_DIMENSIONS", "coordinates", "grid_mapping"):
+        if key in zarr_array.attrs:
+            keep[key] = zarr_array.attrs[key]
+
+    new_attrs = {**keep, **attrs}
+    old_attrs = dict(zarr_array.attrs)
+
+    if old_attrs == new_attrs:
+        return False
+
+    zarr_array.attrs.clear()
+    zarr_array.attrs.update(new_attrs)
+    return True
+
 def _sync_variable_attrs(dataset: xr.Dataset, destination: str) -> None:
     """Overwrite destination variable attrs with attrs from the latest dataset."""
 
     root = zarr.open_group(destination, mode="a")
+    changed = False
+
     for name, data in dataset.data_vars.items():
         if name not in root:
             continue
         attrs = _clean_output_attrs(dict(data.attrs))
-        root[name].attrs.clear()
-        root[name].attrs.update(attrs)
+        changed |= _replace_public_attrs(root[name], attrs)
+
+    if changed:
+        zarr.consolidate_metadata(destination)
 
 
 def _attrs_for_record(record: SourceRecord) -> dict[str, Any]:
@@ -363,11 +374,15 @@ def _sync_named_variable_attrs(
     """Update attrs in one Zarr store without touching data chunks."""
 
     root = zarr.open_group(destination, mode="a")
+    changed = False
+
     for name, attrs in attrs_by_name.items():
         if name not in root:
             continue
-        root[name].attrs.clear()
-        root[name].attrs.update(attrs)
+        changed |= _replace_public_attrs(root[name], attrs)
+
+    if changed:
+        zarr.consolidate_metadata(destination)
 
 
 def _merge_time_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Dataset:
@@ -433,11 +448,10 @@ def _write_missing_variables(
 
     add_ds = candidate[missing].reindex(time=existing["time"].values)
     _write_dataset(add_ds, destination, mode="a", zarr_format=zarr_format)
-    return xr.merge(
-        [existing, add_ds],
-        compat="override",
-        combine_attrs="drop_conflicts",
-    )
+    updated = existing.copy()
+    for name in missing:
+        updated[name] = add_ds[name]
+    return updated
 
 
 def _append_new_times(
@@ -467,7 +481,14 @@ def _append_new_times(
         append_dim="time",
         zarr_format=zarr_format,
     )
-    return xr.concat([existing, append_ds], dim="time")
+    return xr.concat(
+        [existing, append_ds],
+        dim="time",
+        data_vars="all",
+        coords="minimal",
+        compat="override",
+        combine_attrs="drop_conflicts",
+    )
 
 
 def _rewrite_overlapping_times(
@@ -487,7 +508,7 @@ def _rewrite_overlapping_times(
     time_slices = _contiguous_slices(np.asarray(time_positions, dtype=np.int64))
     for time_slice in time_slices:
         region_times = existing["time"].values[time_slice]
-        region_ds = candidate.sel(time=region_times)
+        region_ds = _normalise_published_dataset(candidate.sel(time=region_times))
         to_drop = {
             name
             for name, var in region_ds.variables.items()
@@ -513,6 +534,7 @@ def _update_zarr_store(
 ) -> None:
     """Incrementally update or recreate one destination Zarr store."""
 
+    dataset = _normalise_published_dataset(dataset)
     path = Path(destination)
     if clean or not path.exists():
         _write_dataset(dataset, destination, mode="w", zarr_format=zarr_format)

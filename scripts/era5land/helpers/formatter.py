@@ -5,10 +5,7 @@ from glob import glob
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
-from .file_fetcher import SourceRecord, load_json
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / ".." / "assets" / "source_mapper.json"
+from .file_fetcher import SourceRecord, SOURCE_MAPPER
 
 def normalise_frequencies(frequencies: Iterable[str]) -> Tuple[str, ...]:
     """Return a stable tuple of requested output frequencies."""
@@ -30,9 +27,8 @@ def group_records_by_frequency(
 def destination_for_level(frequency: str, zoom_number: int) -> str:
     """Return the concrete Zarr store path for one frequency and HEALPix level."""
 
-    source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
-    return source_mapper["output_path"].format(
-        output_frequency=source_mapper["output_frequency"][frequency],
+    return SOURCE_MAPPER["output_path"].format(
+        output_frequency=SOURCE_MAPPER["output_frequency"][frequency],
         zoom_number=zoom_number,
     )
 
@@ -40,9 +36,8 @@ def destination_for_level(frequency: str, zoom_number: int) -> str:
 def existing_destinations_for_frequency(frequency: str) -> Tuple[str, ...]:
     """Return existing Zarr stores for one output frequency."""
 
-    source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
-    output_frequency = source_mapper["output_frequency"][frequency]
-    pattern = source_mapper["output_path"].format(
+    output_frequency = SOURCE_MAPPER["output_frequency"][frequency]
+    pattern = SOURCE_MAPPER["output_path"].format(
         output_frequency=output_frequency,
         zoom_number="*",
     )

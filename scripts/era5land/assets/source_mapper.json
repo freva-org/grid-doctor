@@ -42,6 +42,32 @@
     "fx": "fx"
   },
   "output_path": "/work/ks1387/gw/data/era5/era5land/{output_frequency}/level_{zoom_number}.zarr",
-  "weights_path": "/work/ks1387/healpix-weights"
+  "weights_path": "/work/ks1387/healpix-weights",
+  "var_attrs": [
+        "cell_measures",
+        "cell_methods",
+        "comment",
+        "frequency",
+        "long_name",
+        "modeling_realm",
+        "ok_max_mean_abs",
+        "ok_min_mean_abs",
+        "out_name",
+        "positive",
+        "standard_name",
+        "units",
+        "valid_max",
+        "valid_min",
+        "grib_table",
+        "grib_paramID",
+        "orig_short_name",
+        "orig_name",
+        "orig_units",
+        "grib_description",
+        "orig_grid",
+        "level_type",
+        "table",
+        "DKRZ_ID"
+  ]
 }
 
