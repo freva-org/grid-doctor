@@ -1,0 +1,387 @@
+"""Zarr publication helpers for ERA5/ERA5-Land outputs."""
+
+from pathlib import Path
+import shutil
+import uuid
+from typing import Any, Optional
+
+import numpy as np
+import xarray as xr
+import zarr
+
+from .datasets import normalise_published_dataset
+from .metadata import clean_output_attrs
+
+
+def _fill_value_for_dtype(dtype: np.dtype[Any]) -> Any:
+    """Return a sensible missing value for a dtype."""
+
+    if np.issubdtype(dtype, np.floating):
+        return np.nan
+    if np.issubdtype(dtype, np.integer):
+        return np.iinfo(dtype).min
+    return None
+
+
+def _make_fill_variable(template: xr.DataArray, name: str, time_size: int) -> xr.DataArray:
+    """Create a placeholder variable for appended time slices."""
+
+    if "time" not in template.dims:
+        values = np.asarray(template.values)
+        coords = template.coords
+    else:
+        values = np.asarray(template.isel(time=slice(0, time_size)).values)
+        coords = template.isel(time=slice(0, time_size)).coords
+
+    fill = _fill_value_for_dtype(template.dtype)
+    data = np.full(values.shape, fill, dtype=template.dtype)
+    array = xr.DataArray(data, dims=template.dims, coords=coords, attrs=template.attrs)
+    array.name = name
+    return array
+
+
+def _pad_missing_existing_vars_for_append(
+    candidate: xr.Dataset,
+    existing: xr.Dataset,
+) -> xr.Dataset:
+    """Pad appended time slices with placeholder arrays for existing variables."""
+
+    padded = candidate.copy()
+    time_size = padded.sizes.get("time", 0)
+    for name, data in existing.data_vars.items():
+        if name not in padded.data_vars:
+            padded[name] = _make_fill_variable(data, name, time_size)
+
+    ordered = [name for name in existing.data_vars if name in padded.data_vars]
+    ordered.extend(name for name in padded.data_vars if name not in ordered)
+    return padded[ordered]
+
+
+def _write_dataset(
+    dataset: xr.Dataset,
+    destination: str,
+    *,
+    mode: str,
+    zarr_format: int,
+    append_dim: Optional[str] = None,
+) -> None:
+    """Write one dataset to a Zarr store with consistent options."""
+
+    dataset = normalise_published_dataset(dataset)
+    options: dict[str, Any] = {
+        "mode": mode,
+        "zarr_format": zarr_format,
+        "consolidated": (zarr_format == 2),
+    }
+    if append_dim is not None:
+        options["append_dim"] = append_dim
+    dataset.to_zarr(destination, **options)
+
+
+def _rewrite_dataset_via_temp(
+    dataset: xr.Dataset,
+    destination: str,
+    *,
+    zarr_format: int,
+) -> None:
+    """Rewrite a store via a temporary path to avoid reading and writing it in place."""
+
+    dataset = normalise_published_dataset(dataset)
+    destination_path = Path(destination)
+    temp_path = destination_path.parent / (
+        f".{destination_path.name}.tmp-{uuid.uuid4().hex}"
+    )
+
+    try:
+        _write_dataset(
+            dataset,
+            str(temp_path),
+            mode="w",
+            zarr_format=zarr_format,
+        )
+        if destination_path.exists():
+            shutil.rmtree(destination_path)
+        shutil.move(str(temp_path), str(destination_path))
+    finally:
+        if temp_path.exists():
+            shutil.rmtree(temp_path, ignore_errors=True)
+
+
+def _replace_public_attrs(zarr_array, attrs: dict[str, Any]) -> bool:
+    keep = {}
+    for key in ("_ARRAY_DIMENSIONS", "coordinates", "grid_mapping"):
+        if key in zarr_array.attrs:
+            keep[key] = zarr_array.attrs[key]
+
+    new_attrs = {**keep, **attrs}
+    old_attrs = dict(zarr_array.attrs)
+
+    if old_attrs == new_attrs:
+        return False
+
+    zarr_array.attrs.clear()
+    zarr_array.attrs.update(new_attrs)
+    return True
+
+
+def _sync_global_attrs(attrs: dict[str, Any], destination: str) -> None:
+    """Update root attrs in one Zarr store without touching data chunks."""
+
+    root = zarr.open_group(destination, mode="a")
+    existing_attrs = dict(root.attrs)
+    new_attrs = dict(attrs)
+
+    if existing_attrs == {**existing_attrs, **new_attrs}:
+        return
+
+    root.attrs.update(new_attrs)
+    zarr.consolidate_metadata(destination)
+
+
+def sync_global_attrs(attrs: dict[str, Any], destination: str) -> None:
+    """Update store-level attrs without touching data chunks."""
+
+    _sync_global_attrs(attrs, destination)
+
+
+def _sync_variable_attrs(dataset: xr.Dataset, destination: str) -> None:
+    """Overwrite destination variable attrs with attrs from the latest dataset."""
+
+    root = zarr.open_group(destination, mode="a")
+    changed = False
+
+    for name, data in dataset.data_vars.items():
+        if name not in root:
+            continue
+        attrs = clean_output_attrs(dict(data.attrs))
+        changed |= _replace_public_attrs(root[name], attrs)
+
+    if changed:
+        zarr.consolidate_metadata(destination)
+
+
+def sync_named_variable_attrs(
+    attrs_by_name: dict[str, dict[str, Any]],
+    destination: str,
+) -> None:
+    """Update attrs in one Zarr store without touching data chunks."""
+
+    root = zarr.open_group(destination, mode="a")
+    changed = False
+
+    for name, attrs in attrs_by_name.items():
+        if name not in root:
+            continue
+        changed |= _replace_public_attrs(root[name], attrs)
+
+    if changed:
+        zarr.consolidate_metadata(destination)
+
+
+def _merge_time_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Dataset:
+    """Merge a candidate dataset into an existing one, preferring candidate values."""
+
+    merged = candidate.combine_first(existing)
+    if "time" in merged.coords:
+        merged = merged.sortby("time")
+    return merged
+
+
+def _contiguous_slices(indices: np.ndarray) -> list[slice]:
+    """Convert sorted integer indices into contiguous slices."""
+
+    if indices.size == 0:
+        return []
+
+    slices: list[slice] = []
+    start = int(indices[0])
+    previous = start
+    for value in indices[1:]:
+        current = int(value)
+        if current != previous + 1:
+            slices.append(slice(start, previous + 1))
+            start = current
+        previous = current
+    slices.append(slice(start, previous + 1))
+    return slices
+
+
+def _can_append_new_times(existing: xr.Dataset, candidate: xr.Dataset) -> bool:
+    """Return True when candidate times can be appended at the end of existing time."""
+
+    if "time" not in existing.dims or "time" not in candidate.dims:
+        return False
+    if existing.sizes.get("time", 0) == 0 or candidate.sizes.get("time", 0) == 0:
+        return False
+
+    existing_times = existing.indexes["time"]
+    candidate_times = candidate.indexes["time"]
+    overlap = candidate_times.intersection(existing_times)
+    if len(overlap) > 0:
+        return False
+
+    try:
+        return bool(candidate_times.min() > existing_times.max())
+    except TypeError:
+        return False
+
+
+def _write_missing_variables(
+    existing: xr.Dataset,
+    candidate: xr.Dataset,
+    destination: str,
+    *,
+    zarr_format: int,
+) -> xr.Dataset:
+    """Add variables missing from an existing store across the current time axis."""
+
+    missing = [name for name in candidate.data_vars if name not in existing.data_vars]
+    if not missing:
+        return existing
+
+    add_ds = candidate[missing].reindex(time=existing["time"].values)
+    _write_dataset(add_ds, destination, mode="a", zarr_format=zarr_format)
+    updated = existing.copy()
+    for name in missing:
+        updated[name] = add_ds[name]
+    return updated
+
+
+def _append_new_times(
+    existing: xr.Dataset,
+    candidate: xr.Dataset,
+    destination: str,
+    *,
+    zarr_format: int,
+) -> xr.Dataset:
+    """Append strictly newer time slices to an existing store."""
+
+    existing_time_strings = set(map(str, existing["time"].values))
+    new_time_values = [
+        value for value in candidate["time"].values if str(value) not in existing_time_strings
+    ]
+    if not new_time_values:
+        return existing
+
+    append_ds = _pad_missing_existing_vars_for_append(
+        candidate.sel(time=new_time_values),
+        existing,
+    )
+    _write_dataset(
+        append_ds,
+        destination,
+        mode="a",
+        append_dim="time",
+        zarr_format=zarr_format,
+    )
+    return xr.concat(
+        [existing, append_ds],
+        dim="time",
+        data_vars="all",
+        coords="minimal",
+        compat="override",
+        combine_attrs="drop_conflicts",
+    )
+
+
+def _rewrite_overlapping_times(
+    existing: xr.Dataset,
+    candidate: xr.Dataset,
+    destination: str,
+    *,
+    zarr_format: int,
+) -> None:
+    """Rewrite only the overlapping time regions in an existing store."""
+
+    overlap = candidate.indexes["time"].intersection(existing.indexes["time"])
+    if len(overlap) == 0:
+        return
+
+    time_positions = existing.indexes["time"].get_indexer(overlap)
+    time_slices = _contiguous_slices(np.asarray(time_positions, dtype=np.int64))
+    for time_slice in time_slices:
+        region_times = existing["time"].values[time_slice]
+        region_ds = normalise_published_dataset(candidate.sel(time=region_times))
+        to_drop = {
+            name
+            for name, var in region_ds.variables.items()
+            if "time" not in var.dims
+        }
+        region_ds = region_ds.drop_vars(to_drop, errors="ignore")
+        region = {"time": time_slice}
+        region_ds.to_zarr(
+            destination,
+            mode="r+",
+            region=region,
+            zarr_format=zarr_format,
+            consolidated=(zarr_format == 2),
+        )
+
+
+def update_zarr_store(
+    dataset: xr.Dataset,
+    destination: str,
+    *,
+    clean: bool,
+    zarr_format: int,
+) -> None:
+    """Incrementally update or recreate one destination Zarr store."""
+
+    dataset = normalise_published_dataset(dataset)
+    path = Path(destination)
+    if clean or not path.exists():
+        _write_dataset(dataset, destination, mode="w", zarr_format=zarr_format)
+        _sync_global_attrs(dict(dataset.attrs), destination)
+        _sync_variable_attrs(dataset, destination)
+        return
+
+    existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
+
+    if "time" not in dataset.dims or "time" not in existing.dims:
+        _write_dataset(dataset, destination, mode="a", zarr_format=zarr_format)
+        _sync_global_attrs(dict(dataset.attrs), destination)
+        _sync_variable_attrs(dataset, destination)
+        return
+
+    existing = _write_missing_variables(
+        existing,
+        dataset,
+        destination,
+        zarr_format=zarr_format,
+    )
+
+    _rewrite_overlapping_times(
+        existing,
+        dataset,
+        destination,
+        zarr_format=zarr_format,
+    )
+
+    candidate_times = dataset.indexes["time"]
+    existing_times = existing.indexes["time"]
+    new_times = candidate_times.difference(existing_times)
+    if len(new_times) == 0:
+        _sync_global_attrs(dict(dataset.attrs), destination)
+        _sync_variable_attrs(dataset, destination)
+        return
+
+    appendable_candidate = dataset.sel(time=new_times.values)
+    if _can_append_new_times(existing, appendable_candidate):
+        _append_new_times(
+            existing,
+            appendable_candidate,
+            destination,
+            zarr_format=zarr_format,
+        )
+        _sync_global_attrs(dict(dataset.attrs), destination)
+        _sync_variable_attrs(dataset, destination)
+        return
+
+    merged = _merge_time_updates(existing, dataset)
+    _rewrite_dataset_via_temp(
+        merged,
+        destination,
+        zarr_format=zarr_format,
+    )
+    _sync_global_attrs(dict(dataset.attrs), destination)
+    _sync_variable_attrs(dataset, destination)
