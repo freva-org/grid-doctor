@@ -8,17 +8,48 @@ from typing import Any, List, Optional, Tuple
 
 import numpy as np
 import xarray as xr
+import zarr
 
 import grid_doctor as gd
 
 from .file_fetcher import SourceRecord
-from .formatter import destination_for_level, group_records_by_frequency
+from .formatter import (
+    destination_for_level,
+    existing_destinations_for_frequency,
+    group_records_by_frequency,
+)
 from .grib import get_vars, open_dataset
 
 LAT_COORD_NAMES = ("latitude", "lat", "Latitude", "LATITUDE", "y", "Y")
 LON_COORD_NAMES = ("longitude", "lon", "Longitude", "LONGITUDE", "x", "X")
-
-
+OUTPUT_ATTR_KEYS = (
+    "cell_measures", #
+    "cell_methods",#
+    "comment",#
+    # "dimensions",
+    "frequency",
+    "long_name",#
+    "modeling_realm",
+    "ok_max_mean_abs",
+    "ok_min_mean_abs",
+    "out_name",
+    "positive",#
+    "standard_name",#
+    "units",#
+    "valid_max",
+    "valid_min",
+    "grib_table",
+    "grib_paramID",
+    "orig_short_name",
+    "orig_name",
+    "orig_units",
+    "grib_description",
+    "orig_grid",
+    "level_type",
+    # "conversion",#
+    "table",
+    "DKRZ_ID",
+)
 def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> Optional[str]:
     """Return the first matching coordinate name from *candidates*."""
 
@@ -26,6 +57,16 @@ def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> Optional[st
         if name in ds.coords:
             return name
     return None
+
+
+def _clean_output_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the curated output attrs for published variables."""
+
+    return {
+        key: value
+        for key, value in attrs.items()
+        if key in OUTPUT_ATTR_KEYS and value not in ("", None)
+    }
 
 
 def _circular_lon_bounds(lon_values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -140,15 +181,27 @@ def open_source_record_dataset(
 
     ds = open_dataset(record.files, use_cache=use_cache)
     if record.variable in ds.data_vars:
-        return ds[[record.variable]]
+        ds_var = ds[[record.variable]]
+    else:
+        data_vars = get_vars(ds)
+        if len(data_vars) != 1:
+            raise ValueError(
+                f"Expected exactly one GRIB payload variable for {record.variable!r}, "
+                f"found {data_vars!r}"
+            )
+        ds_var = ds.rename({data_vars[0]: record.variable})[[record.variable]]
 
-    data_vars = get_vars(ds)
-    if len(data_vars) != 1:
-        raise ValueError(
-            f"Expected exactly one GRIB payload variable for {record.variable!r}, "
-            f"found {data_vars!r}"
-        )
-    return ds.rename({data_vars[0]: record.variable})[[record.variable]]
+    data = ds_var[record.variable]
+    if record.conversion_factor != 1.0:
+        data = data * record.conversion_factor
+
+    attrs = dict(record.output_attrs)
+    if record.conversion_factor != 1.0:
+        attrs["conversion_factor"] = str(record.conversion_factor)
+
+    data.attrs = _clean_output_attrs(attrs)
+    ds_var[record.variable] = data
+    return ds_var
 
 
 def merge_frequency_dataset(
@@ -280,6 +333,41 @@ def _rewrite_dataset_via_temp(
     finally:
         if temp_path.exists():
             shutil.rmtree(temp_path, ignore_errors=True)
+
+
+def _sync_variable_attrs(dataset: xr.Dataset, destination: str) -> None:
+    """Overwrite destination variable attrs with attrs from the latest dataset."""
+
+    root = zarr.open_group(destination, mode="a")
+    for name, data in dataset.data_vars.items():
+        if name not in root:
+            continue
+        attrs = _clean_output_attrs(dict(data.attrs))
+        root[name].attrs.clear()
+        root[name].attrs.update(attrs)
+
+
+def _attrs_for_record(record: SourceRecord) -> dict[str, Any]:
+    """Return the cleaned published attrs for one resolved variable."""
+
+    attrs = dict(record.output_attrs)
+    if record.conversion_factor != 1.0:
+        attrs["conversion_factor"] = str(record.conversion_factor)
+    return _clean_output_attrs(attrs)
+
+
+def _sync_named_variable_attrs(
+    attrs_by_name: dict[str, dict[str, Any]],
+    destination: str,
+) -> None:
+    """Update attrs in one Zarr store without touching data chunks."""
+
+    root = zarr.open_group(destination, mode="a")
+    for name, attrs in attrs_by_name.items():
+        if name not in root:
+            continue
+        root[name].attrs.clear()
+        root[name].attrs.update(attrs)
 
 
 def _merge_time_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Dataset:
@@ -428,12 +516,14 @@ def _update_zarr_store(
     path = Path(destination)
     if clean or not path.exists():
         _write_dataset(dataset, destination, mode="w", zarr_format=zarr_format)
+        _sync_variable_attrs(dataset, destination)
         return
 
     existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
 
     if "time" not in dataset.dims or "time" not in existing.dims:
         _write_dataset(dataset, destination, mode="a", zarr_format=zarr_format)
+        _sync_variable_attrs(dataset, destination)
         return
 
     existing = _write_missing_variables(
@@ -454,6 +544,7 @@ def _update_zarr_store(
     existing_times = existing.indexes["time"]
     new_times = candidate_times.difference(existing_times)
     if len(new_times) == 0:
+        _sync_variable_attrs(dataset, destination)
         return
 
     appendable_candidate = dataset.sel(time=new_times.values)
@@ -464,6 +555,7 @@ def _update_zarr_store(
             destination,
             zarr_format=zarr_format,
         )
+        _sync_variable_attrs(dataset, destination)
         return
 
     merged = _merge_time_updates(existing, dataset)
@@ -472,6 +564,7 @@ def _update_zarr_store(
         destination,
         zarr_format=zarr_format,
     )
+    _sync_variable_attrs(dataset, destination)
 
 
 def map_grib_to_healpix(
@@ -526,3 +619,28 @@ def map_grib_to_healpix(
                 clean=clean,
                 zarr_format=zarr_format,
             )
+
+
+def update_healpix_attrs_only(
+    records: List[SourceRecord],
+    *,
+    frequencies: Tuple[str, ...],
+) -> None:
+    """Refresh published variable attrs on existing Zarr stores without remapping."""
+
+    records_by_frequency = {
+        frequency: [record for record in records if record.frequency == frequency]
+        for frequency in frequencies
+    }
+
+    for frequency in frequencies:
+        freq_records = records_by_frequency.get(frequency, [])
+        if not freq_records:
+            continue
+
+        attrs_by_name = {
+            record.variable: _attrs_for_record(record)
+            for record in freq_records
+        }
+        for destination in existing_destinations_for_frequency(frequency):
+            _sync_named_variable_attrs(attrs_by_name, destination)

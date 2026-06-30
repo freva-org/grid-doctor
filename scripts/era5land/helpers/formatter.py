@@ -1,6 +1,7 @@
 """Output formatting helpers for ERA5/ERA5-Land HEALPix Zarr products."""
 
 from collections import defaultdict
+from glob import glob
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
@@ -34,3 +35,15 @@ def destination_for_level(frequency: str, zoom_number: int) -> str:
         output_frequency=source_mapper["output_frequency"][frequency],
         zoom_number=zoom_number,
     )
+
+
+def existing_destinations_for_frequency(frequency: str) -> Tuple[str, ...]:
+    """Return existing Zarr stores for one output frequency."""
+
+    source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
+    output_frequency = source_mapper["output_frequency"][frequency]
+    pattern = source_mapper["output_path"].format(
+        output_frequency=output_frequency,
+        zoom_number="*",
+    )
+    return tuple(sorted(glob(pattern)))

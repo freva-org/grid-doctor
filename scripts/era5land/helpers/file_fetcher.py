@@ -4,6 +4,8 @@
 import csv
 import json
 import re
+import ast
+import operator
 from datetime import date, datetime
 from glob import glob
 from pathlib import Path
@@ -38,6 +40,8 @@ class SourceRecord(NamedTuple):
     level_type: str
     pattern: str
     files: Tuple[str, ...]
+    conversion_factor: float
+    output_attrs: Dict[str, str]
 
 
 class UnresolvedRecord(NamedTuple):
@@ -56,6 +60,80 @@ def load_json(path: Union[str, Path]) -> Dict[str, Any]:
     if not isinstance(data, dict):
         raise TypeError(f"Expected JSON object in {path}")
     return data
+
+
+def _safe_eval_numeric_expression(expression: str) -> float:
+    """Evaluate a simple numeric expression containing only literals and */+-."""
+
+    operators = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    def _eval(node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node, ast.UnaryOp) and type(node.op) in operators:
+            return float(operators[type(node.op)](_eval(node.operand)))
+        if isinstance(node, ast.BinOp) and type(node.op) in operators:
+            return float(operators[type(node.op)](_eval(node.left), _eval(node.right)))
+        raise ValueError(f"Unsupported numeric expression: {expression!r}")
+
+    return _eval(ast.parse(expression, mode="eval"))
+
+
+def parse_conversion_factor(entry: Dict[str, Any]) -> float:
+    """Return the numeric multiplicative conversion factor for one CMOR entry."""
+
+    raw = str(entry.get("conversion", "")).strip()
+    if not raw:
+        return 1.0
+    return _safe_eval_numeric_expression(raw)
+
+
+def extract_output_attrs(entry: Dict[str, Any]) -> Dict[str, str]:
+    """Extract relevant output metadata from one CMOR entry."""
+
+    keys = (
+        "cell_measures", #
+        "cell_methods",#
+        "comment",#
+        # "dimensions",
+        "frequency",
+        "long_name",#
+        "modeling_realm",
+        "ok_max_mean_abs",
+        "ok_min_mean_abs",
+        "out_name",
+        "positive",#
+        "standard_name",#
+        "units",#
+        "valid_max",
+        "valid_min",
+        "grib_table",
+        "grib_paramID",
+        "orig_short_name",
+        "orig_name",
+        "orig_units",
+        "grib_description",
+        "orig_grid",
+        "level_type",
+        # "conversion",#
+        "table",
+        "DKRZ_ID",
+    )
+    attrs: Dict[str, str] = {}
+    for key in keys:
+        value = str(entry.get(key, "")).strip()
+        if value:
+            attrs[key] = value
+    return attrs
 
 
 def split_csv_list(value: str) -> Tuple[str, ...]:
@@ -360,6 +438,8 @@ def resolve_records(
                         level_type=level_type,
                         pattern=pattern,
                         files=files,
+                        conversion_factor=parse_conversion_factor(entry),
+                        output_attrs=extract_output_attrs(entry),
                     )
                 )
                 if files:

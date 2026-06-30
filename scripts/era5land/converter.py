@@ -17,7 +17,7 @@ from helpers.file_fetcher import (
     unresolved_records,
 )
 from helpers.formatter import normalise_frequencies
-from helpers.mapper import map_grib_to_healpix
+from helpers.mapper import map_grib_to_healpix, update_healpix_attrs_only
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_VAR_TABLE = SCRIPT_DIR / "assets" / "default_variables.csv"
@@ -132,6 +132,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Overwrite existing Zarr outputs instead of updating them incrementally.",
     )
+    convert.add_argument(
+        "--attrs-only",
+        action="store_true",
+        help="Refresh variable attrs on existing Zarr outputs without remapping data.",
+    )
     return parser
 
 
@@ -244,6 +249,13 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         root=args.root,
         glob_files=True,
     )
+
+    if args.attrs_only:
+        update_healpix_attrs_only(
+            records,
+            frequencies=frequencies,
+        )
+        return 0
 
     map_grib_to_healpix(
         records,
