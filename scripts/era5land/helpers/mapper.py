@@ -1,6 +1,6 @@
 """GRIB to HEALPix mapping helpers for ERA5/ERA5-Land."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import shutil
 import uuid
@@ -12,7 +12,7 @@ import zarr
 
 import grid_doctor as gd
 
-from .file_fetcher import SourceRecord, SOURCE_MAPPER
+from .file_fetcher import SOURCE_MAPPER, SourceRecord, load_json
 from .formatter import (
     destination_for_level,
     existing_destinations_for_frequency,
@@ -24,6 +24,9 @@ OUTPUT_ATTR_KEYS = tuple(SOURCE_MAPPER.get("var_attrs", []))
 LAT_COORD_NAMES = ("latitude", "lat", "Latitude", "LATITUDE", "y", "Y")
 LON_COORD_NAMES = ("longitude", "lon", "Longitude", "LONGITUDE", "x", "X")
 STATIC_COORD_NAMES = ("cell", "time", "crs", "surface")
+SCRIPT_DIR = Path(__file__).resolve().parent
+CMOR_TABLES_ROOT = SCRIPT_DIR.parent / "tables" / "era5-cmor-tables"
+CMOR_TABLES_DIR = CMOR_TABLES_ROOT / "Tables"
 
 def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> Optional[str]:
     """Return the first matching coordinate name from *candidates*."""
@@ -41,6 +44,82 @@ def _clean_output_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
         key: value
         for key, value in attrs.items()
         if key in OUTPUT_ATTR_KEYS and value not in ("", None)
+    }
+
+
+def _pick_cv_value(value: Any, default: str = "") -> str:
+    """Normalise a CV value into one representative string."""
+
+    if isinstance(value, list):
+        return str(value[0]) if value else default
+    if isinstance(value, dict):
+        first_key = next(iter(value), None)
+        return str(first_key) if first_key else default
+    if value not in ("", None):
+        return str(value)
+    return default
+
+
+def _source_id_from_table_id(table_id: str) -> str:
+    """Infer the source identifier from a CMOR table identifier."""
+
+    return "ERA-5-Land" if "ERA5Land" in table_id else "ERA-5"
+
+
+def _global_attrs_for_records(records: List[SourceRecord]) -> dict[str, str]:
+    """Build dataset-level attrs from the CMOR table header and ERA5 CV."""
+
+    if not records:
+        return {}
+
+    first_record = records[0]
+    dataset_cfg = SOURCE_MAPPER["datasets"][first_record.dataset]
+    table_prefix = str(dataset_cfg["table_prefix"])
+    table_path = CMOR_TABLES_DIR / f"{table_prefix}_{first_record.frequency}.json"
+    table_payload = load_json(table_path)
+    header = table_payload.get("Header", {})
+    cv = load_json(CMOR_TABLES_ROOT / "ERA5_CV.json").get("CV", {})
+
+    attrs = {
+        key: str(value)
+        for key, value in header.items()
+        if value not in ("", None) and key not in {"missing_value", "int_missing_value"}
+    }
+
+    table_id = attrs.get("table_id", "")
+    source_id = _source_id_from_table_id(table_id)
+    source_info = cv.get("source_id", {}).get(source_id, {})
+    institution_id = str(source_info.get("institution_id", "ECMWF"))
+
+    attrs.update(
+        {
+            "activity_id": _pick_cv_value(cv.get("activity_id")),
+            "contact": _pick_cv_value(cv.get("contact")),
+            # "creation_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            # "data_specs_version": _pick_cv_value(
+            #     cv.get("data_specs_version"),
+            #     attrs.get("data_specs_version", ""),
+            # ),
+            "frequency": first_record.frequency,
+            "institution_id": institution_id,
+            "institution": _pick_cv_value(cv.get("institution_id", {}).get(institution_id)),
+            "license": _pick_cv_value(cv.get("license")),
+            "nominal_resolution": _pick_cv_value(cv.get("nominal_resolution")),
+            "product": _pick_cv_value(cv.get("product"), attrs.get("product", "")),
+            "source_id": source_id,
+            "source": _pick_cv_value(source_info.get("source")),
+            "source_type": _pick_cv_value(source_info.get("source_type")),
+            # "source_version_number": _pick_cv_value(
+            #     source_info.get("source_version_number")
+            # ),
+            "variant_label": _pick_cv_value(cv.get("variant_label")),
+        }
+    )
+
+    return {
+        key: str(value)
+        for key, value in attrs.items()
+        if value not in ("", None)
     }
 
 
@@ -338,6 +417,22 @@ def _replace_public_attrs(zarr_array, attrs: dict[str, Any]) -> bool:
     zarr_array.attrs.update(new_attrs)
     return True
 
+
+def _sync_global_attrs(attrs: dict[str, Any], destination: str) -> None:
+    """Update root attrs in one Zarr store without touching data chunks."""
+
+    root = zarr.open_group(destination, mode="a")
+    existing_attrs = dict(root.attrs)
+    new_attrs = dict(attrs)
+    if "creation_date" in existing_attrs and "creation_date" in new_attrs:
+        new_attrs["creation_date"] = existing_attrs["creation_date"]
+
+    if existing_attrs == {**existing_attrs, **new_attrs}:
+        return
+
+    root.attrs.update(new_attrs)
+    zarr.consolidate_metadata(destination)
+
 def _sync_variable_attrs(dataset: xr.Dataset, destination: str) -> None:
     """Overwrite destination variable attrs with attrs from the latest dataset."""
 
@@ -534,6 +629,7 @@ def _update_zarr_store(
     path = Path(destination)
     if clean or not path.exists():
         _write_dataset(dataset, destination, mode="w", zarr_format=zarr_format)
+        _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)
         return
 
@@ -541,6 +637,7 @@ def _update_zarr_store(
 
     if "time" not in dataset.dims or "time" not in existing.dims:
         _write_dataset(dataset, destination, mode="a", zarr_format=zarr_format)
+        _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)
         return
 
@@ -562,6 +659,7 @@ def _update_zarr_store(
     existing_times = existing.indexes["time"]
     new_times = candidate_times.difference(existing_times)
     if len(new_times) == 0:
+        _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)
         return
 
@@ -573,6 +671,7 @@ def _update_zarr_store(
             destination,
             zarr_format=zarr_format,
         )
+        _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)
         return
 
@@ -582,6 +681,7 @@ def _update_zarr_store(
         destination,
         zarr_format=zarr_format,
     )
+    _sync_global_attrs(dict(dataset.attrs), destination)
     _sync_variable_attrs(dataset, destination)
 
 
@@ -607,7 +707,9 @@ def map_grib_to_healpix(
         if not freq_records:
             continue
 
+        global_attrs = _global_attrs_for_records(freq_records)
         ds = merge_frequency_dataset(freq_records, use_cache=use_cache)
+        ds.attrs.update(global_attrs)
         ds = _select_time_interval(ds, interval)
         if "time" in ds.dims and ds.sizes.get("time", 0) == 0:
             continue
@@ -629,6 +731,7 @@ def map_grib_to_healpix(
             weights_path=weight_file,
         )
         for zoom_number, dataset in pyramid.items():
+            dataset.attrs.update(global_attrs)
             destination = destination_for_level(frequency, zoom_number)
             Path(destination).parent.mkdir(parents=True, exist_ok=True)
             _update_zarr_store(
@@ -656,9 +759,11 @@ def update_healpix_attrs_only(
         if not freq_records:
             continue
 
+        global_attrs = _global_attrs_for_records(freq_records)
         attrs_by_name = {
             record.variable: _attrs_for_record(record)
             for record in freq_records
         }
         for destination in existing_destinations_for_frequency(frequency):
+            _sync_global_attrs(global_attrs, destination)
             _sync_named_variable_attrs(attrs_by_name, destination)
