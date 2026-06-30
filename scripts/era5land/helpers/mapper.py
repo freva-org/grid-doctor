@@ -12,6 +12,18 @@ from .file_fetcher import SourceRecord
 from .formatter import destination_for_level, group_records_by_frequency
 from .grib import get_vars, open_dataset
 
+LAT_COORD_NAMES = ("latitude", "lat", "Latitude", "LATITUDE", "y", "Y")
+LON_COORD_NAMES = ("longitude", "lon", "Longitude", "LONGITUDE", "x", "X")
+
+
+def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> Optional[str]:
+    """Return the first matching coordinate name from *candidates*."""
+
+    for name in candidates:
+        if name in ds.coords:
+            return name
+    return None
+
 
 def _circular_lon_bounds(lon_values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Infer west/east bounds for one reduced-Gaussian latitude ring."""
@@ -55,13 +67,16 @@ def normalise_reduced_gaussian_dataset(ds: xr.Dataset) -> xr.Dataset:
 
     if "values" not in ds.dims:
         return ds
-    if "latitude" not in ds.coords or "longitude" not in ds.coords:
-        return ds
     if "lon_vertices" in ds or "clon_vertices" in ds:
         return ds
 
-    lat_coord = ds["latitude"]
-    lon_coord = ds["longitude"]
+    lat_name = _find_coord_name(ds, LAT_COORD_NAMES)
+    lon_name = _find_coord_name(ds, LON_COORD_NAMES)
+    if lat_name is None or lon_name is None:
+        return ds
+
+    lat_coord = ds[lat_name]
+    lon_coord = ds[lon_name]
     if lat_coord.ndim != 1 or lon_coord.ndim != 1:
         return ds
     if lat_coord.dims != ("values",) or lon_coord.dims != ("values",):
@@ -69,22 +84,19 @@ def normalise_reduced_gaussian_dataset(ds: xr.Dataset) -> xr.Dataset:
 
     ds = ds.rename({"values": "cell"})
 
-    latitudes = np.asarray(ds["latitude"].values, dtype=np.float64)
-    longitudes = np.asarray(ds["longitude"].values, dtype=np.float64)
+    latitudes = np.asarray(ds[lat_name].values, dtype=np.float64)
+    longitudes = np.asarray(ds[lon_name].values, dtype=np.float64)
     rings = _ring_slices(latitudes)
 
     ring_centres = np.asarray([latitudes[ring.start] for ring in rings], dtype=np.float64)
     ring_edges = np.empty(ring_centres.size + 1, dtype=np.float64)
-    if ring_centres.size == 1:
-        ring_edges[0] = max(-90.0, ring_centres[0] - 0.5)
-        ring_edges[1] = min(90.0, ring_centres[0] + 0.5)
-    else:
+    if ring_centres.size > 1:
         ring_edges[1:-1] = 0.5 * (ring_centres[:-1] + ring_centres[1:])
-        ring_edges[0] = ring_centres[0] + 0.5 * (ring_centres[0] - ring_centres[1])
-        ring_edges[-1] = ring_centres[-1] + 0.5 * (
-            ring_centres[-1] - ring_centres[-2]
-        )
-        ring_edges = np.clip(ring_edges, -90.0, 90.0)
+
+    # Reduced Gaussian latitude rings cover the full sphere, so the
+    # outermost cells should close exactly at the poles.
+    ring_edges[0] = 90.0
+    ring_edges[-1] = -90.0
 
     n_cells = ds.sizes["cell"]
     lon_vertices = np.empty((n_cells, 4), dtype=np.float64)
@@ -160,6 +172,7 @@ def map_grib_to_healpix(
     time_chunk: int = 48,
     zarr_format: int = 2,
     use_cache: bool = False,
+    weights_dir: Optional[str] = None,
 ) -> None:
     """Convert resolved GRIB records to per-frequency HEALPix Zarr pyramids."""
 
@@ -177,8 +190,16 @@ def map_grib_to_healpix(
         if time_chunk and "time" in ds.dims:
             ds = ds.chunk({"time": time_chunk})
 
+        max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
+        weight_file = gd.cached_weights(
+            ds,
+            level=max_level,
+            cache_path=weights_dir,
+        )
         pyramid = gd.latlon_to_healpix_pyramid(
             ds,
+            max_level=max_level,
+            weights_path=weight_file,
         )
         for zoom_number, dataset in pyramid.items():
             destination = destination_for_level(frequency, zoom_number)

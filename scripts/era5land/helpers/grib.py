@@ -333,14 +333,6 @@ def open_dataset(files: Collection[str | Path], use_cache: bool = False) -> xr.D
             ds_raw = gd.cached_open_dataset(
                 files_for_var,
                 **open_kwargs,
-                cache_key={
-                    "engine": "cfgrib",
-                    "shortName": short_name,
-                    "paramId": int(param_id),
-                    "typeOfLevel": type_of_level,
-                    "level": int(level),
-                    "time_normalizer": "valid_time_v1",
-                },
             )
         else:
             ds_raw = xr.open_mfdataset(

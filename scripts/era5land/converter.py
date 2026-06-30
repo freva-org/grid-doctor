@@ -41,6 +41,8 @@ def parse_arg_list(value: Optional[str]) -> Optional[Tuple[str, ...]]:
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level command parser."""
 
+    source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
+
     parser = argparse.ArgumentParser(
         description="ERA5/ERA5-Land source discovery and conversion tools."
     )
@@ -114,9 +116,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Zarr format version for the output pyramid.",
     )
     convert.add_argument(
-        "--use-cache",
-        action="store_true",
-        help="Reuse cached GRIB inventories and cached multi-file opens.",
+        "--no-cache",
+        action="store_false",
+        dest="use_cache",
+        help="Disable cached GRIB inventories and cached multi-file opens.",
+    )
+    convert.set_defaults(use_cache=True)
+    convert.add_argument(
+        "--weights-dir",
+        default=str(source_mapper["weights_path"]),
+        help="Directory where HEALPix weight files are stored and reused.",
     )
     return parser
 
@@ -236,6 +245,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         time_chunk=args.time_chunk,
         zarr_format=args.zarr_format,
         use_cache=args.use_cache,
+        weights_dir=args.weights_dir,
     )
 
     return 0
