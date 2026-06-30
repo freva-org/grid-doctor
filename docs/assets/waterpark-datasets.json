@@ -10,7 +10,7 @@
     "nextgems",
     "obs",
     "palmod",
-    "xpies"
+    "xspies"
   ],
   "datasets": {
     "cmip6": {
@@ -61,9 +61,9 @@
       "title": "PalMod",
       "label": "Paleoclimate Modelling initiative"
     },
-    "xpies": {
-      "title": "xpies",
-      "label": "XPIES simulations",
+    "xspies": {
+      "title": "xspies",
+      "label": "XSPIES simulations",
       "locked": "coming soon"
     }
   }
