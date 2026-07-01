@@ -296,7 +296,10 @@ def open_dataset(files: Collection[str | Path], use_cache: bool = False) -> xr.D
         short_name, param_id, type_of_level, level = key
 
         files_for_var = [str(file) for file in sorted(g["file"].unique())]
-        time_by_file = {file: rows.drop(columns="_file_key") for file, rows in g.groupby("_file_key", sort=False)}
+        time_by_file = {
+            file: rows.drop(columns="_file_key")
+            for file, rows in g.groupby("_file_key", sort=False)
+        }
 
         def preprocess(ds: xr.Dataset) -> xr.Dataset:
             source = ds.encoding.get("source")
@@ -328,7 +331,6 @@ def open_dataset(files: Collection[str | Path], use_cache: bool = False) -> xr.D
             "combine": "by_coords",
             "preprocess": preprocess,
         }
-
         if use_cache:
             ds_raw = gd.cached_open_dataset(
                 files_for_var,

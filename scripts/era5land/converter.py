@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -28,6 +29,80 @@ UNRESOLVED_REASON = (
     "not found in CMOR table, unsupported stream/frequency, "
     "or has no DKRZ_ID/grib_paramID"
 )
+LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
+RESET_COLOR = "\033[0m"
+LEVEL_COLORS = {
+    logging.DEBUG: "\033[36m",
+    logging.INFO: "\033[37m",
+    logging.WARNING: "\033[33m",
+    logging.ERROR: "\033[31m",
+    logging.CRITICAL: "\033[1;31m",
+}
+STAGE_COLORS = {
+    "convert_start": "\033[1;36m",
+    "frequency_start": "\033[1;34m",
+    "grib_merge_start": "\033[34m",
+    "grib_read_parallel": "\033[34m",
+    "grib_read": "\033[34m",
+    "grib_merge_done": "\033[36m",
+    "weight_calculation": "\033[33m",
+    "remap_start": "\033[1;35m",
+    "remap_done": "\033[1;35m",
+    "zarr_write": "\033[32m",
+    "frequency_done": "\033[1;32m",
+    "frequency_skip_empty": "\033[90m",
+    "attrs_only": "\033[32m",
+}
+
+
+class StageColorFormatter(logging.Formatter):
+    """Format log records with ANSI colors when writing to an interactive terminal."""
+
+    def __init__(self, fmt: str, *, use_color: bool) -> None:
+        """Store the base format and whether ANSI colors should be emitted."""
+
+        super().__init__(fmt)
+        self.use_color = use_color
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Return one formatted log line, optionally colorized by stage or level."""
+
+        message = super().format(record)
+        if not self.use_color:
+            return message
+
+        stage_name = self._stage_name(record)
+        color = STAGE_COLORS.get(stage_name, LEVEL_COLORS.get(record.levelno))
+        if color is None:
+            return message
+        return f"{color}{message}{RESET_COLOR}"
+
+    @staticmethod
+    def _stage_name(record: logging.LogRecord) -> Optional[str]:
+        """Extract the structured stage token from the rendered log message."""
+
+        message = record.getMessage()
+        for token in message.split():
+            if token.startswith("stage="):
+                return token.split("=", 1)[1]
+        return None
+
+
+def configure_logging() -> None:
+    """Configure terminal logging with ANSI colors for interactive stderr."""
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        StageColorFormatter(
+            LOG_FORMAT,
+            use_color=sys.stderr.isatty(),
+        )
+    )
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
 
 
 def parse_arg_list(value: Optional[str]) -> Optional[Tuple[str, ...]]:
@@ -274,6 +349,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
 def main(argv: Optional[List[str]] = None) -> int:
     """Run the ERA5-Land converter."""
 
+    configure_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command is None:

@@ -2,6 +2,7 @@
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, timedelta
+import logging
 from typing import Any, Optional
 
 import numpy as np
@@ -11,10 +12,10 @@ from .file_fetcher import SourceRecord
 from .grib import get_vars, open_dataset
 from .metadata import clean_output_attrs
 
+LOGGER = logging.getLogger(__name__)
 LAT_COORD_NAMES = ("latitude", "lat", "Latitude", "LATITUDE", "y", "Y")
 LON_COORD_NAMES = ("longitude", "lon", "Longitude", "LONGITUDE", "x", "X")
 STATIC_COORD_NAMES = ("cell", "time", "crs", "surface")
-MAX_OPEN_WORKERS = 8
 
 
 def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> Optional[str]:
@@ -148,6 +149,12 @@ def open_source_record_dataset(
 ) -> xr.Dataset:
     """Open one source record and rename the payload to the requested variable."""
 
+    LOGGER.info(
+        "stage=grib_read variable=%s frequency=%s files=%d",
+        record.variable,
+        record.frequency,
+        len(record.files),
+    )
     ds = open_dataset(record.files, use_cache=use_cache)
     if record.variable in ds.data_vars:
         ds_var = ds[[record.variable]]
@@ -176,9 +183,9 @@ def merge_frequency_dataset(
 ) -> xr.Dataset:
     """Open and merge all resolved variables for one output frequency.
 
-    File opening and GRIB decoding are performed with a small thread pool to
-    improve throughput when many source records are resolved for one frequency.
-    The merge order still follows the input record order.
+    Source records are opened in parallel at the variable level, with one
+    worker per resolved variable record for the current frequency. The merge
+    order still follows the input record order.
     """
 
     resolved_records = [record for record in records if record.files]
@@ -190,7 +197,18 @@ def merge_frequency_dataset(
             open_source_record_dataset(resolved_records[0], use_cache=use_cache)
         ]
     else:
-        max_workers = min(MAX_OPEN_WORKERS, len(resolved_records))
+        total_files = sum(len(record.files) for record in resolved_records)
+        max_workers = len(resolved_records)
+        LOGGER.info(
+            (
+                "stage=grib_read_parallel frequency=%s record_tasks=%d "
+                "total_files=%d workers=%d"
+            ),
+            resolved_records[0].frequency,
+            len(resolved_records),
+            total_files,
+            max_workers,
+        )
         datasets_by_index: list[Optional[xr.Dataset]] = [None] * len(resolved_records)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
