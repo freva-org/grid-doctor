@@ -1,7 +1,7 @@
 /*
  * STAC Browser embed; host-side layout, scale & containment.
- * stopping Bootstrap from bleeding onto Material, and Material's 
- * `.md-typeset` from bleeding into the app) is done at BUILD time by
+ * stopping Bootstrap from bleeding onto Material, and also Material's 
+ * `.md-typeset` from bleeding into the stacbrowser app at BUILD time by
  * prefixing STAC's compiled CSS under `#stac-browser`
  */
 
