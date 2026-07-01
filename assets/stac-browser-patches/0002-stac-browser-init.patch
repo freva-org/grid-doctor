@@ -1,0 +1,35 @@
+From 34797cef8403b49f014106c3f9bd71ae63256e0a Mon Sep 17 00:00:00 2001
+From: tropicrainforest <tropicrainforest27017@gmail.com>
+Date: Wed, 1 Jul 2026 12:26:27 +0200
+Subject: [PATCH 2/8] stac browser init
+
+Mount the app into the embed container #stac-browser-mount (fail-closed if absent), with lifecycle-safe mount/unmount via window.__WATERPARK_STAC_APP__
+---
+ src/init.js | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/init.js b/src/init.js
+index 2d44994d..cb41f77e 100644
+--- a/src/init.js
++++ b/src/init.js
+@@ -46,6 +46,19 @@ export default function init() {
+     app.use(router);
+     app.use(store);
+ 
+-    return app.mount("body");
++    // Waterpark embed: mount into the host element instead of <body>; fail
++    // closed if it's missing, and support a clean re-mount.
++    const mountTarget = document.getElementById("stac-browser-mount");
++    if (!mountTarget) {
++      return null;
++    }
++    if (window.__WATERPARK_STAC_APP__) {
++      try { window.__WATERPARK_STAC_APP__.unmount(); } catch (e) { /* noop */ }
++      window.__WATERPARK_STAC_APP__ = null;
++      mountTarget.replaceChildren();
++    }
++    const mounted = app.mount(mountTarget);
++    window.__WATERPARK_STAC_APP__ = app;
++    return mounted;
+   });
+ }

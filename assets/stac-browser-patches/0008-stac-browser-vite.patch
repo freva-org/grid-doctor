@@ -1,0 +1,23 @@
+From e554e1c24a232b30a203178a21271808064d2e74 Mon Sep 17 00:00:00 2001
+From: tropicrainforest <tropicrainforest27017@gmail.com>
+Date: Wed, 1 Jul 2026 12:30:00 +0200
+Subject: [PATCH 8/8] stac browser vite
+
+Enable Vite's build manifest (manifest: true) so the docs build can resolve STAC Browser's hashed asset filenames when embedding it
+---
+ vite.config.js | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/vite.config.js b/vite.config.js
+index f830a2ab..4a5d5d84 100644
+--- a/vite.config.js
++++ b/vite.config.js
+@@ -85,6 +85,8 @@ export default defineConfig(async ({ mode }) => {
+   return ({
+     base: config.pathPrefix,
+     build: {
++      // Waterpark embed: emit build manifest so the docs build can resolve hashed assets.
++      manifest: true,
+       sourcemap: mode !== "minimal",
+       rollupOptions: {
+         external: ["fs/promises"],

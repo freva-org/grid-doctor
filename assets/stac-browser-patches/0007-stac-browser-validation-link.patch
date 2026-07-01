@@ -1,0 +1,40 @@
+From e15b80dc47ea82ca4bef0de20a531a4ac744489d Mon Sep 17 00:00:00 2001
+From: tropicrainforest <tropicrainforest27017@gmail.com>
+Date: Wed, 1 Jul 2026 12:29:33 +0200
+Subject: [PATCH 7/8] stac browser validation link
+
+it keep the Source valid/invalid tick, but open the full validation report in a new tab (href + target=_blank) instead of navigating in-place, which froze the embedded landing tab
+---
+ src/components/Validation.vue | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/src/components/Validation.vue b/src/components/Validation.vue
+index db004088..ff489f12 100644
+--- a/src/components/Validation.vue
++++ b/src/components/Validation.vue
+@@ -1,8 +1,8 @@
+ <template>
+   <div class="valid">
+     <b-spinner v-if="working" :label="$t('source.validating')" small />
+-    <b-button v-else-if="valid === true" variant="success" :size="size" :to="validationLink"><b-icon-check /> {{ $t('checkbox.true') }}</b-button>
+-    <b-button v-else-if="valid === false" variant="danger" :size="size" :to="validationLink"><b-icon-x /> {{ $t('checkbox.false') }}</b-button>
++    <b-button v-else-if="valid === true" variant="success" :size="size" :href="validationHref" target="_blank" rel="noopener noreferrer"><b-icon-check /> {{ $t('checkbox.true') }}</b-button>
++    <b-button v-else-if="valid === false" variant="danger" :size="size" :href="validationHref" target="_blank" rel="noopener noreferrer"><b-icon-x /> {{ $t('checkbox.false') }}</b-button>
+     <template v-else>{{ $t('source.validationNA') }}</template>
+   </div>
+ </template>
+@@ -37,6 +37,14 @@ export default {
+       else {
+         return null;
+       }
++    },
++    // Waterpark embed: open the report in a new tab so it doesn't freeze the embedded tab.
++    validationHref() {
++      if (!this.validationLink || !this.$router) {
++        return null;
++      }
++      const href = this.$router.resolve(this.validationLink).href;
++      return new URL(href, window.location.href).toString();
+     }
+   },
+   async created() {
