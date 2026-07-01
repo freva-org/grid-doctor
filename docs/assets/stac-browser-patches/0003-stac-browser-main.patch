@@ -1,0 +1,21 @@
+From 3b2d1a949036b4fc2366e49ebea6a43bb327815c Mon Sep 17 00:00:00 2001
+From: tropicrainforest <tropicrainforest27017@gmail.com>
+Date: Wed, 1 Jul 2026 12:27:00 +0200
+Subject: [PATCH 3/8] stac browser main
+
+Expose init() as window.STAC_BROWSER_INIT so the host page can boot and re-boot the embedded app on navigation
+---
+ src/main.js | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/main.js b/src/main.js
+index 284b4abf..0b35c171 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -1,3 +1,6 @@
+ import init from "./init";
+ 
++// Waterpark embed: expose init so the host loader can re-boot the app.
++window.STAC_BROWSER_INIT = init;
++
+ init();
