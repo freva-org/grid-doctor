@@ -1,5 +1,6 @@
 """Dataset opening and reshaping helpers for ERA5/ERA5-Land."""
 
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, timedelta
 from typing import Any, Optional
 
@@ -13,6 +14,7 @@ from .metadata import clean_output_attrs
 LAT_COORD_NAMES = ("latitude", "lat", "Latitude", "LATITUDE", "y", "Y")
 LON_COORD_NAMES = ("longitude", "lon", "Longitude", "LONGITUDE", "x", "X")
 STATIC_COORD_NAMES = ("cell", "time", "crs", "surface")
+MAX_OPEN_WORKERS = 8
 
 
 def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> Optional[str]:
@@ -172,16 +174,45 @@ def merge_frequency_dataset(
     *,
     use_cache: bool,
 ) -> xr.Dataset:
-    """Open and merge all resolved variables for one output frequency."""
+    """Open and merge all resolved variables for one output frequency.
 
-    datasets = [
-        open_source_record_dataset(record, use_cache=use_cache)
-        for record in records
-        if record.files
-    ]
-    if not datasets:
+    File opening and GRIB decoding are performed with a small thread pool to
+    improve throughput when many source records are resolved for one frequency.
+    The merge order still follows the input record order.
+    """
+
+    resolved_records = [record for record in records if record.files]
+    if not resolved_records:
         raise ValueError("No source files were resolved for this frequency.")
-    return xr.merge(datasets, compat="override", combine_attrs="drop_conflicts")
+
+    if len(resolved_records) == 1:
+        datasets = [
+            open_source_record_dataset(resolved_records[0], use_cache=use_cache)
+        ]
+    else:
+        max_workers = min(MAX_OPEN_WORKERS, len(resolved_records))
+        datasets_by_index: list[Optional[xr.Dataset]] = [None] * len(resolved_records)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures: dict[Future[xr.Dataset], int] = {
+                executor.submit(
+                    open_source_record_dataset,
+                    record,
+                    use_cache=use_cache,
+                ): index
+                for index, record in enumerate(resolved_records)
+            }
+            for future, index in futures.items():
+                datasets_by_index[index] = future.result()
+
+        datasets = [dataset for dataset in datasets_by_index if dataset is not None]
+
+    return xr.merge(
+        datasets,
+        compat="override",
+        join="outer",
+        combine_attrs="drop_conflicts",
+    )
 
 
 def select_time_interval(
