@@ -110,8 +110,26 @@ def _write_dataset(
     }
     if append_dim is not None:
         options["append_dim"] = append_dim
+        # Do not pass encoding when appending along time.
+        # xarray rejects encoding for variables that already exist.        
+        dataset.to_zarr(destination, **options)
+        return
 
     encoding = _encoding_for_full_horizontal_chunks(dataset)
+
+    # Ensure Dask chunks match the explicit Zarr chunks.
+    # Otherwise xarray may reject writes because one Zarr chunk overlaps
+    # multiple Dask chunks.
+    chunk_map: dict[str, tuple[int, ...]] = {}
+    for name, enc in encoding.items():
+        if name in dataset:
+            dims = dataset[name].dims
+            chunks = enc.get("chunks")
+            if chunks is not None:
+                chunk_map.update(dict(zip(dims, chunks)))
+
+    if chunk_map:
+        dataset = dataset.chunk(chunk_map)
 
     dataset.to_zarr(
         destination,
