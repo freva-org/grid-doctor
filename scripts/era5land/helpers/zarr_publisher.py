@@ -56,6 +56,41 @@ def _pad_missing_existing_vars_for_append(
     ordered.extend(name for name in padded.data_vars if name not in ordered)
     return padded[ordered]
 
+def _encoding_for_full_horizontal_chunks(
+    dataset: xr.Dataset,
+    *,
+    target_mb: int = 100,
+) -> dict[str, dict[str, tuple[int, ...]]]:
+    """Return Zarr encoding with full horizontal chunks and bounded time chunks."""
+
+    target_bytes = target_mb * 1024**2
+    encoding: dict[str, dict[str, tuple[int, ...]]] = {}
+
+    for name, da in dataset.data_vars.items():
+        if "cell" not in da.dims:
+            continue
+
+        dtype_size = da.dtype.itemsize
+        ncell = dataset.sizes["cell"]
+        bytes_per_time = ncell * dtype_size
+
+        if "time" in da.dims:
+            resolved_time_chunk = max(1, target_bytes // bytes_per_time)
+        else:
+            resolved_time_chunk = None
+
+        chunks = []
+        for dim in da.dims:
+            if dim == "time":
+                chunks.append(resolved_time_chunk)
+            elif dim == "cell":
+                chunks.append(ncell)
+            else:
+                chunks.append(dataset.sizes[dim])
+
+        encoding[name] = {"chunks": tuple(chunks)}
+
+    return encoding
 
 def _write_dataset(
     dataset: xr.Dataset,
@@ -75,7 +110,14 @@ def _write_dataset(
     }
     if append_dim is not None:
         options["append_dim"] = append_dim
-    dataset.to_zarr(destination, **options)
+
+    encoding = _encoding_for_full_horizontal_chunks(dataset)
+
+    dataset.to_zarr(
+        destination,
+        **options,
+        encoding=encoding,
+    )
 
 
 def _rewrite_dataset_via_temp(
@@ -240,7 +282,12 @@ def _write_missing_variables(
         return existing
 
     add_ds = candidate[missing].reindex(time=existing["time"].values)
-    _write_dataset(add_ds, destination, mode="a", zarr_format=zarr_format)
+    _write_dataset(
+        add_ds,
+        destination,
+        mode="a",
+        zarr_format=zarr_format,
+    )
     updated = existing.copy()
     for name in missing:
         updated[name] = add_ds[name]
@@ -330,7 +377,12 @@ def update_zarr_store(
     dataset = normalise_published_dataset(dataset)
     path = Path(destination)
     if clean or not path.exists():
-        _write_dataset(dataset, destination, mode="w", zarr_format=zarr_format)
+        _write_dataset(
+            dataset,
+            destination,
+            mode="w",
+            zarr_format=zarr_format,
+        )
         _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)
         return
@@ -338,7 +390,12 @@ def update_zarr_store(
     existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
 
     if "time" not in dataset.dims or "time" not in existing.dims:
-        _write_dataset(dataset, destination, mode="a", zarr_format=zarr_format)
+        _write_dataset(
+            dataset,
+            destination,
+            mode="a",
+            zarr_format=zarr_format,
+        )
         _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)
         return
@@ -368,11 +425,11 @@ def update_zarr_store(
     appendable_candidate = dataset.sel(time=new_times.values)
     if _can_append_new_times(existing, appendable_candidate):
         _append_new_times(
-            existing,
-            appendable_candidate,
-            destination,
-            zarr_format=zarr_format,
-        )
+        existing,
+        appendable_candidate,
+        destination,
+        zarr_format=zarr_format,
+    )
         _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)
         return

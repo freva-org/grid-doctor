@@ -47,8 +47,15 @@ STAGE_COLORS = {
     "grib_merge_done": "\033[36m",
     "weight_calculation": "\033[33m",
     "remap_start": "\033[1;35m",
-    "remap_done": "\033[1;35m",
-    "zarr_write": "\033[32m",
+    "remap_graph_ready": "\033[35m",
+    "remap_materialize_start": "\033[1;35m",
+    "remap_materialize_done": "\033[35m",
+    "coarsen_source_open": "\033[36m",
+    "coarsen_start": "\033[36m",
+    "coarsen_done": "\033[36m",
+    "zarr_write_start": "\033[32m",
+    "zarr_write_done": "\033[1;32m",
+    "highest_level_only_done": "\033[1;32m",
     "frequency_done": "\033[1;32m",
     "frequency_skip_empty": "\033[90m",
     "attrs_only": "\033[32m",
@@ -178,12 +185,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override /pool/data/ERA5 for tests or alternate mounts.",
     )
     convert.add_argument(
-        "--time-chunk",
-        type=int,
-        default=48,
-        help="Optional time chunk size before remapping.",
-    )
-    convert.add_argument(
         "--zarr-format",
         type=int,
         choices=(2, 3),
@@ -208,9 +209,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing Zarr outputs instead of updating them incrementally.",
     )
     convert.add_argument(
-        "--attrs-only",
+        "-ao","--attrs-only",
         action="store_true",
         help="Refresh variable attrs on existing Zarr outputs without remapping data.",
+    )
+    mode_group = convert.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "-hlo","--highest-level-only",
+        action="store_true",
+        help="Only remap and write the finest HEALPix zoom level for each frequency.",
+    )
+    mode_group.add_argument(
+        "-co","--coarsen-only",
+        action="store_true",
+        help="Skip GRIB remapping and derive lower zoom levels from an existing highest-level Zarr store.",
+    )
+    convert.add_argument(
+        "-ps","--pyramid-strategy",
+        choices=("lazy", "stepwise"),
+        default="lazy",
+        help=(
+            "Build the HEALPix pyramid lazily with grid_doctor's default path, "
+            "or materialize the highest zoom first and coarsen stepwise in memory."
+        ),
     )
     return parser
 
@@ -308,10 +329,23 @@ def run_fetch_files(args: argparse.Namespace) -> int:
 def run_convert_healpix(args: argparse.Namespace) -> int:
     """Resolve source files, remap them with grid_doctor, and write Zarr output."""
 
+    logger = logging.getLogger(__name__)
     variables = parse_arg_list(args.variables)
     frequencies = parse_frequencies(args.freq)
     interval = parse_interval(args.interval)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
+
+    if args.highest_level_only and args.pyramid_strategy != "stepwise":
+        logger.info(
+            "Forcing pyramid strategy to 'stepwise' because --highest-level-only was requested."
+        )
+        args.pyramid_strategy = "stepwise"
+    if args.coarsen_only and args.pyramid_strategy != "lazy":
+        logger.info(
+            "Ignoring --pyramid-strategy=%s because --coarsen-only does not remap.",
+            args.pyramid_strategy,
+        )
+        args.pyramid_strategy = "lazy"
 
     records = resolve_records(
         var_table=DEFAULT_VAR_TABLE,
@@ -336,11 +370,13 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         records,
         frequencies=frequencies,
         interval=interval,
-        time_chunk=args.time_chunk,
         zarr_format=args.zarr_format,
         use_cache=args.use_cache,
         weights_dir=args.weights_dir,
         clean=args.clean,
+        pyramid_strategy=args.pyramid_strategy,
+        highest_level_only=args.highest_level_only,
+        coarsen_only=args.coarsen_only,
     )
 
     return 0
