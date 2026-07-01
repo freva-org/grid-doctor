@@ -1,14 +1,33 @@
 from argparse import ArgumentParser
 import logging
 from grid_doctor import setup_logging
-from imerg import IMERGConfig as Config
+
+
+_CONFS = {
+    "imerg": ("imerg", "IMERGConfig"),
+}
+
+
+def loadConfig(name: str):
+    from importlib import import_module
+
+    mod_name, cls_name = _CONFS[name]
+    mod = import_module(mod_name)
+    return getattr(mod, cls_name)
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     setup_logging(logging.DEBUG)
 
     parser = ArgumentParser(
-        "imerg", description="Tool for remaping IMERG to healpix in zarr format"
+        description="Tool for remapping datasets to healpix in zarr format"
+    )
+
+    parser.add_argument(
+        "config",
+        choices=_CONFS.keys(),
+        help="Dataset configuration to use",
     )
 
     parser.add_argument(
@@ -19,10 +38,8 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "destination",
-        help=f"Base location where to write the dataset (default: file//{Config.store_path})",
+        help=f"Parent path/location where to write the dataset",
         type=str,
-        nargs="?",
-        default=Config.store_path,
     )
     ## Init arguments
     parser.add_argument(
@@ -45,6 +62,8 @@ if __name__ == "__main__":
         help="Used to adjust the width of each regio when writing",
     )
     args = parser.parse_args()
+
+    Config = loadConfig(args.config)
 
     config = Config(store_path=args.destination)
 
