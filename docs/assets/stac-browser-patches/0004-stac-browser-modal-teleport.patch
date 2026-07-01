@@ -1,0 +1,23 @@
+From 8a729186e25029339d6575c8dd5edcbd4bc40836 Mon Sep 17 00:00:00 2001
+From: tropicrainforest <tropicrainforest27017@gmail.com>
+Date: Wed, 1 Jul 2026 12:27:36 +0200
+Subject: [PATCH 4/8] stac browser modal teleport
+
+Teleport the Search 'example code' modal into #stac-browser so it renders inside the embed instead of document.body (To keeps it scoped and styled)
+---
+ src/components/SearchFilter.vue | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/components/SearchFilter.vue b/src/components/SearchFilter.vue
+index 7dd179a8..43b0364f 100644
+--- a/src/components/SearchFilter.vue
++++ b/src/components/SearchFilter.vue
+@@ -149,7 +149,7 @@
+         <b-button v-if="canShowExampleCode" type="button" variant="secondary" @click="showCodeModal = true">{{ $t('exampleCode.title') }}</b-button>
+       </b-card-footer>
+     </b-card>
+-    <b-modal v-if="canShowExampleCode" v-model="showCodeModal" :title="$t('exampleCode.title')" size="xl">
++    <b-modal v-if="canShowExampleCode" v-model="showCodeModal" :title="$t('exampleCode.title')" size="xl" teleport-to="#stac-browser">
+       <SearchCode
+         v-if="showCodeModal"
+         :searchLinks="codeExampleSearchLinks"

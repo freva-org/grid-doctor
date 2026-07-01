@@ -1,0 +1,38 @@
+From 3dd930669cfbec7429ab58422049044f042d7759 Mon Sep 17 00:00:00 2001
+From: tropicrainforest <tropicrainforest27017@gmail.com>
+Date: Wed, 1 Jul 2026 12:28:09 +0200
+Subject: [PATCH 5/8] stac browser readmore expanded
+
+Default the ReadMore component to expanded so the landing-page description shows in full on load, while keeping the toggle working (users can still collapse with 'Read less' and re-expand)
+---
+ src/components/ReadMore.vue | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/components/ReadMore.vue b/src/components/ReadMore.vue
+index 38433192..42231138 100644
+--- a/src/components/ReadMore.vue
++++ b/src/components/ReadMore.vue
+@@ -34,7 +34,7 @@ export default defineComponent({
+   data() {
+     return {
+       readmore: false,
+-      expanded: false,
++      expanded: true,
+       inMaxRange: false
+     };
+   },
+@@ -66,6 +66,14 @@ export default defineComponent({
+ 
+       this.$refs.to.style.setProperty("--lineHeight", lh + "px");
+       this.$refs.ht.style.setProperty("--lineHeight", lh + "px");
++
++      // Waterpark embed: start fully expanded by default (toggle still works).
++      if (this.expanded && !this.inMaxRange) {
++        this.$refs.to.style.setProperty(
++          "max-height",
++          this.$refs.to.scrollHeight + "px"
++        );
++      }
+     });
+   },
+   methods: {

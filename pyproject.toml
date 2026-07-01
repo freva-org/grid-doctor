@@ -138,6 +138,7 @@ exclude_lines = [
 
 [tool.codespell]
 ignore-words-list = "te,nd,fo,ist,orcestra,cdo,COO"
+skip = "docs/assets/logos/*.svg"
 
 [tool.tox]
 legacy_tox_ini = """
@@ -207,6 +208,7 @@ deps =
     -e .[docs]
     codespell
 commands =
+    python docs/scripts/build_stac_browser_docs.py {posargs:tech}
     codespell {posargs: --quiet-level=2} docs
     mkdocs build --strict -f mkdocs.{posargs:tech}.yml
 
@@ -222,6 +224,7 @@ deps =
 commands_pre =
     {[docs-prep]serve}
 commands =
+    python docs/scripts/build_stac_browser_docs.py {posargs:tech}
     codespell --quiet-level=2 docs
     mkdocs serve -f mkdocs.{posargs:tech}.yml --strict -a localhost:8000 --watch docs
 

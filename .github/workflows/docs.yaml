@@ -21,6 +21,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node.js (for STAC Browser build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Setup micromamba
         uses: mamba-org/setup-micromamba@v1
         with:

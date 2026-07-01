@@ -1,0 +1,35 @@
+From fc0cd69b791cc5237dc4867c549b5370ad0360e9 Mon Sep 17 00:00:00 2001
+From: tropicrainforest <tropicrainforest27017@gmail.com>
+Date: Wed, 1 Jul 2026 12:28:48 +0200
+Subject: [PATCH 6/8] stac browser sidebar
+
+Namespace the sidebar body class (sidebar -> stac-browser-sidebar) and add body-scrolling to the Browse offcanvas so it no longer scroll-locks or shifts the host docs page when opened/closed
+---
+ src/components/Sidebar.vue | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/components/Sidebar.vue b/src/components/Sidebar.vue
+index 2851a253..3ed6b009 100644
+--- a/src/components/Sidebar.vue
++++ b/src/components/Sidebar.vue
+@@ -2,6 +2,7 @@
+   <b-offcanvas
+     initial-animation id="sidebar" :model-value="modelValue" @update:model-value="emit"
+     :title="$t('browse')" teleport-to="#stac-browser" footer-class="offcanvas-footer"
++    body-scrolling
+   >
+     <template #default>
+       <Loading v-if="loading" />
+@@ -58,10 +59,10 @@ export default {
+         }
+ 
+         if (visible) {
+-          document.body.classList.add("sidebar");
++          document.body.classList.add("stac-browser-sidebar"); // Waterpark embed: namespaced to avoid host clash
+         }
+         else {
+-          document.body.classList.remove("sidebar");
++          document.body.classList.remove("stac-browser-sidebar");
+         }
+       }
+     },

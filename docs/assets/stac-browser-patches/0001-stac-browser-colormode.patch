@@ -1,0 +1,72 @@
+From 3fd18db930872ea3978d3e438d952cdd9a3e341c Mon Sep 17 00:00:00 2001
+From: tropicrainforest <tropicrainforest27017@gmail.com>
+Date: Wed, 1 Jul 2026 12:23:55 +0200
+Subject: [PATCH 1/8] stac browser colormode
+
+Scope color-mode to #stac-browser-mount and mirror MkDocs Material's light/dark toggle into STAC Browser, so the embed follows the docs theme.
+---
+ src/StacBrowser.vue | 32 ++++++++++++++++++++++++++++++--
+ 1 file changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/src/StacBrowser.vue b/src/StacBrowser.vue
+index f1394c1c..68ef1203 100644
+--- a/src/StacBrowser.vue
++++ b/src/StacBrowser.vue
+@@ -39,7 +39,7 @@
+                 @set-locale="locale => switchLocale({locale, userSelected: true})"
+               />
+               <b-button
+-                v-if="!enforcedColorModeFromVueX || enforcedColorModeFromVueX === 'auto'"
++                v-if="(!enforcedColorModeFromVueX || enforcedColorModeFromVueX === 'auto') && !materialColorSync"
+                 variant="primary"
+                 @click="toggleColorMode"
+               >
+@@ -168,6 +168,7 @@ export default defineComponent({
+   data() {
+     return {
+       colorMode: null,
++      materialColorSync: false, // Waterpark embed: follow Material's theme
+       sidebar: null,
+       error: null,
+       onDataLoaded: null,
+@@ -404,12 +405,39 @@ export default defineComponent({
+       this.$store.commit('setColorMode', value);
+     }
+   },
++  beforeUnmount() {
++    // Waterpark embed: stop observing Material's theme on teardown.
++    if (this._waterparkColorObserver) {
++      this._waterparkColorObserver.disconnect();
++      this._waterparkColorObserver = null;
++    }
++  },
++
+   async created() {
+     this.colorMode = useColorMode({
+-      selector: 'body',
++      // Waterpark embed: scope the color attribute to the mount host, not <body>.
++      selector: '#stac-browser-mount',
+       initialValue: this.enforcedColorModeFromVueX
+     });
+ 
++    // Waterpark embed: follow Material's light/dark toggle (mirror body[data-md-color-scheme]).
++    if (document.getElementById('stac-browser-mount')) {
++      this.materialColorSync = true;
++      const readMaterial = () =>
++        (document.body.getAttribute('data-md-color-scheme') === 'slate') ? 'dark' : 'light';
++      this.colorMode = readMaterial();
++      this._waterparkColorObserver = new MutationObserver(() => {
++        const mode = readMaterial();
++        if (mode !== this.colorMode) {
++          this.colorMode = mode;
++        }
++      });
++      this._waterparkColorObserver.observe(document.body, {
++        attributes: true,
++        attributeFilter: ['data-md-color-scheme']
++      });
++    }
++
+     await updateExternals(this.localeFromVueX, this.fallbackLocaleFromVueX);
+     await this.$router.isReady();
+     await this.detectLocale();
