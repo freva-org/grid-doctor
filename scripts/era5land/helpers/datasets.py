@@ -10,6 +10,7 @@ import xarray as xr
 
 from .file_fetcher import SourceRecord
 from .grib import get_vars, open_dataset
+from .logging_utils import log_stage
 from .metadata import clean_output_attrs
 
 LOGGER = logging.getLogger(__name__)
@@ -148,13 +149,6 @@ def open_source_record_dataset(
     use_cache: bool,
 ) -> xr.Dataset:
     """Open one source record and rename the payload to the requested variable."""
-
-    LOGGER.info(
-        "stage=grib_read variable=%s frequency=%s files=%d",
-        record.variable,
-        record.frequency,
-        len(record.files),
-    )
     ds = open_dataset(record.files, use_cache=use_cache)
     if record.variable in ds.data_vars:
         ds_var = ds[[record.variable]]
@@ -199,15 +193,13 @@ def merge_frequency_dataset(
     else:
         total_files = sum(len(record.files) for record in resolved_records)
         max_workers = len(resolved_records)
-        LOGGER.info(
-            (
-                "stage=grib_read_parallel frequency=%s record_tasks=%d "
-                "total_files=%d workers=%d"
-            ),
-            resolved_records[0].frequency,
-            len(resolved_records),
-            total_files,
-            max_workers,
+        log_stage(
+            LOGGER,
+            "grib_read_parallel",
+            frequency=resolved_records[0].frequency,
+            record_tasks=len(resolved_records),
+            total_files=total_files,
+            workers=max_workers,
         )
         datasets_by_index: list[Optional[xr.Dataset]] = [None] * len(resolved_records)
 

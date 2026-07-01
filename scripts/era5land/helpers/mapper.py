@@ -20,6 +20,7 @@ from .formatter import (
     existing_destinations_for_frequency,
     group_records_by_frequency,
 )
+from .logging_utils import log_stage
 from .metadata import attrs_for_record, global_attrs_for_records
 from .zarr_publisher import (
     sync_global_attrs,
@@ -63,15 +64,13 @@ def _write_zoom_level(
             merged_attrs[key] = dataset.attrs[key]
     dataset.attrs = merged_attrs
     destination = destination_for_level(frequency, zoom_number)
-    LOGGER.info(
-        (
-            "stage=zarr_write_start frequency=%s variables=%s "
-            "zoom=%d destination=%s"
-        ),
-        frequency,
-        variables,
-        zoom_number,
-        destination,
+    log_stage(
+        LOGGER,
+        "zarr_write_start",
+        frequency=frequency,
+        variables=variables,
+        zoom=zoom_number,
+        destination=destination,
     )
     Path(destination).parent.mkdir(parents=True, exist_ok=True)
     update_zarr_store(
@@ -80,14 +79,6 @@ def _write_zoom_level(
         clean=clean,
         zarr_format=zarr_format,
     )
-    LOGGER.info(
-        "stage=zarr_write_done frequency=%s variables=%s zoom=%d",
-        frequency,
-        variables,
-        zoom_number,
-    )
-
-
 def _prepare_dataset_for_coarsen(ds: xr.Dataset) -> xr.Dataset:
     """Drop level-specific HEALPix geometry that must be regenerated after coarsening."""
 
@@ -130,29 +121,18 @@ def _coarsen_existing_frequency(
         )
 
     highest_level, highest_destination = existing[0]
-    LOGGER.info(
-        "stage=coarsen_source_open frequency=%s variables=%s zoom=%d source=%s",
-        frequency,
-        variables,
-        highest_level,
-        highest_destination,
+    log_stage(
+        LOGGER,
+        "coarsen_source_open",
+        frequency=frequency,
+        variables=variables,
+        zoom=highest_level,
+        source=highest_destination,
     )
     current = xr.open_zarr(highest_destination, consolidated=(zarr_format == 2)).load()
     global_attrs = dict(current.attrs)
     for zoom_number in range(highest_level - 1, -1, -1):
-        LOGGER.info(
-            "stage=coarsen_start frequency=%s variables=%s zoom=%d",
-            frequency,
-            variables,
-            zoom_number,
-        )
         current = gd.coarsen_healpix(_prepare_dataset_for_coarsen(current), zoom_number)
-        LOGGER.info(
-            "stage=coarsen_done frequency=%s variables=%s zoom=%d",
-            frequency,
-            variables,
-            zoom_number,
-        )
         _write_zoom_level(
             current,
             frequency=frequency,
@@ -187,11 +167,7 @@ def map_grib_to_healpix(
         for frequency in frequencies
     }
 
-    LOGGER.info(
-        "stage=convert_start frequencies=%s records=%d",
-        ",".join(frequencies),
-        len(records),
-    )
+    log_stage(LOGGER, "convert_start", frequencies=",".join(frequencies), records=len(records))
 
     for frequency in frequencies:
         freq_records = grouped_records.get(frequency, [])
@@ -199,10 +175,12 @@ def map_grib_to_healpix(
         if coarsen_only:
             if not variable_names:
                 variable_names = "unknown"
-            LOGGER.info(
-                "stage=frequency_start frequency=%s variables=%s mode=coarsen_only",
-                frequency,
-                variable_names,
+            log_stage(
+                LOGGER,
+                "frequency_start",
+                frequency=frequency,
+                variables=variable_names,
+                mode="coarsen_only",
             )
             _coarsen_existing_frequency(
                 frequency=frequency,
@@ -210,71 +188,54 @@ def map_grib_to_healpix(
                 zarr_format=zarr_format,
                 clean=clean,
             )
-            LOGGER.info(
-                "stage=frequency_done frequency=%s variables=%s",
-                frequency,
-                variable_names,
-            )
+            log_stage(LOGGER, "frequency_done", frequency=frequency, variables=variable_names)
             continue
         if not freq_records:
             continue
         if not variable_names:
             variable_names = _variable_names(freq_records)
 
-        LOGGER.info(
-            "stage=frequency_start frequency=%s variables=%s records=%d",
-            frequency,
-            variable_names,
-            len(freq_records),
+        log_stage(
+            LOGGER,
+            "frequency_start",
+            frequency=frequency,
+            variables=variable_names,
+            records=len(freq_records),
         )
         global_attrs = global_attrs_for_records(freq_records)
-        LOGGER.info(
-            "stage=grib_merge_start frequency=%s variables=%s",
-            frequency,
-            variable_names,
-        )
         ds = merge_frequency_dataset(freq_records, use_cache=use_cache)
         ds.attrs.update(global_attrs)
         ds = select_time_interval(ds, interval)
         if "time" in ds.dims and ds.sizes.get("time", 0) == 0:
-            LOGGER.info(
-                "stage=frequency_skip_empty frequency=%s variables=%s",
-                frequency,
-                variable_names,
-            )
+            log_stage(LOGGER, "frequency_skip_empty", frequency=frequency, variables=variable_names)
             continue
 
-        LOGGER.info(
-            "stage=grib_merge_done frequency=%s variables=%s dims=%s",
-            frequency,
-            variable_names,
-            dict(ds.sizes),
+        log_stage(
+            LOGGER,
+            "grib_merge_done",
+            frequency=frequency,
+            variables=variable_names,
+            dims=dict(ds.sizes),
         )
         ds = normalise_reduced_gaussian_dataset(ds)
         if "cell" in ds.dims:
             ds = ds.chunk({"cell": -1})
 
-        LOGGER.info(
-            "stage=weight_calculation frequency=%s variables=%s",
-            frequency,
-            variable_names,
-        )
+        log_stage(LOGGER, "weight_calculation", frequency=frequency, variables=variable_names)
         max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
         weight_file = gd.cached_weights(
             ds,
             level=max_level,
             cache_path=weights_dir,
         )
-        LOGGER.info(
-            (
-                "stage=remap_start frequency=%s variables=%s max_level=%d "
-                "weights=%s strategy=%s"
-            ),
-            frequency,
-            variable_names,
-            max_level,
-            weight_file,
-            pyramid_strategy,
+        log_stage(
+            LOGGER,
+            "remap_start",
+            frequency=frequency,
+            variables=variable_names,
+            max_level=max_level,
+            weights=weight_file,
+            strategy=pyramid_strategy,
         )
         if pyramid_strategy == "stepwise":
             finest = gd.regrid_to_healpix(
@@ -282,24 +243,13 @@ def map_grib_to_healpix(
                 max_level,
                 weights_path=weight_file,
             )
-            LOGGER.info(
-                "stage=remap_graph_ready frequency=%s variables=%s zoom_levels=%d",
-                frequency,
-                variable_names,
-                max_level + 1,
-            )
-            LOGGER.info(
-                "stage=remap_materialize_start frequency=%s variables=%s zoom=%d",
-                frequency,
-                variable_names,
-                max_level,
-            )
             current = finest.load()
-            LOGGER.info(
-                "stage=remap_materialize_done frequency=%s variables=%s zoom=%d",
-                frequency,
-                variable_names,
-                max_level,
+            log_stage(
+                LOGGER,
+                "remap_materialize_done",
+                frequency=frequency,
+                variables=variable_names,
+                zoom=max_level,
             )
             _write_zoom_level(
                 current,
@@ -311,33 +261,11 @@ def map_grib_to_healpix(
                 zarr_format=zarr_format,
             )
             if highest_level_only:
-                LOGGER.info(
-                    "stage=highest_level_only_done frequency=%s variables=%s zoom=%d",
-                    frequency,
-                    variable_names,
-                    max_level,
-                )
-                LOGGER.info(
-                    "stage=frequency_done frequency=%s variables=%s",
-                    frequency,
-                    variable_names,
-                )
+                log_stage(LOGGER, "frequency_done", frequency=frequency, variables=variable_names)
                 continue
             for zoom_number in range(max_level - 1, -1, -1):
-                LOGGER.info(
-                    "stage=coarsen_start frequency=%s variables=%s zoom=%d",
-                    frequency,
-                    variable_names,
-                    zoom_number,
-                )
                 current = gd.coarsen_healpix(
                     _prepare_dataset_for_coarsen(current),
-                    zoom_number,
-                )
-                LOGGER.info(
-                    "stage=coarsen_done frequency=%s variables=%s zoom=%d",
-                    frequency,
-                    variable_names,
                     zoom_number,
                 )
                 _write_zoom_level(
@@ -355,12 +283,6 @@ def map_grib_to_healpix(
                 max_level=max_level,
                 weights_path=weight_file,
             )
-            LOGGER.info(
-                "stage=remap_graph_ready frequency=%s variables=%s zoom_levels=%d",
-                frequency,
-                variable_names,
-                len(pyramid),
-            )
             for zoom_number, dataset in pyramid.items():
                 _write_zoom_level(
                     dataset,
@@ -372,18 +294,8 @@ def map_grib_to_healpix(
                     zarr_format=zarr_format,
                 )
                 if highest_level_only:
-                    LOGGER.info(
-                        "stage=highest_level_only_done frequency=%s variables=%s zoom=%d",
-                        frequency,
-                        variable_names,
-                        zoom_number,
-                    )
                     break
-        LOGGER.info(
-            "stage=frequency_done frequency=%s variables=%s",
-            frequency,
-            variable_names,
-        )
+        log_stage(LOGGER, "frequency_done", frequency=frequency, variables=variable_names)
 
 
 def update_healpix_attrs_only(
@@ -403,11 +315,7 @@ def update_healpix_attrs_only(
         if not freq_records:
             continue
 
-        LOGGER.info(
-            "stage=attrs_only frequency=%s variables=%s",
-            frequency,
-            _variable_names(freq_records),
-        )
+        log_stage(LOGGER, "attrs_only", frequency=frequency, variables=_variable_names(freq_records))
         global_attrs = global_attrs_for_records(freq_records)
         attrs_by_name = {
             record.variable: attrs_for_record(record)
