@@ -375,6 +375,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
 
     map_grib_to_healpix(
         records,
+        dataset=args.dataset,
         frequencies=frequencies,
         interval=interval,
         zarr_format=args.zarr_format,

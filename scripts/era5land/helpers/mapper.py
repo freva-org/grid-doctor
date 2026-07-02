@@ -49,6 +49,7 @@ def _variable_names(records: list[SourceRecord]) -> str:
 def _write_zoom_level(
     dataset,
     *,
+    source_dataset: str,
     frequency: str,
     variables: str,
     zoom_number: int,
@@ -63,7 +64,7 @@ def _write_zoom_level(
         if key in dataset.attrs:
             merged_attrs[key] = dataset.attrs[key]
     dataset.attrs = merged_attrs
-    destination = destination_for_level(frequency, zoom_number)
+    destination = destination_for_level(source_dataset, frequency, zoom_number)
     log_stage(
         LOGGER,
         "zarr_write_start",
@@ -93,11 +94,14 @@ def _prepare_dataset_for_coarsen(ds: xr.Dataset) -> xr.Dataset:
     )
 
 
-def _existing_level_destinations(frequency: str) -> list[tuple[int, str]]:
+def _existing_level_destinations(
+    source_dataset: str,
+    frequency: str,
+) -> list[tuple[int, str]]:
     """Return existing destinations for one frequency with parsed zoom levels."""
 
     destinations: list[tuple[int, str]] = []
-    for destination in existing_destinations_for_frequency(frequency):
+    for destination in existing_destinations_for_frequency(source_dataset, frequency):
         match = LEVEL_RE.search(destination)
         if match is None:
             continue
@@ -107,6 +111,7 @@ def _existing_level_destinations(frequency: str) -> list[tuple[int, str]]:
 
 def _coarsen_existing_frequency(
     *,
+    source_dataset: str,
     frequency: str,
     variables: str,
     zarr_format: int,
@@ -114,7 +119,7 @@ def _coarsen_existing_frequency(
 ) -> None:
     """Build lower zoom levels from the highest existing Zarr store."""
 
-    existing = _existing_level_destinations(frequency)
+    existing = _existing_level_destinations(source_dataset, frequency)
     if not existing:
         raise ValueError(
             f"No existing HEALPix Zarr stores found for frequency {frequency!r}."
@@ -135,6 +140,7 @@ def _coarsen_existing_frequency(
         current = gd.coarsen_healpix(_prepare_dataset_for_coarsen(current), zoom_number)
         _write_zoom_level(
             current,
+            source_dataset=source_dataset,
             frequency=frequency,
             variables=variables,
             zoom_number=zoom_number,
@@ -147,6 +153,7 @@ def _coarsen_existing_frequency(
 def map_grib_to_healpix(
     records: list[SourceRecord],
     *,
+    dataset: str,
     frequencies: tuple[str, ...],
     interval: tuple[Optional[date], Optional[date]] = (None, None),
     zarr_format: int = 2,
@@ -185,6 +192,7 @@ def map_grib_to_healpix(
                 mode="coarsen_only",
             )
             _coarsen_existing_frequency(
+                source_dataset=dataset,
                 frequency=frequency,
                 variables=variable_names,
                 zarr_format=zarr_format,
@@ -261,6 +269,7 @@ def map_grib_to_healpix(
             )
             _write_zoom_level(
                 current,
+                source_dataset=dataset,
                 frequency=frequency,
                 variables=variable_names,
                 zoom_number=max_level,
@@ -278,6 +287,7 @@ def map_grib_to_healpix(
                 )
                 _write_zoom_level(
                     current,
+                    source_dataset=dataset,
                     frequency=frequency,
                     variables=variable_names,
                     zoom_number=zoom_number,
@@ -294,6 +304,7 @@ def map_grib_to_healpix(
             for zoom_number, dataset in pyramid.items():
                 _write_zoom_level(
                     dataset,
+                    source_dataset=dataset,
                     frequency=frequency,
                     variables=variable_names,
                     zoom_number=zoom_number,
@@ -329,6 +340,7 @@ def update_healpix_attrs_only(
             record.variable: attrs_for_record(record)
             for record in freq_records
         }
-        for destination in existing_destinations_for_frequency(frequency):
+        source_dataset = freq_records[0].dataset
+        for destination in existing_destinations_for_frequency(source_dataset, frequency):
             sync_global_attrs(global_attrs, destination)
             sync_named_variable_attrs(attrs_by_name, destination)

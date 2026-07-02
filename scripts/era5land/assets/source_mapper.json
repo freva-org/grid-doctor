@@ -41,7 +41,7 @@
     "mon": "P1M",
     "fx": "fx"
   },
-  "output_path": "/work/ks1387/gw/data/era5/healpix/era5land/{output_frequency}/level_{zoom_number}.zarr",
+  "output_path": "/work/ks1387/gw/data/era5/healpix/{dataset}/{output_frequency}/level_{zoom_number}.zarr",
   "weights_path": "/work/ks1387/healpix-weights",
   "var_attrs": [
         "cell_measures",
@@ -71,4 +71,3 @@
         "DKRZ_ID"
   ]
 }
-
