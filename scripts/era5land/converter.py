@@ -6,6 +6,7 @@ import json
 import logging
 import shutil
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -175,6 +176,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Date interval as yyyymmdd1,yyyymmdd2. Empty end means today.",
     )
     convert.add_argument(
+        "--batches",
+        type=int,
+        metavar="MONTHS",
+        help=(
+            "Split the requested interval into sequential batches of N months "
+            "and process each batch in a loop."
+        ),
+    )
+    convert.add_argument(
         "--root",
         help="Override /pool/data/ERA5 for tests or alternate mounts.",
     )
@@ -248,6 +258,62 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     return parser
+
+
+def add_months(current: date, months: int) -> date:
+    """Return ``current`` shifted forward by ``months`` calendar months."""
+
+    year = current.year + (current.month - 1 + months) // 12
+    month = (current.month - 1 + months) % 12 + 1
+    return date(year, month, 1)
+
+
+def batched_intervals(
+    interval: Tuple[Optional[date], Optional[date]],
+    *,
+    batch_months: Optional[int],
+) -> Tuple[Tuple[Optional[date], Optional[date]], ...]:
+    """Split one inclusive interval into inclusive month-sized batches.
+
+    Args:
+        interval: Inclusive ``(start, end)`` bounds used by the converter.
+        batch_months: Number of calendar months per batch, or ``None`` to keep
+            the original interval unchanged.
+
+    Returns:
+        A tuple containing one or more inclusive intervals.
+
+    Raises:
+        ValueError: If batching is requested without a fully bounded interval or
+            with a non-positive month count.
+    """
+
+    if batch_months is None:
+        return (interval,)
+    if batch_months <= 0:
+        raise ValueError("--batches must be a positive integer number of months.")
+
+    start, end = interval
+    if start is None or end is None:
+        raise ValueError("--batches requires a bounded --interval with a start and end date.")
+
+    intervals: list[Tuple[date, date]] = []
+    current_start = start
+    while current_start <= end:
+        next_start = add_months(date(current_start.year, current_start.month, 1), batch_months)
+        current_end = min(end, next_start - timedelta(days=1))
+        intervals.append((current_start, current_end))
+        current_start = current_end + timedelta(days=1)
+    return tuple(intervals)
+
+
+def format_interval(interval: Tuple[Optional[date], Optional[date]]) -> str:
+    """Render one interval tuple for logs."""
+
+    start, end = interval
+    start_text = start.isoformat() if start is not None else ""
+    end_text = end.isoformat() if end is not None else ""
+    return f"{start_text},{end_text}"
 
 
 def parse_frequencies(value: str) -> Tuple[str, ...]:
@@ -401,43 +467,68 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         else:
             logger.info("Dataset output root %s does not exist; nothing to delete.", root_path)
 
-    records = resolve_records(
-        var_table=DEFAULT_VAR_TABLE,
-        cmor_tables_dir=DEFAULT_CMOR_TABLES,
-        mapper_path=DEFAULT_SOURCE_MAPPER,
-        dataset=args.dataset,
-        variables=source_variables,
-        frequencies=frequencies,
-        interval=interval,
-        root=args.root,
-        glob_files=True,
-    )
+    def run_single_interval(
+        current_interval: Tuple[Optional[date], Optional[date]],
+        *,
+        clean: bool,
+    ) -> None:
+        """Process one interval with the existing record-resolution pipeline."""
 
-    if args.attrs_only:
-        update_healpix_attrs_only(
+        records = resolve_records(
+            var_table=DEFAULT_VAR_TABLE,
+            cmor_tables_dir=DEFAULT_CMOR_TABLES,
+            mapper_path=DEFAULT_SOURCE_MAPPER,
+            dataset=args.dataset,
+            variables=source_variables,
+            frequencies=frequencies,
+            interval=current_interval,
+            root=args.root,
+            glob_files=True,
+        )
+
+        if args.attrs_only:
+            update_healpix_attrs_only(
+                records,
+                dataset=args.dataset,
+                frequencies=effective_frequencies,
+                requested_variables=requested_variable_names,
+            )
+            return
+
+        map_grib_to_healpix(
             records,
             dataset=args.dataset,
             frequencies=effective_frequencies,
             requested_variables=requested_variable_names,
+            interval=current_interval,
+            zarr_format=args.zarr_format,
+            use_inventory_cache=args.use_inventory_cache,
+            use_input_cache=args.use_input_cache,
+            use_record_threads=args.use_record_threads,
+            weights_dir=args.weights_dir,
+            clean=clean,
+            pyramid_strategy=args.pyramid_strategy,
+            highest_level_only=args.highest_level_only,
+            coarsen_only=args.coarsen_only,
         )
-        return 0
 
-    map_grib_to_healpix(
-        records,
-        dataset=args.dataset,
-        frequencies=effective_frequencies,
-        requested_variables=requested_variable_names,
-        interval=interval,
-        zarr_format=args.zarr_format,
-        use_inventory_cache=args.use_inventory_cache,
-        use_input_cache=args.use_input_cache,
-        use_record_threads=args.use_record_threads,
-        weights_dir=args.weights_dir,
-        clean=args.clean,
-        pyramid_strategy=args.pyramid_strategy,
-        highest_level_only=args.highest_level_only,
-        coarsen_only=args.coarsen_only,
-    )
+    intervals = batched_intervals(interval, batch_months=args.batches)
+    if len(intervals) > 1:
+        logger.info(
+            "Processing %s interval batches of %s month(s) each.",
+            len(intervals),
+            args.batches,
+        )
+
+    for index, current_interval in enumerate(intervals, start=1):
+        if len(intervals) > 1:
+            logger.info(
+                "Starting batch %s/%s for interval %s",
+                index,
+                len(intervals),
+                format_interval(current_interval),
+            )
+        run_single_interval(current_interval, clean=(args.clean and index == 1))
 
     return 0
 
