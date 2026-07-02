@@ -262,7 +262,12 @@ def time_normalizer(
     return ds_out
 
 
-def open_dataset(files: Collection[str | Path], use_cache: bool = False) -> xr.Dataset:
+def open_dataset(
+    files: Collection[str | Path],
+    *,
+    use_inventory_cache: bool = True,
+    use_input_cache: bool = False,
+) -> xr.Dataset:
     """Open GRIB files as a merged xarray dataset.
 
     Files are inventoried first, then opened one GRIB field group at a time
@@ -274,9 +279,13 @@ def open_dataset(files: Collection[str | Path], use_cache: bool = False) -> xr.D
     ----------
     files : iterable of path-like
         GRIB files to open.
-    use_cache : bool, optional
-        If ``True``, reuse cached GRIB inventories and cached opened datasets
-        through ``grid_doctor``. If ``False``, inventory and open directly.
+    use_inventory_cache : bool, optional
+        If ``True``, reuse cached GRIB inventories. If ``False``, rebuild the
+        inventory directly from the source files.
+    use_input_cache : bool, optional
+        If ``True``, reuse cached multi-file dataset pickles through
+        ``grid_doctor.cached_open_dataset``. If ``False``, open the datasets
+        directly with ``xarray.open_mfdataset``.
 
     Returns
     -------
@@ -284,7 +293,7 @@ def open_dataset(files: Collection[str | Path], use_cache: bool = False) -> xr.D
         Merged dataset containing all discovered GRIB field groups.
     """
     files = [str(Path(file).expanduser().resolve()) for file in files]
-    inv = cached_grib_inventory(files) if use_cache else grib_inventory(files)
+    inv = cached_grib_inventory(files) if use_inventory_cache else grib_inventory(files)
 
     inv["_file_key"] = inv["file"].map(lambda file: str(Path(file).resolve()))
 
@@ -331,7 +340,7 @@ def open_dataset(files: Collection[str | Path], use_cache: bool = False) -> xr.D
             "combine": "by_coords",
             "preprocess": preprocess,
         }
-        if use_cache:
+        if use_input_cache:
             ds_raw = gd.cached_open_dataset(
                 files_for_var,
                 **open_kwargs,

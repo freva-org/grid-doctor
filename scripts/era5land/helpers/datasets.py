@@ -146,10 +146,36 @@ def normalise_reduced_gaussian_dataset(ds: xr.Dataset) -> xr.Dataset:
 def open_source_record_dataset(
     record: SourceRecord,
     *,
-    use_cache: bool,
+    interval: tuple[Optional[date], Optional[date]] = (None, None),
+    use_inventory_cache: bool = True,
+    use_input_cache: bool = False,
 ) -> xr.Dataset:
-    """Open one source record and rename the payload to the requested variable."""
-    ds = open_dataset(record.files, use_cache=use_cache)
+    """Open one source record, optionally slice it, and rename its payload.
+
+    Parameters
+    ----------
+    record
+        Source metadata describing the files and output variable name.
+    interval
+        Inclusive start/end date bounds used to trim the dataset immediately
+        after opening. ``None`` leaves the corresponding side unbounded.
+    use_inventory_cache
+        Whether to reuse cached GRIB inventories for this record.
+    use_input_cache
+        Whether to reuse cached multi-file input datasets for this record.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset containing only the requested output variable.
+    """
+    ds = open_dataset(
+        record.files,
+        use_inventory_cache=use_inventory_cache,
+        use_input_cache=use_input_cache,
+    )
+    ds = select_time_interval(ds, interval)
+
     if record.variable in ds.data_vars:
         ds_var = ds[[record.variable]]
     else:
@@ -173,23 +199,48 @@ def open_source_record_dataset(
 def merge_frequency_dataset(
     records: list[SourceRecord],
     *,
-    use_cache: bool,
+    use_inventory_cache: bool = True,
+    use_input_cache: bool = False,
+    use_record_threads: bool = False,
+    interval: tuple[Optional[date], Optional[date]] = (None, None),
 ) -> xr.Dataset:
     """Open and merge all resolved variables for one output frequency.
 
-    Source records are opened in parallel at the variable level, with one
-    worker per resolved variable record for the current frequency. The merge
-    order still follows the input record order.
-    """
+    Parameters
+    ----------
+    records
+        Resolved source records for a single output frequency.
+    use_inventory_cache
+        Whether to reuse cached GRIB inventories while opening records.
+    use_input_cache
+        Whether to reuse cached multi-file GRIB input datasets while opening
+        records.
+    use_record_threads
+        Whether to open source records in parallel with one worker per
+        resolved record for the current frequency.
+    interval
+        Inclusive start/end date bounds applied to each per-record dataset
+        immediately after it is opened.
 
+    Returns
+    -------
+    xarray.Dataset
+        Merged dataset containing all variables for the requested frequency.
+    """
     resolved_records = [record for record in records if record.files]
     if not resolved_records:
         raise ValueError("No source files were resolved for this frequency.")
 
-    if len(resolved_records) == 1:
-        datasets = [
-            open_source_record_dataset(resolved_records[0], use_cache=use_cache)
-        ]
+    if len(resolved_records) == 1 or not use_record_threads:
+        datasets = []
+        for record in resolved_records:
+            ds = open_source_record_dataset(
+                record,
+                interval=interval,
+                use_inventory_cache=use_inventory_cache,
+                use_input_cache=use_input_cache,
+            )
+            datasets.append(ds)
     else:
         total_files = sum(len(record.files) for record in resolved_records)
         max_workers = len(resolved_records)
@@ -208,7 +259,9 @@ def merge_frequency_dataset(
                 executor.submit(
                     open_source_record_dataset,
                     record,
-                    use_cache=use_cache,
+                    interval=interval,
+                    use_inventory_cache=use_inventory_cache,
+                    use_input_cache=use_input_cache,
                 ): index
                 for index, record in enumerate(resolved_records)
             }
@@ -223,7 +276,6 @@ def merge_frequency_dataset(
         join="outer",
         combine_attrs="drop_conflicts",
     )
-
 
 def select_time_interval(
     ds: xr.Dataset,

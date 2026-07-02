@@ -185,11 +185,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     convert.add_argument(
         "--no-cache",
+        "--no-inventory-cache",
         action="store_false",
-        dest="use_cache",
-        help="Disable cached GRIB inventories and cached multi-file opens.",
+        dest="use_inventory_cache",
+        help="Disable cached GRIB inventories.",
     )
-    convert.set_defaults(use_cache=True)
+    convert.set_defaults(use_inventory_cache=True)
+    convert.add_argument(
+        "--cache-input-datasets",
+        action="store_true",
+        dest="use_input_cache",
+        help="Enable cached multi-file input dataset pickles.",
+    )
+    convert.set_defaults(use_input_cache=False)
+    convert.add_argument(
+        "--record-threads",
+        action="store_true",
+        dest="use_record_threads",
+        help="Open source records in parallel within each frequency merge.",
+    )
+    convert.set_defaults(use_record_threads=False)
     convert.add_argument(
         "--weights-dir",
         default=str(source_mapper["weights_path"]),
@@ -363,7 +378,9 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         frequencies=frequencies,
         interval=interval,
         zarr_format=args.zarr_format,
-        use_cache=args.use_cache,
+        use_inventory_cache=args.use_inventory_cache,
+        use_input_cache=args.use_input_cache,
+        use_record_threads=args.use_record_threads,
         weights_dir=args.weights_dir,
         clean=args.clean,
         pyramid_strategy=args.pyramid_strategy,

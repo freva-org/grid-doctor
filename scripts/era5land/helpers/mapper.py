@@ -150,7 +150,9 @@ def map_grib_to_healpix(
     frequencies: tuple[str, ...],
     interval: tuple[Optional[date], Optional[date]] = (None, None),
     zarr_format: int = 2,
-    use_cache: bool = False,
+    use_inventory_cache: bool = True,
+    use_input_cache: bool = False,
+    use_record_threads: bool = False,
     weights_dir: Optional[str] = None,
     clean: bool = False,
     pyramid_strategy: str = "lazy",
@@ -203,9 +205,15 @@ def map_grib_to_healpix(
             records=len(freq_records),
         )
         global_attrs = global_attrs_for_records(freq_records)
-        ds = merge_frequency_dataset(freq_records, use_cache=use_cache)
+        ds = merge_frequency_dataset(
+            freq_records,
+            use_inventory_cache=use_inventory_cache,
+            use_input_cache=use_input_cache,
+            use_record_threads=use_record_threads,
+            interval=interval,
+        )
         ds.attrs.update(global_attrs)
-        ds = select_time_interval(ds, interval)
+        # ds = select_time_interval(ds, interval)
         if "time" in ds.dims and ds.sizes.get("time", 0) == 0:
             log_stage(LOGGER, "frequency_skip_empty", frequency=frequency, variables=variable_names)
             continue
