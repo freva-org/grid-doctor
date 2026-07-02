@@ -149,14 +149,15 @@ def selected_variables(
 ) -> List[VariableRequest]:
     """Filter CSV requests by allowed source codes and optional variable names."""
 
+    requested_filter = variables is not None
     requested = set(variables or ())
     selected = [
         request
         for request in requests
         if dataset_code_allowed(allowed_codes, request.reanalysis)
-        and (not requested or request.name in requested)
+        and (not requested_filter or request.name in requested)
     ]
-    missing = sorted(requested - {request.name for request in selected})
+    missing = sorted(requested - {request.name for request in selected}) if requested_filter else []
     if missing:
         raise KeyError(
             "Requested variables are not available for the selected source: "

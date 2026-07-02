@@ -34,6 +34,13 @@ def destination_for_level(dataset: str, frequency: str, zoom_number: int) -> str
     )
 
 
+def dataset_output_root(dataset: str) -> Path:
+    """Return the dataset-level output root containing all frequencies."""
+
+    sample_path = Path(destination_for_level(dataset, "fx", 0))
+    return sample_path.parent.parent
+
+
 def existing_destinations_for_frequency(dataset: str, frequency: str) -> Tuple[str, ...]:
     """Return existing Zarr stores for one output frequency."""
 

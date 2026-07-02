@@ -312,6 +312,12 @@ def _write_missing_variables(
     return updated
 
 
+def _merge_static_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Dataset:
+    """Merge non-time variables, preferring values from *candidate*."""
+
+    return candidate.combine_first(existing)
+
+
 def _append_new_times(
     existing: xr.Dataset,
     candidate: xr.Dataset,
@@ -408,12 +414,22 @@ def update_zarr_store(
     existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
 
     if "time" not in dataset.dims or "time" not in existing.dims:
-        _write_dataset(
-            dataset,
-            destination,
-            mode="a",
-            zarr_format=zarr_format,
-        )
+        missing = [name for name in dataset.data_vars if name not in existing.data_vars]
+        overlapping = [name for name in dataset.data_vars if name in existing.data_vars]
+        if overlapping:
+            merged = _merge_static_updates(existing, dataset)
+            _rewrite_dataset_via_temp(
+                merged,
+                destination,
+                zarr_format=zarr_format,
+            )
+        elif missing:
+            _write_dataset(
+                dataset,
+                destination,
+                mode="a",
+                zarr_format=zarr_format,
+            )
         _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)
         return

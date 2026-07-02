@@ -93,9 +93,70 @@ python3 converter.py convert-healpix \
   --clean
 ```
 
-`--clean` rewrites each target `level_*.zarr` store from scratch. Without it,
-existing stores are updated incrementally by merging overlapping time slices,
-adding missing variables, and appending new times where possible.
+**NOTE:**
+`--clean` rewrites only the target `level_*.zarr` stores touched by the run.
+Without it, existing stores are updated incrementally by merging overlapping
+time slices, adding missing variables, and appending new times where possible.
+`--from-scratch` is broader: it deletes the **whole dataset output root **before
+the run starts. For `--dataset era5land`, that means the entire
+`.../healpix/era5land` subtree across all frequencies and levels.
+
+**NOTE:**
+special variables such as `areacella` (that DO not depend on GRIB files) are
+published through the `fx` output path while still being requestable via `--var`
+
+
+Example:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas,pr \
+  --freq mon \
+  --interval 202603,202603 \
+  --from-scratch
+```
+
+### Cache And Parallelism
+
+The converter separates the two input-side caches:
+
+- GRIB inventory cache: enabled by default
+- pickled multi-file input-dataset cache: disabled by default
+
+Disable the inventory cache:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas,pr \
+  --freq 1hr \
+  --interval 202603,202603 \
+  --no-inventory-cache
+```
+
+`--no-cache` is kept as an alias for `--no-inventory-cache`.
+
+Enable the pickled multi-file input-dataset cache explicitly:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas,pr \
+  --freq 1hr \
+  --interval 202603,202603 \
+  --cache-input-datasets
+```
+
+Open source records in parallel within each frequency merge:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas,pr \
+  --freq 1hr \
+  --interval 202603,202603 \
+  --record-threads
+```
+
+`--record-threads` is disabled by default. When enabled, the per-record open
+stage in `merge_frequency_dataset(...)` uses a thread pool.
 
 ### Pyramid Modes
 
@@ -176,6 +237,8 @@ deliberately milestone-based rather than per-file noisy. Typical stages include:
 - `frequency_done`
 
 If stderr is attached to an interactive terminal, these stages are colorised.
+`grib_read_parallel` appears only when `--record-threads` is enabled and there
+is more than one resolved record for the current frequency.
 
 ## Development Checks
 

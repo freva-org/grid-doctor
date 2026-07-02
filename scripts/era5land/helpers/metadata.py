@@ -49,16 +49,12 @@ def _source_id_from_table_id(table_id: str) -> str:
     return "ERA-5-Land" if "ERA5Land" in table_id else "ERA-5"
 
 
-def global_attrs_for_records(records: list[SourceRecord]) -> dict[str, str]:
-    """Build dataset-level attrs from the CMOR table header and ERA5 CV."""
+def global_attrs_for_dataset_frequency(dataset: str, frequency: str) -> dict[str, str]:
+    """Build dataset-level attrs for one dataset/frequency CMOR table."""
 
-    if not records:
-        return {}
-
-    first_record = records[0]
-    dataset_cfg = SOURCE_MAPPER["datasets"][first_record.dataset]
+    dataset_cfg = SOURCE_MAPPER["datasets"][dataset]
     table_prefix = str(dataset_cfg["table_prefix"])
-    table_path = CMOR_TABLES_DIR / f"{table_prefix}_{first_record.frequency}.json"
+    table_path = CMOR_TABLES_DIR / f"{table_prefix}_{frequency}.json"
     table_payload = load_json(table_path)
     header = table_payload.get("Header", {})
     cv = load_json(CMOR_TABLES_ROOT / "ERA5_CV.json").get("CV", {})
@@ -78,7 +74,7 @@ def global_attrs_for_records(records: list[SourceRecord]) -> dict[str, str]:
         {
             "activity_id": _pick_cv_value(cv.get("activity_id")),
             "contact": _pick_cv_value(cv.get("contact")),
-            "frequency": first_record.frequency,
+            "frequency": frequency,
             "institution_id": institution_id,
             "institution": _pick_cv_value(cv.get("institution_id", {}).get(institution_id)),
             "license": _pick_cv_value(cv.get("license")),
@@ -96,3 +92,13 @@ def global_attrs_for_records(records: list[SourceRecord]) -> dict[str, str]:
         for key, value in attrs.items()
         if value not in ("", None)
     }
+
+
+def global_attrs_for_records(records: list[SourceRecord]) -> dict[str, str]:
+    """Build dataset-level attrs from the CMOR table header and ERA5 CV."""
+
+    if not records:
+        return {}
+
+    first_record = records[0]
+    return global_attrs_for_dataset_frequency(first_record.dataset, first_record.frequency)

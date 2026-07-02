@@ -4,6 +4,7 @@
 import argparse
 import json
 import logging
+import shutil
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -17,7 +18,8 @@ from helpers.file_fetcher import (
     split_csv_list,
     unresolved_records,
 )
-from helpers.formatter import normalise_frequencies
+from helpers.special import split_special_variables
+from helpers.formatter import dataset_output_root, normalise_frequencies
 from helpers.mapper import map_grib_to_healpix, update_healpix_attrs_only
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -216,6 +218,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing Zarr outputs instead of updating them incrementally.",
     )
     convert.add_argument(
+        "--from-scratch",
+        action="store_true",
+        help="Delete the whole dataset output root before writing any new stores.",
+    )
+    convert.add_argument(
         "-ao","--attrs-only",
         action="store_true",
         help="Refresh variable attrs on existing Zarr outputs without remapping data.",
@@ -234,7 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument(
         "-ps","--pyramid-strategy",
         choices=("lazy", "stepwise"),
-        default="lazy",
+        default="stepwise",
         help=(
             "Build the HEALPix pyramid lazily with grid_doctor's default path, "
             "or materialize the highest zoom first and coarsen stepwise in memory."
@@ -255,6 +262,18 @@ def parse_frequencies(value: str) -> Tuple[str, ...]:
     if unknown_freqs:
         raise ValueError(f"Unsupported frequencies: {', '.join(unknown_freqs)}")
     return tuple(frequencies)
+
+
+def extend_frequencies_for_special_variables(
+    frequencies: Tuple[str, ...],
+    requested_variables: Tuple[str, ...],
+) -> Tuple[str, ...]:
+    """Add the `fx` publication pass when special variables are requested."""
+
+    _, special_variables = split_special_variables(requested_variables)
+    if not special_variables or "fx" in frequencies:
+        return frequencies
+    return tuple((*frequencies, "fx"))
 
 
 def selected_requests(
@@ -282,12 +301,18 @@ def run_fetch_files(args: argparse.Namespace) -> int:
     variables = parse_arg_list(args.variables)
     frequencies = parse_frequencies(args.freq)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
+    requested_variable_names = tuple(request.name for request in requests)
+    source_variables, _ = split_special_variables(requested_variable_names)
+    effective_frequencies = extend_frequencies_for_special_variables(
+        frequencies,
+        requested_variable_names,
+    )
     records = resolve_records(
         var_table=DEFAULT_VAR_TABLE,
         cmor_tables_dir=DEFAULT_CMOR_TABLES,
         mapper_path=DEFAULT_SOURCE_MAPPER,
         dataset=args.dataset,
-        variables=variables,
+        variables=source_variables,
         frequencies=frequencies,
         interval=parse_interval(args.interval),
         root=args.root,
@@ -295,7 +320,12 @@ def run_fetch_files(args: argparse.Namespace) -> int:
     )
 
     missing = [record for record in records if not record.files]
-    unresolved = unresolved_records(requests, frequencies, records, UNRESOLVED_REASON)
+    unresolved = unresolved_records(
+        [request for request in requests if request.name in source_variables],
+        frequencies,
+        records,
+        UNRESOLVED_REASON,
+    )
     if args.strict and (missing or unresolved):
         for record in missing:
             print(
@@ -341,6 +371,15 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
     frequencies = parse_frequencies(args.freq)
     interval = parse_interval(args.interval)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
+    requested_variable_names = tuple(request.name for request in requests)
+    source_variables, _ = split_special_variables(requested_variable_names)
+    effective_frequencies = extend_frequencies_for_special_variables(
+        frequencies,
+        requested_variable_names,
+    )
+
+    if args.from_scratch and args.attrs_only:
+        raise ValueError("--from-scratch cannot be combined with --attrs-only.")
 
     if args.highest_level_only and args.pyramid_strategy != "stepwise":
         logger.info(
@@ -354,12 +393,20 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         )
         args.pyramid_strategy = "lazy"
 
+    if args.from_scratch:
+        root_path = dataset_output_root(args.dataset)
+        if root_path.exists():
+            logger.warning("Deleting dataset output root %s", root_path)
+            shutil.rmtree(root_path)
+        else:
+            logger.info("Dataset output root %s does not exist; nothing to delete.", root_path)
+
     records = resolve_records(
         var_table=DEFAULT_VAR_TABLE,
         cmor_tables_dir=DEFAULT_CMOR_TABLES,
         mapper_path=DEFAULT_SOURCE_MAPPER,
         dataset=args.dataset,
-        variables=variables,
+        variables=source_variables,
         frequencies=frequencies,
         interval=interval,
         root=args.root,
@@ -369,14 +416,17 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
     if args.attrs_only:
         update_healpix_attrs_only(
             records,
-            frequencies=frequencies,
+            dataset=args.dataset,
+            frequencies=effective_frequencies,
+            requested_variables=requested_variable_names,
         )
         return 0
 
     map_grib_to_healpix(
         records,
         dataset=args.dataset,
-        frequencies=frequencies,
+        frequencies=effective_frequencies,
+        requested_variables=requested_variable_names,
         interval=interval,
         zarr_format=args.zarr_format,
         use_inventory_cache=args.use_inventory_cache,
