@@ -2,6 +2,7 @@
 """Unified entry point for the ERA5/ERA5-Land conversion workflow."""
 
 import argparse
+from rich_argparse import RichHelpFormatter
 import json
 import logging
 import shutil
@@ -55,6 +56,13 @@ STAGE_COLORS = {
     "frequency_skip_empty": "\033[90m",
     "attrs_only": "\033[32m",
 }
+
+
+class RichDefaultsHelpFormatter(
+    argparse.ArgumentDefaultsHelpFormatter,
+    RichHelpFormatter,
+):
+    """Rich help with argparse default values."""
 
 
 class StageColorFormatter(logging.Formatter):
@@ -121,63 +129,99 @@ def build_parser() -> argparse.ArgumentParser:
     source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
 
     parser = argparse.ArgumentParser(
-        description="ERA5/ERA5-Land source discovery and conversion tools."
+        description="ERA5/ERA5-Land source discovery and conversion tools.",
+        formatter_class=RichDefaultsHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command")
 
     fetch = subparsers.add_parser(
         "fetch-files",
         help="Resolve source GRIB files from the CMOR tables.",
+        formatter_class=RichDefaultsHelpFormatter,
     )
-    fetch.add_argument("--dataset", choices=("era5land", "era5"), default="era5land")
-    fetch.add_argument("--var", dest="variables", help="Comma-separated variables.")
+    fetch.add_argument(
+        "--dataset",
+        choices=("era5land", "era5"),
+        default="era5land",
+        help="Dataset to process.",
+    )
+    fetch.add_argument(
+        "--var",
+        dest="variables",
+        default=None,
+        help="Comma-separated variables.",
+    )
     fetch.add_argument(
         "--freq",
         default="all",
-        help="Comma-separated frequencies: 1hr,day,mon,fx. Default: all.",
+        help="Comma-separated frequencies: 1hr,day,mon,fx.",
     )
     fetch.add_argument(
         "--interval",
-        help="Date interval as yyyymmdd1,yyyymmdd2. Empty end means today.",
+        default=None,
+        help=(
+            "Date interval (START,END) where each date may be YYYY, YYYYMM, YYYYMMDD "
+            "(hyphens optional). Empty END means today."
+        ),
     )
     fetch.add_argument(
         "--root",
+        default=None,
         help="Override /pool/data/ERA5 for tests or alternate mounts.",
     )
     fetch.add_argument(
         "--json",
         action="store_true",
+        default=False,
         help="Print records, missing matches, and unresolved requests as JSON.",
     )
     fetch.add_argument(
         "--show-patterns",
         action="store_true",
+        default=False,
         help="Print resolved glob patterns instead of matching files.",
     )
     fetch.add_argument(
         "--strict",
         action="store_true",
+        default=False,
         help="Exit non-zero if any resolved source has no matching files.",
     )
 
     convert = subparsers.add_parser(
         "convert-healpix",
         help="Resolve GRIB files and convert them to HEALPix Zarr pyramids.",
+        formatter_class=RichDefaultsHelpFormatter,
     )
-    convert.add_argument("--dataset", choices=("era5land", "era5"), default="era5land")
-    convert.add_argument("--var", dest="variables", help="Comma-separated variables.")
+    convert.add_argument(
+        "--dataset",
+        choices=("era5land", "era5"),
+        default="era5land",
+        help="Dataset to process.",
+    )
+    convert.add_argument(
+        "--var",
+        dest="variables",
+        default=None,
+        help="Comma-separated variables.",
+    )
     convert.add_argument(
         "--freq",
         default="all",
-        help="Comma-separated frequencies: 1hr,day,mon,fx. Default: all.",
+        help="Comma-separated frequencies: 1hr,day,mon,fx.",
     )
     convert.add_argument(
         "--interval",
-        help="Date interval as yyyymmdd1,yyyymmdd2. Empty end means today.",
+        default=None,
+        help=(
+            "Date interval (START,END) where each date may be YYYY, YYYYMM, YYYYMMDD "
+            "(hyphens optional). Empty END means today."
+        ),
     )
     convert.add_argument(
         "--batches",
         type=int,
+        default=None,
         metavar="MONTHS",
         help=(
             "Split the requested interval into sequential batches of N months "
@@ -186,6 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     convert.add_argument(
         "--root",
+        default=None,
         help="Override /pool/data/ERA5 for tests or alternate mounts.",
     )
     convert.add_argument(
@@ -200,23 +245,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-inventory-cache",
         action="store_false",
         dest="use_inventory_cache",
+        default=True,
         help="Disable cached GRIB inventories.",
     )
-    convert.set_defaults(use_inventory_cache=True)
     convert.add_argument(
         "--cache-input-datasets",
         action="store_true",
         dest="use_input_cache",
+        default=False,
         help="Enable cached multi-file input dataset pickles.",
     )
-    convert.set_defaults(use_input_cache=False)
     convert.add_argument(
         "--record-threads",
         action="store_true",
         dest="use_record_threads",
+        default=False,
         help="Open source records in parallel within each frequency merge.",
     )
-    convert.set_defaults(use_record_threads=False)
     convert.add_argument(
         "--weights-dir",
         default=str(source_mapper["weights_path"]),
@@ -225,31 +270,45 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument(
         "--clean",
         action="store_true",
+        default=False,
         help="Overwrite existing Zarr outputs instead of updating them incrementally.",
     )
     convert.add_argument(
         "--from-scratch",
         action="store_true",
+        default=False,
         help="Delete the whole dataset output root before writing any new stores.",
     )
     convert.add_argument(
-        "-ao","--attrs-only",
+        "-ao",
+        "--attrs-only",
         action="store_true",
+        default=False,
         help="Refresh variable attrs on existing Zarr outputs without remapping data.",
     )
+
     mode_group = convert.add_mutually_exclusive_group()
     mode_group.add_argument(
-        "-hlo","--highest-level-only",
+        "-hlo",
+        "--highest-level-only",
         action="store_true",
+        default=False,
         help="Only remap and write the finest HEALPix zoom level for each frequency.",
     )
     mode_group.add_argument(
-        "-co","--coarsen-only",
+        "-co",
+        "--coarsen-only",
         action="store_true",
-        help="Skip GRIB remapping and derive lower zoom levels from an existing highest-level Zarr store.",
+        default=False,
+        help=(
+            "Skip GRIB remapping and derive lower zoom levels from an existing "
+            "highest-level Zarr store."
+        ),
     )
+
     convert.add_argument(
-        "-ps","--pyramid-strategy",
+        "-ps",
+        "--pyramid-strategy",
         choices=("lazy", "stepwise"),
         default="stepwise",
         help=(
@@ -257,6 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
             "or materialize the highest zoom first and coarsen stepwise in memory."
         ),
     )
+
     return parser
 
 
@@ -273,20 +333,7 @@ def batched_intervals(
     *,
     batch_months: Optional[int],
 ) -> Tuple[Tuple[Optional[date], Optional[date]], ...]:
-    """Split one inclusive interval into inclusive month-sized batches.
-
-    Args:
-        interval: Inclusive ``(start, end)`` bounds used by the converter.
-        batch_months: Number of calendar months per batch, or ``None`` to keep
-            the original interval unchanged.
-
-    Returns:
-        A tuple containing one or more inclusive intervals.
-
-    Raises:
-        ValueError: If batching is requested without a fully bounded interval or
-            with a non-positive month count.
-    """
+    """Split one inclusive interval into inclusive month-sized batches."""
 
     if batch_months is None:
         return (interval,)
@@ -373,6 +420,7 @@ def run_fetch_files(args: argparse.Namespace) -> int:
         frequencies,
         requested_variable_names,
     )
+
     records = resolve_records(
         var_table=DEFAULT_VAR_TABLE,
         cmor_tables_dir=DEFAULT_CMOR_TABLES,
@@ -388,10 +436,11 @@ def run_fetch_files(args: argparse.Namespace) -> int:
     missing = [record for record in records if not record.files]
     unresolved = unresolved_records(
         [request for request in requests if request.name in source_variables],
-        frequencies,
+        effective_frequencies,
         records,
         UNRESOLVED_REASON,
     )
+
     if args.strict and (missing or unresolved):
         for record in missing:
             print(
@@ -452,6 +501,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
             "Forcing pyramid strategy to 'stepwise' because --highest-level-only was requested."
         )
         args.pyramid_strategy = "stepwise"
+
     if args.coarsen_only and args.pyramid_strategy != "lazy":
         logger.info(
             "Ignoring --pyramid-strategy=%s because --coarsen-only does not remap.",
@@ -513,6 +563,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         )
 
     intervals = batched_intervals(interval, batch_months=args.batches)
+
     if len(intervals) > 1:
         logger.info(
             "Processing %s interval batches of %s month(s) each.",
@@ -539,13 +590,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     configure_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
+
     if args.command is None:
         parser.print_help()
         return 2
+
     if args.command == "fetch-files":
         return run_fetch_files(args)
+
     if args.command == "convert-healpix":
         return run_convert_healpix(args)
+
     parser.error(f"Unsupported command {args.command!r}")
     return 2
 

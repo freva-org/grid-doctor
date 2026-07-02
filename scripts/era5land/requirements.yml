@@ -13,5 +13,7 @@ dependencies:
   # Regridding stack used by grid_doctor
   - "esmf=*=mpi_openmpi_*"
   - esmpy
+  # CLI formatting
+  - rich_argparse
   - pip:
     - reflow-hpc
