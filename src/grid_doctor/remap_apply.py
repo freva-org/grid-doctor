@@ -28,7 +28,7 @@ on what is installed and the problem size:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Iterable, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -132,7 +132,7 @@ def _build_numba_kernels() -> (
     if not _HAS_NUMBA:
         return None
 
-    @numba.njit(parallel=True, cache=True)  # type: ignore[untyped-decorator]
+    @numba.njit(parallel=True, cache=True)
     def _numba_renormalize(
         indptr: npt.NDArray[np.int32],
         indices: npt.NDArray[np.int32],
@@ -142,7 +142,7 @@ def _build_numba_kernels() -> (
     ) -> None:
         """Fused NaN-aware sparse apply with renormalization."""
         n_target = indptr.size - 1
-        for i in numba.prange(n_target):
+        for i in cast(Iterable[int], numba.prange(n_target)):
             wsum = 0.0
             sup = 0.0
             for j in range(indptr[i], indptr[i + 1]):
@@ -154,7 +154,7 @@ def _build_numba_kernels() -> (
                     sup += w
             out[i] = wsum / sup if sup > 0.0 else np.nan
 
-    @numba.njit(parallel=True, cache=True)  # type: ignore[untyped-decorator]
+    @numba.njit(parallel=True, cache=True)
     def _numba_propagate(
         indptr: npt.NDArray[np.int32],
         indices: npt.NDArray[np.int32],
@@ -164,7 +164,7 @@ def _build_numba_kernels() -> (
     ) -> None:
         """Fused sparse apply that propagates NaN."""
         n_target = indptr.size - 1
-        for i in numba.prange(n_target):
+        for i in cast(Iterable[int], numba.prange(n_target)):
             wsum = 0.0
             has_nan = False
             for j in range(indptr[i], indptr[i + 1]):
@@ -177,7 +177,7 @@ def _build_numba_kernels() -> (
                     has_nan = True
             out[i] = np.nan if has_nan else wsum
 
-    return _numba_renormalize, _numba_propagate
+    return _numba_renormalize, _numba_propagate  # type: ignore
 
 
 # Lazy singleton — compiled on first call.
