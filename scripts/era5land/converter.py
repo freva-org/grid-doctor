@@ -4,13 +4,15 @@
 import argparse
 import json
 import logging
+import os
 from rich_argparse import RichHelpFormatter
 import shutil
+import signal
 import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 from helpers.file_fetcher import (
     load_json,
@@ -431,6 +433,38 @@ def build_batch_command(
     return command
 
 
+def _batch_state_path() -> Path:
+    """Return the writable path used to persist the active batch process state."""
+
+    launch_dir_candidate = Path.cwd() / ".current_batch_pid.json"
+    try:
+        if launch_dir_candidate.exists():
+            return launch_dir_candidate
+        with launch_dir_candidate.open("w", encoding="utf-8") as handle:
+            json.dump({}, handle)
+        launch_dir_candidate.unlink()
+        return launch_dir_candidate
+    except OSError:
+        return SCRIPT_DIR / ".current_batch_pid.json"
+
+
+def write_batch_state(state: dict[str, Any]) -> Path:
+    """Persist the current batch state for external inspection or manual kill."""
+
+    state_path = _batch_state_path()
+    with state_path.open("w", encoding="utf-8") as handle:
+        json.dump(state, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    return state_path
+
+
+def clear_batch_state() -> None:
+    """Remove the persisted batch state file when no child batch is active."""
+
+    state_path = _batch_state_path()
+    state_path.unlink(missing_ok=True)
+
+
 def run_batched_subprocesses(
     args: argparse.Namespace,
     intervals: Sequence[Tuple[Optional[date], Optional[date]]],
@@ -438,25 +472,93 @@ def run_batched_subprocesses(
     """Run each batch interval in a fresh child process on the same node."""
 
     logger = logging.getLogger(__name__)
+    active_process: subprocess.Popen[str] | None = None
+    original_sigint = signal.getsignal(signal.SIGINT)
+    original_sigterm = signal.getsignal(signal.SIGTERM)
 
-    for index, current_interval in enumerate(intervals, start=1):
-        logger.info(
-            "Starting batch %s/%s for interval %s",
-            index,
-            len(intervals),
-            format_interval(current_interval),
-        )
-        command = build_batch_command(
-            args,
-            interval=current_interval,
-            clean=(args.clean and index == 1),
-        )
-        logger.info(
-            "Launching isolated batch process %s/%s with --batch-mode=inprocess",
-            index,
-            len(intervals),
-        )
-        subprocess.run(command, check=True)
+    def forward_signal(signum: int, _frame: object) -> None:
+        """Forward termination signals to the active batch process group."""
+
+        nonlocal active_process
+        if active_process is not None and active_process.poll() is None:
+            try:
+                process_group_id = os.getpgid(active_process.pid)
+                logger.warning(
+                    "Forwarding signal %s to batch_pid=%s batch_pgid=%s",
+                    signum,
+                    active_process.pid,
+                    process_group_id,
+                )
+                os.killpg(process_group_id, signum)
+            except ProcessLookupError:
+                logger.warning(
+                    "Batch process already exited before signal %s could be forwarded.",
+                    signum,
+                )
+        raise KeyboardInterrupt
+
+    def _install_handler(
+        signum: int,
+        handler: Callable[[int, object], None],
+    ) -> None:
+        """Install one signal handler for the batched parent process."""
+
+        signal.signal(signum, handler)
+
+    _install_handler(signal.SIGINT, forward_signal)
+    _install_handler(signal.SIGTERM, forward_signal)
+
+    try:
+        for index, current_interval in enumerate(intervals, start=1):
+            logger.info(
+                "Starting batch %s/%s for interval %s",
+                index,
+                len(intervals),
+                format_interval(current_interval),
+            )
+            command = build_batch_command(
+                args,
+                interval=current_interval,
+                clean=(args.clean and index == 1),
+            )
+            active_process = subprocess.Popen(
+                command,
+                start_new_session=True,
+                text=True,
+            )
+            state_path = write_batch_state(
+                {
+                    "batch_index": index,
+                    "batch_count": len(intervals),
+                    "batch_interval": format_interval(current_interval),
+                    "batch_mode": "subprocess",
+                    "batch_pgid": active_process.pid,
+                    "batch_pid": active_process.pid,
+                    "command": command,
+                    "parent_pid": os.getpid(),
+                }
+            )
+            logger.info(
+                "Launched isolated batch process %s/%s batch_pid=%s batch_pgid=%s state_file=%s",
+                index,
+                len(intervals),
+                active_process.pid,
+                active_process.pid,
+                state_path,
+            )
+            return_code = active_process.wait()
+            if return_code != 0:
+                raise subprocess.CalledProcessError(return_code, command)
+            active_process = None
+    finally:
+        signal.signal(signal.SIGINT, original_sigint)
+        signal.signal(signal.SIGTERM, original_sigterm)
+        if active_process is not None and active_process.poll() is None:
+            try:
+                os.killpg(os.getpgid(active_process.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        clear_batch_state()
 
     return 0
 

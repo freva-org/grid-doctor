@@ -230,6 +230,31 @@ By default, batched runs use isolated child processes:
 The subprocess mode keeps all batches inside the same job allocation, node, and
 environment, but releases the batch-local memory floor when each child exits.
 
+While a batched subprocess run is active, the converter writes the current batch
+process state to `.current_batch_pid.json` in the launch directory when
+possible, or falls back to `scripts/era5land/.current_batch_pid.json`.
+
+The state file contains:
+
+- `parent_pid`: PID of the top-level batch controller process
+- `batch_pid`: PID of the currently running child batch
+- `batch_pgid`: process-group ID of the active child batch
+- `batch_index`: 1-based index of the current batch
+- `batch_count`: total number of batches in the run
+- `batch_interval`: date interval currently being processed
+
+This is mainly intended for manual intervention during a stuck batch. Typical
+examples:
+
+```console
+cat .current_batch_pid.json
+kill 12345
+kill -- -12345
+```
+
+In practice, `kill <batch_pid>` stops the current child batch, while
+`kill -- -<batch_pgid>` targets the whole active batch process group.
+
 If you explicitly want the legacy behavior for debugging or profiling:
 
 ```console
