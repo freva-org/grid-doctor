@@ -2,14 +2,15 @@
 """Unified entry point for the ERA5/ERA5-Land conversion workflow."""
 
 import argparse
-from rich_argparse import RichHelpFormatter
 import json
 import logging
+from rich_argparse import RichHelpFormatter
 import shutil
+import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from helpers.file_fetcher import (
     load_json,
@@ -29,6 +30,7 @@ DEFAULT_VAR_TABLE = SCRIPT_DIR / "assets" / "default_variables.csv"
 DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / "assets" / "source_mapper.json"
 DEFAULT_CMOR_TABLES = SCRIPT_DIR / "tables" / "era5-cmor-tables" / "Tables"
 FREQUENCIES = ("1hr", "day", "mon", "fx")
+BATCH_EXECUTION_MODES = ("subprocess", "inprocess")
 UNRESOLVED_REASON = (
     "not found in CMOR table, unsupported stream/frequency, "
     "or has no DKRZ_ID/grib_paramID"
@@ -229,6 +231,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     convert.add_argument(
+        "--batch-mode",
+        choices=BATCH_EXECUTION_MODES,
+        default="subprocess",
+        help=(
+            "Execution mode for --batches. "
+            "'subprocess' runs each batch in a fresh child process to release "
+            "memory between intervals, while 'inprocess' keeps the legacy "
+            "single-process loop."
+        ),
+    )
+    convert.add_argument(
         "--root",
         default=None,
         help="Override /pool/data/ERA5 for tests or alternate mounts.",
@@ -361,6 +374,91 @@ def format_interval(interval: Tuple[Optional[date], Optional[date]]) -> str:
     start_text = start.isoformat() if start is not None else ""
     end_text = end.isoformat() if end is not None else ""
     return f"{start_text},{end_text}"
+
+
+def build_batch_command(
+    args: argparse.Namespace,
+    *,
+    interval: Tuple[Optional[date], Optional[date]],
+    clean: bool,
+) -> list[str]:
+    """Build one isolated child-process command for a single batch interval.
+
+    The child inherits the current Python interpreter and script path so it
+    runs inside the same job allocation and environment while still releasing
+    all batch-local memory on process exit.
+    """
+
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "convert-healpix",
+        "--dataset",
+        args.dataset,
+        "--freq",
+        args.freq,
+        "--interval",
+        format_interval(interval),
+        "--zarr-format",
+        str(args.zarr_format),
+        "--weights-dir",
+        str(args.weights_dir),
+        "--batch-mode",
+        "inprocess",
+        "--pyramid-strategy",
+        args.pyramid_strategy,
+    ]
+
+    if args.variables is not None:
+        command.extend(["--var", args.variables])
+    if args.root is not None:
+        command.extend(["--root", args.root])
+    if not args.use_inventory_cache:
+        command.append("--no-inventory-cache")
+    if args.use_input_cache:
+        command.append("--cache-input-datasets")
+    if args.use_record_threads:
+        command.append("--record-threads")
+    if clean:
+        command.append("--clean")
+    if args.attrs_only:
+        command.append("--attrs-only")
+    if args.highest_level_only:
+        command.append("--highest-level-only")
+    if args.coarsen_only:
+        command.append("--coarsen-only")
+
+    return command
+
+
+def run_batched_subprocesses(
+    args: argparse.Namespace,
+    intervals: Sequence[Tuple[Optional[date], Optional[date]]],
+) -> int:
+    """Run each batch interval in a fresh child process on the same node."""
+
+    logger = logging.getLogger(__name__)
+
+    for index, current_interval in enumerate(intervals, start=1):
+        logger.info(
+            "Starting batch %s/%s for interval %s",
+            index,
+            len(intervals),
+            format_interval(current_interval),
+        )
+        command = build_batch_command(
+            args,
+            interval=current_interval,
+            clean=(args.clean and index == 1),
+        )
+        logger.info(
+            "Launching isolated batch process %s/%s with --batch-mode=subprocess",
+            index,
+            len(intervals),
+        )
+        subprocess.run(command, check=True)
+
+    return 0
 
 
 def parse_frequencies(value: str) -> Tuple[str, ...]:
@@ -566,10 +664,14 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
 
     if len(intervals) > 1:
         logger.info(
-            "Processing %s interval batches of %s month(s) each.",
+            "Processing %s interval batches of %s month(s) each using %s mode.",
             len(intervals),
             args.batches,
+            args.batch_mode,
         )
+
+    if len(intervals) > 1 and args.batch_mode == "subprocess":
+        return run_batched_subprocesses(args, intervals)
 
     for index, current_interval in enumerate(intervals, start=1):
         if len(intervals) > 1:

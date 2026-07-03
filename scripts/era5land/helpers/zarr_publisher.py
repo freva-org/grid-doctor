@@ -1,5 +1,6 @@
 """Zarr publication helpers for ERA5/ERA5-Land outputs."""
 
+import gc
 from pathlib import Path
 import shutil
 import uuid
@@ -324,7 +325,7 @@ def _append_new_times(
     destination: str,
     *,
     zarr_format: int,
-) -> xr.Dataset:
+) -> None:
     """Append strictly newer time slices to an existing store."""
 
     existing_time_strings = set(map(str, existing["time"].values))
@@ -332,7 +333,7 @@ def _append_new_times(
         value for value in candidate["time"].values if str(value) not in existing_time_strings
     ]
     if not new_time_values:
-        return existing
+        return
 
     append_ds = _pad_missing_existing_vars_for_append(
         candidate.sel(time=new_time_values),
@@ -344,14 +345,6 @@ def _append_new_times(
         mode="a",
         append_dim="time",
         zarr_format=zarr_format,
-    )
-    return xr.concat(
-        [existing, append_ds],
-        dim="time",
-        data_vars="all",
-        coords="minimal",
-        compat="override",
-        combine_attrs="drop_conflicts",
     )
 
 
@@ -412,67 +405,70 @@ def update_zarr_store(
         return
 
     existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
+    try:
+        if "time" not in dataset.dims or "time" not in existing.dims:
+            missing = [name for name in dataset.data_vars if name not in existing.data_vars]
+            overlapping = [name for name in dataset.data_vars if name in existing.data_vars]
+            if overlapping:
+                merged = _merge_static_updates(existing, dataset)
+                _rewrite_dataset_via_temp(
+                    merged,
+                    destination,
+                    zarr_format=zarr_format,
+                )
+            elif missing:
+                _write_dataset(
+                    dataset,
+                    destination,
+                    mode="a",
+                    zarr_format=zarr_format,
+                )
+            _sync_global_attrs(dict(dataset.attrs), destination)
+            _sync_variable_attrs(dataset, destination)
+            return
 
-    if "time" not in dataset.dims or "time" not in existing.dims:
-        missing = [name for name in dataset.data_vars if name not in existing.data_vars]
-        overlapping = [name for name in dataset.data_vars if name in existing.data_vars]
-        if overlapping:
-            merged = _merge_static_updates(existing, dataset)
-            _rewrite_dataset_via_temp(
-                merged,
+        existing = _write_missing_variables(
+            existing,
+            dataset,
+            destination,
+            zarr_format=zarr_format,
+        )
+
+        _rewrite_overlapping_times(
+            existing,
+            dataset,
+            destination,
+            zarr_format=zarr_format,
+        )
+
+        candidate_times = dataset.indexes["time"]
+        existing_times = existing.indexes["time"]
+        new_times = candidate_times.difference(existing_times)
+        if len(new_times) == 0:
+            _sync_global_attrs(dict(dataset.attrs), destination)
+            _sync_variable_attrs(dataset, destination)
+            return
+
+        appendable_candidate = dataset.sel(time=new_times.values)
+        if _can_append_new_times(existing, appendable_candidate):
+            _append_new_times(
+                existing,
+                appendable_candidate,
                 destination,
                 zarr_format=zarr_format,
             )
-        elif missing:
-            _write_dataset(
-                dataset,
-                destination,
-                mode="a",
-                zarr_format=zarr_format,
-            )
+            _sync_global_attrs(dict(dataset.attrs), destination)
+            _sync_variable_attrs(dataset, destination)
+            return
+
+        merged = _merge_time_updates(existing, dataset)
+        _rewrite_dataset_via_temp(
+            merged,
+            destination,
+            zarr_format=zarr_format,
+        )
         _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)
-        return
-
-    existing = _write_missing_variables(
-        existing,
-        dataset,
-        destination,
-        zarr_format=zarr_format,
-    )
-
-    _rewrite_overlapping_times(
-        existing,
-        dataset,
-        destination,
-        zarr_format=zarr_format,
-    )
-
-    candidate_times = dataset.indexes["time"]
-    existing_times = existing.indexes["time"]
-    new_times = candidate_times.difference(existing_times)
-    if len(new_times) == 0:
-        _sync_global_attrs(dict(dataset.attrs), destination)
-        _sync_variable_attrs(dataset, destination)
-        return
-
-    appendable_candidate = dataset.sel(time=new_times.values)
-    if _can_append_new_times(existing, appendable_candidate):
-        _append_new_times(
-        existing,
-        appendable_candidate,
-        destination,
-        zarr_format=zarr_format,
-    )
-        _sync_global_attrs(dict(dataset.attrs), destination)
-        _sync_variable_attrs(dataset, destination)
-        return
-
-    merged = _merge_time_updates(existing, dataset)
-    _rewrite_dataset_via_temp(
-        merged,
-        destination,
-        zarr_format=zarr_format,
-    )
-    _sync_global_attrs(dict(dataset.attrs), destination)
-    _sync_variable_attrs(dataset, destination)
+    finally:
+        existing.close()
+        gc.collect()

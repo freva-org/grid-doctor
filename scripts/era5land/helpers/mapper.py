@@ -1,5 +1,6 @@
 """Orchestration helpers for ERA5/ERA5-Land HEALPix conversion."""
 
+import gc
 from datetime import date
 import logging
 from pathlib import Path
@@ -48,6 +49,17 @@ PROTECTED_GRID_ATTRS = {
     "grid_doctor_method",
     "grid_doctor_coarsened_from_level",
 }
+
+
+def _close_dataset_quietly(dataset: xr.Dataset | None) -> None:
+    """Best-effort dataset cleanup for long-running batch conversions."""
+
+    if dataset is None:
+        return
+    try:
+        dataset.close()
+    except Exception:
+        pass
 
 
 def _ensure_output_directory(destination: str) -> None:
@@ -297,6 +309,9 @@ def map_grib_to_healpix(
         special_requested_for_frequency = special_requested if frequency == "fx" else ()
         variable_names = _variable_names(frequency_records, special_requested_for_frequency)
         written_zoom_numbers: tuple[int, ...] = ()
+        ds: xr.Dataset | None = None
+        current: xr.Dataset | None = None
+        finest: xr.Dataset | None = None
         if coarsen_only:
             if not variable_names:
                 variable_names = "unknown"
@@ -340,86 +355,107 @@ def map_grib_to_healpix(
             records=len(freq_records),
         )
 
-        if freq_records:
-            global_attrs = global_attrs_for_records(freq_records)
-            ds = merge_frequency_dataset(
-                freq_records,
-                use_inventory_cache=use_inventory_cache,
-                use_input_cache=use_input_cache,
-                use_record_threads=use_record_threads,
-                interval=interval,
-            )
-            ds.attrs.update(global_attrs)
-            if "time" in ds.dims and ds.sizes.get("time", 0) == 0:
+        try:
+            if freq_records:
+                global_attrs = global_attrs_for_records(freq_records)
+                ds = merge_frequency_dataset(
+                    freq_records,
+                    use_inventory_cache=use_inventory_cache,
+                    use_input_cache=use_input_cache,
+                    use_record_threads=use_record_threads,
+                    interval=interval,
+                )
+                ds.attrs.update(global_attrs)
+                if "time" in ds.dims and ds.sizes.get("time", 0) == 0:
+                    log_stage(
+                        LOGGER,
+                        "frequency_skip_empty",
+                        frequency=frequency,
+                        variables=variable_names,
+                    )
+                    continue
+
                 log_stage(
                     LOGGER,
-                    "frequency_skip_empty",
+                    "grib_merge_done",
                     frequency=frequency,
                     variables=variable_names,
+                    dims=dict(ds.sizes),
                 )
-                continue
+                ds = normalise_reduced_gaussian_dataset(ds)
+                if "cell" in ds.dims:
+                    ds = ds.chunk({"cell": -1})
 
-            log_stage(
-                LOGGER,
-                "grib_merge_done",
-                frequency=frequency,
-                variables=variable_names,
-                dims=dict(ds.sizes),
-            )
-            ds = normalise_reduced_gaussian_dataset(ds)
-            if "cell" in ds.dims:
-                ds = ds.chunk({"cell": -1})
-
-            log_stage(LOGGER, "weight_calculation", frequency=frequency, variables=variable_names)
-            max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
-            weight_file = gd.cached_weights(
-                ds,
-                level=max_level,
-                cache_path=weights_dir,
-            )
-            log_stage(
-                LOGGER,
-                "remap_start",
-                frequency=frequency,
-                variables=variable_names,
-                max_level=max_level,
-                weights=weight_file,
-                strategy=pyramid_strategy,
-            )
-            if pyramid_strategy == "stepwise":
-                finest = gd.regrid_to_healpix(
+                log_stage(LOGGER, "weight_calculation", frequency=frequency, variables=variable_names)
+                max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
+                weight_file = gd.cached_weights(
                     ds,
-                    max_level,
-                    weights_path=weight_file,
+                    level=max_level,
+                    cache_path=weights_dir,
                 )
-                current = finest.load()
-                written_zoom_numbers = (max_level,)
                 log_stage(
                     LOGGER,
-                    "remap_materialize_done",
+                    "remap_start",
                     frequency=frequency,
                     variables=variable_names,
-                    zoom=max_level,
+                    max_level=max_level,
+                    weights=weight_file,
+                    strategy=pyramid_strategy,
                 )
-                _write_zoom_level(
-                    current,
-                    source_dataset=dataset,
-                    frequency=frequency,
-                    variables=variable_names,
-                    zoom_number=max_level,
-                    global_attrs=global_attrs,
-                    clean=clean,
-                    zarr_format=zarr_format,
-                )
-                if not highest_level_only:
-                    remaining_zoom_numbers = tuple(range(max_level - 1, -1, -1))
-                    for zoom_number in remaining_zoom_numbers:
-                        current = gd.coarsen_healpix(
-                            _prepare_dataset_for_coarsen(current),
-                            zoom_number,
-                        )
+                if pyramid_strategy == "stepwise":
+                    finest = gd.regrid_to_healpix(
+                        ds,
+                        max_level,
+                        weights_path=weight_file,
+                    )
+                    current = finest.load()
+                    written_zoom_numbers = (max_level,)
+                    log_stage(
+                        LOGGER,
+                        "remap_materialize_done",
+                        frequency=frequency,
+                        variables=variable_names,
+                        zoom=max_level,
+                    )
+                    _write_zoom_level(
+                        current,
+                        source_dataset=dataset,
+                        frequency=frequency,
+                        variables=variable_names,
+                        zoom_number=max_level,
+                        global_attrs=global_attrs,
+                        clean=clean,
+                        zarr_format=zarr_format,
+                    )
+                    if not highest_level_only:
+                        remaining_zoom_numbers = tuple(range(max_level - 1, -1, -1))
+                        for zoom_number in remaining_zoom_numbers:
+                            current = gd.coarsen_healpix(
+                                _prepare_dataset_for_coarsen(current),
+                                zoom_number,
+                            )
+                            _write_zoom_level(
+                                current,
+                                source_dataset=dataset,
+                                frequency=frequency,
+                                variables=variable_names,
+                                zoom_number=zoom_number,
+                                global_attrs=global_attrs,
+                                clean=clean,
+                                zarr_format=zarr_format,
+                            )
+                        written_zoom_numbers += remaining_zoom_numbers
+                else:
+                    pyramid = gd.latlon_to_healpix_pyramid(
+                        ds,
+                        max_level=max_level,
+                        weights_path=weight_file,
+                    )
+                    written_levels: list[int] = []
+                    for zoom_number, ds_level in pyramid.items():
+                        written_levels.append(int(zoom_number))
                         _write_zoom_level(
-                            current,
+                            ds_level,
                             source_dataset=dataset,
                             frequency=frequency,
                             variables=variable_names,
@@ -428,43 +464,29 @@ def map_grib_to_healpix(
                             clean=clean,
                             zarr_format=zarr_format,
                         )
-                    written_zoom_numbers += remaining_zoom_numbers
-            else:
-                pyramid = gd.latlon_to_healpix_pyramid(
-                    ds,
-                    max_level=max_level,
-                    weights_path=weight_file,
+                        if highest_level_only:
+                            break
+                    written_zoom_numbers = tuple(written_levels)
+
+            if special_requested_for_frequency:
+                _write_special_frequency(
+                    dataset=dataset,
+                    frequency=frequency,
+                    variable_names=special_requested_for_frequency,
+                    written_zoom_numbers=written_zoom_numbers,
+                    highest_level_only=highest_level_only,
+                    coarsen_only=coarsen_only,
+                    zarr_format=zarr_format,
+                    clean=clean,
                 )
-                written_levels: list[int] = []
-                for zoom_number, ds_level in pyramid.items():
-                    written_levels.append(int(zoom_number))
-                    _write_zoom_level(
-                        ds_level,
-                        source_dataset=dataset,
-                        frequency=frequency,
-                        variables=variable_names,
-                        zoom_number=zoom_number,
-                        global_attrs=global_attrs,
-                        clean=clean,
-                        zarr_format=zarr_format,
-                    )
-                    if highest_level_only:
-                        break
-                written_zoom_numbers = tuple(written_levels)
 
-        if special_requested_for_frequency:
-            _write_special_frequency(
-                dataset=dataset,
-                frequency=frequency,
-                variable_names=special_requested_for_frequency,
-                written_zoom_numbers=written_zoom_numbers,
-                highest_level_only=highest_level_only,
-                coarsen_only=coarsen_only,
-                zarr_format=zarr_format,
-                clean=clean,
-            )
-
-        log_stage(LOGGER, "frequency_done", frequency=frequency, variables=variable_names)
+            log_stage(LOGGER, "frequency_done", frequency=frequency, variables=variable_names)
+        finally:
+            _close_dataset_quietly(current)
+            if finest is not current:
+                _close_dataset_quietly(finest)
+            _close_dataset_quietly(ds)
+            gc.collect()
 
 
 SOURCE_MAPPER_PATH = Path(__file__).resolve().parent.parent / "assets" / "source_mapper.json"

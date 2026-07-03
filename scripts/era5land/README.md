@@ -208,6 +208,39 @@ Available strategies:
 - `lazy`: keep `grid_doctor`'s default lazy pyramid construction
 - `stepwise`: remap the highest level first, materialise it, then coarsen level by level
 
+### Batched Execution
+
+Split a long interval into sequential month-sized batches:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas \
+  --freq 1hr,day,mon \
+  --interval 1950,1962 \
+  --batches 2 \
+  --highest-level-only \
+  --from-scratch
+```
+
+By default, batched runs use isolated child processes:
+
+- `--batch-mode subprocess`: default; each batch runs in a fresh Python process
+- `--batch-mode inprocess`: legacy single-process loop
+
+The subprocess mode keeps all batches inside the same job allocation, node, and
+environment, but releases the batch-local memory floor when each child exits.
+
+If you explicitly want the legacy behavior for debugging or profiling:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas \
+  --freq 1hr \
+  --interval 1950,1951 \
+  --batches 2 \
+  --batch-mode inprocess
+```
+
 ### Metadata-Only Maintenance
 
 Refresh metadata on already-published Zarr stores without remapping data:
