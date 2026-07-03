@@ -382,7 +382,10 @@ def map_grib_to_healpix(
                     variables=variable_names,
                     dims=dict(ds.sizes),
                 )
-                ds = normalise_reduced_gaussian_dataset(ds)
+                ds = normalise_reduced_gaussian_dataset(
+                    ds,
+                    use_cache=use_inventory_cache,
+                )
                 if "cell" in ds.dims:
                     ds = ds.chunk({"cell": -1})
 

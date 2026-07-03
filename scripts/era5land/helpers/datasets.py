@@ -2,9 +2,12 @@
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, timedelta
+import hashlib
 import logging
+from pathlib import Path
 from typing import Any, Optional
 
+from grid_doctor.utils import cache_dir
 import numpy as np
 import xarray as xr
 
@@ -17,6 +20,7 @@ LOGGER = logging.getLogger(__name__)
 LAT_COORD_NAMES = ("latitude", "lat", "Latitude", "LATITUDE", "y", "Y")
 LON_COORD_NAMES = ("longitude", "lon", "Longitude", "LONGITUDE", "x", "X")
 STATIC_COORD_NAMES = ("cell", "time", "crs", "surface")
+_REDUCED_GAUSSIAN_GEOMETRY_CACHE: dict[str, dict[str, np.ndarray]] = {}
 
 
 def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> Optional[str]:
@@ -79,8 +83,169 @@ def _ring_slices(latitudes: np.ndarray) -> list[slice]:
     return rings
 
 
-def normalise_reduced_gaussian_dataset(ds: xr.Dataset) -> xr.Dataset:
-    """Convert flattened reduced-Gaussian GRIB output to an unstructured form."""
+def _reduced_gaussian_geometry_cache_key(
+    latitudes: np.ndarray,
+    longitudes: np.ndarray,
+) -> str:
+    """Return a stable cache key for one reduced-Gaussian horizontal grid."""
+
+    digest = hashlib.sha256()
+    digest.update(np.ascontiguousarray(latitudes).tobytes())
+    digest.update(np.ascontiguousarray(longitudes).tobytes())
+    digest.update(f"n={latitudes.size};version=1".encode())
+    return digest.hexdigest()
+
+
+def _reduced_gaussian_geometry_cache_path(cache_key: str) -> Path:
+    """Return the shared cache path for one reduced-Gaussian geometry payload."""
+
+    return cache_dir() / f"reduced_gaussian_geometry_{cache_key}.npz"
+
+
+def _compute_reduced_gaussian_geometry(
+    latitudes: np.ndarray,
+    longitudes: np.ndarray,
+) -> dict[str, np.ndarray]:
+    """Compute reduced-Gaussian cell-vertex geometry for one horizontal grid."""
+
+    rings = _ring_slices(latitudes)
+    ring_centres = np.asarray([latitudes[ring.start] for ring in rings], dtype=np.float64)
+    ring_edges = np.empty(ring_centres.size + 1, dtype=np.float64)
+    if ring_centres.size > 1:
+        ring_edges[1:-1] = 0.5 * (ring_centres[:-1] + ring_centres[1:])
+
+    ring_edges[0] = 90.0
+    ring_edges[-1] = -90.0
+
+    n_cells = latitudes.size
+    lon_vertices = np.empty((n_cells, 4), dtype=np.float64)
+    lat_vertices = np.empty((n_cells, 4), dtype=np.float64)
+
+    for ring_index, ring in enumerate(rings):
+        west, east = _circular_lon_bounds(longitudes[ring])
+        lat_a = ring_edges[ring_index]
+        lat_b = ring_edges[ring_index + 1]
+        south = min(lat_a, lat_b)
+        north = max(lat_a, lat_b)
+
+        lon_vertices[ring, 0] = west
+        lon_vertices[ring, 1] = east
+        lon_vertices[ring, 2] = east
+        lon_vertices[ring, 3] = west
+
+        lat_vertices[ring, 0] = south
+        lat_vertices[ring, 1] = south
+        lat_vertices[ring, 2] = north
+        lat_vertices[ring, 3] = north
+
+    return {
+        "lat_vertices": lat_vertices,
+        "lon_vertices": lon_vertices,
+    }
+
+
+def _load_cached_reduced_gaussian_geometry(
+    cache_key: str,
+) -> Optional[dict[str, np.ndarray]]:
+    """Load cached reduced-Gaussian geometry from memory or shared disk cache."""
+
+    geometry = _REDUCED_GAUSSIAN_GEOMETRY_CACHE.get(cache_key)
+    if geometry is not None:
+        return geometry
+
+    cache_path = _reduced_gaussian_geometry_cache_path(cache_key)
+    if not cache_path.exists():
+        return None
+
+    try:
+        with np.load(cache_path, allow_pickle=False) as payload:
+            geometry = {
+                "lat_vertices": payload["lat_vertices"],
+                "lon_vertices": payload["lon_vertices"],
+            }
+    except Exception as exc:
+        LOGGER.warning(
+            "Could not read cached reduced-Gaussian geometry %s: %s",
+            cache_path,
+            exc,
+        )
+        cache_path.unlink(missing_ok=True)
+        return None
+
+    _REDUCED_GAUSSIAN_GEOMETRY_CACHE[cache_key] = geometry
+    LOGGER.info("Using cached reduced-Gaussian geometry %s", cache_path)
+    return geometry
+
+
+def _store_reduced_gaussian_geometry(
+    cache_key: str,
+    geometry: dict[str, np.ndarray],
+) -> None:
+    """Persist one reduced-Gaussian geometry payload for reuse by later runs."""
+
+    cache_path = _reduced_gaussian_geometry_cache_path(cache_key)
+    temp_path = cache_path.with_name(f"{cache_path.name}.tmp")
+    try:
+        with temp_path.open("wb") as handle:
+            np.savez_compressed(
+                handle,
+                lat_vertices=geometry["lat_vertices"],
+                lon_vertices=geometry["lon_vertices"],
+            )
+        temp_path.replace(cache_path)
+    except Exception as exc:
+        LOGGER.warning(
+            "Could not write reduced-Gaussian geometry cache %s: %s",
+            cache_path,
+            exc,
+        )
+        temp_path.unlink(missing_ok=True)
+
+
+def _reduced_gaussian_geometry(
+    latitudes: np.ndarray,
+    longitudes: np.ndarray,
+    *,
+    use_cache: bool,
+) -> dict[str, np.ndarray]:
+    """Return reduced-Gaussian geometry, regenerating it if cache entries vanish."""
+
+    cache_key = _reduced_gaussian_geometry_cache_key(latitudes, longitudes)
+    if use_cache:
+        geometry = _load_cached_reduced_gaussian_geometry(cache_key)
+        if geometry is not None:
+            return geometry
+
+    geometry = _compute_reduced_gaussian_geometry(latitudes, longitudes)
+    _REDUCED_GAUSSIAN_GEOMETRY_CACHE[cache_key] = geometry
+    if use_cache:
+        LOGGER.info(
+            "Caching reduced-Gaussian geometry in %s",
+            _reduced_gaussian_geometry_cache_path(cache_key),
+        )
+        _store_reduced_gaussian_geometry(cache_key, geometry)
+    return geometry
+
+
+def normalise_reduced_gaussian_dataset(
+    ds: xr.Dataset,
+    *,
+    use_cache: bool = True,
+) -> xr.Dataset:
+    """Convert flattened reduced-Gaussian GRIB output to an unstructured form.
+
+    Parameters
+    ----------
+    ds
+        Dataset that may contain a flattened reduced-Gaussian `values` axis.
+    use_cache
+        Reuse shared reduced-Gaussian geometry caches when available.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset with an unstructured `cell` axis and HEALPix-ready vertices.
+    """
 
     if "values" not in ds.dims:
         return ds
@@ -103,40 +268,15 @@ def normalise_reduced_gaussian_dataset(ds: xr.Dataset) -> xr.Dataset:
 
     latitudes = np.asarray(ds[lat_name].values, dtype=np.float64)
     longitudes = np.asarray(ds[lon_name].values, dtype=np.float64)
-    rings = _ring_slices(latitudes)
+    geometry = _reduced_gaussian_geometry(
+        latitudes,
+        longitudes,
+        use_cache=use_cache,
+    )
 
-    ring_centres = np.asarray([latitudes[ring.start] for ring in rings], dtype=np.float64)
-    ring_edges = np.empty(ring_centres.size + 1, dtype=np.float64)
-    if ring_centres.size > 1:
-        ring_edges[1:-1] = 0.5 * (ring_centres[:-1] + ring_centres[1:])
-
-    ring_edges[0] = 90.0
-    ring_edges[-1] = -90.0
-
-    n_cells = ds.sizes["cell"]
-    lon_vertices = np.empty((n_cells, 4), dtype=np.float64)
-    lat_vertices = np.empty((n_cells, 4), dtype=np.float64)
-
-    for ring_index, ring in enumerate(rings):
-        west, east = _circular_lon_bounds(longitudes[ring])
-        lat_a = ring_edges[ring_index]
-        lat_b = ring_edges[ring_index + 1]
-        south = min(lat_a, lat_b)
-        north = max(lat_a, lat_b)
-
-        lon_vertices[ring, 0] = west
-        lon_vertices[ring, 1] = east
-        lon_vertices[ring, 2] = east
-        lon_vertices[ring, 3] = west
-
-        lat_vertices[ring, 0] = south
-        lat_vertices[ring, 1] = south
-        lat_vertices[ring, 2] = north
-        lat_vertices[ring, 3] = north
-
-    ds = ds.assign_coords(cell=np.arange(n_cells, dtype=np.int64))
-    ds["lon_vertices"] = (("cell", "nv"), lon_vertices)
-    ds["lat_vertices"] = (("cell", "nv"), lat_vertices)
+    ds = ds.assign_coords(cell=np.arange(ds.sizes["cell"], dtype=np.int64))
+    ds["lon_vertices"] = (("cell", "nv"), geometry["lon_vertices"])
+    ds["lat_vertices"] = (("cell", "nv"), geometry["lat_vertices"])
     for name in ds.data_vars:
         if "cell" in ds[name].dims:
             ds[name].attrs["CDI_grid_type"] = "unstructured"

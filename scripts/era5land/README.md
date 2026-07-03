@@ -121,7 +121,12 @@ python3 converter.py convert-healpix \
 The converter separates the two input-side caches:
 
 - GRIB inventory cache: enabled by default
+- reduced-Gaussian geometry cache in `grid_doctor.utils.cache_dir()`: enabled by default
 - pickled multi-file input-dataset cache: disabled by default
+
+The geometry cache stores the expensive reduced-Gaussian cell-vertex arrays so
+later runs can load them instead of rebuilding them. If the cache file
+disappears or becomes unreadable, the converter regenerates it automatically.
 
 Disable the inventory cache:
 
@@ -133,7 +138,8 @@ python3 converter.py convert-healpix \
   --no-inventory-cache
 ```
 
-`--no-cache` is kept as an alias for `--no-inventory-cache`.
+`--no-cache` is kept as an alias for `--no-inventory-cache`. That same flag
+also disables the reduced-Gaussian geometry cache for the run.
 
 Enable the pickled multi-file input-dataset cache explicitly:
 
