@@ -452,7 +452,7 @@ def run_batched_subprocesses(
             clean=(args.clean and index == 1),
         )
         logger.info(
-            "Launching isolated batch process %s/%s with --batch-mode=subprocess",
+            "Launching isolated batch process %s/%s with --batch-mode=inprocess",
             index,
             len(intervals),
         )
