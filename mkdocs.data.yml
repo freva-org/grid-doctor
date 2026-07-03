@@ -9,10 +9,10 @@ nav:
   - Overview: index.md
   - STAC Browser: stac-browser.md
   - Storage Concepts:
-      - " ": storage_concepts/index.md
+      - HEALPix in Zarr on S3: storage_concepts/index.md
       - Why HEALPix?: storage_concepts/why-healpix.md
       - Why Zarr and S3?: storage_concepts/zarr-and-s3.md
-  - Technical Desicions: technical-decisions.md
+  - Technical Decisions: technical-decisions.md
   - Operations :
       - Remapping and benchmark: appendix-remapping-benchmark.md
 exclude_docs: |

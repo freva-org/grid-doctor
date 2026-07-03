@@ -105,7 +105,7 @@ Different variables need different remapping methods.
 | Continuous fields, such as temperature, SST, wind, radiation, or precipitation | **Conservative remapping** | Preserves area-weighted quantities and handles sub-pixel variability. |
 | Discrete or categorical fields, such as land-sea masks, land cover, or soil type | **Nearest neighbour** | Keeps valid class labels and avoids artificial intermediate classes. |
 
-Bilinear interpolation is deliberately not the default Waterpark choice. It can
+Bilinear interpolation is deliberately not Waterpark's default choice. It can
 create values that were not present in the original field and does not preserve
 integrals. For Waterpark, conservative remapping is the safer default for
 continuous geophysical fields.

@@ -19,7 +19,7 @@ comes on its own grid. ERA5, CMIP6, ICON, DYAMOND, campaign data, and satellite
 products all have different geometries, resolutions, chunking strategies, and
 access patterns. Waterpark turns them into a more consistent, analysis-ready
 data layer. See the [Available datasets](#currently-available-datasets) section
-to get an overview over all datasets that have been added.
+to get an overview of all datasets that have been added.
 
 ## Why Waterpark exists
 
