@@ -88,7 +88,7 @@ flowchart LR
         A["user query"]
         B["Zarr metadata + selected chunks"]
 
-    A -->|"S3 GET (e.g xarray)"| B
+    A -->|"S3 GET (e.g., xarray)"| B
 ```
 
 This is what makes Waterpark suitable for interactive and programmatic use. A
