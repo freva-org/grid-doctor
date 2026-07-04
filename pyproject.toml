@@ -71,11 +71,11 @@ tests = [
     "healpy",
 ]
 docs = [
-    "mkdocs>=1.6",
+    "mkdocs>=1.6,<2",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.27",
     "pymdown-extensions>=10.0",
-    "mkdocs-material[imaging]",
+    "mkdocs-material[imaging]>=9.7",
     "pillow",
 
 ]
@@ -138,6 +138,7 @@ exclude_lines = [
 
 [tool.codespell]
 ignore-words-list = "te,nd,fo,ist,orcestra,cdo,COO"
+skip = "docs/assets/logos/*.svg"
 
 [tool.tox]
 legacy_tox_ini = """
@@ -172,21 +173,60 @@ commands =
     python3 -m pytest -vv --cov=grid_doctor --cov-report=html:coverage_report --junitxml report.xml --cov-report xml tests/
     python3 -m coverage report --fail-under=65 --precision=2
 
+[docs-prep]
+description = Prepare the documentation creation
+static =
+    rm -rf .build site-tech site-data
+    mkdir -p .build/tech .build/data
+    cp -a docs/technical/. .build/tech/
+    cp -a docs/data/. .build/data/
+    cp -a docs/shared/. .build/tech/
+    cp -a docs/shared/. .build/data/
+    cp -a docs/assets .build/tech/
+    cp -a docs/assets .build/data/
+
+serve =
+    rm -rf .build
+    mkdir -p .build/tech .build/data
+    cp -as {toxinidir}/docs/technical/. .build/tech/
+    cp -as {toxinidir}/docs/data/. .build/data/
+    cp -as {toxinidir}/docs/shared/. .build/tech/
+    cp -as {toxinidir}/docs/shared/. .build/data/
+    mkdir -p .build/tech/assets .build/data/assets
+    cp -as {toxinidir}/docs/assets/. .build/tech/assets/
+    cp -as {toxinidir}/docs/assets/. .build/data/assets/
+
 [testenv:docs]
-description = Build the documentation with mkdocs
+description = Build docs. Usage: tox -e docs -- [tech|data|all]
+allowlist_externals =
+    rm
+    cp
+    ln
+    mkdir
+commands_pre = {[docs-prep]static}
 deps =
     -e .[docs]
     codespell
 commands =
+    python docs/scripts/build_stac_browser_docs.py {posargs:tech}
     codespell {posargs: --quiet-level=2} docs
-    mkdocs build --strict {posargs}
+    mkdocs build --strict -f mkdocs.{posargs:tech}.yml
 
 [testenv:docs-serve]
-description = Serve the documentation locally for preview
+description = Serve docs locally. Usage: tox -e serve-docs -- [tech|data]
+allowlist_externals =
+    rm
+    cp
+    ln
+    mkdir
 deps =
     {[testenv:docs]deps}
+commands_pre =
+    {[docs-prep]serve}
 commands =
-    mkdocs serve {posargs}
+    python docs/scripts/build_stac_browser_docs.py {posargs:tech}
+    codespell --quiet-level=2 docs
+    mkdocs serve -f mkdocs.{posargs:tech}.yml --strict -a localhost:8000 --watch docs
 
 [testenv:types]
 description = Run mypy in strict mode

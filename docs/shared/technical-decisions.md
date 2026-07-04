@@ -1,7 +1,6 @@
-# Technical decisions
-
 This document records the design rationale behind the significant
-technical choices in grid-doctor.  It is intended as a reference for
+technical choices in the remapping process that is applied to create all
+datasets[^1].  It is intended as a reference for
 contributors, reviewers, and downstream consumers of the produced
 HEALPix pyramids.
 
@@ -27,7 +26,7 @@ This property is critical for climate data:
 
 HEALPix defines two pixel numbering schemes: **ring** ordering (pixels
 numbered along iso-latitude rings) and **nested** ordering (pixels
-numbered by a hierarchical quad-tree).  Grid-doctor defaults to nested
+numbered by a hierarchical quad-tree).  The remapping procedure[^1] defaults to nested
 ordering because it makes coarsening free.
 
 In nested ordering, a parent pixel at level $L$ with index $i$ has
@@ -36,8 +35,8 @@ the full grid therefore reduces to reshaping the data array from
 $(n_\text{cells},)$ to $(n_\text{cells} / 4,\; 4)$ and reducing along
 the last axis, requiring no index lookup, no scatter, and no sorting.
 
-Ring ordering does not have contiguous parent-child layout.  Grid-doctor
-supports it, but in that mode every pyramid level is independently
+Ring ordering does not have contiguous parent-child layout. Our remapping
+software[^1] supports it, but in that mode every pyramid level is independently
 remapped from the source grid, which is substantially more expensive.
 
 
@@ -91,7 +90,7 @@ no additional information is fabricated.
 
 Remapping is performed by ESMF, which computes the geometric overlap
 between source and target cells and produces a sparse weight matrix
-that is applied to the data.  Grid-doctor supports two remapping
+that is applied to the data.  The remapping software supports two remapping
 methods, chosen by variable type.
 
 ### Conservative remapping (continuous fields)
@@ -134,11 +133,11 @@ HEALPix level.  Subsequent runs reuse the cached weight file.
 
 For moderate grids, weights are generated in memory using ESMF's Python
 bindings (ESMPy).  For very large grids where this would exceed
-available RAM, grid-doctor writes both meshes to temporary files and
+available RAM, grid-doctor[^1] writes both meshes to temporary files and
 invokes the standalone `ESMF_RegridWeightGen` command under MPI, with a
 configurable number of ranks.
 
-Grid-doctor automatically classifies the source grid and constructs the
+Grid-doctor[^1] automatically classifies the source grid and constructs the
 appropriate mesh representation:
 
 | Source type     | Examples                    | Detection |
@@ -336,3 +335,7 @@ amortised over the batch.
 
 The backend can be overridden explicitly via `backend="scipy"`,
 `"numba"`, or `"cupy"` in any remapping call.
+
+
+[^1]: Remapping is realised with a uniform remapping software
+    [grid-doctor](https://freva-org.github.io/grid-doctor)

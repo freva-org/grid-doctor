@@ -146,6 +146,8 @@
       if (ctx.mode !== "live") return;
       const items = [...rootUl.children].filter((li) => li._bucketRow && li.dataset.bucket);
       await Promise.all(items.map(async (li) => {
+        // never probes for data for locked tags
+        if (li._node && li._node.locked) return;
         const has = await s3HasObjects(ctx.endpoint, li.dataset.bucket);
         // null (probe failed); leave unlabeled
         if (has !== null) setNoData(li._bucketRow, has);
@@ -162,9 +164,11 @@
       const li = h("li");
       const isStore = node.type === "store";
       const isBucket = node.type === "bucket";
+      // A bucket flagged locked is shown but not browsable
+      const locked = isBucket && !!node.locked;
       // loose file, not a .zarr store
       const nonZarr = isStore && node.zarr === false;
-      const expandable = !isStore;
+      const expandable = !isStore && !locked;
   
       const row = h("button", "wp__row"); row.type = "button";
       row.innerHTML = SVG.chevron;
@@ -198,6 +202,14 @@
       li.appendChild(row);
       li._node = node; li._row = row; li._name = (node.title || node.name || "").toLowerCase();
   
+      if (locked) {
+        // a "coming soon" badge
+        const b = h("span", "wp__badge wp__badge--nodata");
+        b.innerHTML = '<span class="wp__badge-dot"></span>' + (typeof node.locked === "string" ? node.locked : "coming soon");
+        row.appendChild(b);
+        return li;
+      }
+
       if (isStore) {
         //inert: hoverable row, but no detail/actions/click
         if (nonZarr) return li;

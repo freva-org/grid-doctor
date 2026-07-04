@@ -1,6 +1,6 @@
 # Structured Grids (ERA5, CMIP)
 
-This recipe converts a regular lat/lon dataset (e.g. ERA5 or CMIP6
+This recipe converts a regular lat/lon dataset (e.g., ERA5 or CMIP6
 output) to a HEALPix pyramid and uploads it to S3.
 
 ## Minimal Example

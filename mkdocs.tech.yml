@@ -1,0 +1,26 @@
+INHERIT: mkdocs.base.yml
+site_name: Grid Doctor
+site_description: Convert lat/lon xarray datasets to HEALPix pyramids.
+site_url: https://freva-org.github.io/grid-doctor/
+repo_url: https://github.com/freva-org/grid-doctor
+repo_name: freva-org/grid-doctor
+site_dir: site-tech
+docs_dir: .build/tech
+nav:
+  - Overview: index.md
+  - Technical decisions: technical-decisions.md
+  - Grid-doctor software: getting-started.md
+  - Discussion: roadmap.md
+  - API Reference:
+      - High Level API: api/helpers.md
+      - Regridding: api/remap.md
+      - Helper Utilities: api/utils.md
+      - Logging: api/log.md
+      - CLI: api/cli.md
+  - Recipes:
+      - Overview: recipes/index.md
+      - Structured Grids (ERA5, CMIP): recipes/structured.md
+      - Unstructured Grids (ICON): recipes/icon.md
+
+exclude_docs: |
+  data/**
