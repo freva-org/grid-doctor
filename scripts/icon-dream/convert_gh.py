@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import xarray as xr
-from icon_dream_reflow_helpers.common import target_root
+from icon_dream_reflow_helpers.common import DEFAULT_SOURCE_ROOT, target_root
 
 import grid_doctor as gd
 import grid_doctor.cli as gd_cli
@@ -27,15 +27,21 @@ def download_files(
     s3_bucket: str = "icon-dream",
     override: bool = False,
     run_dir: Path = Path(SCRATCH_DIR),
+    cmor: bool = True,
 ) -> list[dict[str, str]]:
     """Download files."""
 
     from icon_dream_reflow_helpers.planning import (IconDreamSource,
                                                     load_existing_target_info,
-                                                    parse_datetime)
+                                                    parse_datetime,
+                                                    resolve_variables)
 
-    variables = variables or ["t_2m", "tot_prec"]
+    variables = resolve_variables(
+        variables or ["all"], frequency, DEFAULT_SOURCE_ROOT
+    )
     src = IconDreamSource(variables, frequency, ("2010-01-01T00:00", "now"))
+    existing_max = None
+    existing_variables: set[str] = set()
     if override is False:
         existing = load_existing_target_info(
             target_root(s3_bucket, frequency), s3_options
@@ -43,10 +49,14 @@ def download_files(
         existing_max = (
             parse_datetime(existing["max_time"]) if existing["max_time"] else None
         )
-    else:
-        existing_max = None
+        # The update-only check must compare against the variables that
+        # are actually in the target store (previously the *requested*
+        # variables were passed here, which defeated the check).
+        existing_variables = set(existing["variables"])
     items = src.list_items(
-        existing_max_time=existing_max, existing_variables=set(variables)
+        existing_max_time=existing_max,
+        existing_variables=existing_variables,
+        cmor=cmor,
     )
     for item in items:
         tmp_path = run_dir / "raw-input" / item["variable"] / item["filename"]
@@ -63,9 +73,12 @@ def remap(
     items: list[dict[str, str]],
     s3_options: dict[str, str],
     run_dir: Path = Path(SCRATCH_DIR),
-) -> None:
+    frequency: str = "hourly",
+    cmor: bool = True,
+) -> dict[int, xr.Dataset]:
     """Remap the items."""
 
+    from icon_dream_reflow_helpers.cmor import cmorize_dataset
     from icon_dream_reflow_helpers.common import (DEFAULT_GRID_URL,
                                                   chunk_for_target_store_size)
     from icon_dream_reflow_helpers.transform import \
@@ -108,9 +121,12 @@ def remap(
             combine_attrs="override",
         )
         logger.debug("Preprocessing files ... ")
-        dsets.append(
-            prepare_dataset_for_regridding(ds).drop_duplicates(dim="time", keep="first")
+        ds = prepare_dataset_for_regridding(ds).drop_duplicates(
+            dim="time", keep="first"
         )
+        if cmor:
+            ds = cmorize_dataset(ds, var, frequency=frequency)
+        dsets.append(ds)
         logger.debug("Preprocessing files .... done")
     dset = xr.merge(dsets, join="outer").chunk({"cell": -1})
     chunk = chunk_for_target_store_size(level=max_level)
@@ -146,9 +162,15 @@ def cli(argv: list[str] | None = None) -> "argparse.Namespace":
     parser = gd_cli.get_parser("convert-icon-dream", description="Convert ICON-DREAM")
     parser.add_argument(
         "--variables",
-        default=["t_2m", "tot_prec"],
+        default=["all"],
         nargs="+",
-        help="Variables to process",
+        help="Variables to process ('all' expands to every variable "
+        "available for the chosen frequency)",
+    )
+    parser.add_argument(
+        "--no-cmor",
+        action="store_true",
+        help="Keep the original ICON variable names and units.",
     )
     parser.add_argument(
         "--freq", "-f", default="hourly", help="ICON-DREAM data frequency"
@@ -177,11 +199,14 @@ if __name__ == "__main__":
         s3_bucket=args.s3_bucket,
         override=args.override,
         run_dir=args.run_dir,
+        cmor=not args.no_cmor,
     )
     pyramid = remap(
         raw_files,
         s3_options,
         run_dir=args.run_dir,
+        frequency=args.freq,
+        cmor=not args.no_cmor,
     )
 
     upload_pyramid(pyramid, s3_options, s3_path)

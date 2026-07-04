@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
@@ -20,7 +21,7 @@ from .common import (
 if TYPE_CHECKING:
     import xarray as xr
 
-BAD = ["heightAboveGround", "surface"]
+LOGGER = logging.getLogger(__name__)
 
 
 def _build_compressor(compression_level: int, zarr_format: Literal[2, 3]) -> Any:
@@ -91,15 +92,33 @@ def fill_value_for_dtype(dtype: np.dtype[Any]) -> Any:
     return None
 
 
-def make_fill_variable(template: "xr.DataArray", name: str) -> "xr.DataArray":
-    """Create a fully missing variable matching a template array."""
+def make_fill_variable(
+    template: "xr.DataArray",
+    name: str,
+    candidate: "xr.Dataset",
+) -> "xr.DataArray":
+    """Create a fully-missing variable shaped like *template* on the
+    candidate's coordinates.
+
+    The shape and coordinates come from the *candidate* dataset (the
+    block being appended); only dtype and attributes are taken from the
+    template found in the existing store.  Reusing the existing store's
+    time coordinates here would silently misalign the fill values during
+    assignment.
+    """
     import xarray as xr
 
     fill = fill_value_for_dtype(template.dtype)
-    values = np.full(template.shape, fill, dtype=template.dtype)
-    arr = xr.DataArray(
-        values, dims=template.dims, coords=template.coords, attrs=template.attrs
+    shape = tuple(
+        candidate.sizes.get(dim, template.sizes[dim]) for dim in template.dims
     )
+    coords = {
+        dim: candidate[dim]
+        for dim in template.dims
+        if dim in candidate.coords
+    }
+    values = np.full(shape, fill, dtype=template.dtype)
+    arr = xr.DataArray(values, dims=template.dims, coords=coords, attrs=template.attrs)
     arr.name = name
     return arr
 
@@ -110,9 +129,7 @@ def pad_missing_existing_vars_for_append(
     """Pad candidate data with placeholder variables required for appending."""
     for name, data in existing.data_vars.items():
         if name not in candidate.data_vars:
-            candidate[name] = make_fill_variable(
-                data.isel(time=slice(0, candidate.sizes.get("time", 0))), name
-            )
+            candidate[name] = make_fill_variable(data, str(name), candidate)
     ordered = [name for name in existing.data_vars if name in candidate.data_vars]
     ordered.extend(name for name in candidate.data_vars if name not in ordered)
     return candidate[ordered]
@@ -167,9 +184,22 @@ def append_time_block(
     if "time" not in candidate.dims:
         return 0
     existing_times = set(map(str, existing["time"].values))
+    existing_max = existing["time"].values.max()
     new_time_values = [
         value for value in candidate["time"].values if str(value) not in existing_times
     ]
+    # Appending along ``time`` places slices at the *end* of the axis, so
+    # only strictly newer times may be appended; anything older would
+    # break the monotonic time axis of the store.
+    stale = [value for value in new_time_values if value <= existing_max]
+    if stale:
+        LOGGER.warning(
+            "Skipping %d time slice(s) older than the existing store "
+            "maximum %s; use replace_existing_times / a backfill run to "
+            "insert them.",
+            len(stale), existing_max,
+        )
+        new_time_values = [v for v in new_time_values if v > existing_max]
     if not new_time_values:
         return 0
     append_ds = pad_missing_existing_vars_for_append(
@@ -397,7 +427,10 @@ def finalize_outputs(
     plan = load_plan(run_dir)
 
     level = worker_results["level"]
-    print(f"Working on {worker_results['level_paths']}")
+    LOGGER.info(
+        "Publishing level %s from %d temporary file(s)",
+        level, len(worker_results["level_paths"]),
+    )
     # A coarse map-layout chunking is fine for the lazy read of the temp files.
     candidate = combine_worker_level_outputs(
         sorted(worker_results["level_paths"]),

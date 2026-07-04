@@ -25,10 +25,11 @@ def gather_sources(
     path: Annotated[str, Param(help="Target S3 path/s3 bucket.")],
     start: Annotated[str, Param(help="Requested UTC start time")] = "2010-01-01T00:00",
     end: Annotated[str, Param(help="Requested UTC end time")] = "now",
-    variables: Annotated[list[str], Param(help="Variables to process")] = [
-        "t_2m",
-        "tot_prec",
-    ],
+    variables: Annotated[
+        list[str],
+        Param(help="Variables to process ('all' expands to every variable "
+              "available for the chosen frequency)"),
+    ] = ["all"],
     freq: Annotated[TIME_FREQUENCY, Param(help="ICON-DREAM data frequency")] = "hourly",
     source_root: Annotated[
         str, Param(help="Source dataset root URL")
@@ -52,6 +53,10 @@ def gather_sources(
     update_only: Annotated[
         bool, Param(help="Skip source chunks already covered by existing variables")
     ] = True,
+    cmor: Annotated[
+        bool,
+        Param(help="Rename variables and convert units to the CMOR standard"),
+    ] = True,
     run_dir: RunDir = RunDir(),
 ) -> list[dict[str, Any]]:
     """Discover source files that still need processing and persist the run plan."""
@@ -69,6 +74,7 @@ def gather_sources(
         update_only=update_only,
         fs_type=fs_type,
         run_dir=cast(Path, run_dir),
+        cmor=cmor,
     )["source_items"]
     return plan
 
@@ -161,9 +167,9 @@ def convert_source(
 def gather_temp_levels(
     worker_results: Annotated[list[dict[str, Any]], Result(step="convert_source")],
 ) -> list[dict[str, int | list[str]]]:
-    """Merge temporary outputs and publish the final pyramid to S3."""
+    """Group temporary worker outputs by HEALPix level for publishing."""
     grouped: dict[int, list[str]] = {}
-    resutls: list[dict[str, int | list[str]]] = []
+    results: list[dict[str, int | list[str]]] = []
     for result in sorted(
         worker_results,
         key=lambda result: (
@@ -175,8 +181,8 @@ def gather_temp_levels(
         for level_str, level_path in result["level_paths"].items():
             grouped.setdefault(int(level_str), []).append(level_path)
     for level, level_paths in sorted(grouped.items()):
-        resutls.append({"level": level, "level_paths": sorted(level_paths)})
-    return resutls
+        results.append({"level": level, "level_paths": sorted(level_paths)})
+    return results
 
 
 @wf.array_job(

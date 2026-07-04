@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Sequence
@@ -10,6 +11,7 @@ from typing import Any, Sequence
 import grid_doctor as gd
 import grid_doctor.cli as gd_cli
 
+from .cmor import target_variable_name
 from .common import (
     DATE_TOKEN_RE,
     DEFAULT_GRID_URL,
@@ -22,6 +24,7 @@ from .common import (
     build_paths,
     download_one,
     isoformat_utc,
+    list_available_variables,
     load_existing_target_info,
     load_plan,
     open_grid_dataset,
@@ -30,6 +33,43 @@ from .common import (
     save_plan,
     target_root,
 )
+
+LOGGER = logging.getLogger(__name__)
+
+
+def resolve_variables(
+    variables: Sequence[str],
+    frequency: TIME_FREQUENCY,
+    source_root: str,
+) -> list[str]:
+    """Expand and validate the requested variable list.
+
+    ``["all"]`` (or an empty list) expands to every variable found on the
+    server for the given frequency.  Explicit requests are validated
+    against the discovered set; if discovery fails (offline planning),
+    the static :data:`ICON_DREAM_VARIABLES` list is used as a fallback.
+    """
+    if frequency == "fx":
+        return ["fx"]
+    requested = [variable.lower() for variable in variables]
+    try:
+        available = list_available_variables(frequency, source_root)
+    except Exception as error:  # noqa: BLE001 - offline fallback
+        LOGGER.warning(
+            "Could not list variables from %s (%s); "
+            "falling back to the static variable list.",
+            source_root, error,
+        )
+        available = sorted(ICON_DREAM_VARIABLES)
+    if not requested or requested == ["all"]:
+        return available
+    invalid = sorted(set(requested) - set(available))
+    if invalid:
+        raise ValueError(
+            f"Unsupported variables for {frequency!r}: {invalid}. "
+            f"Available: {available}"
+        )
+    return requested
 
 
 class IconDreamSource:
@@ -132,8 +172,16 @@ class IconDreamSource:
         existing_max_time: datetime | None = None,
         existing_variables: set[str] | None = None,
         update_only: bool = True,
+        cmor: bool = False,
     ) -> list[dict[str, Any]]:
-        """List source files that still need processing."""
+        """List source files that still need processing.
+
+        ``existing_variables`` holds the names as found in the target
+        store; with ``cmor=True`` the requested source variables are
+        translated before the comparison, so that a source variable whose
+        CMOR counterpart is already present is treated as an update
+        (``update_only``) rather than re-processed from scratch.
+        """
         if self.frequency == "fx":
             filename = Path(self.invariant_url).name
             return [
@@ -153,9 +201,10 @@ class IconDreamSource:
         existing_variables = existing_variables or set()
         items: list[dict[str, Any]] = []
         for variable in self.variables:
+            stored_name = target_variable_name(variable, cmor)
             variable_max = (
                 existing_max_time
-                if update_only and variable in existing_variables
+                if update_only and stored_name in existing_variables
                 else None
             )
             items.extend(self._list_variable_urls(variable, variable_max))
@@ -182,14 +231,16 @@ def build_plan(
     update_only: bool,
     fs_type: str,
     run_dir: str | Path,
+    cmor: bool = True,
 ) -> dict[str, Any]:
-    """Discover source files and create the persisted run plan."""
-    if not variables:
-        raise ValueError("At least one variable is required.")
-    invalid = sorted(set(variables) - set(ICON_DREAM_VARIABLES))
-    if invalid:
-        raise ValueError(f"Unsupported variables: {invalid}")
+    """Discover source files and create the persisted run plan.
 
+    ``variables=["all"]`` processes every variable available on the
+    server for the requested frequency.  With ``cmor=True`` the target
+    store uses CMOR names/units and the update-only comparison against
+    the existing store is performed on those names.
+    """
+    variables = resolve_variables(variables, freq, source_root)
     paths = build_paths(run_dir)
     if fs_type.lower() == "s3":
         s3_options = gd.get_s3_options(s3_endpoint, s3_credentials_file)
@@ -210,8 +261,10 @@ def build_plan(
         existing_max_time=existing_max,
         existing_variables=set(existing["variables"]),
         update_only=update_only,
+        cmor=cmor,
     )
     plan = {
+        "cmor": cmor,
         "run_dir": str(paths["run_dir"]),
         "target_root": target_root(uri, freq),
         "frequency": freq,

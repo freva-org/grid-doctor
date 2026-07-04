@@ -10,6 +10,7 @@ import numpy as np
 
 import grid_doctor as gd
 
+from .cmor import cmorize_dataset
 from .common import (
     build_paths,
     drop_surface_coords,
@@ -285,6 +286,15 @@ def convert_downloaded_item(
                 chunks={},
             )
         )
+        if plan.get("cmor", False):
+            # Rename to CMOR variable names and convert units *before*
+            # the regrid, so temporary files, the update-only bookkeeping
+            # and the final store all agree on one naming scheme.
+            ds = cmorize_dataset(
+                ds,
+                str(downloaded["variable"]),
+                frequency=str(plan.get("frequency", "hourly")),
+            )
 
         time_values = to_time_strings(ds["time"].values) if "time" in ds.dims else []
         if "time" in ds.dims:

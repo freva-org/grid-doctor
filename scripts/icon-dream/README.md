@@ -4,6 +4,60 @@
 
 Icon dream is a reanalysis product from the German Weather Service.
 
+## Variables, CMOR names and units
+
+By default the pipeline processes **all** variables available on the DWD
+open data server for the chosen frequency (the per-variable
+sub-directories of e.g.
+`https://opendata.dwd.de/climate_environment/REA/ICON-DREAM-Global/hourly/`
+are discovered at plan time). To restrict the run, pass an explicit list,
+e.g. `--variables t_2m tot_prec`; `--variables all` is the explicit form
+of the default.
+
+Variables are renamed to their CMOR/CF counterparts and units are
+converted where necessary (e.g. `t_2m -> tas`, `pmsl -> psl`,
+`tot_prec [kg m-2 per interval] -> pr [kg m-2 s-1]`). The mapping lives in
+one declarative table,
+`icon_dream_reflow_helpers/cmor.py::CMOR_TABLE`; add or adjust entries
+there. Pass `--cmor false` (slurm mode) or `--no-cmor` (simple mode) to
+keep the original ICON names and units. Two caveats worth knowing:
+
+* `tot_prec` is currently treated as the amount accumulated over each
+  output interval. If the product turns out to be accumulated since model
+  start, flip the entry's `conversion` to `"deaccumulate_rate"`.
+* `qv_s` (surface/skin specific humidity) is mapped to `huss` as the
+  closest CMOR analogue; the `long_name` records the difference.
+
+Note that the update-only bookkeeping compares against the names stored
+in the target, so a store written with `--cmor` must also be updated with
+`--cmor` (and vice versa).
+
+## Writing to local disk (serving via versitygw)
+
+The target does not have to be S3. With `--fs-type posix` the `path`
+argument is interpreted as a local directory and the Zarr pyramids are
+written straight to disk, which is the mode to use when the data are
+served by an S3 gateway such as versity afterwards:
+
+```console
+REFLOW_ACCOUNT=foo python convert.py submit --run-dir \
+    /scratch/k/$USER/grid-doctor --fs-type posix \
+    --path /work/ks1387/waterpark-data/icon-dream --freq hourly
+```
+
+The final stores end up under
+`<path>/healpix/reanalysis/icon-dream-global/icon/<freq>/level_<n>.zarr`
+and can be exposed by pointing a versitygw bucket at `<path>`. S3
+credentials/endpoint arguments are ignored in this mode.
+
+## Adding variables to an existing store
+
+Re-running `submit` with additional (or `all`) variables against an
+existing target is supported: variables already present are only extended
+in time (`--update-only`, default), while variables missing from the
+store are backfilled across the store's full time axis and then kept in
+sync with the shared time axis on subsequent appends.
+
 
 
 ## How to run:
@@ -32,7 +86,7 @@ mamba install -c conda-forge -y -f requirements.yml
    workflow. Reflow wraps the script in a simple flat cli that define slurm
    jobs:
 ```console
-pthon convert.py submit --help
+python convert.py submit --help
 Usage: icon_dream_healpix submit [-h] --run-dir RUN_DIR [--store-path STORE_PATH] [--access-pattern {map,time_series}] [--cell-chunk CELL_CHUNK]
                                  [--compression-level COMPRESSION_LEVEL] [--download-chunk-size DOWNLOAD_CHUNK_SIZE] [--download-timeout DOWNLOAD_TIMEOUT] [--end END]
                                  [--freq {hourly,daily,monthly,fx}] [--local-dask-workers LOCAL_DASK_WORKERS] [--max-level MAX_LEVEL]

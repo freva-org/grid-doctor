@@ -59,7 +59,12 @@ ICON_DREAM_VARIABLES: tuple[str, ...] = (
 
 
 class HrefParser(HTMLParser):
-    """Collect href targets ending in a specific suffix."""
+    """Collect href targets ending in a specific suffix.
+
+    Query links (``?C=N;O=D`` sort links), absolute paths and the parent
+    directory link produced by typical index pages are skipped so that
+    ``suffix="/"`` can be used to list sub-directories.
+    """
 
     def __init__(self, suffix: str = ".grb") -> None:
         super().__init__()
@@ -71,8 +76,32 @@ class HrefParser(HTMLParser):
         if tag != "a":
             return
         for key, value in attrs:
-            if key == "href" and value and value.endswith(self.suffix):
+            if key != "href" or not value:
+                continue
+            if "?" in value or value.startswith(("/", "../")) or value == "..":
+                continue
+            if value.endswith(self.suffix):
                 self.hrefs.append(value)
+
+
+def list_available_variables(
+    frequency: str,
+    source_root: str = DEFAULT_SOURCE_ROOT,
+    *,
+    timeout: int = 30,
+) -> list[str]:
+    """Discover the variables available for one frequency on the server.
+
+    The DWD open data server exposes one sub-directory per variable
+    (e.g. ``hourly/T_2M/``); the returned names are lower-cased to match
+    the convention used throughout this pipeline.
+    """
+    parser = HrefParser(suffix="/")
+    url = f"{source_root.rstrip('/')}/{frequency}/"
+    with gd_cli.AutoRaiseSession() as session:
+        response = session.get(url, timeout=timeout)
+        parser.feed(response.text)
+    return sorted({href.rstrip("/").lower() for href in parser.hrefs})
 
 
 def parse_datetime(value: str) -> datetime:
@@ -126,79 +155,10 @@ def drop_surface_coords(ds: "xr.Dataset") -> "xr.Dataset":
     return ds
 
 
-def chunk_for_target_store_size(
-    *,
-    level: int,
-    dtype: str | np.dtype = "float32",
-    target_stored_mib: float = 16.0,
-    compression_ratio: float = 2.0,
-    access: Literal["time_series", "map"] = "map",
-    ntime: int | None = None,
-    max_time_chunk: int | None = None,
-    max_cell_chunk: int | None = None,
-) -> dict[str, int]:
-    """
-    Compute (time, cell) chunks for a HEALPix dataset.
-
-    Parameters
-    ----------
-    level
-        HEALPix order / level.
-    dtype
-        Variable dtype.
-    target_stored_mib
-        Desired approximate compressed chunk size on disk.
-    compression_ratio
-        Estimated ratio:
-            uncompressed_bytes / compressed_bytes
-    access
-        "map" or "time_series".
-    ntime
-        Total time size. Needed for time_series mode unless max_time_chunk is given.
-    max_time_chunk
-        Optional cap for time chunk.
-    max_cell_chunk
-        Optional cap for cell chunk.
-
-    Returns
-    -------
-    dict[str, int]
-        Chunk sizes, e.g. {"time": 5, "cell": 786432}.
-    """
-    nside = 2**level
-    ncell = 12 * nside * nside
-    itemsize = np.dtype(dtype).itemsize
-
-    target_stored_bytes = int(target_stored_mib * 1024 * 1024)
-    target_uncompressed_bytes = int(target_stored_bytes * compression_ratio)
-
-    if access == "map":
-        cell_chunk = ncell if max_cell_chunk is None else min(ncell, max_cell_chunk)
-        time_chunk = max(1, target_uncompressed_bytes // (itemsize * cell_chunk))
-        return {"time": int(time_chunk), "cell": int(cell_chunk)}
-
-    if access == "time_series":
-        if max_time_chunk is not None:
-            time_chunk = max_time_chunk
-        elif ntime is not None:
-            time_chunk = ntime
-        else:
-            raise ValueError(
-                "For access='time_series', provide either ntime or max_time_chunk."
-            )
-
-        if ntime is not None:
-            time_chunk = min(time_chunk, ntime)
-
-        cell_chunk = max(1, target_uncompressed_bytes // (itemsize * time_chunk))
-        cell_chunk = min(cell_chunk, ncell)
-
-        if max_cell_chunk is not None:
-            cell_chunk = min(cell_chunk, max_cell_chunk)
-
-        return {"time": int(time_chunk), "cell": int(cell_chunk)}
-
-    raise ValueError(f"Unsupported access mode: {access!r}")
+# Re-exported so existing imports keep working; the implementation lives
+# in grid_doctor.utils (the previous local copy was a byte-identical
+# duplicate that had already started to drift risk).
+from grid_doctor import chunk_for_target_store_size  # noqa: E402,F401
 
 
 def save_plan(plan: dict[str, Any], path: Path) -> None:
