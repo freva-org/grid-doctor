@@ -39,3 +39,19 @@ sbatch -p shared -Ak20200 --mem 100G --time 3-00:00:00 <(echo -e '#!/bin/sh\n~/m
 ```
 sbatch -p compute -Ak20200 --mem 16G --array=0-542 <(echo -e '#!/bin/sh\n~/micromamba/envs/grid-doctor/bin/python3 scripts/icdc/main.py modis-atm-aqua write --batch-size=16 /work/ks1387/gw/data/icdc/healpix/atmosphere/MODIS/aqua/P1D/')
 ```
+
+## CERES ATM
+
+### Initialize:
+
+```
+sbatch -p shared -Ak20200 --mem 100G --time=3-00:00:00 <(echo -e '#!/bin/sh\n~/micromamba/envs/grid-doctor/bin/python3  scripts/icdc/main.py ceres init /work/ks1387/gw/data/icdc/healpix/atmosphere/CERES/PT1H/')
+```
+
+### Write
+
+9252 files each with 24 timesteps batched into 1000 job of size 223:  `echo '24 * 9252 / 1000 +1' | bc`
+
+```
+sbatch -p compute -Ak20200 --mem 16G --array=0-1000 <(echo -e '#!/bin/sh\n~/micromamba/envs/grid-doctor/bin/python3 scripts/icdc/main.py ceres write --batch-size=223 /work/ks1387/gw/data/icdc/healpix/atmosphere/MODIS/aqua/P1D/')
+```

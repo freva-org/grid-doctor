@@ -1,10 +1,11 @@
 from argparse import ArgumentParser
 import logging
 from grid_doctor import setup_logging
-
+import os
 
 _CONFS = {
     "imerg": ("imerg", "IMERGConfig"),
+    "ceres": ("ceres", "CERESConfig"),
     "modis-atm-aqua": ("modis_atm_aqua", "MODISAquaAtmConfig"),
 }
 
@@ -68,6 +69,7 @@ if __name__ == "__main__":
 
     config = Config(store_path=args.destination)
 
+    os.umask(0o002)  # Ensure others from group can write
     if args.action == "init":
         config.init(overwrite=args.overwrite)
     elif args.action == "write":
