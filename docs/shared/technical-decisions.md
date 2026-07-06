@@ -200,6 +200,73 @@ coastlines, swath edges, and orbit gaps, large portions of the output
 will be NaN.
 
 
+## Point binning (swath and station data)
+
+Gridded datasets are remapped with ESMF as described above.  *Point-sampled*
+data — satellite Level-2 swaths, station records, trajectories — cannot use
+that path for two structural reasons: every granule has unique geometry, so
+the precomputed weight matrix can never be reused, and ESMF's
+nearest source-to-destination method assigns a value to **every**
+destination cell, which would smear a narrow swath over the entire globe.
+
+Point data is therefore **binned**: each sample is assigned to the HEALPix
+cell containing its coordinates and all samples per cell are reduced.  The
+available reductions mirror the two remapping methods:
+
+- **Mean binning (continuous fields).**  In the oversampled limit — sample
+  spacing much finer than the target cell spacing — the per-cell sample
+  mean converges to the area-weighted mean, making it a first-order
+  approximation of conservative remapping.  This validity condition is
+  enforced by choosing the target level from the sample spacing with the
+  same heuristic used for gridded data; a swath is never binned into cells
+  finer than its own pixel spacing.
+- **Mode binning (categorical fields).**  The most frequent class per cell,
+  the binning analogue of nearest-neighbour remapping.  Ties are broken
+  deterministically towards the lowest class value.  As with
+  nearest-neighbour remapping, no interpolated intermediate classes can
+  appear.
+- ``min`` / ``max`` / ``count`` are available for extrema and coverage
+  diagnostics.
+
+A per-sample **sum is deliberately not offered**: it scales with sample
+density (orbit overlap, across-track pixel count) rather than any physical
+integral, and therefore violates the integral-preservation rationale that
+motivates conservative remapping.  Root-mean-square reductions are likewise
+excluded because they do not commute with mean coarsening in the pyramid;
+if an RMS quantity is required, bin the *squared* field with the mean and
+apply the square root at read time.
+
+### Sphere, not ellipsoid — also for satellite data
+
+Satellite geolocation is geodetic (WGS84).  Binning nevertheless indexes
+cells on the **perfect sphere**, exactly like all remapped datasets.  The
+geodetic-vs-spherical latitude discrepancy (up to ~0.19° at 45° latitude,
+~21 km) is accepted so that every dataset in the hub shares a single
+indexing geometry.  Indexing one dataset on the ellipsoid while all others
+use the sphere would shift it by dozens of pixels at typical swath target
+levels, producing visible misregistration (offset coastlines) when
+datasets are overlaid.
+
+### Minimum sample count and coverage tracking
+
+A cell is set to NaN when it receives fewer than ``min_count`` valid
+samples (default: 1).  Optionally, a companion ``<variable>_count``
+variable records the number of valid samples per cell.  Publishing the
+count is recommended: it makes coverage auditable, enables unbiased
+count-weighted merging of overlapping granules, and is the point-data
+analogue of a valid-area fraction for coarsened grids.
+
+### Pyramids from binned data
+
+Binned datasets carry the full standard metadata (``crs`` variable,
+``healpix_*`` and ``grid_doctor_*`` attributes) and dense cell layout, so
+pyramid construction reuses the ordinary coarsening machinery unchanged,
+including the 50% minimum-valid-fraction rule.  The recorded method
+(``grid_doctor_method = "binned-mean"`` or ``"binned-mode"``) drives the
+automatic mean-vs-mode coarsening selection, just as ``"conservative"``
+and ``"nearest"`` do for remapped data.
+
+
 ## Pyramid construction and coarsening
 
 The multi-resolution pyramid is built by first remapping the source

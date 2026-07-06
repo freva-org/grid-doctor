@@ -15,6 +15,7 @@ _SUBMODULES: dict[str, str] = {
     "helpers": ".helpers",
     "log": ".log",
     "remap": ".remap",
+    "swath": ".swath",
     "utils": ".utils",
     "cli": ".cli",
 }
@@ -22,6 +23,7 @@ _SUBMODULES: dict[str, str] = {
 
 _ATTRS: dict[str, str] = {
     "apply_weight_file": ".remap",
+    "bin_to_healpix": ".swath",
     "compute_healpix_weights": ".remap",
     "chunk_for_target_store_size": ".utils",
     "coarsen_healpix": ".helpers",
@@ -36,11 +38,12 @@ _ATTRS: dict[str, str] = {
     "resolution_to_healpix_level": ".helpers",
     "save_pyramid": ".helpers",
     "setup_logging": ".log",
+    "sparse_to_dense": ".swath",
 }
 
 
 if TYPE_CHECKING:
-    from . import helpers, log, remap, utils
+    from . import helpers, log, remap, swath, utils
     from .helpers import (
         coarsen_healpix,
         create_healpix_pyramid,
@@ -56,6 +59,7 @@ if TYPE_CHECKING:
         regrid_to_healpix,
         regrid_unstructured_to_healpix,
     )
+    from .swath import bin_to_healpix, sparse_to_dense
     from .utils import (
         cached_open_dataset,
         cached_weights,
@@ -90,8 +94,10 @@ __all__ = [
     "helpers",
     "log",
     "remap",
+    "swath",
     "utils",
     "apply_weight_file",
+    "bin_to_healpix",
     "cached_open_dataset",
     "cached_weights",
     "chunk_for_target_store_size",
@@ -106,4 +112,5 @@ __all__ = [
     "resolution_to_healpix_level",
     "save_pyramid",
     "setup_logging",
+    "sparse_to_dense",
 ]

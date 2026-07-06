@@ -238,6 +238,35 @@ gd.save_pyramid(
 )
 ```
 
+## Swath and Point Data
+
+Satellite Level-2 swaths, station records, and trajectories don't live on a
+fixed grid, so the ESMF weight path doesn't apply (no weight reuse, and
+nearest-neighbour would smear a swath over the whole globe).  Use point
+binning instead — the output carries the standard metadata, so coarsening
+and uploading work exactly as above:
+
+```python
+finest = gd.bin_to_healpix(
+    ds,                                   # per-sample latitude/longitude
+    level=11,                             # coarser than the sample spacing!
+    agg={"radiance": "mean", "cloud_type": "mode"},
+    fill_values={"cloud_type": 255},
+    with_counts=True,                     # auditable coverage
+)
+pyramid = {11: finest}
+for level in range(10, -1, -1):
+    pyramid[level] = gd.coarsen_healpix(pyramid[level + 1], level)
+gd.save_pyramid(pyramid, "s3://my-bucket/my-l2-product.zarr", ...)
+```
+
+`mean` is the binning analogue of conservative remapping (valid when the
+samples oversample the target cells), `mode` the analogue of
+nearest-neighbour for categorical fields.  All cell geometry stays on the
+perfect sphere — do not index satellite data on the WGS84 ellipsoid, or it
+will be misregistered against every other dataset in the hub.  See the
+point-data recipe in the documentation for details.
+
 ## 🏥 Grid Rehab Progress
 How are our patients doing? Every dataset starts broken and leaves HEALed.
 If your dataset is still 😢, it needs a doctor — that could be you.
@@ -260,6 +289,7 @@ Claim a patient, write a script, and turn that frown into 😎.
 | ORCHESTRA | 😎 | 😎 |
 | PalMod | 😢 | 😢 |
 | Dyamond| 😎 | 😎 |
+| EarthCARE | 😢 | 🩹 |
 > [!TIP]
 > To claim a dataset, open a PR adding your script to `scripts/<dataset>/`
 > and update this table. See [Getting Started](#writing-a-conversion-script)

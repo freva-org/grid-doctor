@@ -1,6 +1,7 @@
 from . import helpers as helpers
 from . import log as log
 from . import remap as remap
+from . import swath as swath
 from . import utils as utils
 from .helpers import coarsen_healpix as coarsen_healpix
 from .helpers import create_healpix_pyramid as create_healpix_pyramid
@@ -15,6 +16,8 @@ from .remap import regrid_to_healpix as regrid_to_healpix
 from .remap import (
     regrid_unstructured_to_healpix as regrid_unstructured_to_healpix,
 )
+from .swath import bin_to_healpix as bin_to_healpix
+from .swath import sparse_to_dense as sparse_to_dense
 from .utils import cached_open_dataset as cached_open_dataset
 from .utils import cached_weights as cached_weights
 from .utils import chunk_for_target_store_size as chunk_for_target_store_size

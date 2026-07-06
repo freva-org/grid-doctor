@@ -14,6 +14,7 @@ nav:
   - API Reference:
       - High Level API: api/helpers.md
       - Regridding: api/remap.md
+      - Point Binning: api/swath.md
       - Helper Utilities: api/utils.md
       - Logging: api/log.md
       - CLI: api/cli.md
@@ -21,6 +22,8 @@ nav:
       - Overview: recipes/index.md
       - Structured Grids (ERA5, CMIP): recipes/structured.md
       - Unstructured Grids (ICON): recipes/icon.md
+      - Point Data: recipes/point-data.md
+
 
 exclude_docs: |
   data/**

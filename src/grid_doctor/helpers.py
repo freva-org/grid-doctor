@@ -308,7 +308,8 @@ def coarsen_healpix(
     # Resolve coarsening strategy.
     if coarsen_mode == "auto":
         method = str(ds.attrs.get("grid_doctor_method", "conservative"))
-        resolved_mode: CoarsenMode = "mode" if method == "nearest" else "mean"
+        is_categorical = method == "nearest" or method.endswith("-mode")
+        resolved_mode: CoarsenMode = "mode" if is_categorical else "mean"
     else:
         resolved_mode = coarsen_mode
 
