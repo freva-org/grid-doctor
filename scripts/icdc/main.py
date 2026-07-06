@@ -5,6 +5,7 @@ from grid_doctor import setup_logging
 
 _CONFS = {
     "imerg": ("imerg", "IMERGConfig"),
+    "modis-atm-aqua": ("modis_atm_aqua", "MODISAquaAtmConfig"),
 }
 
 
