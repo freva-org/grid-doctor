@@ -1,6 +1,92 @@
 # TODO
 
+
+- areacella calculation
+- update to the altest dates with quirugicall record replacement
+- the batchfolders in era5
+- cf checking?
+
+---
+if I need some extra info (`cache_key`) to create pickeld filenames in [grib.py](helpers/grib.py)
+```python
+        if use_cache:
+            ds_raw = gd.cached_open_dataset(
+                files_for_var,
+                **open_kwargs,
+                cache_key={
+                    "engine": "cfgrib",
+                    "shortName": short_name,
+                    "paramId": int(param_id),
+                    "typeOfLevel": type_of_level,
+                    "level": int(level),
+                    "time_normalizer": "valid_time_v1",
+                },
+            )
+        else:
+            ds_raw = xr.open_mfdataset(
+                files_for_var,
+                **open_kwargs,
+                parallel=True,
+                chunks="auto",
+            )
+```            
+
+
+I will modify back in [grid_doctor/utils.py](../../src/grid_doctor/utils.py)
+
+```python
+def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
+    """Open multiple files and cache the merged dataset as a pickle.
+
+    Parameters
+    ----------
+    files:
+        Input file paths or glob-expanded file names.
+    **kwargs:
+        Extra keyword arguments for `xarray.open_mfdataset`.
+
+    Returns
+    -------
+    xarray.Dataset
+        The opened dataset.
+    """
+    cache_key = kwargs.pop("cache_key", None) #<---
+
+    digest = hashlib.sha256()
+    normalised = sorted({str(path) for path in files})
+    digest.update("\0".join(normalised).encode())
+    if cache_key is not None: #<--->
+        digest.update(repr(cache_key).encode()) #<--->
+    pickle_file = cache_dir() / f"{digest.hexdigest()}.pickle"
+
+    if pickle_file.exists():
+        try:
+            with pickle_file.open("rb") as handle:
+                return cast(xr.Dataset, pickle.load(handle))  # nosec B301  # noqa: S301
+        except Exception as exc:  # pragma: no cover - defensive cache cleanup
+            logger.warning("Could not read cached dataset %s: %s", pickle_file, exc)
+            pickle_file.unlink(missing_ok=True)
+
+    from dask.diagnostics.progress import ProgressBar
+
+    merged_kwargs: dict[str, Any] = {"parallel": True, "chunks": "auto"} | kwargs
+    with ProgressBar():
+        dataset = xr.open_mfdataset(normalised, **merged_kwargs)
+
+    with pickle_file.open("wb") as handle:
+        pickle.dump(dataset, handle)
+    return dataset
+```
+
+---
+
 ## create mapping
+
+
+apparenlty is better to create the highes zzom level and then coarsen, the coarsen can be done directly calling the coarsen_healpix() methiod from src/grid_ctor/helpers.py
+
+this is mapper.map_grib_to_healpix()
+
 
 ### Era5:
 we will need to check how the whole grib timestamping goes
