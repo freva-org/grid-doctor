@@ -14,6 +14,6 @@ dependencies:
   - "esmf=*=mpi_openmpi_*"
   - esmpy
   # CLI formatting
-  - rich_argparse
+  - rich-argparse
   - pip:
     - reflow-hpc
