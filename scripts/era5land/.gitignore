@@ -17,7 +17,7 @@ tables/era5-cmor-tables
 *.grb
 *.nc
 *.zarr/
-
+*.current_batch_pid.json
 # Local run output
 run/
 runs/

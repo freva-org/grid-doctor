@@ -160,6 +160,7 @@ venv.bak/
 
 # local assistants
 **/.codex
+/AGENTS.md
 
 # mypy
 .mypy_cache/
