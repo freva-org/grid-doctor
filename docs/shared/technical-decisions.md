@@ -378,6 +378,37 @@ visualisation where only a single chunk of a single variable at a single
 level needs to be fetched.
 
 
+
+## High-level regional datasets: implicit coordinates
+
+Small-area datasets at very high levels (16 and beyond) keep the dense
+global convention — cell position equals cell index — but stop
+materialising what the index already implies.  Above level
+10 (`WRITE_COORDS_MAX_LEVEL`), stores are written **without**
+`cell`/`latitude`/`longitude` coordinate arrays: at level 16 those two
+float64 arrays would cost ~800 GB while the regional payload is
+megabytes, and unlike the data variables they are never fill values, so
+empty-chunk elision cannot help.  Such stores carry
+`grid_doctor_implicit_coords = 1`, retain the `crs` variable and all
+`healpix_*` attributes, and remain byte-identical in layout to an
+ordinary dense store.
+
+Access is region-driven through range selection.  Nested ordering
+guarantees that every coarse-level parent corresponds to one contiguous
+fine-level index range, so a bounding-box query decomposes into a
+handful of contiguous reads that align one-to-one with power-of-four
+chunks.  Coordinates are reconstructed on the fly for exactly the cells
+returned.  Combined with `fill_value = NaN` and empty-chunk elision on
+the data variables, storage and access cost are proportional to the
+domain, not the globe, while cross-dataset and cross-level alignment
+stay a bit-shift (`parent = id >> 2k`) exactly as for every other
+dataset in the hub.
+
+Levels at or below the threshold within the same pyramid are written
+with materialised coordinates as usual, so coarse overview levels stay
+directly consumable by CF-aware viewers.
+
+
 ---
 
 ## Performance: application backends

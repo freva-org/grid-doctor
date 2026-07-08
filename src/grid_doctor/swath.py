@@ -42,10 +42,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
-import numpy_groupies as npg
+import numpy_groupies as npg  # type: ignore[import-untyped]
 import xarray as xr
 
 from .remap import _attach_healpix_coords
@@ -313,7 +313,7 @@ def _bin_count(
     *,
     n_cells: int,
 ) -> FloatArray:
-    """Calculate the number of valid samples per cell."""
+    """Number of valid samples per cell."""
     result = npg.aggregate(
         group_idx,
         # numpy-groupies treats 1-D boolean input to ``sum`` as a
@@ -508,10 +508,14 @@ def bin_to_healpix(
             result[valid_count < min_count] = np.nan
 
         attrs = {
-            key: value for key, value in da.attrs.items() if key not in _FILL_ATTR_NAMES
+            key: value
+            for key, value in da.attrs.items()
+            if key not in _FILL_ATTR_NAMES
         }
         attrs["grid_doctor_method"] = _AGG_TO_METHOD[method]
-        binned[var_name] = xr.DataArray(result, dims=(*batch_dims, "cell"), attrs=attrs)
+        binned[var_name] = xr.DataArray(
+            result, dims=(*batch_dims, "cell"), attrs=attrs
+        )
         if with_counts and method != "count":
             counts[f"{var_name}_count"] = xr.DataArray(
                 valid_count.astype(np.int32),
@@ -532,7 +536,9 @@ def bin_to_healpix(
     result_ds.attrs["grid_doctor_method"] = _dominant_method(result_ds)
 
     if dense:
-        return _scatter_to_dense(result_ds, unique_cells, level=level, nest=nest)
+        return _scatter_to_dense(
+            result_ds, unique_cells, level=level, nest=nest
+        )
     return _attach_sparse_coords(result_ds, unique_cells, level=level, nest=nest)
 
 
@@ -611,7 +617,9 @@ def _scatter_to_dense(
         else:
             full = np.full((*arranged.shape[:-1], npix), np.nan)
         full[..., cell_ids] = arranged.values
-        scattered[str(name)] = xr.DataArray(full, dims=arranged.dims, attrs=da.attrs)
+        scattered[str(name)] = xr.DataArray(
+            full, dims=arranged.dims, attrs=da.attrs
+        )
     dense = xr.Dataset(scattered, attrs=ds.attrs.copy())
     dense = dense.assign_coords(
         {
@@ -648,9 +656,7 @@ def _attach_sparse_coords(
         cell=cell_ids,
         latitude=("cell", np.asarray(lat_deg, dtype=np.float64)),
         longitude=("cell", _canonical_lon(np.asarray(lon_deg, dtype=np.float64))),
-        crs=_make_crs_variable(
-            level=level, nside=2**level, order="nested" if nest else "ring"
-        ),
+        crs=_make_crs_variable(level=level, nside=2**level, order="nested" if nest else "ring"),
     )
     for name in result.data_vars:
         if "cell" in result[name].dims:

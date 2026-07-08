@@ -53,3 +53,49 @@ class TestPublicCallables:
         first = gd.regrid_to_healpix
         second = gd.regrid_to_healpix
         assert first is second
+
+
+class TestStubFileCompleteness:
+    """The ``__init__.pyi`` stub must mirror the lazy loader.
+
+    Regenerate it with::
+
+        stubgen -m grid_doctor -o src
+
+    (stubgen reads the ``TYPE_CHECKING`` block, so keep that block in
+    sync with ``_SUBMODULES`` / ``_ATTRS`` as well.)
+    """
+
+    @staticmethod
+    def _stub_exports() -> set[str]:
+        import ast
+        from pathlib import Path
+
+        import grid_doctor
+
+        stub = Path(grid_doctor.__file__).with_suffix(".pyi")
+        names: set[str] = set()
+        for node in ast.parse(stub.read_text()).body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    names.add(alias.asname or alias.name)
+            elif isinstance(node, ast.AnnAssign) and isinstance(
+                node.target, ast.Name
+            ):
+                names.add(node.target.id)
+        return names
+
+    def test_stub_covers_public_api(self) -> None:
+        import grid_doctor
+
+        missing = set(grid_doctor.__all__) - self._stub_exports() - {"__all__"}
+        assert not missing, (
+            f"__init__.pyi is missing {sorted(missing)}; "
+            "regenerate with `stubgen -m grid_doctor -o src`."
+        )
+
+    def test_stub_has_no_stale_exports(self) -> None:
+        import grid_doctor
+
+        stale = self._stub_exports() - set(grid_doctor.__all__)
+        assert not stale, f"__init__.pyi exports non-public names: {sorted(stale)}"

@@ -22,6 +22,7 @@ nav:
       - Overview: recipes/index.md
       - Structured Grids (ERA5, CMIP): recipes/structured.md
       - Unstructured Grids (ICON): recipes/icon.md
+      - Limited Area/Regional grids: recipes/regional.md
       - Point Data: recipes/point-data.md
 
 

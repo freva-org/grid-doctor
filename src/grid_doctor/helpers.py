@@ -35,6 +35,13 @@ from .types import CoarsenMode, FloatArray, ZarrOptions
 
 logger = logging.getLogger(__name__)
 
+WRITE_COORDS_MAX_LEVEL = 10
+"""Highest level for which ``save_pyramid(write_coords="auto")``
+materialises coordinate arrays.  At level 10 the two float64 coordinate
+arrays cost ~200 MB per store; one level up they double, and by level 16
+they would reach hundreds of GB while carrying no information that is not
+already implied by the cell index."""
+
 
 # ===================================================================
 # Resolution estimation
@@ -456,6 +463,7 @@ def save_pyramid(
     region: Literal["auto"] | dict[str, slice] = "auto",
     zarr_format: Literal[2, 3] = 2,
     encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
+    write_coords: bool | Literal["auto"] = "auto",
 ) -> None:
     """Write a HEALPix pyramid to Zarr stores on S3 or local disk.
 
@@ -481,10 +489,35 @@ def save_pyramid(
         Zarr format version.
     encoding:
         Per-level encoding dictionaries.
+    write_coords:
+        Whether to materialise the ``cell``/``latitude``/``longitude``
+        coordinate arrays in the store.  HEALPix coordinates are a pure
+        function of the cell index, and above roughly level 10 the
+        arrays dwarf regional payloads (hundreds of GB at level 16 —
+        they are never fill values, so chunk elision cannot help).
+        ``"auto"`` (default) writes coordinates for levels up to
+        :data:`WRITE_COORDS_MAX_LEVEL` and omits them above; ``True`` /
+        ``False`` force either behaviour for all levels.  Coordinate-
+        less stores keep the ``crs`` variable and all ``healpix_*``
+        attributes, carry ``grid_doctor_implicit_coords = 1``, and are
+        meant to be accessed through the region selectors
+        ([`select_bbox`][grid_doctor.select_bbox],
+        [`select_cells`][grid_doctor.select_cells]), which reconstruct
+        coordinates for exactly the cells they return.
     """
     is_s3 = path.startswith("s3://")
     fs = s3fs.S3FileSystem(**(s3_options or {})) if is_s3 else None
     for level, dataset in pyramid.items():
+        include_coords = (
+            write_coords
+            if isinstance(write_coords, bool)
+            else level <= WRITE_COORDS_MAX_LEVEL
+        )
+        if not include_coords:
+            dataset = dataset.drop_vars(
+                ["latitude", "longitude", "cell"], errors="ignore"
+            )
+            dataset.attrs["grid_doctor_implicit_coords"] = 1
         level_path = f"{path}/level_{level}.zarr"
         logger.info("Writing HEALPix level %s to %s", level, level_path)
         store: Any
