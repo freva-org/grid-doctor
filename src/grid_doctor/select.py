@@ -1,4 +1,4 @@
-"""Region selection for (high-level) HEALPix datasets.
+r"""Region selection for (high-level) HEALPix datasets.
 
 At high HEALPix levels the global cell dimension becomes enormous
 (``12 * 4**16`` ≈ 5.2e10 cells at ~100 m resolution) while regional
@@ -65,14 +65,11 @@ def _contiguous_runs(ids: Int64Array) -> list[tuple[int, int]]:
     return [(int(ids[a]), int(ids[b]) + 1) for a, b in zip(starts, stops)]
 
 
-def _parents_to_ranges(
-    parents: Int64Array, delta: int
-) -> list[tuple[int, int]]:
+def _parents_to_ranges(parents: Int64Array, delta: int) -> list[tuple[int, int]]:
     """Convert coarse parent IDs into fine-level ``[start, stop)`` ranges."""
     factor = 4**delta
     return [
-        (start * factor, stop * factor)
-        for start, stop in _contiguous_runs(parents)
+        (start * factor, stop * factor) for start, stop in _contiguous_runs(parents)
     ]
 
 
@@ -92,9 +89,7 @@ def _require_nested(ds: xr.Dataset) -> None:
     """Range-based selection relies on nested ordering."""
     order = str(ds.attrs.get("healpix_order", "nested"))
     if order not in {"nested", "nest"}:
-        raise ValueError(
-            f"Region selection requires nested ordering, got {order!r}."
-        )
+        raise ValueError(f"Region selection requires nested ordering, got {order!r}.")
 
 
 # ===================================================================
@@ -163,24 +158,20 @@ def select_cells(
                 f"{missing.size} requested cells are not present in the "
                 f"dataset (first missing: {int(missing[0])})."
             )
-        pieces = [
-            ds.isel(cell=slice(a, b)) for a, b in _contiguous_runs(pos)
-        ]
+        pieces = [ds.isel(cell=slice(a, b)) for a, b in _contiguous_runs(pos)]
     else:
         # Dense store without materialised coordinates: positional
         # index *is* the cell ID.
-        pieces = [
-            ds.isel(cell=slice(a, b)) for a, b in _contiguous_runs(wanted)
-        ]
+        pieces = [ds.isel(cell=slice(a, b)) for a, b in _contiguous_runs(wanted)]
 
-    subset = pieces[0] if len(pieces) == 1 else xr.concat(
-        pieces, dim="cell", data_vars="minimal", coords="minimal"
+    subset = (
+        pieces[0]
+        if len(pieces) == 1
+        else xr.concat(pieces, dim="cell", data_vars="minimal", coords="minimal")
     )
     if load:
         subset = subset.load()
-    return attach_cell_coords(
-        subset, wanted, level=resolved_level, attrs=ds.attrs
-    )
+    return attach_cell_coords(subset, wanted, level=resolved_level, attrs=ds.attrs)
 
 
 def select_bbox(
@@ -244,9 +235,7 @@ def select_bbox(
         len(ranges),
         resolved_level,
     )
-    cells = np.concatenate(
-        [np.arange(a, b, dtype=np.int64) for a, b in ranges]
-    )
+    cells = np.concatenate([np.arange(a, b, dtype=np.int64) for a, b in ranges])
     return select_cells(ds, cells, level=resolved_level, load=load)
 
 
@@ -286,15 +275,11 @@ def select_cone(
     query_level = max(0, resolved_level - query_delta)
     module, kwargs = _require_healpix_geo_module(nest=True)
     coverage = np.asarray(
-        module.cone_coverage(
-            (lon, lat), radius, query_level, flat=True, **kwargs
-        )
+        module.cone_coverage((lon, lat), radius, query_level, flat=True, **kwargs)
     )
     parents = coverage[0].astype(np.int64)
     ranges = _parents_to_ranges(parents, resolved_level - query_level)
-    cells = np.concatenate(
-        [np.arange(a, b, dtype=np.int64) for a, b in ranges]
-    )
+    cells = np.concatenate([np.arange(a, b, dtype=np.int64) for a, b in ranges])
     return select_cells(ds, cells, level=resolved_level, load=load)
 
 
