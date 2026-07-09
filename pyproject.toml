@@ -47,7 +47,8 @@ dependencies = [
     "fsspec",
     "numcodecs",
     "dask[array]",
-    "numba"
+    "numba",
+    "numpy_groupies",
 ]
 
 

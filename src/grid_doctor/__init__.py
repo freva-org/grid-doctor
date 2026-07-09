@@ -15,6 +15,8 @@ _SUBMODULES: dict[str, str] = {
     "helpers": ".helpers",
     "log": ".log",
     "remap": ".remap",
+    "select": ".select",
+    "swath": ".swath",
     "utils": ".utils",
     "cli": ".cli",
 }
@@ -22,6 +24,8 @@ _SUBMODULES: dict[str, str] = {
 
 _ATTRS: dict[str, str] = {
     "apply_weight_file": ".remap",
+    "attach_cell_coords": ".select",
+    "bin_to_healpix": ".swath",
     "compute_healpix_weights": ".remap",
     "chunk_for_target_store_size": ".utils",
     "coarsen_healpix": ".helpers",
@@ -35,12 +39,16 @@ _ATTRS: dict[str, str] = {
     "regrid_unstructured_to_healpix": ".remap",
     "resolution_to_healpix_level": ".helpers",
     "save_pyramid": ".helpers",
+    "select_bbox": ".select",
+    "select_cells": ".select",
+    "select_cone": ".select",
     "setup_logging": ".log",
+    "sparse_to_dense": ".swath",
 }
 
 
 if TYPE_CHECKING:
-    from . import helpers, log, remap, utils
+    from . import helpers, log, remap, select, swath, utils
     from .helpers import (
         coarsen_healpix,
         create_healpix_pyramid,
@@ -56,6 +64,13 @@ if TYPE_CHECKING:
         regrid_to_healpix,
         regrid_unstructured_to_healpix,
     )
+    from .select import (
+        attach_cell_coords,
+        select_bbox,
+        select_cells,
+        select_cone,
+    )
+    from .swath import bin_to_healpix, sparse_to_dense
     from .utils import (
         cached_open_dataset,
         cached_weights,
@@ -90,8 +105,12 @@ __all__ = [
     "helpers",
     "log",
     "remap",
+    "select",
+    "swath",
     "utils",
     "apply_weight_file",
+    "attach_cell_coords",
+    "bin_to_healpix",
     "cached_open_dataset",
     "cached_weights",
     "chunk_for_target_store_size",
@@ -105,5 +124,9 @@ __all__ = [
     "regrid_unstructured_to_healpix",
     "resolution_to_healpix_level",
     "save_pyramid",
+    "select_bbox",
+    "select_cells",
+    "select_cone",
     "setup_logging",
+    "sparse_to_dense",
 ]

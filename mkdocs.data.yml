@@ -14,6 +14,7 @@ nav:
       - Why Zarr and S3?: storage_concepts/zarr-and-s3.md
   - Technical Decisions: technical-decisions.md
   - Operations :
+      - Working with data data: high-level-access.md
       - Remapping and benchmark: appendix-remapping-benchmark.md
 exclude_docs: |
   technical/**
