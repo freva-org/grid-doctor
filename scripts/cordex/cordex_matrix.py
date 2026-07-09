@@ -51,7 +51,6 @@ class CordexEntry:
     experiment: str
     frequency: str
     model: str
-    driving_model: str | None
     ensemble: str
     files_by_variable: dict[str, list[str]]
 
@@ -76,7 +75,7 @@ class CordexMatrix:
     project: str = "nukleus"
     product: str | None = None
     experiments: Sequence[str] = ()
-    frequencies: Sequence[str] = ("day",)
+    frequencies: Sequence[str] = ("1day",)
     models: Sequence[str] = ()
     driving_models: Sequence[str] = ()
     variables: Sequence[str] = ()
@@ -85,8 +84,7 @@ class CordexMatrix:
     default_ensemble: str = DEFAULT_ENSEMBLE
     extra_facets: Mapping[str, object] = field(default_factory=dict)
     path_template: str = (
-        "healpix/{project}/{experiment}-{ensemble}/"
-        "{driving_model}/{model}/{frequency}"
+        "healpix/{project}/{experiment}-{ensemble}/{driving_model}/{model}/{frequency}"
     )
 
     def _facets(self, **extra: object) -> dict[str, object]:
@@ -103,28 +101,27 @@ class CordexMatrix:
 
     def build(self, client: DatabrowserClient) -> list[CordexEntry]:
         entries: list[CordexEntry] = []
-        experiments = list(self.experiments) or self._values(client, "experiment")
+        experiments = list(self.experiments or []) or self._values(client, "experiment")
         for experiment in experiments:
             for frequency in self.frequencies:
                 combo = {"experiment": experiment, "time_frequency": frequency}
-                models = list(self.models) or self._values(
+                if self.driving_models:
+                    combo["driving_model"] = self.driving_models
+                models = list(self.models or []) or self._values(
                     client, "model", **combo
                 )
                 if self.max_models is not None:
                     models = models[: self.max_models]
                 for model in models:
-                    drivers = list(self.driving_models) or (
-                        self._values(
-                            client, "driving_model", model=model, **combo
-                        )
-                        or [None]  # facet unused by this project
+                    driving_model = self._values(
+                        client, "driving_model", model=model, **combo
                     )
-                    for driver in drivers:
-                        entry = self._build_entry(
-                            client, experiment, frequency, model, driver
-                        )
-                        if entry is not None:
-                            entries.append(entry)
+                    driving_model = driving_model or ["self-driven"]
+                    entry = self._build_entry(
+                        client, experiment, frequency, model, driving_model[0]
+                    )
+                    if entry is not None:
+                        entries.append(entry)
         return entries
 
     def _build_entry(
@@ -133,13 +130,12 @@ class CordexMatrix:
         experiment: str,
         frequency: str,
         model: str,
-        driver: str | None,
+        driving_model: str,
     ) -> CordexEntry | None:
         combo: dict[str, object] = {
             "experiment": experiment,
             "time_frequency": frequency,
             "model": model,
-            "driving_model": driver,
         }
         ensembles = self._values(client, "ensemble", **combo)
         if not ensembles:
@@ -151,7 +147,7 @@ class CordexMatrix:
             else sorted(ensembles)[0]
         )
 
-        variables = list(self.variables) or self._values(
+        variables = list(self.variables or []) or self._values(
             client, "variable", ensemble=ensemble, **combo
         )
         variables = [v for v in variables if v not in set(self.exclude_variables)]
@@ -175,8 +171,8 @@ class CordexMatrix:
             product=self.product or "",
             experiment=experiment,
             ensemble=ensemble,
-            driving_model=driver or "self-driven",
             model=model,
+            driving_model=driving_model,
             frequency=cmor_to_iso8601(frequency) or frequency,
         )
         return CordexEntry(
@@ -184,7 +180,6 @@ class CordexMatrix:
             experiment=experiment,
             frequency=frequency,
             model=model,
-            driving_model=driver,
             ensemble=ensemble,
             files_by_variable=files_by_variable,
         )
@@ -230,15 +225,10 @@ def build_group_weights(
 
     representatives = {key: files[0] for key, files in groups.items()}
     rep_datasets = {key: open_dataset(rep) for key, rep in representatives.items()}
-    native_levels = {
-        key: int(resolution_level(ds)) for key, ds in rep_datasets.items()
-    }
-    target_level = (
-        int(level) if level else max(native_levels.values())
-    )
+    native_levels = {key: int(resolution_level(ds)) for key, ds in rep_datasets.items()}
+    target_level = int(level) if level else max(native_levels.values())
     group_weights = {
-        key: str(make_weights(ds, target_level))
-        for key, ds in rep_datasets.items()
+        key: str(make_weights(ds, target_level)) for key, ds in rep_datasets.items()
     }
     return target_level, native_levels, group_weights, representatives
 
