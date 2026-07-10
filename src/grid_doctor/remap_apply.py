@@ -51,6 +51,8 @@ def extract_sparse_weights(
     row: FloatArray,
     col: FloatArray,
     values: FloatArray,
+    n_target: int | None = None,
+    n_source: int | None = None,
 ) -> tuple["csr_array", int, int]:
     """Build a CSR weight matrix from COO triplets.
 
@@ -61,13 +63,23 @@ def extract_sparse_weights(
         row: Destination (target) indices.
         col: Source indices.
         values: Weight values.
+        n_target: True target grid size.  When omitted it is inferred
+            as ``max(row) + 1`` — correct only when the highest target
+            cell actually receives weights.  A *regional* source
+            touches only a subset of the global HEALPix target, so the
+            inferred size is silently too small; always pass the true
+            size when it is known.
+        n_source: True source grid size (same caveat: masked or
+            fully-unmapped source cells make the inferred size too
+            small).
 
     Returns:
         ``(matrix, n_target, n_source)``.
 
     Raises:
-        ValueError: When the arrays have mismatched lengths or are
-            empty.
+        ValueError: When the arrays have mismatched lengths, are
+            empty, or an explicit size is smaller than the indices
+            require.
     """
     row_i = np.asarray(row, dtype=np.int64).ravel()
     col_i = np.asarray(col, dtype=np.int64).ravel()
@@ -82,8 +94,22 @@ def extract_sparse_weights(
         row_i = row_i - 1
         col_i = col_i - 1
 
-    n_target = int(row_i.max()) + 1
-    n_source = int(col_i.max()) + 1
+    min_target = int(row_i.max()) + 1
+    min_source = int(col_i.max()) + 1
+    if n_target is None:
+        n_target = min_target
+    elif n_target < min_target:
+        raise ValueError(
+            f"n_target={n_target} is smaller than the largest destination "
+            f"index requires ({min_target})."
+        )
+    if n_source is None:
+        n_source = min_source
+    elif n_source < min_source:
+        raise ValueError(
+            f"n_source={n_source} is smaller than the largest source "
+            f"index requires ({min_source})."
+        )
     matrix = coo_matrix(
         (values, (row_i, col_i)),
         shape=(n_target, n_source),

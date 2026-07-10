@@ -136,12 +136,34 @@ def _read_weight_file(
         col_name = "col" if "col" in wds else "src_address"
         val_name = "S" if "S" in wds else "remap_matrix"
 
+        level = int(wds.attrs.get("grid_doctor_level", -1))
+
+        # Resolve the TRUE grid sizes rather than inferring them from
+        # the largest weight index. A regional source touches only a
+        # subset of the global HEALPix target, so max(row)+1 silently
+        # truncates the target grid (and downstream coordinate
+        # attachment fails with a 'conflicting sizes' error). Priority:
+        # ESMF's n_b/n_a dimensions, then the HEALPix level for the
+        # target, then dst/src_grid_dims variables, then inference.
+        def _grid_size(dim: str, dims_var: str) -> int | None:
+            if dim in wds.sizes:
+                return int(wds.sizes[dim])
+            if dims_var in wds:
+                return int(np.prod(wds[dims_var].values))
+            return None
+
+        n_target_true = _grid_size("n_b", "dst_grid_dims")
+        if n_target_true is None and level >= 0:
+            n_target_true = 12 * 4**level
+        n_source_true = _grid_size("n_a", "src_grid_dims")
+
         matrix, n_target, n_source = extract_sparse_weights(
             row=wds[row_name].values,
             col=wds[col_name].values,
             values=wds[val_name].values,
+            n_target=n_target_true,
+            n_source=n_source_true,
         )
-        level = int(wds.attrs.get("grid_doctor_level", -1))
         order = str(wds.attrs.get("grid_doctor_order", "nested"))
         method_raw = wds.attrs.get("grid_doctor_method")
         method = str(method_raw) if method_raw is not None else None

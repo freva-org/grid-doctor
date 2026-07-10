@@ -331,7 +331,7 @@ def gather_sources(
 # ---------------------------------------------------------------------------
 # Step 2: Create / cache ESMF weight files + per-grid coverage fields
 # ---------------------------------------------------------------------------
-@wf.job(cpus=128, time="08:00:00", partition="compute", mem="0", version="2")
+@wf.job(cpus=128, time="08:00:00", partition="compute", mem="0", version="3")
 def create_weights(
     paths: Annotated[list[tuple[str, list[str]]], Result(step="gather_sources")],
     run_dir: RunDir,
@@ -391,6 +391,12 @@ def create_weights(
                     method="conservative",
                     weights_path=group_weights[key],
                     ignore_unmapped=True,
+                    # "propagate" returns the raw weight-row sums, which
+                    # for a ones-field ARE the coverage fractions. The
+                    # default "renormalize" divides by the weight sum and
+                    # would turn every touched cell into exactly 1.0,
+                    # making the mask a no-op.
+                    missing_policy="propagate",
                 )[COVERAGE_VAR].fillna(0.0)
                 coverage.attrs.update(
                     long_name=("fraction of HEALPix cell covered by the source domain"),
