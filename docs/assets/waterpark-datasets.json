@@ -4,7 +4,7 @@
     "cordex",
     "dyamond",
     "eerie",
-    "era5",
+    "reanalysis",
     "icdc",
     "icon-dream",
     "nextgems",
@@ -33,9 +33,9 @@
       "label": "Eddy-Rich Earth System Models",
       "href": "https://dataviewer.eerie-project.eu/home/eddy-rich"
     },
-    "era5": {
-      "title": "ERA5",
-      "label": "ECMWF Reanalysis v5",
+    "reanalysis": {
+      "title": "Reanalysis",
+      "label": "Reanalysis data for Ocean and Atmosphere",
       "href": "https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5"
     },
     "icdc": {
@@ -54,16 +54,16 @@
       "href": "https://nextgems-h2020.eu"
     },
     "obs": {
-      "title": "obs",
-      "label": "Observations"
+      "title": "Observations",
+      "label": "Various observational datasets, grid and swath products"
     },
     "palmod": {
       "title": "PalMod",
       "label": "Paleoclimate Modelling initiative"
     },
     "xspies": {
-      "title": "xspies",
-      "label": "XSPIES simulations",
+      "title": "XSpies",
+      "label": "km scale flagship ICON simulations",
       "locked": "coming soon"
     }
   }
