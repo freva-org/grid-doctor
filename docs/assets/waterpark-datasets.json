@@ -9,7 +9,9 @@
     "icon-dream",
     "nextgems",
     "obs",
+    "oras5",
     "palmod",
+    "wcrp-hackathon",
     "xspies"
   ],
   "datasets": {
@@ -57,9 +59,15 @@
       "title": "obs",
       "label": "Observations"
     },
+    "oras5": {
+      "title": "oras5"
+    },
     "palmod": {
       "title": "PalMod",
       "label": "Paleoclimate Modelling initiative"
+    },
+    "wcrp-hackathon": {
+      "title": "wcrp-hackathon"
     },
     "xspies": {
       "title": "xspies",
