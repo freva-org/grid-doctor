@@ -8,19 +8,23 @@ import xarray as xr
 
 from grid_doctor import coarsen_healpix
 from grid_doctor.swath import (
-    _bin_mode,
-    _declared_fill_value,
-    _masked_float64,
-    _resolve_point_coords,
     bin_to_healpix,
     sparse_to_dense,
+)
+from grid_doctor.swath.utils import (
+    bin_mode,
+    _declared_fill_value,
+    masked_float64,
+    resolve_point_coords,
 )
 
 LEVEL = 4
 NPIX = 12 * 4**LEVEL
 
 
-def _cell_centres(cells: np.ndarray, level: int = LEVEL) -> tuple[np.ndarray, np.ndarray]:
+def _cell_centres(
+    cells: np.ndarray, level: int = LEVEL
+) -> tuple[np.ndarray, np.ndarray]:
     """Return (lon, lat) centres of *cells* on the sphere."""
     from healpix_geo import nested
 
@@ -74,7 +78,7 @@ def swath_ds(target_cells: np.ndarray) -> xr.Dataset:
 
 class TestResolvePointCoords:
     def test_auto_detection(self, swath_ds: xr.Dataset) -> None:
-        lat, lon, dims = _resolve_point_coords(
+        lat, lon, dims = resolve_point_coords(
             swath_ds, lat_name=None, lon_name=None, source_units="auto"
         )
         assert dims == ("along_track", "across_track")
@@ -82,7 +86,7 @@ class TestResolvePointCoords:
 
     def test_explicit_names(self, target_cells: np.ndarray) -> None:
         ds = _make_swath(target_cells, lat_name="lat_swath", lon_name="lon_swath")
-        lat, lon, dims = _resolve_point_coords(
+        lat, lon, dims = resolve_point_coords(
             ds, lat_name="lat_swath", lon_name="lon_swath", source_units="auto"
         )
         assert dims == ("along_track", "across_track")
@@ -90,29 +94,23 @@ class TestResolvePointCoords:
 
     def test_explicit_name_missing_raises(self, swath_ds: xr.Dataset) -> None:
         with pytest.raises(KeyError, match="not found"):
-            _resolve_point_coords(
+            resolve_point_coords(
                 swath_ds, lat_name="nope", lon_name=None, source_units="auto"
             )
 
     def test_no_candidate_raises(self) -> None:
         ds = xr.Dataset({"t": (("x",), np.zeros(3))})
         with pytest.raises(ValueError, match="Could not locate"):
-            _resolve_point_coords(
-                ds, lat_name=None, lon_name=None, source_units="auto"
-            )
+            resolve_point_coords(ds, lat_name=None, lon_name=None, source_units="auto")
 
     def test_mismatched_dims_raise(self, swath_ds: xr.Dataset) -> None:
         ds = swath_ds.assign_coords(
             latitude=("along_track", swath_ds["latitude"].values[:, 0])
         )
         with pytest.raises(ValueError, match="same dimensions"):
-            _resolve_point_coords(
-                ds, lat_name=None, lon_name=None, source_units="auto"
-            )
+            resolve_point_coords(ds, lat_name=None, lon_name=None, source_units="auto")
 
-    def test_radians_and_negative_longitudes(
-        self, target_cells: np.ndarray
-    ) -> None:
+    def test_radians_and_negative_longitudes(self, target_cells: np.ndarray) -> None:
         ds = _make_swath(target_cells)
         lon180 = ((ds["longitude"].values + 180.0) % 360.0) - 180.0
         rad = ds.assign_coords(
@@ -145,7 +143,7 @@ class TestFillValues:
     def test_zero_is_a_valid_fill_value(self) -> None:
         """Regression: a fill value of 0 must not be dropped as falsy."""
         da = xr.DataArray(np.array([0, 1, 2], dtype=np.int16))
-        masked = _masked_float64(da, fill_value=0)
+        masked = masked_float64(da, fill_value=0)
         assert np.isnan(masked[0])
         assert masked[1:].tolist() == [1.0, 2.0]
 
@@ -155,27 +153,25 @@ class TestFillValues:
         da = xr.DataArray(
             np.array([1.0, fill], dtype=np.float32), attrs={"_FillValue": fill}
         )
-        masked = _masked_float64(da, fill_value=None)
+        masked = masked_float64(da, fill_value=None)
         assert masked[0] == 1.0
         assert np.isnan(masked[1])
 
     def test_nan_invalid_even_with_declared_fill(self) -> None:
-        da = xr.DataArray(
-            np.array([np.nan, 1.0, -999.0]), attrs={"_FillValue": -999.0}
-        )
-        masked = _masked_float64(da, fill_value=None)
+        da = xr.DataArray(np.array([np.nan, 1.0, -999.0]), attrs={"_FillValue": -999.0})
+        masked = masked_float64(da, fill_value=None)
         assert np.isnan(masked[0]) and np.isnan(masked[2])
         assert masked[1] == 1.0
 
     def test_explicit_fill_overrides_attrs(self) -> None:
         da = xr.DataArray(np.array([5.0, 7.0]), attrs={"_FillValue": 7.0})
-        masked = _masked_float64(da, fill_value=5.0)
+        masked = masked_float64(da, fill_value=5.0)
         assert np.isnan(masked[0])
         assert masked[1] == 7.0
 
     def test_integer_fill_on_unsigned_dtype(self) -> None:
         da = xr.DataArray(np.array([1, 255], dtype=np.uint8))
-        masked = _masked_float64(da, fill_value=255)
+        masked = masked_float64(da, fill_value=255)
         assert masked[0] == 1.0 and np.isnan(masked[1])
 
 
@@ -188,17 +184,17 @@ class TestBinMode:
     def test_majority_wins(self) -> None:
         group_idx = np.zeros(5, dtype=np.int64)
         values = np.array([1.0, 2.0, 2.0, 2.0, 3.0])
-        result = _bin_mode(group_idx, values, n_cells=1)
+        result = bin_mode(group_idx, values, n_cells=1)
         assert result[0] == 2.0
 
     def test_tie_breaks_to_lowest_class(self) -> None:
         group_idx = np.zeros(4, dtype=np.int64)
         values = np.array([3.0, 3.0, 1.0, 1.0])
-        result = _bin_mode(group_idx, values, n_cells=1)
+        result = bin_mode(group_idx, values, n_cells=1)
         assert result[0] == 1.0
 
     def test_all_invalid_gives_nan(self) -> None:
-        result = _bin_mode(
+        result = bin_mode(
             np.zeros(2, dtype=np.int64), np.array([np.nan, np.nan]), n_cells=1
         )
         assert np.isnan(result[0])
@@ -206,9 +202,7 @@ class TestBinMode:
     def test_too_many_classes_raises(self) -> None:
         values = np.arange(10.0)
         with pytest.raises(ValueError, match="distinct classes"):
-            _bin_mode(
-                np.zeros(10, dtype=np.int64), values, n_cells=1, max_classes=5
-            )
+            bin_mode(np.zeros(10, dtype=np.int64), values, n_cells=1, max_classes=5)
 
 
 # ===================================================================
@@ -248,31 +242,25 @@ class TestBinToHealpixDense:
         result = bin_to_healpix(ds, LEVEL)
         assert result["field"].dims == ("time", "cell")
         assert np.allclose(
-            result["field"].values[1, target_cells] -
-            result["field"].values[0, target_cells],
+            result["field"].values[1, target_cells]
+            - result["field"].values[0, target_cells],
             10.0,
         )
         assert "time" in result.coords
 
-    def test_non_spatial_variables_pass_through(
-        self, swath_ds: xr.Dataset
-    ) -> None:
+    def test_non_spatial_variables_pass_through(self, swath_ds: xr.Dataset) -> None:
         ds = swath_ds.assign(meta=((), np.float64(42.0)))
         result = bin_to_healpix(ds, LEVEL)
         assert float(result["meta"]) == 42.0
 
-    def test_partial_dimension_overlap_is_skipped(
-        self, swath_ds: xr.Dataset
-    ) -> None:
+    def test_partial_dimension_overlap_is_skipped(self, swath_ds: xr.Dataset) -> None:
         ds = swath_ds.assign(
             profile=(("along_track",), np.zeros(swath_ds.sizes["along_track"]))
         )
         result = bin_to_healpix(ds, LEVEL)
         assert "profile" not in result
 
-    def test_min_count_masks_sparse_cells(
-        self, target_cells: np.ndarray
-    ) -> None:
+    def test_min_count_masks_sparse_cells(self, target_cells: np.ndarray) -> None:
         ds = _make_swath(target_cells, n_across=2)
         result = bin_to_healpix(ds, LEVEL, min_count=3)
         assert np.isnan(result["field"].values[target_cells]).all()
@@ -380,9 +368,7 @@ class TestBinToHealpixSparse:
         assert "grid_doctor_sparse" not in dense.attrs
         assert dense.attrs["grid_doctor_method"] == "binned-mean"
 
-    def test_sparse_to_dense_rejects_dense_input(
-        self, swath_ds: xr.Dataset
-    ) -> None:
+    def test_sparse_to_dense_rejects_dense_input(self, swath_ds: xr.Dataset) -> None:
         dense = bin_to_healpix(swath_ds, LEVEL)
         with pytest.raises(ValueError, match="sparse"):
             sparse_to_dense(dense)
