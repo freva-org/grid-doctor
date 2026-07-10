@@ -238,7 +238,7 @@ def _mask_with_coverage(
 # ---------------------------------------------------------------------------
 # Step 1: Discover source files via the Freva databrowser
 # ---------------------------------------------------------------------------
-@wf.job(cpus=2, time="00:10:00", mem="1GB", partition="shared")
+@wf.job(cpus=2, time="00:10:00", mem="1GB", partition="shared", version="2")
 def gather_sources(
     project: Annotated[
         str, Param(help="Freva project facet (CORDEX protocol)", short="-p")
@@ -298,13 +298,34 @@ def gather_sources(
         counts = {v: len(f) for v, f in entry.files_by_variable.items()}
         print(f"  {entry.key}  (ensemble={entry.ensemble})  files={counts}")
 
+    if not entries:
+        # An empty matrix would let the whole run "succeed" doing nothing
+        # (the array fan-out gets zero elements). Fail loudly instead, and
+        # show what the databrowser actually offers for this project so
+        # the facet mismatch is visible in the task log.
+        diagnostics: dict[str, list[str]] = {}
+        base = {"project": project, **({"product": product} if product else {})}
+        for facet in ("experiment", "time_frequency", "model",
+                      "driving_model", "ensemble", "variable"):
+            try:
+                diagnostics[facet] = client.facet_values(facet, **base)[:25]
+            except Exception as exc:  # diagnostics must never mask the error
+                diagnostics[facet] = [f"<query failed: {exc!r}>"]
+        lines = "\n".join(f"  {k}: {v}" for k, v in diagnostics.items())
+        raise RuntimeError(
+            f"Search matched no datasets for project={project!r} "
+            f"product={product!r} experiments={experiment or 'ALL'} "
+            f"freq={freq}. Available facet values (constrained only by "
+            f"project/product):\n{lines}"
+        )
+
     return [(entry.key, entry.files) for entry in entries]
 
 
 # ---------------------------------------------------------------------------
 # Step 2: Create / cache ESMF weight files + per-grid coverage fields
 # ---------------------------------------------------------------------------
-@wf.job(cpus=128, time="08:00:00", partition="compute", mem="0")
+@wf.job(cpus=128, time="08:00:00", partition="compute", mem="0", version="2")
 def create_weights(
     paths: Annotated[list[tuple[str, list[str]]], Result(step="gather_sources")],
     run_dir: RunDir,
@@ -389,13 +410,20 @@ def create_weights(
                 "group_coverage": group_coverage,
             }
         )
+    if paths and not out:
+        raise RuntimeError(
+            f"Weight/coverage generation failed for all {len(paths)} "
+            "datasets (see the SKIP lines above for the individual "
+            "reasons; a missing ESMF/esmpy in this partition's environment "
+            "fails every dataset the same way)."
+        )
     return out
 
 
 # ---------------------------------------------------------------------------
 # Step 3: Explode into per-file work items
 # ---------------------------------------------------------------------------
-@wf.job(cpus=1, time="00:05:00", mem="1GB", partition="shared")
+@wf.job(cpus=1, time="00:05:00", mem="1GB", partition="shared", version="2")
 def plan_regrid(
     sources: Annotated[list[tuple[str, list[str]]], Result(step="gather_sources")],
     weights: Annotated[list[WeightInfo], Result(step="create_weights")],
@@ -437,6 +465,12 @@ def plan_regrid(
             )
 
     print(f"Planned {len(items)} regrid tasks across {len(sources)} datasets")
+    if sources and not items:
+        raise RuntimeError(
+            "Planned zero regrid tasks although sources exist — every "
+            "dataset was dropped for missing weights. Fix create_weights "
+            "and retry."
+        )
     return items
 
 
