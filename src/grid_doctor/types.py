@@ -20,6 +20,9 @@ SourceKind = Literal["auto", "regular", "curvilinear", "unstructured", "spectral
 CoarsenMode = Literal["mean", "mode", "auto"]
 """Coarsening strategy for HEALPix pyramid construction."""
 
+BinAgg = Literal["mean", "mode", "min", "max", "count"]
+"""Per-cell aggregation methods for point binning."""
+
 FloatArray = npt.NDArray[np.float64]
 """Shorthand for a float64 NumPy array."""
 
