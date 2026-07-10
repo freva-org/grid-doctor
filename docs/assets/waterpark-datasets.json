@@ -4,7 +4,7 @@
     "cordex",
     "dyamond",
     "eerie",
-    "era5",
+    "reanalysis",
     "icdc",
     "icon-dream",
     "nextgems",
@@ -33,9 +33,9 @@
       "label": "Eddy-Rich Earth System Models",
       "href": "https://dataviewer.eerie-project.eu/home/eddy-rich"
     },
-    "era5": {
-      "title": "ERA5",
-      "label": "ECMWF Reanalysis v5",
+    "Reanalysis": {
+      "title": "Reanalysis",
+      "label": "Reanalysis",
       "href": "https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5"
     },
     "icdc": {
