@@ -49,7 +49,7 @@ from cordex_matrix import (
 if TYPE_CHECKING:
     import xarray as xr
 
-
+logger = gd.log.logging.getLogger(__name__)
 wf = Workflow("cordex_healpix")
 
 TARGET_CHUNK_BYTES = 16 * 1024**2  # 16 MiB
@@ -64,7 +64,7 @@ class WeightInfo(TypedDict):
 
     s3_path: str
     max_level: int
-    group_weights: dict[str, str]   # grid-group key -> weight file path
+    group_weights: dict[str, str]  # grid-group key -> weight file path
     group_coverage: dict[str, str]  # grid-group key -> coverage NetCDF
 
 
@@ -125,7 +125,8 @@ def _drop_source_grid(ds: xr.Dataset) -> xr.Dataset:
     drop += [
         str(name)
         for name in ds.variables
-        if ds[name].ndim == 0 and str(name) != "crs"
+        if ds[name].ndim == 0
+        and str(name) != "crs"
         and "grid_mapping_name" in ds[name].attrs
     ]
     ds = ds.drop_vars(drop, errors="ignore")
@@ -133,8 +134,7 @@ def _drop_source_grid(ds: xr.Dataset) -> xr.Dataset:
     orphaned = [
         d
         for d in ds.dims
-        if str(d) not in keep
-        and not any(d in ds[name].dims for name in ds.variables)
+        if str(d) not in keep and not any(d in ds[name].dims for name in ds.variables)
     ]
     return ds.drop_dims(orphaned, errors="ignore")
 
@@ -305,8 +305,14 @@ def gather_sources(
         # the facet mismatch is visible in the task log.
         diagnostics: dict[str, list[str]] = {}
         base = {"project": project, **({"product": product} if product else {})}
-        for facet in ("experiment", "time_frequency", "model",
-                      "driving_model", "ensemble", "variable"):
+        for facet in (
+            "experiment",
+            "time_frequency",
+            "model",
+            "driving_model",
+            "ensemble",
+            "variable",
+        ):
             try:
                 diagnostics[facet] = client.facet_values(facet, **base)[:25]
             except Exception as exc:  # diagnostics must never mask the error
@@ -369,7 +375,9 @@ def create_weights(
                 ),
             )
         except Exception as exc:
-            print(f"SKIP dataset {s3_path}: weight generation failed: {exc!r}")
+            logger.error(
+                f"SKIP dataset {s3_path}: weight generation failed", exc_info=exc
+            )
             continue
 
         safe = s3_path.replace("/", "__")
@@ -385,9 +393,7 @@ def create_weights(
                     ignore_unmapped=True,
                 )[COVERAGE_VAR].fillna(0.0)
                 coverage.attrs.update(
-                    long_name=(
-                        "fraction of HEALPix cell covered by the source domain"
-                    ),
+                    long_name=("fraction of HEALPix cell covered by the source domain"),
                     units="1",
                 )
                 cov_path = coverage_dir / f"{safe}__{key}.nc"
