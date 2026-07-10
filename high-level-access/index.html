@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://waterpark.dkrz.de/stac-browser/">
+        <link rel="canonical" href="https://waterpark.dkrz.de/high-level-access/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../technical-decisions/">
       
       
-        <link rel="next" href="../storage_concepts/">
+        <link rel="next" href="../appendix-remapping-benchmark/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>STAC Browser - Waterpark</title>
+        <title>Working with data data - Waterpark</title>
       
     
     
@@ -79,17 +79,17 @@
     
   
 <meta property="og:type" content="website" />
-<meta property="og:title" content="STAC Browser - Waterpark" />
+<meta property="og:title" content="Working with data data - Waterpark" />
 <meta property="og:description" content="The HEALPix Data Hub on s3" />
-<meta property="og:image" content="https://waterpark.dkrz.de/assets/images/social/stac-browser.png" />
+<meta property="og:image" content="https://waterpark.dkrz.de/assets/images/social/high-level-access.png" />
 <meta property="og:image:type" content="image/png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
-<meta property="og:url" content="https://waterpark.dkrz.de/stac-browser/" />
+<meta property="og:url" content="https://waterpark.dkrz.de/high-level-access/" />
 <meta property="twitter:card" content="summary_large_image" />
-<meta property="twitter:title" content="STAC Browser - Waterpark" />
+<meta property="twitter:title" content="Working with data data - Waterpark" />
 <meta property="twitter:description" content="The HEALPix Data Hub on s3" />
-<meta property="twitter:image" content="https://waterpark.dkrz.de/assets/images/social/stac-browser.png" />
+<meta property="twitter:image" content="https://waterpark.dkrz.de/assets/images/social/high-level-access.png" />
 </head>
   
   
@@ -107,6 +107,11 @@
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
+      
+        
+        <a href="#accessing-high-resolution-regional-data" class="md-skip">
+          Skip to content
+        </a>
       
     </div>
     <div data-md-component="announce">
@@ -139,7 +144,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              STAC Browser
+              Working with data data
             
           </span>
         </div>
@@ -251,11 +256,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../stac-browser/" class="md-tabs__link">
         
   
   
@@ -311,11 +314,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../high-level-access/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
           
   
   
@@ -344,9 +349,7 @@
           
             
               
-                
-              
-              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" hidden>
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
                 <div class="md-sidebar__scrollwrap">
                   <div class="md-sidebar__inner">
                     
@@ -400,17 +403,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../stac-browser/" class="md-nav__link">
         
   
   
@@ -426,7 +422,6 @@
   
 
       </a>
-      
     </li>
   
 
@@ -605,26 +600,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
             
   
   
@@ -642,7 +642,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -657,10 +657,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../high-level-access/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Working with data data
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -676,6 +703,109 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#opening-always-chunksnone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opening: always chunks=None
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#selecting-a-region" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selecting a region
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Selecting a region">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-this-is-fast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this is fast
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plotting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plotting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#comparing-across-levels-and-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing across levels and datasets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coarser-overview-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coarser overview levels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-mistakes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common mistakes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -730,35 +860,142 @@
               <article class="md-content__inner md-typeset">
                 
                   
-  
+
+
+
+<h1 id="accessing-high-resolution-regional-data">Accessing High-Resolution Regional Data<a class="headerlink" href="#accessing-high-resolution-regional-data" title="Permanent link">&para;</a></h1>
+<p>Some datasets in the hub cover a small area — a city, an island, a
+catchment — at very high HEALPix levels (16 ≈ 100 m, 20 ≈ 6 m cells).
+These stores look different from the global pyramids in two ways, and
+both change how you load them:</p>
+<ol>
+<li><strong>No coordinate arrays.</strong>  The global cell dimension at level 16 has
+   ~5.2 × 10¹⁰ entries; materialised <code>latitude</code>/<code>longitude</code> arrays would
+   cost hundreds of gigabytes while carrying no information — HEALPix
+   coordinates are a pure function of the cell index.  These stores
+   carry only the <code>crs</code> variable and the <code>healpix_*</code> attributes
+   (<code>grid_doctor_implicit_coords = 1</code> marks them), and coordinates are
+   computed on the fly for whatever cells you actually read.</li>
+<li><strong>All access is region-driven.</strong>  Nobody loads the full cell
+   dimension, the same way nobody downloads a complete XYZ tile set.
+   You select a region; the selection is small by construction.</li>
+</ol>
+<h2 id="opening-always-chunksnone">Opening: always <code>chunks=None</code><a class="headerlink" href="#opening-always-chunksnone" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">xarray</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">xr</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">ds</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">open_zarr</span><span class="p">(</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="s2">&quot;s3://data/city-example.zarr/level_16.zarr&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">storage_options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;anon&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;endpoint_url&quot;</span><span class="p">:</span> <span class="s2">&quot;https://s3.waterpark.dkrz.de&quot;</span><span class="p">},</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">chunks</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>          <span class="c1"># &lt;- essential at high levels</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span>
+</code></pre></div>
+<p><code>chunks=None</code> gives you plain lazy Zarr-backed arrays that slice in
+O(selection).  With the default dask chunking, xarray eagerly builds a
+chunk-grid description proportional to the <strong>global</strong> chunk count —
+millions of entries at level 16, nearly a billion at level 20.  Opening
+would hang long before any data moves.</p>
+<p>The opened dataset has an enormous nominal shape and no coordinates.
+That is fine — do not call <code>.load()</code>, do not print <code>.values</code>.  Select
+first.</p>
+<h2 id="selecting-a-region">Selecting a region<a class="headerlink" href="#selecting-a-region" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">grid_doctor</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gd</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">berlin</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">select_bbox</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">lon</span><span class="o">=</span><span class="p">(</span><span class="mf">13.1</span><span class="p">,</span> <span class="mf">13.8</span><span class="p">),</span> <span class="n">lat</span><span class="o">=</span><span class="p">(</span><span class="mf">52.3</span><span class="p">,</span> <span class="mf">52.7</span><span class="p">))</span>
+</code></pre></div>
+<p>That one call is fully loaded and ready:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;t2m&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>                       <span class="c1"># data is in memory</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;latitude&quot;</span><span class="p">],</span> <span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;longitude&quot;</span><span class="p">]</span>    <span class="c1"># computed for these cells only</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;cell&quot;</span><span class="p">]</span>                             <span class="c1"># the global HEALPix indices</span>
+</code></pre></div>
+<p>A circular region works the same way:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">station</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">select_cone</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">lon</span><span class="o">=</span><span class="mf">13.41</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">52.52</span><span class="p">,</span> <span class="n">radius</span><span class="o">=</span><span class="mf">0.05</span><span class="p">)</span>
+</code></pre></div>
+<p>and if you already know the cell IDs (e.g. from a previous selection or
+another dataset):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">subset</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">select_cells</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">my_cell_ids</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="why-this-is-fast">Why this is fast<a class="headerlink" href="#why-this-is-fast" title="Permanent link">&para;</a></h3>
+<p>In nested ordering, every cell at a coarse level corresponds to one
+<em>contiguous</em> index range at the fine level.  <code>select_bbox</code> rasterises
+your box at a coarse level (a cheap geometric query), and each coarse
+parent becomes a single contiguous slice — which is exactly one Zarr
+chunk when the store is chunked at a power of four.  A city-sized box
+resolves to a handful of contiguous byte-range reads from S3, with
+nothing wasted.  The <code>query_delta</code> parameter controls the granularity:
+the selection arrives in whole blocks of <code>4**query_delta</code> cells, so
+matching it to the store's chunk exponent gives zero-waste reads.</p>
+<h2 id="plotting">Plotting<a class="headerlink" href="#plotting" title="Permanent link">&para;</a></h2>
+<p>The selection is a normal xarray dataset with per-cell coordinates:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">plt</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;longitude&quot;</span><span class="p">],</span> <span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;latitude&quot;</span><span class="p">],</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">c</span><span class="o">=</span><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;t2m&quot;</span><span class="p">],</span> <span class="n">s</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s2">&quot;viridis&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">)</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">plt</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;t2m&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>For publication-quality regional maps, bin the cells into a local
+raster or use any HEALPix-aware plotting path — at level 16 a scatter
+of cell centres is visually indistinguishable from a raster at typical
+figure sizes.</p>
+<h2 id="comparing-across-levels-and-datasets">Comparing across levels and datasets<a class="headerlink" href="#comparing-across-levels-and-datasets" title="Permanent link">&para;</a></h2>
+<p>Nested cell IDs make cross-level alignment a bit shift: the level-9
+parent of a level-16 cell is <code>cell_id &gt;&gt; 14</code> (two bits per level).  To
+place your high-resolution selection onto, say, an ERA5 pyramid level:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">parents_l9</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;cell&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span> <span class="o">&gt;&gt;</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="mi">16</span> <span class="o">-</span> <span class="mi">9</span><span class="p">)))</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">era5_region</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">select_cells</span><span class="p">(</span><span class="n">era5_level9</span><span class="p">,</span> <span class="n">parents_l9</span><span class="p">)</span>
+</code></pre></div>
+<p>No interpolation, no index join — the hierarchies coincide by
+construction, which is one of the reasons the hub uses nested ordering
+everywhere.</p>
+<h2 id="coarser-overview-levels">Coarser overview levels<a class="headerlink" href="#coarser-overview-levels" title="Permanent link">&para;</a></h2>
+<p>High-level stores are still pyramids.  For a quick overview, open a
+coarse level of the <em>same</em> store — levels at or below the coordinate
+threshold are written with materialised coordinates and behave exactly
+like every other dataset in the hub, including in the browser viewer:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">overview</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">open_zarr</span><span class="p">(</span><span class="s2">&quot;.../city-example.zarr/level_8.zarr&quot;</span><span class="p">,</span> <span class="n">chunks</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="common-mistakes">Common mistakes<a class="headerlink" href="#common-mistakes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Opening hangs or eats memory</td>
+<td>default dask chunking at high level</td>
+<td><code>chunks=None</code></td>
+</tr>
+<tr>
+<td><code>MemoryError</code> on <code>.load()</code> / <code>.values</code></td>
+<td>loading the global dimension</td>
+<td>select a region first</td>
+</tr>
+<tr>
+<td>"no latitude coordinate"</td>
+<td>store has implicit coordinates</td>
+<td>use the selectors, or <code>gd.select_cells</code> + the returned coords</td>
+</tr>
+<tr>
+<td>Slow S3 reads for a small box</td>
+<td><code>query_delta</code> misaligned with store chunks</td>
+<td>match <code>query_delta</code> to the chunk exponent</td>
+</tr>
+</tbody>
+</table>
 
 
 
 
-  <h1>STAC Browser</h1>
-
-<!-- AUTO-GENERATED by docs/scripts/build_stac_browser_docs.py. Do not edit;
-     settings live in docs/assets/stac-browser.config.js. -->
-
-<div class="waterpark-stac-wrapper">
-  <div id="stac-browser-mount"
-       data-stac-entry="/stac-browser/assets/index-BFYvRWJo.js"
-       data-stac-css="[&quot;/stac-browser/assets/index-_5KLt79H.css&quot;]"></div>
-</div>
 
 
 
 
 
-
-
-  
-  
-
-
-
-
-  
 
 
 
@@ -776,12 +1013,10 @@
   
     
       
-        
-      
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href=".." class="md-footer__link md-footer__link--prev" aria-label="Previous: Overview">
+          <a href="../technical-decisions/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Technical Decisions">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L77.3 256l137.3-137.4c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg>
@@ -791,20 +1026,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Overview
+                Technical Decisions
               </div>
             </div>
           </a>
         
         
           
-          <a href="../storage_concepts/" class="md-footer__link md-footer__link--next" aria-label="Next: HEALPix in Zarr on S3">
+          <a href="../appendix-remapping-benchmark/" class="md-footer__link md-footer__link--next" aria-label="Next: Remapping and benchmark">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                HEALPix in Zarr on S3
+                Remapping and benchmark
               </div>
             </div>
             <div class="md-footer__button md-icon">

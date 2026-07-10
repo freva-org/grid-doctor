@@ -16,7 +16,7 @@
         <link rel="prev" href="../storage_concepts/zarr-and-s3/">
       
       
-        <link rel="next" href="../appendix-remapping-benchmark/">
+        <link rel="next" href="../high-level-access/">
       
       
         
@@ -320,7 +320,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../appendix-remapping-benchmark/" class="md-tabs__link">
+        <a href="../high-level-access/" class="md-tabs__link">
           
   
   
@@ -782,6 +782,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#point-binning-swath-and-station-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Point binning (swath and station data)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Point binning (swath and station data)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sphere-not-ellipsoid-also-for-satellite-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sphere, not ellipsoid — also for satellite data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minimum-sample-count-and-coverage-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimum sample count and coverage tracking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyramids-from-binned-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pyramids from binned data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#pyramid-construction-and-coarsening" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -893,6 +943,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#high-level-regional-datasets-implicit-coordinates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        High-level regional datasets: implicit coordinates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#performance-application-backends" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -962,6 +1023,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../high-level-access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Working with data data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1230,6 +1319,63 @@ incomplete coverage.</p>
 edge of a target cell's footprint is enough to discard it.  Along
 coastlines, swath edges, and orbit gaps, large portions of the output
 will be NaN.</p>
+<h2 id="point-binning-swath-and-station-data">Point binning (swath and station data)<a class="headerlink" href="#point-binning-swath-and-station-data" title="Permanent link">&para;</a></h2>
+<p>Gridded datasets are remapped with ESMF as described above.  <em>Point-sampled</em>
+data — satellite Level-2 swaths, station records, trajectories — cannot use
+that path for two structural reasons: every granule has unique geometry, so
+the precomputed weight matrix can never be reused, and ESMF's
+nearest source-to-destination method assigns a value to <strong>every</strong>
+destination cell, which would smear a narrow swath over the entire globe.</p>
+<p>Point data is therefore <strong>binned</strong>: each sample is assigned to the HEALPix
+cell containing its coordinates and all samples per cell are reduced.  The
+available reductions mirror the two remapping methods:</p>
+<ul>
+<li><strong>Mean binning (continuous fields).</strong>  In the oversampled limit — sample
+  spacing much finer than the target cell spacing — the per-cell sample
+  mean converges to the area-weighted mean, making it a first-order
+  approximation of conservative remapping.  This validity condition is
+  enforced by choosing the target level from the sample spacing with the
+  same heuristic used for gridded data; a swath is never binned into cells
+  finer than its own pixel spacing.</li>
+<li><strong>Mode binning (categorical fields).</strong>  The most frequent class per cell,
+  the binning analogue of nearest-neighbour remapping.  Ties are broken
+  deterministically towards the lowest class value.  As with
+  nearest-neighbour remapping, no interpolated intermediate classes can
+  appear.</li>
+<li><code>min</code> / <code>max</code> / <code>count</code> are available for extrema and coverage
+  diagnostics.</li>
+</ul>
+<p>A per-sample <strong>sum is deliberately not offered</strong>: it scales with sample
+density (orbit overlap, across-track pixel count) rather than any physical
+integral, and therefore violates the integral-preservation rationale that
+motivates conservative remapping.  Root-mean-square reductions are likewise
+excluded because they do not commute with mean coarsening in the pyramid;
+if an RMS quantity is required, bin the <em>squared</em> field with the mean and
+apply the square root at read time.</p>
+<h3 id="sphere-not-ellipsoid-also-for-satellite-data">Sphere, not ellipsoid — also for satellite data<a class="headerlink" href="#sphere-not-ellipsoid-also-for-satellite-data" title="Permanent link">&para;</a></h3>
+<p>Satellite geolocation is geodetic (WGS84).  Binning nevertheless indexes
+cells on the <strong>perfect sphere</strong>, exactly like all remapped datasets.  The
+geodetic-vs-spherical latitude discrepancy (up to ~0.19° at 45° latitude,
+~21 km) is accepted so that every dataset in the hub shares a single
+indexing geometry.  Indexing one dataset on the ellipsoid while all others
+use the sphere would shift it by dozens of pixels at typical swath target
+levels, producing visible misregistration (offset coastlines) when
+datasets are overlaid.</p>
+<h3 id="minimum-sample-count-and-coverage-tracking">Minimum sample count and coverage tracking<a class="headerlink" href="#minimum-sample-count-and-coverage-tracking" title="Permanent link">&para;</a></h3>
+<p>A cell is set to NaN when it receives fewer than <code>min_count</code> valid
+samples (default: 1).  Optionally, a companion <code>&lt;variable&gt;_count</code>
+variable records the number of valid samples per cell.  Publishing the
+count is recommended: it makes coverage auditable, enables unbiased
+count-weighted merging of overlapping granules, and is the point-data
+analogue of a valid-area fraction for coarsened grids.</p>
+<h3 id="pyramids-from-binned-data">Pyramids from binned data<a class="headerlink" href="#pyramids-from-binned-data" title="Permanent link">&para;</a></h3>
+<p>Binned datasets carry the full standard metadata (<code>crs</code> variable,
+<code>healpix_*</code> and <code>grid_doctor_*</code> attributes) and dense cell layout, so
+pyramid construction reuses the ordinary coarsening machinery unchanged,
+including the 50% minimum-valid-fraction rule.  The recorded method
+(<code>grid_doctor_method = "binned-mean"</code> or <code>"binned-mode"</code>) drives the
+automatic mean-vs-mode coarsening selection, just as <code>"conservative"</code>
+and <code>"nearest"</code> do for remapped data.</p>
 <h2 id="pyramid-construction-and-coarsening">Pyramid construction and coarsening<a class="headerlink" href="#pyramid-construction-and-coarsening" title="Permanent link">&para;</a></h2>
 <p>The multi-resolution pyramid is built by first remapping the source
 dataset to the finest HEALPix level, then deriving all coarser levels
@@ -1339,6 +1485,31 @@ transition to v3 is planned once the client ecosystem has converged.</p>
 without downloading entire files, which is essential for interactive
 visualisation where only a single chunk of a single variable at a single
 level needs to be fetched.</p>
+<h2 id="high-level-regional-datasets-implicit-coordinates">High-level regional datasets: implicit coordinates<a class="headerlink" href="#high-level-regional-datasets-implicit-coordinates" title="Permanent link">&para;</a></h2>
+<p>Small-area datasets at very high levels (16 and beyond) keep the dense
+global convention — cell position equals cell index — but stop
+materialising what the index already implies.  Above level
+10 (<code>WRITE_COORDS_MAX_LEVEL</code>), stores are written <strong>without</strong>
+<code>cell</code>/<code>latitude</code>/<code>longitude</code> coordinate arrays: at level 16 those two
+float64 arrays would cost ~800 GB while the regional payload is
+megabytes, and unlike the data variables they are never fill values, so
+empty-chunk elision cannot help.  Such stores carry
+<code>grid_doctor_implicit_coords = 1</code>, retain the <code>crs</code> variable and all
+<code>healpix_*</code> attributes, and remain byte-identical in layout to an
+ordinary dense store.</p>
+<p>Access is region-driven through range selection.  Nested ordering
+guarantees that every coarse-level parent corresponds to one contiguous
+fine-level index range, so a bounding-box query decomposes into a
+handful of contiguous reads that align one-to-one with power-of-four
+chunks.  Coordinates are reconstructed on the fly for exactly the cells
+returned.  Combined with <code>fill_value = NaN</code> and empty-chunk elision on
+the data variables, storage and access cost are proportional to the
+domain, not the globe, while cross-dataset and cross-level alignment
+stay a bit-shift (<code>parent = id &gt;&gt; 2k</code>) exactly as for every other
+dataset in the hub.</p>
+<p>Levels at or below the threshold within the same pyramid are written
+with materialised coordinates as usual, so coarse overview levels stay
+directly consumable by CF-aware viewers.</p>
 <hr />
 <h2 id="performance-application-backends">Performance: application backends<a class="headerlink" href="#performance-application-backends" title="Permanent link">&para;</a></h2>
 <p>The sparse weight-matrix multiplication supports three backends,
@@ -1412,13 +1583,13 @@ amortised over the batch.</p>
         
         
           
-          <a href="../appendix-remapping-benchmark/" class="md-footer__link md-footer__link--next" aria-label="Next: Remapping and benchmark">
+          <a href="../high-level-access/" class="md-footer__link md-footer__link--next" aria-label="Next: Working with data data">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Remapping and benchmark
+                Working with data data
               </div>
             </div>
             <div class="md-footer__button md-icon">
