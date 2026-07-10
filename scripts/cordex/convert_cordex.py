@@ -220,19 +220,25 @@ def _mask_with_coverage(
 ) -> xr.Dataset:
     """NaN out under-covered cells in every cell-dimensioned data var.
 
-    Applied per variable (not ``Dataset.where``) so side-cars without
-    the cell dimension — ``time_bnds`` and friends — are not broadcast
-    onto the grid.
+    Masks **in place** on the numpy buffers: ``DataArray.where`` would
+    promote to float64 and allocate a full copy — 137 GiB for one year
+    of daily data at level 11 — while the in-place assignment touches
+    only the masked cells. Applied per variable (never
+    ``Dataset.where``) so side-cars without the cell dimension are not
+    broadcast onto the grid.
     """
+    import numpy as np
+
     cell = _spatial_dim(ds)
-    out = ds.copy()
-    keep = coverage >= threshold
-    for name in out.data_vars:
-        if cell is not None and cell in out[name].dims:
-            attrs = dict(out[name].attrs)
-            out[name] = out[name].where(keep)
-            out[name].attrs = attrs
-    return out
+    if cell is None:
+        return ds
+    invalid = ~(np.asarray(coverage.values) >= threshold)
+    for name in ds.data_vars:
+        var = ds[name]
+        if cell in var.dims and np.issubdtype(var.dtype, np.floating):
+            var = var.transpose(..., cell)
+            var.values[..., invalid] = np.nan
+    return ds
 
 
 # ---------------------------------------------------------------------------
@@ -491,10 +497,11 @@ def plan_regrid(
 # ---------------------------------------------------------------------------
 @wf.array_job(
     cpus=32,
-    time="02:00:00",
+    time="04:00:00",
     mem="0",
     partition="compute",
     array_parallelism=6,
+    version="2",
 )
 def regrid_file(
     item: Annotated[RegridItem, Result(step="plan_regrid")],
@@ -502,15 +509,34 @@ def regrid_file(
         float,
         Param(help="Cells with domain coverage below this become NaN"),
     ] = 0.5,
+    time_chunk: Annotated[
+        int,
+        Param(help="Time steps regridded per slice (memory ceiling)"),
+    ] = 120,
 ) -> RegridResult:
     """Regrid one source file, mask boundary cells, write pyramid levels.
 
-    Masking happens at the *finest* level, before coarsening: the
-    default renormalize policy extrapolates cells that barely overlap
-    the domain to full-cell values, and coarsening first would fold that
-    boundary junk into parent means. ``coverage_fraction`` is attached
-    once per dataset (file_index 0) and coarsens by mean, which is
-    exactly the parent's coverage.
+    Memory discipline (a year of daily data at level 11 is ~74 GB in
+    float32 for the finest level alone):
+
+    - the file is processed in ``time_chunk``-step slices, each written
+      as ``file_XXXXX_part_PPP_level_L.nc`` (the combine step's sorted
+      glob concatenates parts transparently);
+    - regrid output is cast to float32 immediately (the sparse matmul
+      returns float64 — double the footprint for no benefit after the
+      conservative average has been taken);
+    - masking is in place (see ``_mask_with_coverage``);
+    - the pyramid is streamed: write a level, coarsen to the next, drop
+      the previous — never all levels in memory at once;
+    - staging NetCDFs are zlib-compressed: cells outside the domain are
+      constant NaN and compress by orders of magnitude, keeping the
+      staging volume proportional to the domain instead of the globe.
+
+    Masking happens at the *finest* level, before coarsening, so the
+    renormalize policy's boundary extrapolation never contaminates
+    parent cells. ``coverage_fraction`` is attached once per dataset
+    (file_index 0, first slice) and coarsens by mean, which is exactly
+    the parent's coverage.
     """
     import numpy as np
     import xarray as xr
@@ -525,24 +551,58 @@ def regrid_file(
     ds = xr.open_dataset(src)
     coverage = xr.open_dataset(item["coverage_file"])[COVERAGE_VAR].load()
 
-    finest = gd.regrid_to_healpix(
-        ds,
-        max_level,
-        method="conservative",
-        weights_path=item["weight_file"],
-        ignore_unmapped=True,
+    n_time = int(ds.sizes.get("time", 0))
+    slices = (
+        [slice(a, min(a + time_chunk, n_time)) for a in range(0, n_time, time_chunk)]
+        if n_time
+        else [slice(None)]
     )
-    finest = _mask_with_coverage(finest, coverage, coverage_threshold)
-    if file_idx == 0:
-        finest[COVERAGE_VAR] = coverage.astype(np.float32)
 
-    pyramid: dict[int, xr.Dataset] = {max_level: finest}
-    for lvl in range(max_level - 1, -1, -1):
-        pyramid[lvl] = gd.coarsen_healpix(pyramid[lvl + 1], lvl)
+    def _encoding(level_ds: xr.Dataset) -> dict[str, dict[str, object]]:
+        cell = _spatial_dim(level_ds)
+        return {
+            str(v): {"zlib": True, "complevel": 1}
+            for v in level_ds.data_vars
+            if cell is not None and cell in level_ds[str(v)].dims
+        }
 
-    for lvl, level_ds in pyramid.items():
-        nc_path = out_dir / f"file_{file_idx:05d}_level_{lvl}.nc"
-        level_ds.load().to_netcdf(nc_path)
+    for part, tsel in enumerate(slices):
+        chunk_ds = ds.isel(time=tsel) if n_time else ds
+        finest = gd.regrid_to_healpix(
+            chunk_ds,
+            max_level,
+            method="conservative",
+            weights_path=item["weight_file"],
+            ignore_unmapped=True,
+        )
+        cell = _spatial_dim(finest)
+        finest = finest.astype(
+            {
+                str(v): np.float32
+                for v in finest.data_vars
+                if cell is not None
+                and cell in finest[str(v)].dims
+                and finest[str(v)].dtype == np.float64
+            }
+        )
+        finest = _mask_with_coverage(finest, coverage, coverage_threshold)
+        if file_idx == 0 and part == 0:
+            finest[COVERAGE_VAR] = coverage.astype(np.float32)
+
+        current = finest
+        for lvl in range(max_level, -1, -1):
+            nc_path = out_dir / f"file_{file_idx:05d}_part_{part:03d}_level_{lvl}.nc"
+            # Cell coordinates are a pure function of the index and cost
+            # ~805 MB per part file at level 11; drop them from staging
+            # and re-attach once in the combine step.
+            slim = current.drop_vars(["latitude", "longitude", "cell"], errors="ignore")
+            slim.load().to_netcdf(nc_path, encoding=_encoding(slim))
+            del slim
+            if lvl:
+                coarser = gd.coarsen_healpix(current, lvl - 1)
+                del current
+                current = coarser
+        del current, finest
 
     return {
         "s3_path": item["s3_path"],
@@ -620,6 +680,23 @@ def combine_and_upload(
                 f"No staging files for {s3_path} level {level} in {out_dir}"
             )
         ds = _open_level(nc_files)
+
+        # Staging files carry no cell coordinates (see regrid_file);
+        # re-attach them for levels the store will materialise.
+        if "latitude" not in ds.coords:
+            try:
+                from grid_doctor.helpers import WRITE_COORDS_MAX_LEVEL
+            except ImportError:  # older grid-doctor
+                WRITE_COORDS_MAX_LEVEL = 10
+            if level <= WRITE_COORDS_MAX_LEVEL:
+                from grid_doctor.remap import _attach_healpix_coords
+
+                ds = _attach_healpix_coords(
+                    ds,
+                    level=level,
+                    nest=True,
+                    method=str(ds.attrs.get("grid_doctor_method", "conservative")),
+                )
 
         for name, v in ds.variables.items():
             v.encoding.pop("chunks", None)
