@@ -277,11 +277,133 @@ class TestApplyWeightFileWithGrid:
             remap,
             "_healpix_centres",
             lambda level, nest: (
-                np.array([0.0, 1.0], dtype=np.float64),
-                np.array([2.0, 3.0], dtype=np.float64),
+                np.arange(48, dtype=np.float64),
+                np.arange(48, dtype=np.float64),
             ),
         )
 
         result = apply_weight_file(ds, path, grid=grid)
+        # grid_doctor_level = 1 means a 12 * 4**1 = 48-cell target. Only
+        # cells 0 and 1 receive weights; the rest must be NaN, not
+        # truncated away (regression for the regional-source bug where
+        # n_target was inferred as max(row) + 1).
+        assert result.sizes["cell"] == 48
         out = result["temperature"].isel(time=0).values
-        np.testing.assert_allclose(out, [1.0, 2.75])
+        np.testing.assert_allclose(out[:2], [1.0, 2.75])
+        assert np.isnan(out[2:]).all()
+
+
+# ===================================================================
+# Regional weight files (regression)
+# ===================================================================
+
+
+class TestRegionalWeightFiles:
+    """A regional source touches only a subset of the global target.
+
+    ``max(row) + 1`` then underestimates the target size (observed with
+    CORDEX CEU-3 -> level 11: inferred 3 088 513 instead of 50 331 648,
+    failing coordinate attachment with a 'conflicting sizes' error).
+    The reader must recover the true size from ESMF's ``n_b`` dimension
+    or the stored HEALPix level.
+    """
+
+    LEVEL = 4
+    NPIX = 12 * 4**4
+
+    @staticmethod
+    def _regional_weight_ds(n_src: int, rows: np.ndarray) -> xr.Dataset:
+        return xr.Dataset(
+            {
+                "row": ("nnz", (rows + 1).astype("int32")),  # 1-based
+                "col": ("nnz", np.arange(1, n_src + 1, dtype="int32")),
+                "S": ("nnz", np.full(rows.size, 0.25)),
+            },
+            attrs={
+                "grid_doctor_level": 4,
+                "grid_doctor_order": "nested",
+                "grid_doctor_method": "conservative",
+            },
+        )
+
+    def test_explicit_sizes_override_inference(self) -> None:
+        from grid_doctor.remap_apply import extract_sparse_weights
+
+        matrix, n_t, n_s = extract_sparse_weights(
+            np.array([0, 1, 1]),
+            np.array([0, 1, 2]),
+            np.array([1.0, 0.5, 0.5]),
+            n_target=100,
+            n_source=50,
+        )
+        assert (n_t, n_s) == (100, 50)
+        assert matrix.shape == (100, 50)
+
+    def test_explicit_size_too_small_raises(self) -> None:
+        from grid_doctor.remap_apply import extract_sparse_weights
+
+        with pytest.raises(ValueError, match="n_target"):
+            extract_sparse_weights(
+                np.array([5]), np.array([0]), np.array([1.0]), n_target=3
+            )
+
+    def test_level_recovers_full_target(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Rows confined to a low range; the level attr must set the size."""
+        monkeypatch.setattr(
+            remap,
+            "_healpix_centres",
+            lambda level, nest: (
+                np.arange(self.NPIX, dtype=np.float64),
+                np.arange(self.NPIX, dtype=np.float64),
+            ),
+        )
+        n_src = 200
+        rows = np.arange(n_src) % 97  # touches only cells [0, 97)
+        wpath = tmp_path / "regional.nc"
+        self._regional_weight_ds(n_src, rows).to_netcdf(wpath)
+
+        src = xr.Dataset(
+            {"tas": (("time", "ncells"), np.ones((2, n_src)))},
+            coords={
+                "lat": ("ncells", np.linspace(45, 55, n_src)),
+                "lon": ("ncells", np.linspace(5, 15, n_src)),
+            },
+        )
+        result = apply_weight_file(src, wpath)
+        assert result.sizes["cell"] == self.NPIX
+        vals = result["tas"].values
+        assert np.isfinite(vals[:, :97]).all()
+        assert np.isnan(vals[:, 97:]).all()  # untouched cells stay NaN
+
+    def test_esmf_nb_dimension_wins(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An explicit n_b dim beats both inference and the level attr."""
+        n_src, n_b = 10, 5000
+        monkeypatch.setattr(
+            remap,
+            "_healpix_centres",
+            lambda level, nest: (
+                np.arange(n_b, dtype=np.float64),
+                np.arange(n_b, dtype=np.float64),
+            ),
+        )
+        w = self._regional_weight_ds(n_src, np.zeros(n_src, dtype=int))
+        w = w.assign(
+            dst_dummy=("n_b", np.zeros(n_b)),
+            src_dummy=("n_a", np.zeros(n_src)),
+        )
+        w.attrs["grid_doctor_level"] = -1  # no level: n_b must carry it
+        wpath = tmp_path / "nb.nc"
+        w.to_netcdf(wpath)
+        src = xr.Dataset(
+            {"tas": (("ncells",), np.ones(n_src))},
+            coords={
+                "lat": ("ncells", np.linspace(0, 1, n_src)),
+                "lon": ("ncells", np.linspace(0, 1, n_src)),
+            },
+        )
+        result = apply_weight_file(src, wpath)
+        assert result.sizes["cell"] == n_b

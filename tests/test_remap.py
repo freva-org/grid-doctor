@@ -427,17 +427,21 @@ class TestApplyWeightFile:
             remap,
             "_healpix_centres",
             lambda level, nest: (
-                np.array([0.0, 1.0], dtype=np.float64),
-                np.array([2.0, 3.0], dtype=np.float64),
+                np.arange(48, dtype=np.float64),
+                np.arange(48, dtype=np.float64),
             ),
         )
 
         result = apply_weight_file(ds, path, missing_policy="renormalize")
 
+        # grid_doctor_level = 1 -> full 12 * 4**1 = 48-cell target; cells
+        # beyond the weighted ones stay NaN instead of being truncated
+        # away (regression for the regional-source bug).
         assert "cell" in result.dims
-        assert result.sizes["cell"] == 2
+        assert result.sizes["cell"] == 48
         out = result["temperature"].isel(time=0, level=0).values
-        np.testing.assert_allclose(out, [1.0, 3.0])
+        np.testing.assert_allclose(out[:2], [1.0, 3.0])
+        assert np.isnan(out[2:]).all()
         np.testing.assert_allclose(result["static"].values, ds["static"].values)
 
     def test_with_explicit_source_dims(
@@ -473,8 +477,8 @@ class TestApplyWeightFile:
             remap,
             "_healpix_centres",
             lambda level, nest: (
-                np.array([0.0, 1.0], dtype=np.float64),
-                np.array([2.0, 3.0], dtype=np.float64),
+                np.arange(48, dtype=np.float64),
+                np.arange(48, dtype=np.float64),
             ),
         )
 
@@ -483,9 +487,10 @@ class TestApplyWeightFile:
             path,
             source_dims=("cell",),
         )
-        assert result.sizes["cell"] == 2
+        assert result.sizes["cell"] == 48
         out = result["temperature"].isel(time=0).values
-        np.testing.assert_allclose(out, [1.0, 3.0])
+        np.testing.assert_allclose(out[:2], [1.0, 3.0])
+        assert np.isnan(out[2:]).all()
 
     def test_stored_source_dims_without_geometry(
         self,
