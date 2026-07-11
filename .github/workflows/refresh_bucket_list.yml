@@ -1,16 +1,12 @@
 name: Refresh Waterpark bucket list
 
-# Regenerates docs/assets/waterpark-datasets.json (the bucket list)
-
-
 on:
   schedule:
-    - cron: "0 4 * * *"  # every 24h at 4am UTC
-  workflow_dispatch: {}
+    - cron: "0 4 * * *"
+  workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: refresh-buckets
@@ -19,7 +15,17 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+
     steps:
+      - name: Create freva-bot token
+        id: freva-bot-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.FREVA_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.FREVA_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -41,14 +47,15 @@ jobs:
             echo "::error::WATERPARK_S3_KEY / WATERPARK_S3_SECRET secrets are not set."
             exit 1
           fi
+
           python docs/scripts/refresh_buckets.py \
             --endpoint https://s3.waterpark.dkrz.de \
             --out docs/assets/waterpark-datasets.json
 
       - name: Open a PR if the bucket list changed
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.freva-bot-token.outputs.token }}
           add-paths: docs/assets/waterpark-datasets.json
           branch: bump-waterpark-buckets
           delete-branch: true
@@ -58,8 +65,8 @@ jobs:
           base: main
           title: "chore(waterpark): refresh dataset bucket list"
           body: |
-            Automated refresh of `docs/assets/waterpark-datasets.json`
-            the bucket list (and labels) the live dataset tree reads.
+            Automated refresh of `docs/assets/waterpark-datasets.json`,
+            the bucket list and labels read by the live dataset tree.
 
             The live page fetches this JSON directly from GitHub,
             so the tree updates as soon as this lands on `main`.
