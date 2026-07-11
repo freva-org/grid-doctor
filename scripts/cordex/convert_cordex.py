@@ -501,7 +501,7 @@ def plan_regrid(
     mem="0",
     partition="compute",
     array_parallelism=6,
-    version="2",
+    version="3",
 )
 def regrid_file(
     item: Annotated[RegridItem, Result(step="plan_regrid")],
@@ -566,6 +566,21 @@ def regrid_file(
             if cell is not None and cell in level_ds[str(v)].dims
         }
 
+    # Grid-geometry side-cars (cell bounds, grid-mapping scalars) must not
+    # enter the regrid: conservative remapping of lat/lon_vertices onto
+    # 50M cells is ~1.6 GB of meaningless output per part, and the
+    # rotated-pole mapping variable is obsolete on the HEALPix grid.
+    geometry_vars = [
+        str(name)
+        for name in ds.data_vars
+        if {"vertices", "nv", "nvertex", "bnds"} & {str(d) for d in ds[name].dims}
+        and str(name) != "time_bnds"
+        or "grid_mapping_name" in ds[name].attrs
+    ]
+    if geometry_vars:
+        print(f"Dropping grid-geometry side-cars: {sorted(geometry_vars)}")
+        ds = ds.drop_vars(geometry_vars)
+
     for part, tsel in enumerate(slices):
         chunk_ds = ds.isel(time=tsel) if n_time else ds
         finest = gd.regrid_to_healpix(
@@ -576,15 +591,19 @@ def regrid_file(
             ignore_unmapped=True,
         )
         cell = _spatial_dim(finest)
-        finest = finest.astype(
-            {
-                str(v): np.float32
-                for v in finest.data_vars
-                if cell is not None
-                and cell in finest[str(v)].dims
-                and finest[str(v)].dtype == np.float64
-            }
-        )
+        # Per-variable cast: Dataset.astype with a dict demands an entry
+        # for EVERY data variable and raises 'exact match required'
+        # otherwise; casting one variable at a time also frees each
+        # float64 buffer before the next is converted.
+        for v in list(map(str, finest.data_vars)):
+            if (
+                cell is not None
+                and cell in finest[v].dims
+                and finest[v].dtype == np.float64
+            ):
+                attrs = dict(finest[v].attrs)
+                finest[v] = finest[v].astype(np.float32)
+                finest[v].attrs = attrs
         finest = _mask_with_coverage(finest, coverage, coverage_threshold)
         if file_idx == 0 and part == 0:
             finest[COVERAGE_VAR] = coverage.astype(np.float32)
