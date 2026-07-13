@@ -80,14 +80,3 @@ jobs:
           labels: |
             automated
             waterpark
-
-      - name: Build data docs
-        shell: bash -l {0}
-        run: tox -e docs -- data
-
-      - name: Deploy data docs to gh-pages branch
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ steps.freva-bot-token.outputs.token }}
-          publish_dir: ./site-data
-          publish_branch: gh-pages
