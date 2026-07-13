@@ -134,11 +134,22 @@ class CERESConfig:
     def write_region(self, region=None | dict[str | slice]):
         """Writes a region to the initialized dataset in ``store`` by remapping only the implicated files from the original dataset"""
         region_files = self.region_to_files(region)
+        logging.info(
+            "Opening %s(%s) files from provided region, from %s to %s",
+            len(region_files),
+            len(set(region_files)),
+            region_files[0],
+            region_files[-1],
+        )
+        logging.debug("Files:\n%s", "\n\t".join(region_files))
         reg_ds = xr.open_mfdataset(region_files, **self.open_kwargs)
-        src_zoom = gd.resolution_to_healpix_level(gd.get_latlon_resolution(reg_ds))
+        # reg_ds = gd.cached_open_dataset(region_files, **self.open_kwargs)
+        src_zoom = int(gd.resolution_to_healpix_level(gd.get_latlon_resolution(reg_ds)))
         store = f"{self.store_path.rstrip('/')}/level_{src_zoom}.zarr"
 
         hp_reg_ds = xr.open_zarr(store).isel(region)
+        assert hp_reg_ds.time.variable.identical(reg_ds.time.variable)
+
         logger.info(
             "Writing region %s into store at %s [ %s -> %s ]",
             region,
@@ -147,7 +158,8 @@ class CERESConfig:
             str(hp_reg_ds.time[-1].values),
         )
 
-        dst_zoom = hp_reg_ds.attrs.get("healpix_level")
+        dst_zoom = int(hp_reg_ds.attrs.get("healpix_level", -1))
+        logging.info("Region vs target zoom levels: %d == %d", src_zoom, dst_zoom)
         if dst_zoom != src_zoom:
             raise RuntimeError(
                 "Unable to safely write region, input resolution (%s) does not match the destinations' (%s)",
@@ -155,11 +167,10 @@ class CERESConfig:
                 str(dst_zoom),
             )
 
-        assert hp_reg_ds.time.variable.identical(reg_ds.time.variable)
-
         remap_reg_ds = gd.regrid_to_healpix(
             reg_ds, dst_zoom, weights_path=self.weights_path
         )
+
         remap_reg_ds.drop_vars(set(remap_reg_ds.coords)).to_zarr(
             store, mode="r+", region=region
         )
