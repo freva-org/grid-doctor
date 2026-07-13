@@ -147,7 +147,18 @@ class CERESConfig:
         src_zoom = int(gd.resolution_to_healpix_level(gd.get_latlon_resolution(reg_ds)))
         store = f"{self.store_path.rstrip('/')}/level_{src_zoom}.zarr"
 
-        hp_reg_ds = xr.open_zarr(store).isel(region)
+        # hp_reg_ds = xr.open_zarr(store).isel(region)
+        hp_ds = xr.open_zarr(store)
+        # We need to use integers as index
+        start = hp_ds.indexes["time"].get_loc(reg_ds.time.values[0])
+        end = hp_ds.indexes["time"].get_loc(reg_ds.time.values[-1])
+        region = {
+            "time": slice(
+                start,
+                end + 1,
+            ),
+        }
+        hp_reg_ds = hp_ds.isel(region)
         assert hp_reg_ds.time.variable.identical(reg_ds.time.variable)
 
         logger.info(
