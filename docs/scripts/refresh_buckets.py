@@ -1,6 +1,7 @@
 """
 Refresh docs/assets/waterpark-datasets.json from the live bucket listing.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -14,10 +15,17 @@ import s3fs
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUT = HERE.parent.parent / "docs" / "assets" / "waterpark-datasets.json"
 
+ANNOUNCEMENTS = """{{% extends "base.html" %}}
+{{% block announce %}}
+{announcements}
+{{% endblock %}}
+"""
+
 
 def list_buckets(endpoint: str, key: str, secret: str) -> list[str]:
-    fs = s3fs.S3FileSystem(key=key, secret=secret,
-                           client_kwargs={"endpoint_url": endpoint})
+    fs = s3fs.S3FileSystem(
+        key=key, secret=secret, client_kwargs={"endpoint_url": endpoint}
+    )
     names: list[str] = []
     for root in ("", "/"):
         try:
@@ -28,14 +36,17 @@ def list_buckets(endpoint: str, key: str, secret: str) -> list[str]:
         except Exception:
             continue
     if not names:
-        raise SystemExit(f"could not list buckets from {endpoint} "
-                         f"(check admin credentials / gateway permissions)")
+        raise SystemExit(
+            f"could not list buckets from {endpoint} "
+            f"(check admin credentials / gateway permissions)"
+        )
     return sorted(names)
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--endpoint", default="https://s3.waterpark.dkrz.de")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = ap.parse_args()
@@ -43,12 +54,18 @@ def main() -> None:
     key = os.environ.get("WATERPARK_S3_KEY")
     secret = os.environ.get("WATERPARK_S3_SECRET")
     if not key or not secret:
-        raise SystemExit("set WATERPARK_S3_KEY and WATERPARK_S3_SECRET in the environment")
+        raise SystemExit(
+            "set WATERPARK_S3_KEY and WATERPARK_S3_SECRET in the environment"
+        )
 
     buckets = list_buckets(args.endpoint, key, secret)
 
     # Blacklist
-    blacklist = {b.strip() for b in os.environ.get("WATERPARK_BUCKET_BLACKLIST", "").split(",") if b.strip()}
+    blacklist = {
+        b.strip()
+        for b in os.environ.get("WATERPARK_BUCKET_BLACKLIST", "").split(",")
+        if b.strip()
+    }
     if blacklist:
         buckets = [b for b in buckets if b not in blacklist]
 
@@ -75,6 +92,10 @@ def main() -> None:
         print(f"added (no description): {', '.join(added)}", file=sys.stderr)
     if removed:
         print(f"removed: {', '.join(removed)}", file=sys.stderr)
+    if os.getenv("ANNOUNCEMENTS"):
+        extra = ANNOUNCEMENTS.format(announcements=os.getenv("ANNOUNCEMENTS"))
+        extra_file = HERE / "docs" / "data" / "overrides" / "main.html"
+        extra_file.write_text(extra)
 
 
 if __name__ == "__main__":

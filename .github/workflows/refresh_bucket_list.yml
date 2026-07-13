@@ -56,7 +56,9 @@ jobs:
         uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ steps.freva-bot-token.outputs.token }}
-          add-paths: docs/assets/waterpark-datasets.json
+          add-paths:
+            - docs/assets/waterpark-datasets.json
+            - docs/data/overrides/main.html
           branch: bump-waterpark-buckets
           delete-branch: true
           commit-message: "chore(waterpark): refresh bucket list"
