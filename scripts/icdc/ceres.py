@@ -19,6 +19,7 @@ def preprocess(ds: xr.Dataset) -> xr.Dataset:
     times = np.datetime64(f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}") + (
         ds.gmt_hr_index - 1
     ).astype("timedelta64[h]")
+    times.attrs = {}
     ds = ds.assign_coords(time=times)
     ds = ds.swap_dims({"gmt_hr_index": "time"})
     return ds
