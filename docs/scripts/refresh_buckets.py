@@ -92,9 +92,10 @@ def main() -> None:
         print(f"added (no description): {', '.join(added)}", file=sys.stderr)
     if removed:
         print(f"removed: {', '.join(removed)}", file=sys.stderr)
-    if os.getenv("ANNOUNCEMENTS"):
-        extra = ANNOUNCEMENTS.format(announcements=os.getenv("ANNOUNCEMENTS"))
-        extra_file = HERE / "docs" / "data" / "overrides" / "main.html"
+    announ = os.getenv("ANNOUNCEMENTS", "").strip()
+    if announ:
+        extra = ANNOUNCEMENTS.format(announcements=announ)
+        extra_file = HERE.parent.parent / "docs" / "data" / "overrides" / "main.html"
         extra_file.write_text(extra)
 
 
