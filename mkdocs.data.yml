@@ -31,3 +31,4 @@ nav:
       - Remapping and benchmark: appendix-remapping-benchmark.md
 exclude_docs: |
   technical/**
+  overrides/**

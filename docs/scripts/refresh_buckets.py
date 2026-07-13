@@ -15,11 +15,37 @@ import s3fs
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUT = HERE.parent.parent / "docs" / "assets" / "waterpark-datasets.json"
 
-ANNOUNCEMENTS = """{{% extends "base.html" %}}
-{{% block announce %}}
-{announcements}
-{{% endblock %}}
-"""
+#: Override directory registered as ``theme.custom_dir`` in
+#: mkdocs.data.yml (docs/data/overrides). NOTE: this lives inside the
+#: docs tree, so it must stay listed under ``exclude_docs`` -- otherwise
+#: the raw Jinja template is shipped as a page of the built site.
+OVERRIDE_FILE = HERE.parent.parent / "docs" / "data" / "overrides" / "main.html"
+
+
+def render_announcement(text: str, target: Path = OVERRIDE_FILE) -> None:
+    """Mirror *text* into the announce block; empty text clears it.
+
+    Written unconditionally so that clearing the variable removes the
+    banner on the next run. The message is wrapped in ``{% raw %}`` so
+    stray braces in it cannot break the Jinja build, and no
+    ``str.format`` touches user text (a literal ``{`` would raise).
+    """
+    if text:
+        body = (
+            '{% extends "base.html" %}\n\n'
+            "{% block announce %}\n"
+            "  {% raw %}" + text + "{% endraw %}\n"
+            "{% endblock %}\n"
+        )
+    else:
+        body = '{% extends "base.html" %}\n'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists() or target.read_text() != body:
+        target.write_text(body)
+        print(
+            f"announcement updated: {text!r}" if text else "announcement cleared",
+            file=sys.stderr,
+        )
 
 
 def list_buckets(endpoint: str, key: str, secret: str) -> list[str]:
@@ -92,11 +118,7 @@ def main() -> None:
         print(f"added (no description): {', '.join(added)}", file=sys.stderr)
     if removed:
         print(f"removed: {', '.join(removed)}", file=sys.stderr)
-    announ = os.getenv("ANNOUNCEMENTS", "").strip()
-    if announ:
-        extra = ANNOUNCEMENTS.format(announcements=announ)
-        extra_file = HERE.parent.parent / "docs" / "data" / "overrides" / "main.html"
-        extra_file.write_text(extra)
+    render_announcement(os.getenv("WATERPARK_ANNOUNCEMENT", "").strip())
 
 
 if __name__ == "__main__":
