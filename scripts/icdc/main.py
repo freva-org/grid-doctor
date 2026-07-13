@@ -58,7 +58,7 @@ if __name__ == "__main__":
         help="Used to adjust which time index to start writing from",
     )
     parser.add_argument(
-        "--batch-size",
+        "--files-per-batch",
         type=int,
         default=1,
         help="Used to adjust the width of each regio when writing",
@@ -73,4 +73,4 @@ if __name__ == "__main__":
     if args.action == "init":
         config.init(overwrite=args.overwrite)
     elif args.action == "write":
-        config.write(batch_size=args.batch_size)
+        config.write(files_per_batch=args.files_per_batch)

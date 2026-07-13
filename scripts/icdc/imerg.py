@@ -91,23 +91,25 @@ class IMERGConfig:
         for i in range(start, end, size):
             yield {"time": slice(i, min(i + size, end))}
 
-    def write(self, start=0, batch_size=1):
-        """Writes data in batches of ``batch_size``, using the xr.Dataset.to_zarr `region` option.
+    def write(self, start=0, files_per_batch=1):
+        """Writes data in batches of ``files_per_batch``, using the xr.Dataset.to_zarr `region` option.
         - If in a SLURM array job, each index will write its independed slice slice.
         - Otherwise, regions will be writen sequentially"""
         array_id = int(environ.get("SLURM_ARRAY_TASK_ID", -1))
         if array_id > -1:
             if start > 0:
                 logging.warning(
-                    "Ignoring start argument, as this is array job (start = SLURM_ARRAY_TASK_ID * batch_size)"
+                    "Ignoring start argument, as this is array job (start = SLURM_ARRAY_TASK_ID * files_per_batch)"
                 )
             self.write_region(
                 region={
-                    "time": slice(array_id * batch_size, (array_id + 1) * batch_size)
+                    "time": slice(
+                        array_id * files_per_batch, (array_id + 1) * files_per_batch
+                    )
                 }
             )
         else:
-            for r in self.iter_regions(start=start, size=batch_size):
+            for r in self.iter_regions(start=start, size=files_per_batch):
                 self.write_region(region=r)
 
     def write_region(self, region=None | dict[str | slice]):
