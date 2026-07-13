@@ -1,5 +1,5 @@
 import dask
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import glob
 import grid_doctor as gd
 import xarray as xr
@@ -29,6 +29,13 @@ class CERESConfig:
     pattern: str = "/scratch/k/k202186/tmp/CERES/*"
     store_path: str = "icdc/healpix/atmosphere/CERES/PT1H/"  # relative path!
     weights_path: str = "/work/ks1387/healpix_weights/ceres.nc"
+    open_kwargs: dict = field(
+        default_factory=lambda: {
+            "decode_cf": True,
+            "preprocess": preprocess,
+            "engine": "netcdf4",
+        }
+    )
 
     def region_to_files(self, region: dict[str, slice]) -> list[str]:
         if len(region) != 1 or "time" not in region:
@@ -48,9 +55,9 @@ class CERESConfig:
 
     def _open(self):
         if not hasattr(self, "_src_ds"):
-            self._src_ds = gd.cached_open_dataset(
-                self.files, decode_cf=True, preprocess=preprocess, engine="netcdf4"
-            )
+            self._src_ds = gd.cached_open_dataset(self.files, **self.open_kwargs)
+            self._src_ds.time.attrs = {}
+
         return self._src_ds
 
     def init(self, overwrite=False):
@@ -76,7 +83,7 @@ class CERESConfig:
     @property
     def zoom(self):
         if not hasattr(self, "_zoom"):
-            _ds = xr.open_dataset(self.files[0])
+            _ds = xr.open_mfdataset(self.files[0], **self.open_kwargs)
             self._zoom = gd.resolution_to_healpix_level(gd.get_latlon_resolution(_ds))
         return self._zoom
 
@@ -126,7 +133,7 @@ class CERESConfig:
     def write_region(self, region=None | dict[str | slice]):
         """Writes a region to the initialized dataset in ``store`` by remapping only the implicated files from the original dataset"""
         region_files = self.region_to_files(region)
-        reg_ds = xr.open_mfdataset(region_files)
+        reg_ds = xr.open_mfdataset(region_files, **self.open_kwargs)
         src_zoom = gd.resolution_to_healpix_level(gd.get_latlon_resolution(reg_ds))
         store = f"{self.store_path.rstrip('/')}/level_{src_zoom}.zarr"
 
