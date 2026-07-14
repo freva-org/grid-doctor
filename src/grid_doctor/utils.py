@@ -8,9 +8,10 @@ import logging
 import pickle
 import tempfile
 import warnings
+from collections.abc import Mapping
 from os import environ
 from pathlib import Path
-from typing import Any, Collection, Literal, Set, cast
+from typing import Any, Collection, Iterable, Literal, Set, cast
 
 import numpy as np
 import xarray as xr
@@ -313,22 +314,22 @@ def make_dataset_template(
     import dask
 
     if lazy_vars is None:
-        lazy_vars = set(dataset.keys())
-        lazy_vars.update(k for k in dataset.coords if k not in dataset.indexes)
+        lazy_vars = set(cast(Iterable[str], dataset.keys()))
+        lazy_vars.update(str(k) for k in dataset.coords if k not in dataset.indexes)
 
     result = dataset.copy()
 
     # load non-lazy variables into memory
     result.update(dataset.drop_vars(lazy_vars).compute())
 
-    def _raise_template_error():
+    def _raise_template_error() -> None:
         raise ValueError(
             "cannot compute array values of xarray.Dataset objects created directly "
             "or indirectly from make_dataset_template()"
         )
 
     # override the lazy variables
-    delayed = dask.delayed(_raise_template_error)()
+    delayed = dask.delayed(_raise_template_error)()  # type: ignore[attr-defined]
     for k, v in dataset.variables.items():
         if k in lazy_vars:
             # names of dask arrays are used for keeping track of results, so arrays
@@ -344,7 +345,7 @@ def make_dataset_template(
 
 def _get_encoding(ds: xr.Dataset) -> dict[str, dict[str, Any]]:
     return {
-        k: {
+        str(k): {
             "chunks": ds[k].data.chunksize if ds[k].ndim > 1 else ds[k].size,
         }
         for k in ds.variables  # keys()
@@ -354,10 +355,10 @@ def _get_encoding(ds: xr.Dataset) -> dict[str, dict[str, Any]]:
 def init_full_zarr_store(
     ds: xr.Dataset,
     store: str,
-    overwrite=False,
+    overwrite: bool = False,
     zarr_format: Literal[2, 3] = 2,
-    encoding=None,
-):
+    encoding: Mapping[str, Any] | None = None,
+) -> None:
     """Initialize an empty zarr store from a **full** xarray.Dataset.
 
     Writes only the metadata, dimensions and coordinates, but initializes
@@ -376,7 +377,9 @@ def init_full_zarr_store(
     encoding:
         In case there need, provide `encoding` mapping to be passed to `xr.Dataset.to_zarr`
     """
-    template_ds = make_dataset_template(ds, lazy_vars=set(ds.keys()))
+    template_ds = make_dataset_template(
+        ds, lazy_vars=set(cast(Iterable[str], ds.keys()))
+    )
     # Follow input dataset encoding
     if encoding is None:
         encoding = _get_encoding(ds)
