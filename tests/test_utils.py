@@ -10,6 +10,7 @@ from unittest import mock
 import numpy as np
 import pytest
 import xarray as xr
+import zarr
 
 from grid_doctor.utils import (
     cache_dir,
@@ -17,6 +18,7 @@ from grid_doctor.utils import (
     cached_weights,
     get_s3_options,
     chunk_for_target_store_size,
+    init_full_zarr_store,
 )
 
 
@@ -267,3 +269,19 @@ class TestCachedWeights:
         path1 = cached_weights(regular_ds, 1, method="nearest", cache_path=tmp_path)
         path2 = cached_weights(regular_ds, 2, method="nearest", cache_path=tmp_path)
         assert path1 != path2
+
+
+class TestInitializeStore:
+    def test_init_full_zarr_store(
+        self,
+        regular_lazy_ds: xr.Dataset,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        store = "memory://metadata-only.zarr"
+        init_full_zarr_store(regular_lazy_ds, store)
+        result_ds = xr.open_zarr(store)
+        assert result_ds == regular_lazy_ds
+        assert result_ds.drop_vars(result_ds.data_vars).identical(
+            regular_lazy_ds.drop_vars(regular_lazy_ds.data_vars)
+        )
