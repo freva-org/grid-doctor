@@ -18,7 +18,6 @@ from zarr.errors import ZarrUserWarning
 
 from .types import RemapMethod, SourceUnits
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -284,13 +283,13 @@ def cached_weights(
     )
 
 
-# This function is useful to speed up writting empty zarr stores for big datasets
+# This function is useful to speed up writing empty zarr stores for big datasets
 # Since xarray.Dataset.to_zarr(mode='w', compute=False) may process huge dask graphs
 # This is tacken from https://github.com/pydata/xarray/issues/8343#issuecomment-3364428741
 def make_dataset_template(
-    dataset: xarray.Dataset,
+    dataset: xr.Dataset,
     lazy_vars: Set[str] | None = None,
-) -> xarray.Dataset:
+) -> xr.Dataset:
     """Make a lazy Dask xarray.Dataset for use only as a template.
 
     Lazy variables in an xarray.Dataset can be manipulated with xarray operations,
@@ -298,7 +297,6 @@ def make_dataset_template(
 
     Parameters
     ----------
-
     dataset:
         dataset to convert into a template.
     lazy_vars:
@@ -312,7 +310,6 @@ def make_dataset_template(
          - Lazy variable each use a single Dask chunk.
          - Non-lazy variables are loaded in memory as NumPy arrays.
     """
-
     import dask
 
     if lazy_vars is None:
@@ -361,13 +358,13 @@ def init_full_zarr_store(
     zarr_format: Literal[2, 3] = 2,
     encoding=None,
 ):
-    """Initializes an empty zarr store from a **full** xarray.Dataset.
+    """Initialize an empty zarr store from a **full** xarray.Dataset.
 
-    Writes only the metadata, dimensions and coordinates, but initializes the data variables (by default as chunked by time).
+    Writes only the metadata, dimensions and coordinates, but initializes
+    the data variables (by default as chunked by time).
 
     Parameters
     ----------
-
     ds:
         Complete dataset to convert initialize a zarr store from.
     store:
@@ -379,7 +376,6 @@ def init_full_zarr_store(
     encoding:
         In case there need, provide `encoding` mapping to be passed to `xr.Dataset.to_zarr`
     """
-
     template_ds = make_dataset_template(ds, lazy_vars=set(ds.keys()))
     # Follow input dataset encoding
     if encoding is None:
@@ -403,7 +399,7 @@ def init_full_zarr_store(
         )
 
         if overwrite:
-            logger.debug("Overwritting %s", store)
+            logger.debug("Overwriting %s", store)
             template_ds.to_zarr(
                 store,
                 mode="w",
