@@ -51,6 +51,7 @@ sbatch -p shared -Ak20200 --mem 100G --time=3-00:00:00 <(echo -e '#!/bin/sh\n~/m
 
 9252 files each with 24 timesteps batched into 1000 jobs leads to 223 files per batch  `echo '24 * 9252 / 1000 + 1' | bc`
 
+These jobs are quite long in comparison with previous ones
 ```
-sbatch -p compute -Ak20200 --mem 16G --array=0-999 <(echo -e '#!/bin/sh\n~/micromamba/envs/grid-doctor/bin/python3 scripts/icdc/main.py ceres write --files-per-batch=223 /work/ks1387/gw/data/icdc/healpix/atmosphere/CERES/PT1H/
+sbatch -p compute -Ak20200 --mem 16G --array=0-999 --time=0-06:00:00 <(echo -e '#!/bin/sh\n~/micromamba/envs/grid-doctor/bin/python3 scripts/icdc/main.py ceres write --files-per-batch=223 /work/ks1387/gw/data/icdc/healpix/atmosphere/CERES/PT1H/
 ```
