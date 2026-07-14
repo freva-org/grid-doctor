@@ -10,7 +10,11 @@ _NAME_TEMPLATE = "level_{zoom}.zarr"
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        "A command line tool to coarsen a HealPIX dataset in Zarr format"
+        prog="coarsen",
+        description="""A command line tool to coarsen a HealPIX dataset in Zarr format.
+        When executed called via Slurm array job will parallelize writes over the time axis
+        accross tasks.""",
+        epilog="""Example: `sbatch -p compute -Abm1235 --mem 50G --array=0-999 --time 00:20:00 <(echo -e '#!/bin/sh\n python -m coarsen https://s3.service.com/IMERG/PT30M/level_9.zarr path/to/IMERG/PT30M/')`""",
     )
     parser.add_argument(
         "source",
@@ -28,7 +32,7 @@ def parse_arguments():
         nargs="?",
         type=str,
         default=_NAME_TEMPLATE,
-        help=f"Python format string containing `zoom` to indicate the name of each coarsend dataset (default:{_NAME_TEMPLATE})",
+        help=f"Python format string containing `zoom` to indicate the name of each coarsend dataset (default: '{_NAME_TEMPLATE}')",
     )
     parser.add_argument(
         "-l",
@@ -62,7 +66,6 @@ def get_region(size):
 
 
 def run(args: argparse.Namespace):
-
     ds = open_healpix_zarr(args.source)
     if (region := get_region(ds.time.size)) is None:
         return
