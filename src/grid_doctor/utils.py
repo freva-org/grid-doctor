@@ -15,7 +15,7 @@ from typing import Any, Collection, Iterable, Literal, Set, cast
 
 import numpy as np
 import xarray as xr
-from zarr.errors import ZarrUserWarning
+import zarr
 
 from .types import RemapMethod, SourceUnits
 
@@ -397,9 +397,12 @@ def init_full_zarr_store(
 
     # to get rid of the consolidated metadata warning
     with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore", category=ZarrUserWarning, message=".*consolidated.*"
-        )
+        if hasattr(zarr.errors, "ZarrUserWarning"):
+            warnings.filterwarnings(
+                "ignore",
+                category=zarr.errors.ZarrUserWarning,
+                message=".*consolidated.*",
+            )
 
         if overwrite:
             logger.debug("Overwriting %s", store)
