@@ -2,6 +2,7 @@ import argparse
 import grid_doctor as gd
 import logging
 import warnings
+import os
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -41,6 +42,13 @@ def parse_arguments():
         type=int,
         help="Levels (whitespace-separated) to which coarsen, must be lower than inputs'(N). Default coarsens from level 0 to N-1.",
     )
+    parser.add_argument(
+        "-s",
+        "--chunk-size",
+        type=int,
+        default=1,
+        help="Multiple chunks size over `time` dimension.",
+    )
     return parser.parse_args()
 
 
@@ -51,23 +59,31 @@ def open_healpix_zarr(path: str):
     return ds
 
 
-def get_region(size):
-    import os
-
+def get_region(total_size, chunk_size):
     n_jobs = int(os.environ.get("SLURM_ARRAY_TASK_COUNT", 1))
-    t_p_job = size // n_jobs + 1
     t_id = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0)) - int(
         os.environ.get("SLURM_ARRAY_TASK_MIN", 0)
     )
-    if t_id * t_p_job > size:
-        logging.info("Nothing to do, region outsize dataset")
+
+    start = t_id * (total_size // n_jobs + 1)
+    end = min((t_id + 1) * (total_size // n_jobs + 1), total_size)
+
+    start = (start // chunk_size) * chunk_size
+    if t_id == n_jobs - 1:
+        end = total_size
+    else:
+        end = (end // chunk_size) * chunk_size
+
+    if start >= total_size or start >= end:
+        logging.info("Nothing to do, region outside dataset")
         return None
-    return {"time": slice(t_id * t_p_job, min((t_id + 1) * t_p_job, size))}
+
+    return {"time": slice(start, end)}
 
 
 def run(args: argparse.Namespace):
     ds = open_healpix_zarr(args.source)
-    if (region := get_region(ds.time.size)) is None:
+    if (region := get_region(ds.time.size, chunk_size=args.chunk_size)) is None:
         return
 
     max_level = ds.attrs.get(
