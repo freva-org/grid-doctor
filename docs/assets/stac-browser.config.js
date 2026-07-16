@@ -1,5 +1,5 @@
 export default {
-    catalogUrl: "https://freva.dkrz.de/api/freva-nextgen/stacapi/product/?visible_collections=cmip6,dyamond,eerie,icdc,icon-dream,nextgems,orchestra",
+    catalogUrl: "https://freva.dkrz.de/api/freva-nextgen/stacapi/product/?visible_collections=cmip6,dyamond,eerie,icdc,icon-dream,nextgems,obs,palmod,reanalysis",
 
     // Header
     catalogTitle: "STAC Browser",
