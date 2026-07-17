@@ -389,11 +389,17 @@ def init_full_zarr_store(
         )
 
     if zarr_format == 2:
-        from zarr.core.chunk_key_encodings import V2ChunkKeyEncoding
+        if hasattr(zarr.core, "chunk_key_encodings"):
+            from zarr.core.chunk_key_encodings import V2ChunkKeyEncoding
 
-        key_enc = {"chunk_key_encoding": V2ChunkKeyEncoding(separator="/").to_dict()}
-        for v in encoding.values():
-            v.update(key_enc)
+            key_enc = {
+                "chunk_key_encoding": V2ChunkKeyEncoding(separator="/").to_dict()
+            }
+            for v in encoding.values():
+                v.update(key_enc)
+        else:
+            store = zarr.open(store).store  # type: ignore[assignment]
+            store._dimension_separator = "/"  # type: ignore[attr-defined]
 
     # to get rid of the consolidated metadata warning
     with warnings.catch_warnings():
