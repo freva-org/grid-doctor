@@ -43,6 +43,7 @@ Sanity-check the script entry point:
 
 ```console
 python3 scripts/era5land/converter.py --help
+python3 scripts/era5land/converter.py --version
 ```
 
 ## Environment Notes
@@ -91,6 +92,16 @@ python3 converter.py convert-healpix \
   --freq 1hr,day,mon \
   --interval 202603,202603 \
   --clean
+```
+
+Write test output to a different publication root:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas,pr \
+  --freq mon \
+  --interval 202603,202603 \
+  --output-path /tmp/era5land-test-output
 ```
 
 **NOTE:**
@@ -198,6 +209,43 @@ In `--coarsen-only` mode, the converter:
 
 Here `--clean` only affects the lower levels being rewritten. The highest-level
 source store is read, not replaced.
+
+Restrict coarsening to one time interval in an already existing Zarr store:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas,pr \
+  --freq 1hr \
+  --coarsen-only \
+  --interval 200301,202112 \
+  --clean
+```
+
+Target only specific zoom levels instead of rebuilding every lower level:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas,pr \
+  --freq 1hr \
+  --coarsen-only 8,0 \
+  --interval 200301,202112 \
+  --clean
+```
+
+You can also use descending ranges:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas,pr \
+  --freq 1hr \
+  --coarsen-only 8-0 \
+  --interval 200301,202112 \
+  --clean
+```
+
+When you pass explicit target levels, each requested level assumes its
+immediate parent level already exists. For example, `--coarsen-only 8,0`
+requires both `level_9.zarr` and `level_1.zarr` to already be present.
 
 Select the pyramid construction strategy explicitly:
 
