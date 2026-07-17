@@ -29,7 +29,7 @@ from helpers.mapper import map_grib_to_healpix, update_healpix_attrs_only
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 0
-VERSION_MINOR = 1
+VERSION_MINOR = 2
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 

@@ -210,21 +210,39 @@ def _coarsen_existing_frequency(
         zoom=highest_level,
         source=highest_destination,
     )
-    current = xr.open_zarr(highest_destination, consolidated=(zarr_format == 2)).load()
+    current: xr.Dataset | None = xr.open_zarr(
+        highest_destination,
+        consolidated=(zarr_format == 2),
+    )
     global_attrs = dict(current.attrs)
-    for zoom_number in range(highest_level - 1, -1, -1):
-        current = gd.coarsen_healpix(_prepare_dataset_for_coarsen(current), zoom_number)
-        _write_zoom_level(
-            current,
-            source_dataset=source_dataset,
-            frequency=frequency,
-            variables=variables,
-            zoom_number=zoom_number,
-            global_attrs=global_attrs,
-            clean=clean,
-            zarr_format=zarr_format,
-            output_path=output_path,
-        )
+    try:
+        for zoom_number in range(highest_level - 1, -1, -1):
+            coarsened = gd.coarsen_healpix(
+                _prepare_dataset_for_coarsen(current),
+                zoom_number,
+            )
+            destination = destination_for_level(
+                source_dataset,
+                frequency,
+                zoom_number,
+                output_path=output_path,
+            )
+            _write_zoom_level(
+                coarsened,
+                source_dataset=source_dataset,
+                frequency=frequency,
+                variables=variables,
+                zoom_number=zoom_number,
+                global_attrs=global_attrs,
+                clean=clean,
+                zarr_format=zarr_format,
+                output_path=output_path,
+            )
+            _close_dataset_quietly(coarsened)
+            _close_dataset_quietly(current)
+            current = xr.open_zarr(destination, consolidated=(zarr_format == 2))
+    finally:
+        _close_dataset_quietly(current)
 
 
 def _existing_zoom_numbers(
