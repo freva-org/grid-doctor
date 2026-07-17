@@ -202,12 +202,18 @@ def write_special_variables(
     clean: bool,
     cmor_tables_dir: str | Path,
     mapper_path: str | Path,
+    output_path: str | Path | None = None,
 ) -> None:
     """Publish special-case variables into the target HEALPix stores."""
 
     unique_zoom_numbers = tuple(dict.fromkeys(int(zoom) for zoom in zoom_numbers))
     for zoom_number in unique_zoom_numbers:
-        destination = destination_for_level(dataset, frequency, zoom_number)
+        destination = destination_for_level(
+            dataset,
+            frequency,
+            zoom_number,
+            output_path=output_path,
+        )
         clean_store = bool(clean and not Path(destination).exists())
         for variable_name in variable_names:
             special_ds = build_special_variable_dataset(

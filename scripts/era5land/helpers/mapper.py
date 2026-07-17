@@ -113,6 +113,7 @@ def _write_zoom_level(
     global_attrs: dict[str, object],
     clean: bool,
     zarr_format: int,
+    output_path: str | Path | None = None,
 ) -> None:
     """Write one zoom level with consistent progress logging."""
 
@@ -121,7 +122,12 @@ def _write_zoom_level(
         if key in dataset.attrs:
             merged_attrs[key] = dataset.attrs[key]
     dataset.attrs = merged_attrs
-    destination = destination_for_level(source_dataset, frequency, zoom_number)
+    destination = destination_for_level(
+        source_dataset,
+        frequency,
+        zoom_number,
+        output_path=output_path,
+    )
     log_stage(
         LOGGER,
         "zarr_write_start",
@@ -156,11 +162,17 @@ def _prepare_dataset_for_coarsen(ds: xr.Dataset) -> xr.Dataset:
 def _existing_level_destinations(
     source_dataset: str,
     frequency: str,
+    *,
+    output_path: str | Path | None = None,
 ) -> list[tuple[int, str]]:
     """Return existing destinations for one frequency with parsed zoom levels."""
 
     destinations: list[tuple[int, str]] = []
-    for destination in existing_destinations_for_frequency(source_dataset, frequency):
+    for destination in existing_destinations_for_frequency(
+        source_dataset,
+        frequency,
+        output_path=output_path,
+    ):
         match = LEVEL_RE.search(destination)
         if match is None:
             continue
@@ -175,10 +187,15 @@ def _coarsen_existing_frequency(
     variables: str,
     zarr_format: int,
     clean: bool,
+    output_path: str | Path | None = None,
 ) -> None:
     """Build lower zoom levels from the highest existing Zarr store."""
 
-    existing = _existing_level_destinations(source_dataset, frequency)
+    existing = _existing_level_destinations(
+        source_dataset,
+        frequency,
+        output_path=output_path,
+    )
     if not existing:
         raise ValueError(
             f"No existing HEALPix Zarr stores found for frequency {frequency!r}."
@@ -206,15 +223,25 @@ def _coarsen_existing_frequency(
             global_attrs=global_attrs,
             clean=clean,
             zarr_format=zarr_format,
+            output_path=output_path,
         )
 
 
-def _existing_zoom_numbers(source_dataset: str, frequency: str) -> tuple[int, ...]:
+def _existing_zoom_numbers(
+    source_dataset: str,
+    frequency: str,
+    *,
+    output_path: str | Path | None = None,
+) -> tuple[int, ...]:
     """Return the zoom levels already present for one output frequency."""
 
     return tuple(
         zoom_number
-        for zoom_number, _ in _existing_level_destinations(source_dataset, frequency)
+        for zoom_number, _ in _existing_level_destinations(
+            source_dataset,
+            frequency,
+            output_path=output_path,
+        )
     )
 
 
@@ -225,13 +252,18 @@ def _special_zoom_numbers_for_frequency(
     written_zoom_numbers: tuple[int, ...],
     highest_level_only: bool,
     coarsen_only: bool,
+    output_path: str | Path | None = None,
 ) -> tuple[int, ...]:
     """Resolve the zoom levels to use for special-case variables."""
 
     if written_zoom_numbers:
         return written_zoom_numbers
 
-    existing_zoom_numbers = _existing_zoom_numbers(dataset, frequency)
+    existing_zoom_numbers = _existing_zoom_numbers(
+        dataset,
+        frequency,
+        output_path=output_path,
+    )
     if existing_zoom_numbers:
         return existing_zoom_numbers
 
@@ -251,6 +283,7 @@ def _write_special_frequency(
     coarsen_only: bool,
     zarr_format: int,
     clean: bool,
+    output_path: str | Path | None = None,
 ) -> None:
     """Write special-case variables for one output frequency."""
 
@@ -260,6 +293,7 @@ def _write_special_frequency(
         written_zoom_numbers=written_zoom_numbers,
         highest_level_only=highest_level_only,
         coarsen_only=coarsen_only,
+        output_path=output_path,
     )
     write_special_variables(
         dataset=dataset,
@@ -270,6 +304,7 @@ def _write_special_frequency(
         clean=clean,
         cmor_tables_dir=CMOR_TABLES_DIR,
         mapper_path=SOURCE_MAPPER_PATH,
+        output_path=output_path,
     )
 
 
@@ -289,6 +324,7 @@ def map_grib_to_healpix(
     pyramid_strategy: str = "lazy",
     highest_level_only: bool = False,
     coarsen_only: bool = False,
+    output_path: str | Path | None = None,
 ) -> None:
     """Convert resolved GRIB records to per-frequency HEALPix Zarr pyramids."""
 
@@ -328,18 +364,24 @@ def map_grib_to_healpix(
                 variables=variable_names,
                 zarr_format=zarr_format,
                 clean=clean,
+                output_path=output_path,
             )
             if special_requested_for_frequency:
                 _write_special_frequency(
                     dataset=dataset,
                     frequency=frequency,
                     variable_names=special_requested_for_frequency,
-                    written_zoom_numbers=_existing_zoom_numbers(dataset, frequency),
+                    written_zoom_numbers=_existing_zoom_numbers(
+                        dataset,
+                        frequency,
+                        output_path=output_path,
+                    ),
                     highest_level_only=highest_level_only,
                     coarsen_only=coarsen_only,
                     zarr_format=zarr_format,
                     clean=clean,
-            )
+                    output_path=output_path,
+                )
             log_stage(LOGGER, "frequency_done", frequency=frequency, variables=variable_names)
             continue
         if not freq_records and not special_requested_for_frequency:
@@ -429,6 +471,7 @@ def map_grib_to_healpix(
                         global_attrs=global_attrs,
                         clean=clean,
                         zarr_format=zarr_format,
+                        output_path=output_path,
                     )
                     if not highest_level_only:
                         remaining_zoom_numbers = tuple(range(max_level - 1, -1, -1))
@@ -446,6 +489,7 @@ def map_grib_to_healpix(
                                 global_attrs=global_attrs,
                                 clean=clean,
                                 zarr_format=zarr_format,
+                                output_path=output_path,
                             )
                         written_zoom_numbers += remaining_zoom_numbers
                 else:
@@ -466,6 +510,7 @@ def map_grib_to_healpix(
                             global_attrs=global_attrs,
                             clean=clean,
                             zarr_format=zarr_format,
+                            output_path=output_path,
                         )
                         if highest_level_only:
                             break
@@ -481,6 +526,7 @@ def map_grib_to_healpix(
                     coarsen_only=coarsen_only,
                     zarr_format=zarr_format,
                     clean=clean,
+                    output_path=output_path,
                 )
 
             log_stage(LOGGER, "frequency_done", frequency=frequency, variables=variable_names)
@@ -502,6 +548,7 @@ def update_healpix_attrs_only(
     dataset: str,
     frequencies: tuple[str, ...],
     requested_variables: tuple[str, ...],
+    output_path: str | Path | None = None,
 ) -> None:
     """Refresh published variable attrs on existing Zarr stores without remapping."""
 
@@ -537,6 +584,10 @@ def update_healpix_attrs_only(
                 mapper_path=SOURCE_MAPPER_PATH,
             )
         )
-        for destination in existing_destinations_for_frequency(dataset, frequency):
+        for destination in existing_destinations_for_frequency(
+            dataset,
+            frequency,
+            output_path=output_path,
+        ):
             sync_global_attrs(global_attrs, destination)
             sync_named_variable_attrs(attrs_by_name, destination)

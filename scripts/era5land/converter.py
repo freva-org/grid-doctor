@@ -29,7 +29,7 @@ from helpers.mapper import map_grib_to_healpix, update_healpix_attrs_only
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 0
-VERSION_MINOR = 0
+VERSION_MINOR = 1
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -261,6 +261,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override /pool/data/ERA5 for tests or alternate mounts.",
     )
     convert.add_argument(
+        "--output-path",
+        default=None,
+        help=(
+            "Override the published HEALPix output root directory. "
+            "Useful for test runs that should write outside the default location."
+        ),
+    )
+    convert.add_argument(
         "--zarr-format",
         type=int,
         choices=(2, 3),
@@ -427,6 +435,8 @@ def build_batch_command(
         command.extend(["--var", args.variables])
     if args.root is not None:
         command.extend(["--root", args.root])
+    if args.output_path is not None:
+        command.extend(["--output-path", args.output_path])
     if not args.use_inventory_cache:
         command.append("--no-inventory-cache")
     if args.use_input_cache:
@@ -722,7 +732,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         args.pyramid_strategy = "lazy"
 
     if args.from_scratch:
-        root_path = dataset_output_root(args.dataset)
+        root_path = dataset_output_root(args.dataset, output_path=args.output_path)
         if root_path.exists():
             logger.warning("Deleting dataset output root %s", root_path)
             shutil.rmtree(root_path)
@@ -754,6 +764,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
                 dataset=args.dataset,
                 frequencies=effective_frequencies,
                 requested_variables=requested_variable_names,
+                output_path=args.output_path,
             )
             return
 
@@ -772,6 +783,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
             pyramid_strategy=args.pyramid_strategy,
             highest_level_only=args.highest_level_only,
             coarsen_only=args.coarsen_only,
+            output_path=args.output_path,
         )
 
     intervals = batched_intervals(interval, batch_months=args.batches)
