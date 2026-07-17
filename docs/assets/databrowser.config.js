@@ -8,7 +8,7 @@ export default {
   apiBase: "https://freva.dkrz.de/api/freva-nextgen/databrowser",
 
   // Default metadata flavour.
-  flavour: "freva",
+  flavour: "waterpark",
 
   // Optional freva-web-parity script that maps facet VALUES to human-readable
   // descriptions.
