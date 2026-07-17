@@ -27,6 +27,12 @@ from helpers.special import split_special_variables
 from helpers.formatter import dataset_output_root, normalise_frequencies
 from helpers.mapper import map_grib_to_healpix, update_healpix_attrs_only
 
+VERSION_SERIES = "2026.07"
+VERSION_MAJOR = 0
+VERSION_MINOR = 0
+BETA_REVISION = 1
+__version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_VAR_TABLE = SCRIPT_DIR / "assets" / "default_variables.csv"
 DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / "assets" / "source_mapper.json"
@@ -133,8 +139,14 @@ def build_parser() -> argparse.ArgumentParser:
     source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
 
     parser = argparse.ArgumentParser(
-        description="ERA5/ERA5-Land source discovery and conversion tools.",
+        description=f"ERA5/ERA5-Land source discovery and conversion tools (v{__version__})",
         formatter_class=RichDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "-v","--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show the converter version and exit.",
     )
     subparsers = parser.add_subparsers(dest="command")
 
