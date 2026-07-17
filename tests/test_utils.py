@@ -275,15 +275,25 @@ class TestInitializeStore:
     def test_init_full_zarr_store(
         self,
         regular_lazy_ds: xr.Dataset,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import zarr
-
-        breakpoint()
-        print(zarr.__version__)
         store = "memory://metadata-only.zarr"
         init_full_zarr_store(regular_lazy_ds, store)
+        result_ds = xr.open_zarr(store)
+        assert result_ds == regular_lazy_ds
+        assert result_ds.drop_vars(result_ds.data_vars).identical(
+            regular_lazy_ds.drop_vars(regular_lazy_ds.data_vars)
+        )
+
+    def test_init_full_zarr_store_overwrite(
+        self,
+        regular_lazy_ds: xr.Dataset,
+    ) -> None:
+        store = "memory://metadata-only-overwrite.zarr"
+        init_full_zarr_store(regular_lazy_ds, store)
+        with pytest.raises(FileExistsError):
+            init_full_zarr_store(regular_lazy_ds, store)
+
+        init_full_zarr_store(regular_lazy_ds, store, overwrite=True)
         result_ds = xr.open_zarr(store)
         assert result_ds == regular_lazy_ds
         assert result_ds.drop_vars(result_ds.data_vars).identical(
