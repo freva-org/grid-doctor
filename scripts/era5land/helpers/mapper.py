@@ -188,7 +188,9 @@ def _coarsen_existing_frequency(
     zarr_format: int,
     clean: bool,
     output_path: str | Path | None = None,
-) -> None:
+    interval: tuple[Optional[date], Optional[date]] = (None, None),
+    target_levels: tuple[int, ...] | None = None,
+) -> tuple[int, ...]:
     """Build lower zoom levels from the highest existing Zarr store."""
 
     existing = _existing_level_destinations(
@@ -210,39 +212,94 @@ def _coarsen_existing_frequency(
         zoom=highest_level,
         source=highest_destination,
     )
-    current: xr.Dataset | None = xr.open_zarr(
-        highest_destination,
-        consolidated=(zarr_format == 2),
+    start, end = interval
+    selected_levels = _resolve_requested_coarsen_levels(
+        highest_level=highest_level,
+        requested_levels=target_levels,
+        available_levels=tuple(level for level, _ in existing),
     )
-    global_attrs = dict(current.attrs)
-    try:
-        for zoom_number in range(highest_level - 1, -1, -1):
+    written_levels: list[int] = []
+    for zoom_number in selected_levels:
+        source_level = zoom_number + 1
+        source_destination = (
+            highest_destination
+            if source_level == highest_level
+            else destination_for_level(
+                source_dataset,
+                frequency,
+                source_level,
+                output_path=output_path,
+            )
+        )
+        current: xr.Dataset | None = xr.open_zarr(
+            source_destination,
+            consolidated=(zarr_format == 2),
+        )
+        try:
+            if "time" in current.dims and (start is not None or end is not None):
+                time_slice = slice(
+                    start.isoformat() if start is not None else None,
+                    end.isoformat() if end is not None else None,
+                )
+                current = current.sel(time=time_slice)
+            global_attrs = dict(current.attrs)
             coarsened = gd.coarsen_healpix(
                 _prepare_dataset_for_coarsen(current),
                 zoom_number,
             )
-            destination = destination_for_level(
-                source_dataset,
-                frequency,
-                zoom_number,
-                output_path=output_path,
-            )
-            _write_zoom_level(
-                coarsened,
-                source_dataset=source_dataset,
-                frequency=frequency,
-                variables=variables,
-                zoom_number=zoom_number,
-                global_attrs=global_attrs,
-                clean=clean,
-                zarr_format=zarr_format,
-                output_path=output_path,
-            )
-            _close_dataset_quietly(coarsened)
+            try:
+                _write_zoom_level(
+                    coarsened,
+                    source_dataset=source_dataset,
+                    frequency=frequency,
+                    variables=variables,
+                    zoom_number=zoom_number,
+                    global_attrs=global_attrs,
+                    clean=clean,
+                    zarr_format=zarr_format,
+                    output_path=output_path,
+                )
+            finally:
+                _close_dataset_quietly(coarsened)
+            written_levels.append(zoom_number)
+        finally:
             _close_dataset_quietly(current)
-            current = xr.open_zarr(destination, consolidated=(zarr_format == 2))
-    finally:
-        _close_dataset_quietly(current)
+    return tuple(written_levels)
+
+
+def _resolve_requested_coarsen_levels(
+    *,
+    highest_level: int,
+    requested_levels: tuple[int, ...] | None,
+    available_levels: tuple[int, ...],
+) -> tuple[int, ...]:
+    """Resolve and validate the target levels for one coarsen-only pass."""
+
+    if requested_levels is None:
+        return tuple(range(highest_level - 1, -1, -1))
+
+    invalid = [level for level in requested_levels if level >= highest_level]
+    if invalid:
+        invalid_text = ", ".join(str(level) for level in invalid)
+        raise ValueError(
+            f"Requested coarsen levels must be lower than the highest existing level "
+            f"{highest_level}: {invalid_text}"
+        )
+
+    resolved_levels: list[int] = []
+    available = set(int(level) for level in available_levels)
+    for level in requested_levels:
+        parent_level = level + 1
+        if parent_level not in available:
+            raise ValueError(
+                f"Cannot coarsen level {level}: required parent level {parent_level} "
+                "does not exist. Requested sparse coarsening assumes the immediate "
+                "higher level is already present."
+            )
+        resolved_levels.append(level)
+        available.add(level)
+
+    return tuple(resolved_levels)
 
 
 def _existing_zoom_numbers(
@@ -342,7 +399,9 @@ def map_grib_to_healpix(
     pyramid_strategy: str = "lazy",
     highest_level_only: bool = False,
     coarsen_only: bool = False,
+    coarsen_levels: tuple[int, ...] | None = None,
     output_path: str | Path | None = None,
+    coarsen_interval: tuple[Optional[date], Optional[date]] = (None, None),
 ) -> None:
     """Convert resolved GRIB records to per-frequency HEALPix Zarr pyramids."""
 
@@ -369,6 +428,20 @@ def map_grib_to_healpix(
         if coarsen_only:
             if not variable_names:
                 variable_names = "unknown"
+            highest_existing = _existing_zoom_numbers(
+                dataset,
+                frequency,
+                output_path=output_path,
+            )
+            if not highest_existing:
+                raise ValueError(
+                    f"No existing HEALPix Zarr stores found for frequency {frequency!r}."
+                )
+            selected_coarsen_levels = _resolve_requested_coarsen_levels(
+                highest_level=highest_existing[0],
+                requested_levels=coarsen_levels,
+                available_levels=highest_existing,
+            )
             log_stage(
                 LOGGER,
                 "frequency_start",
@@ -376,24 +449,22 @@ def map_grib_to_healpix(
                 variables=variable_names,
                 mode="coarsen_only",
             )
-            _coarsen_existing_frequency(
+            written_zoom_numbers = _coarsen_existing_frequency(
                 source_dataset=dataset,
                 frequency=frequency,
                 variables=variable_names,
                 zarr_format=zarr_format,
                 clean=clean,
                 output_path=output_path,
+                interval=coarsen_interval,
+                target_levels=selected_coarsen_levels,
             )
             if special_requested_for_frequency:
                 _write_special_frequency(
                     dataset=dataset,
                     frequency=frequency,
                     variable_names=special_requested_for_frequency,
-                    written_zoom_numbers=_existing_zoom_numbers(
-                        dataset,
-                        frequency,
-                        output_path=output_path,
-                    ),
+                    written_zoom_numbers=written_zoom_numbers,
                     highest_level_only=highest_level_only,
                     coarsen_only=coarsen_only,
                     zarr_format=zarr_format,

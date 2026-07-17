@@ -29,7 +29,7 @@ from helpers.mapper import map_grib_to_healpix, update_healpix_attrs_only
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 0
-VERSION_MINOR = 2
+VERSION_MINOR = 3
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -131,6 +131,51 @@ def parse_arg_list(value: Optional[str]) -> Optional[Tuple[str, ...]]:
     if value is None:
         return None
     return split_csv_list(value)
+
+
+def parse_coarsen_levels(value: Optional[str]) -> Optional[Tuple[int, ...]]:
+    """Parse optional HEALPix levels for `--coarsen-only`.
+
+    Accepts comma-separated integers like ``8,0`` and descending ranges like
+    ``8-0``. Multiple comma-separated ranges may be combined.
+    """
+
+    if value in (None, "all"):
+        return None
+
+    levels: list[int] = []
+    for token in split_csv_list(value):
+        if "-" in token:
+            start_text, end_text = token.split("-", maxsplit=1)
+            try:
+                start_level = int(start_text)
+                end_level = int(end_text)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Unsupported coarsen level range {token!r}; use values like 8-0."
+                ) from exc
+            if start_level < 0 or end_level < 0:
+                raise ValueError("Coarsen levels must be non-negative integers.")
+            if start_level < end_level:
+                raise ValueError(
+                    f"Unsupported ascending coarsen range {token!r}; use descending ranges like 8-0."
+                )
+            levels.extend(range(start_level, end_level - 1, -1))
+            continue
+
+        try:
+            level = int(token)
+        except ValueError as exc:
+            raise ValueError(
+                f"Unsupported coarsen level {token!r}; use non-negative integers like 8,0 or ranges like 8-0."
+            ) from exc
+        if level < 0:
+            raise ValueError("Coarsen levels must be non-negative integers.")
+        levels.append(level)
+
+    if not levels:
+        raise ValueError("--coarsen-only requires at least one level when a value is provided.")
+    return tuple(sorted(dict.fromkeys(levels), reverse=True))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -333,11 +378,15 @@ def build_parser() -> argparse.ArgumentParser:
     mode_group.add_argument(
         "-co",
         "--coarsen-only",
-        action="store_true",
-        default=False,
+        nargs="?",
+        const="all",
+        default=None,
+        metavar="LEVELS",
         help=(
             "Skip GRIB remapping and derive lower zoom levels from an existing "
-            "highest-level Zarr store."
+            "higher-level Zarr store. Optionally provide comma-separated target "
+            "levels such as 8,0, ranges such as 8-5, or a combination of both, "
+            "such as 8-5,3-0. Without a value, all lower levels are rebuilt."
         ),
     )
 
@@ -449,8 +498,10 @@ def build_batch_command(
         command.append("--attrs-only")
     if args.highest_level_only:
         command.append("--highest-level-only")
-    if args.coarsen_only:
+    if args.coarsen_only is not None:
         command.append("--coarsen-only")
+        if args.coarsen_only != "all":
+            command.append(args.coarsen_only)
 
     return command
 
@@ -707,6 +758,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
     variables = parse_arg_list(args.variables)
     frequencies = parse_frequencies(args.freq)
     interval = parse_interval(args.interval)
+    coarsen_levels = parse_coarsen_levels(args.coarsen_only)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
     requested_variable_names = tuple(request.name for request in requests)
     source_variables, _ = split_special_variables(requested_variable_names)
@@ -724,7 +776,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         )
         args.pyramid_strategy = "stepwise"
 
-    if args.coarsen_only and args.pyramid_strategy != "lazy":
+    if args.coarsen_only is not None and args.pyramid_strategy != "lazy":
         logger.info(
             "Ignoring --pyramid-strategy=%s because --coarsen-only does not remap.",
             args.pyramid_strategy,
@@ -782,8 +834,10 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
             clean=clean,
             pyramid_strategy=args.pyramid_strategy,
             highest_level_only=args.highest_level_only,
-            coarsen_only=args.coarsen_only,
+            coarsen_only=(args.coarsen_only is not None),
+            coarsen_levels=coarsen_levels,
             output_path=args.output_path,
+            coarsen_interval=interval,
         )
 
     intervals = batched_intervals(interval, batch_months=args.batches)
