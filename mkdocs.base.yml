@@ -82,9 +82,11 @@ extra_css:
   - assets/styles.css
   - assets/waterpark-tree.css
   - assets/stac-browser.css
+  - assets/databrowser.css
 
 extra_javascript:
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
   - assets/stac-browser-loader.js
+  - assets/databrowser-loader.js
   - assets/waterpark-tree.js
   - assets/waterpark-inspector.js

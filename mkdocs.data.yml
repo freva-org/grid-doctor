@@ -20,6 +20,7 @@ extra:
 
 nav:
   - Overview: index.md
+  - Data Browser: databrowser.md
   - STAC Browser: stac-browser.md
   - Storage Concepts:
       - HEALPix in Zarr on S3: storage_concepts/index.md

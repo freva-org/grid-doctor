@@ -210,6 +210,7 @@ deps =
     codespell
 commands =
     python docs/scripts/build_stac_browser_docs.py {posargs:tech}
+    python docs/scripts/build_databrowser_docs.py {posargs:tech}
     codespell {posargs: --quiet-level=2} docs
     mkdocs build --strict -f mkdocs.{posargs:tech}.yml
 
@@ -226,6 +227,7 @@ commands_pre =
     {[docs-prep]serve}
 commands =
     python docs/scripts/build_stac_browser_docs.py {posargs:tech}
+    python docs/scripts/build_databrowser_docs.py {posargs:tech}
     codespell --quiet-level=2 docs
     mkdocs serve -f mkdocs.{posargs:tech}.yml --strict -a localhost:8000 --watch docs
 
