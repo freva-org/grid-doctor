@@ -149,20 +149,26 @@ def bundle_browser(dist: Path) -> str:
     return BROWSER_BUNDLE
 
 
-def copy_single(dist: Path, entry: str, subdir: str) -> None:
-    """Copy a single already-bundled entry file into .build/data/<subdir>/."""
+def copy_single(dist: Path, entry: str, subdir: str,
+                dest_name: str | None = None) -> str:
+    """
+    Copy a single already-bundled entry file into .build/data/<subdir>/.
+    Optionally rename it
+    """
     target = BUILD_DATA / subdir
     if target.exists():
         shutil.rmtree(target)
     target.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(dist / entry, target / entry)
-    print(f"[databrowser] copied {entry} -> {target}")
+    name = dest_name or entry
+    shutil.copy2(dist / entry, target / name)
+    print(f"[databrowser] copied {entry} -> {target / name}")
+    return name
 
 
-def render_page(entry_js: str, inspector_mjs: str) -> str:
+def render_page(entry_js: str, inspector_js: str) -> str:
     """Emit the mkdocs page: a sized mount div; the host loader does the rest."""
     entry_url = html.escape(f"{ASSET_URL}/{entry_js}", quote=True)
-    inspector_url = html.escape(f"{INSPECTOR_URL}/{inspector_mjs}", quote=True)
+    inspector_url = html.escape(f"{INSPECTOR_URL}/{inspector_js}", quote=True)
     config_url = html.escape(CONFIG_URL, quote=True)
     return f"""---
 title: Data Browser
@@ -201,12 +207,14 @@ def main() -> None:
 
     dists = install_packages()
     entry_js = bundle_browser(dists[PACKAGE])
-    inspector_mjs = entry_file(dists[INSPECTOR_PACKAGE])
-    copy_single(dists[INSPECTOR_PACKAGE], inspector_mjs, "databrowser-inspector")
+    inspector_src = entry_file(dists[INSPECTOR_PACKAGE])  # e.g. index.mjs
+    inspector_js = copy_single(
+        dists[INSPECTOR_PACKAGE], inspector_src, "databrowser-inspector",
+        dest_name="index.js")
     (BUILD_DATA / "databrowser.md").write_text(
-        render_page(entry_js, inspector_mjs))
+        render_page(entry_js, inspector_js))
     print(f"[databrowser] embedded OK (entry={entry_js}, "
-          f"inspector={inspector_mjs})")
+          f"inspector={inspector_js})")
 
 
 if __name__ == "__main__":
