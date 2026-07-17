@@ -278,6 +278,10 @@ class TestInitializeStore:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        import zarr
+
+        breakpoint()
+        print(zarr.__version__)
         store = "memory://metadata-only.zarr"
         init_full_zarr_store(regular_lazy_ds, store)
         result_ds = xr.open_zarr(store)

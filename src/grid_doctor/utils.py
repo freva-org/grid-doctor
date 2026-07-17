@@ -398,8 +398,18 @@ def init_full_zarr_store(
             for v in encoding.values():
                 v.update(key_enc)
         else:
-            store = zarr.open(store).store  # type: ignore[assignment]
+            try:
+                store = zarr.open(store, mode="w-").store  # type: ignore[assignment]
+            except (
+                zarr.errors.ContainsGroupError
+            ) as e:  # zarr.errors.ContainsGroupError as e:
+                if not overwrite:
+                    raise FileExistsError(
+                        f"Can't overwrite zarr store {store} by default"
+                    ) from e
+                store = zarr.open(store, mode="w").store
             store._dimension_separator = "/"  # type: ignore[attr-defined]
+            overwrite = True  # We just created it
 
     # to get rid of the consolidated metadata warning
     with warnings.catch_warnings():
