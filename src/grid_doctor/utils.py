@@ -407,7 +407,7 @@ def init_full_zarr_store(
                     raise FileExistsError(
                         f"Can't overwrite zarr store {store} by default"
                     ) from e
-                store = zarr.open(store, mode="w").store
+                store = zarr.open(store, mode="w").store  # type: ignore[assignment]
             store._dimension_separator = "/"  # type: ignore[attr-defined]
             overwrite = True  # We just created it
 
