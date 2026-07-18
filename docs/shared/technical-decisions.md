@@ -5,29 +5,49 @@ contributors, reviewers, and downstream consumers of the produced
 HEALPix pyramids.
 
 ---
-
 ## Why HEALPix?
 
 HEALPix (Hierarchical Equal Area isoLatitude Pixelisation) tiles the
 sphere into pixels of exactly equal area at every resolution level.
-This property is critical for climate data:
+Originally developed for mapping the cosmic microwave background, it
+turns out to be exactly what analysis-ready climate data needs.
 
-- **Area-weighted statistics are trivial.**  Every pixel covers the same
-  solid angle, so a global mean is just the arithmetic mean of all
-  pixels, no latitude-dependent cosine weighting is needed.
-- **Hierarchical nesting** gives a natural multi-resolution pyramid.
-  Four child pixels compose exactly one parent pixel, making
-  coarsening a simple reshape operation with no geometric computation.
-- **No singularities at the poles.**  Regular lat-lon grids have
-  converging meridians and a vanishing cell area at the poles.
-  HEALPix avoids this entirely.
+## Area-weighted statistics are trivial
 
-### Nested ordering, not ring
+Every pixel covers the same solid angle, so a global mean is just the
+arithmetic mean of all pixels. No latitude-dependent cosine weighting
+is needed, and an entire class of subtle statistics bugs, forgotten
+or misapplied area weights, simply cannot occur.
+
+![Equal area comparison](assets/healpix-equal-area.png#only-dark)
+![Equal area comparison](assets/healpix-equal-area-light.png#only-light)
+/// caption
+Cells coloured by their relative area. On a lat-lon grid (left), cell
+areas shrink with latitude; on a comparable 0.25° grid the largest
+cell is more than 400 times bigger than the smallest. On HEALPix
+(right), every cell is identical by construction.
+///
+
+## No singularities at the poles
+
+Regular lat-lon grids have converging meridians and vanishing cell
+areas at the poles, which force special-case handling in numerics,
+storage, and visualisation. HEALPix cells run right through the pole
+without anything special happening there.
+
+![Pole view](assets/healpix-pole.png#only-dark)
+![Pole view](assets/healpix-pole-light.png#only-light)
+/// caption
+Both grids viewed from directly above the North Pole (cross marks the
+pole). The lat-lon cells collapse into slivers at the centre; the
+HEALPix tessellation is unremarkable there, which is the point.
+///
+
+## Nested ordering
 
 HEALPix defines two pixel numbering schemes: **ring** ordering (pixels
 numbered along iso-latitude rings) and **nested** ordering (pixels
-numbered by a hierarchical quad-tree).  The remapping procedure[^1] defaults to nested
-ordering because it makes coarsening free.
+numbered by a hierarchical quad-tree).  The remapping procedure[^1] defaults to nested ordering because it makes coarsening free.
 
 In nested ordering, a parent pixel at level $L$ with index $i$ has
 children $4i$, $4i+1$, $4i+2$, $4i+3$ at level $L+1$.  Coarsening
@@ -35,9 +55,17 @@ the full grid therefore reduces to reshaping the data array from
 $(n_\text{cells},)$ to $(n_\text{cells} / 4,\; 4)$ and reducing along
 the last axis, requiring no index lookup, no scatter, and no sorting.
 
-Ring ordering does not have contiguous parent-child layout. Our remapping
-software[^1] supports it, but in that mode every pyramid level is independently
-remapped from the source grid, which is substantially more expensive.
+![Nesting](assets/healpix-nesting.png#only-dark)
+![Nesting](assets/healpix-nesting-light.png#only-light)
+/// caption
+A real level 2 cell (parent 11, amber) with its four level 3 children
+(44 to 47, teal) and sixteen level 4 grandchildren (thin outlines).
+The indices are the actual nested indices: children of parent *p* are
+*4p* to *4p+3*.
+///
+
+
+HEALPix also supports ring ordering, but it does not have contiguous parent-child layout. Our remapping software[^1] supports it, but in that mode  every pyramid level is independently remapped from the source grid, which is substantially more expensive.
 
 
 ## Spherical geometry
