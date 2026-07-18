@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/favicon.ico">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -698,22 +698,38 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Why HEALPix?">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#nested-ordering-not-ring" class="md-nav__link">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#area-weighted-statistics-are-trivial" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Nested ordering, not ring
+        Area-weighted statistics are trivial
       
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#no-singularities-at-the-poles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No singularities at the poles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nested-ordering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nested ordering
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1173,31 +1189,57 @@ HEALPix pyramids.</p>
 <h2 id="why-healpix">Why HEALPix?<a class="headerlink" href="#why-healpix" title="Permanent link">&para;</a></h2>
 <p>HEALPix (Hierarchical Equal Area isoLatitude Pixelisation) tiles the
 sphere into pixels of exactly equal area at every resolution level.
-This property is critical for climate data:</p>
-<ul>
-<li><strong>Area-weighted statistics are trivial.</strong>  Every pixel covers the same
-  solid angle, so a global mean is just the arithmetic mean of all
-  pixels, no latitude-dependent cosine weighting is needed.</li>
-<li><strong>Hierarchical nesting</strong> gives a natural multi-resolution pyramid.
-  Four child pixels compose exactly one parent pixel, making
-  coarsening a simple reshape operation with no geometric computation.</li>
-<li><strong>No singularities at the poles.</strong>  Regular lat-lon grids have
-  converging meridians and a vanishing cell area at the poles.
-  HEALPix avoids this entirely.</li>
-</ul>
-<h3 id="nested-ordering-not-ring">Nested ordering, not ring<a class="headerlink" href="#nested-ordering-not-ring" title="Permanent link">&para;</a></h3>
+Originally developed for mapping the cosmic microwave background, it
+turns out to be exactly what analysis-ready climate data needs.</p>
+<h2 id="area-weighted-statistics-are-trivial">Area-weighted statistics are trivial<a class="headerlink" href="#area-weighted-statistics-are-trivial" title="Permanent link">&para;</a></h2>
+<p>Every pixel covers the same solid angle, so a global mean is just the
+arithmetic mean of all pixels. No latitude-dependent cosine weighting
+is needed, and an entire class of subtle statistics bugs, forgotten
+or misapplied area weights, simply cannot occur.</p>
+<figure>
+<p><img alt="Equal area comparison" src="../assets/healpix-equal-area.png#only-dark" />
+<img alt="Equal area comparison" src="../assets/healpix-equal-area-light.png#only-light" /></p>
+<figcaption>
+<p>Cells coloured by their relative area. On a lat-lon grid (left), cell
+areas shrink with latitude; on a comparable 0.25° grid the largest
+cell is more than 400 times bigger than the smallest. On HEALPix
+(right), every cell is identical by construction.</p>
+</figcaption>
+</figure>
+<h2 id="no-singularities-at-the-poles">No singularities at the poles<a class="headerlink" href="#no-singularities-at-the-poles" title="Permanent link">&para;</a></h2>
+<p>Regular lat-lon grids have converging meridians and vanishing cell
+areas at the poles, which force special-case handling in numerics,
+storage, and visualisation. HEALPix cells run right through the pole
+without anything special happening there.</p>
+<figure>
+<p><img alt="Pole view" src="../assets/healpix-pole.png#only-dark" />
+<img alt="Pole view" src="../assets/healpix-pole-light.png#only-light" /></p>
+<figcaption>
+<p>Both grids viewed from directly above the North Pole (cross marks the
+pole). The lat-lon cells collapse into slivers at the centre; the
+HEALPix tessellation is unremarkable there, which is the point.</p>
+</figcaption>
+</figure>
+<h2 id="nested-ordering">Nested ordering<a class="headerlink" href="#nested-ordering" title="Permanent link">&para;</a></h2>
 <p>HEALPix defines two pixel numbering schemes: <strong>ring</strong> ordering (pixels
 numbered along iso-latitude rings) and <strong>nested</strong> ordering (pixels
-numbered by a hierarchical quad-tree).  The remapping procedure<sup id="fnref2:1"><a class="footnote-ref" href="#fn:1">1</a></sup> defaults to nested
-ordering because it makes coarsening free.</p>
+numbered by a hierarchical quad-tree).  The remapping procedure<sup id="fnref2:1"><a class="footnote-ref" href="#fn:1">1</a></sup> defaults to nested ordering because it makes coarsening free.</p>
 <p>In nested ordering, a parent pixel at level <span class="arithmatex">\(L\)</span> with index <span class="arithmatex">\(i\)</span> has
 children <span class="arithmatex">\(4i\)</span>, <span class="arithmatex">\(4i+1\)</span>, <span class="arithmatex">\(4i+2\)</span>, <span class="arithmatex">\(4i+3\)</span> at level <span class="arithmatex">\(L+1\)</span>.  Coarsening
 the full grid therefore reduces to reshaping the data array from
 <span class="arithmatex">\((n_\text{cells},)\)</span> to <span class="arithmatex">\((n_\text{cells} / 4,\; 4)\)</span> and reducing along
 the last axis, requiring no index lookup, no scatter, and no sorting.</p>
-<p>Ring ordering does not have contiguous parent-child layout. Our remapping
-software<sup id="fnref3:1"><a class="footnote-ref" href="#fn:1">1</a></sup> supports it, but in that mode every pyramid level is independently
-remapped from the source grid, which is substantially more expensive.</p>
+<figure>
+<p><img alt="Nesting" src="../assets/healpix-nesting.png#only-dark" />
+<img alt="Nesting" src="../assets/healpix-nesting-light.png#only-light" /></p>
+<figcaption>
+<p>A real level 2 cell (parent 11, amber) with its four level 3 children
+(44 to 47, teal) and sixteen level 4 grandchildren (thin outlines).
+The indices are the actual nested indices: children of parent <em>p</em> are
+<em>4p</em> to <em>4p+3</em>.</p>
+</figcaption>
+</figure>
+<p>HEALPix also supports ring ordering, but it does not have contiguous parent-child layout. Our remapping software<sup id="fnref3:1"><a class="footnote-ref" href="#fn:1">1</a></sup> supports it, but in that mode  every pyramid level is independently remapped from the source grid, which is substantially more expensive.</p>
 <h2 id="spherical-geometry">Spherical geometry<a class="headerlink" href="#spherical-geometry" title="Permanent link">&para;</a></h2>
 <p>All HEALPix cell boundaries and centre coordinates are computed on a
 <strong>perfect sphere</strong>, not on the WGS84 ellipsoid.  The remapping software
@@ -1705,7 +1747,7 @@ amortised over the batch.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.footer", "toc.integrate", "search.highlight", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
         <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
       
