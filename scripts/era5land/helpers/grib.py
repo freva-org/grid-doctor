@@ -39,6 +39,9 @@ EXCLUDE_NAMES = {
     "heightAboveGround",
     "isobaricInhPa",
 }
+SINGLETON_AUX_COORDS = {
+    "number",
+}
 
 
 def grib_inventory(files: Collection[str | Path]) -> pd.DataFrame:
@@ -262,6 +265,25 @@ def time_normalizer(
     return ds_out
 
 
+def drop_singleton_auxiliary_coords(ds: xr.Dataset) -> xr.Dataset:
+    """Drop scalar auxiliary coordinates that vary inconsistently across files.
+
+    Some ERA5 GRIB groups expose singleton coordinates such as ``number`` in
+    only a subset of files. `xarray.open_mfdataset(..., combine="by_coords")`
+    then fails because those coordinates are not present everywhere even though
+    they do not carry a meaningful dimension for this workflow.
+    """
+
+    drop_names = [
+        name
+        for name in SINGLETON_AUX_COORDS
+        if name in ds.coords and name not in ds.dims and ds[name].size == 1
+    ]
+    if not drop_names:
+        return ds
+    return ds.drop_vars(drop_names)
+
+
 def open_dataset(
     files: Collection[str | Path],
     *,
@@ -321,10 +343,12 @@ def open_dataset(
             except KeyError as exc:
                 raise KeyError(f"No GRIB inventory rows found for {source!r}") from exc
 
-            return time_normalizer(
-                ds,
-                grib_time_df=grib_time_df,
-                keep_time_bounds=False,
+            return drop_singleton_auxiliary_coords(
+                time_normalizer(
+                    ds,
+                    grib_time_df=grib_time_df,
+                    keep_time_bounds=False,
+                )
             )
 
         open_kwargs: dict[str, Any] = {
