@@ -1,5 +1,5 @@
 export default {
-    catalogUrl: "https://freva.dkrz.de/api/freva-nextgen/stacapi/product/?visible_collections=cmip6,dyamond,eerie,icdc,icon-dream,nextgems,obs,palmod,reanalysis",
+    catalogUrl: "https://freva.dkrz.de/api/freva-nextgen/stacapi/product/?visible_collections=cmip6,dyamond,eerie,icdc,icon-dream,nextgems,obs,palmod,reanalysis-healpix",
 
     // Header
     catalogTitle: "STAC Browser",
@@ -13,6 +13,21 @@ export default {
 
     // Landing content (root catalog only)
     preprocessSTAC(stac, state) {
+        // Canonicalize root-equivalent links to catalogUrl so "up" lands on "/" not /external/...
+        const catalog = (() => { try { return new URL(state.catalogUrl); } catch { return null; } })();
+        if (catalog && Array.isArray(stac.links)) {
+          const stripSlash = p => p.replace(/\/+$/, "");
+          const rootPath = stripSlash(catalog.pathname);
+          for (const link of stac.links) {
+            if (!link || typeof link.href !== "string") continue;
+            let u;
+            try { u = new URL(link.href, state.catalogUrl); } catch { continue; }
+            if (u.host === catalog.host && stripSlash(u.pathname) === rootPath) {
+              link.href = state.catalogUrl;
+            }
+          }
+        }
+
         const base = u =>
           (u || "")
             .split("?")[0]
