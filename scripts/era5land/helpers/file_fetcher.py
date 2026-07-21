@@ -1,11 +1,11 @@
 #! /usr/bin/env python3
 """Resolve ERA5 and ERA5-Land source GRIB files from the local CMOR tables."""
 
+import ast
 import csv
 import json
-import re
-import ast
 import operator
+import re
 from datetime import date, datetime
 from glob import glob
 from pathlib import Path
@@ -13,12 +13,14 @@ from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple, Union
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / ".." / "assets" / "source_mapper.json"
+
 DAY_RE = re.compile(r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})")
 MONTH_RE = re.compile(r"(?P<year>\d{4})-(?P<month>\d{2})(?!-\d{2})")
-YEAR_RE = re.compile(r"(?<!\d)(?P<year>\d{4})(?!\d)")
+YEAR_RE = re.compile(r"(?P<year>\d{4})(?!\d)")
 DATE_VALUE_RE = re.compile(
     r"^(?P<year>\d{4})(?:-?(?P<month>\d{2})(?:-?(?P<day>\d{2}))?)?$"
 )
+
 
 def load_json(path: Union[str, Path]) -> Dict[str, Any]:
     """Load a JSON object from disk."""
@@ -29,7 +31,9 @@ def load_json(path: Union[str, Path]) -> Dict[str, Any]:
         raise TypeError(f"Expected JSON object in {path}")
     return data
 
+
 SOURCE_MAPPER = load_json(DEFAULT_SOURCE_MAPPER)
+
 
 class VariableRequest(NamedTuple):
     """One requested CMOR variable and the reanalysis sources allowed for it."""
@@ -84,7 +88,12 @@ def _safe_eval_numeric_expression(expression: str) -> float:
         if isinstance(node, ast.UnaryOp) and type(node.op) in operators:
             return float(operators[type(node.op)](_eval(node.operand)))
         if isinstance(node, ast.BinOp) and type(node.op) in operators:
-            return float(operators[type(node.op)](_eval(node.left), _eval(node.right)))
+            return float(
+                operators[type(node.op)](
+                    _eval(node.left),
+                    _eval(node.right),
+                )
+            )
         raise ValueError(f"Unsupported numeric expression: {expression!r}")
 
     return _eval(ast.parse(expression, mode="eval"))
@@ -134,7 +143,10 @@ def load_variable_requests(path: Union[str, Path]) -> List[VariableRequest]:
     return rows
 
 
-def dataset_code_allowed(allowed_codes: Iterable[str], codes: Iterable[str]) -> bool:
+def dataset_code_allowed(
+    allowed_codes: Iterable[str],
+    codes: Iterable[str],
+) -> bool:
     """Return whether a variable-table row permits the selected source codes."""
 
     allowed = set(codes)
@@ -157,7 +169,11 @@ def selected_variables(
         if dataset_code_allowed(allowed_codes, request.reanalysis)
         and (not requested_filter or request.name in requested)
     ]
-    missing = sorted(requested - {request.name for request in selected}) if requested_filter else []
+    missing = (
+        sorted(requested - {request.name for request in selected})
+        if requested_filter
+        else []
+    )
     if missing:
         raise KeyError(
             "Requested variables are not available for the selected source: "
@@ -247,7 +263,11 @@ def parse_date_value(value: str, *, bound: str) -> date:
     if day_text is None:
         if bound == "start":
             return date(year, month, 1)
-        next_month = date(year + int(month == 12), 1 if month == 12 else month + 1, 1)
+        next_month = date(
+            year + int(month == 12),
+            1 if month == 12 else month + 1,
+            1,
+        )
         return date.fromordinal(next_month.toordinal() - 1)
 
     return date(year, month, int(day_text))
@@ -257,6 +277,7 @@ def file_interval(path: str, frequency: str) -> Optional[Tuple[date, date]]:
     """Extract the covered date interval from an ERA5/ERA5-Land file name."""
 
     name = Path(path).name
+
     if frequency == "1hr":
         match = DAY_RE.search(name)
         if match is None:
@@ -275,8 +296,12 @@ def file_interval(path: str, frequency: str) -> Optional[Tuple[date, date]]:
         year = int(match.group("year"))
         month = int(match.group("month"))
         start = date(year, month, 1)
-        end = date(year + int(month == 12), 1 if month == 12 else month + 1, 1)
-        return start, date.fromordinal(end.toordinal() - 1)
+        next_month = date(
+            year + int(month == 12),
+            1 if month == 12 else month + 1,
+            1,
+        )
+        return start, date.fromordinal(next_month.toordinal() - 1)
 
     if frequency == "mon":
         match = YEAR_RE.search(name)
@@ -299,6 +324,7 @@ def overlaps_interval(
     current = file_interval(path, frequency)
     if current is None:
         return True
+
     file_start, file_end = current
     if start is not None and file_end < start:
         return False
@@ -307,21 +333,137 @@ def overlaps_interval(
     return True
 
 
-def parse_level_type(level_type: str, mapper: Dict[str, Any]) -> Dict[str, str]:
+def parse_level_type(
+    level_type: str,
+    mapper: Dict[str, Any],
+) -> Dict[str, str]:
     """Convert a CMOR ``level_type`` value into source path fields."""
 
     parts = level_type.split("_")
     if len(parts) < 2:
-        raise ValueError(f"Expected level_type like 'sfc_fc_land', got {level_type!r}")
+        raise ValueError(
+            f"Expected level_type like 'sfc_fc_land', got {level_type!r}"
+        )
 
     level_mapping = mapper.get("level_type", {})
     stream_map = level_mapping.get("stream", {})
     type_map = level_mapping.get("type", {})
-    fields = {
+    return {
         "stream": str(stream_map.get(parts[0], parts[0])),
         "type": str(type_map.get(parts[1], parts[1])),
     }
-    return fields
+
+
+def source_pattern_template(
+    mapper: Dict[str, Any],
+    *,
+    root: Optional[str],
+) -> str:
+    """Return the configured source template, optionally rooted elsewhere.
+
+    The default path comes exclusively from ``source_mapper.json``. When
+    ``root`` is provided, it replaces the configured prefix before the
+    ``{dataset}`` placeholder without embedding any site-specific path here.
+    """
+
+    template = str(mapper["source_path"])
+    if root is None:
+        return template
+
+    prefix, marker, suffix = template.partition("{dataset}")
+    if not marker:
+        raise ValueError(
+            "The configured source_path must contain a {dataset} placeholder "
+            "when --root is used."
+        )
+
+    del prefix
+    return f"{root.rstrip('/')}/{{dataset}}{suffix}"
+
+
+def resolve_priority_files(
+    *,
+    mapper: Dict[str, Any],
+    dataset_priority: Tuple[str, ...],
+    fields: Dict[str, str],
+    frequency: str,
+    start: Optional[date],
+    end: Optional[date],
+    root: Optional[str],
+    glob_files: bool,
+) -> Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]:
+    """Resolve files by priority for each covered period.
+
+    Earlier dataset codes have higher priority. Lower-priority collections fill
+    only periods that are absent from all higher-priority collections.
+    """
+
+    template = source_pattern_template(mapper, root=root)
+    patterns: List[str] = []
+
+    if not glob_files:
+        for dataset_code in dataset_priority:
+            path_fields = dict(fields)
+            path_fields["dataset"] = dataset_code
+            patterns.append(template.format(**path_fields))
+        return (), (), tuple(patterns)
+
+    selected_by_interval: Dict[Tuple[date, date], str] = {}
+    selected_codes: List[str] = []
+    undated_files: Optional[Tuple[str, ...]] = None
+
+    for dataset_code in dataset_priority:
+        path_fields = dict(fields)
+        path_fields["dataset"] = dataset_code
+        pattern = template.format(**path_fields)
+        patterns.append(pattern)
+
+        candidates = tuple(
+            path
+            for path in sorted(glob(pattern))
+            if overlaps_interval(path, frequency, start, end)
+        )
+        if not candidates:
+            continue
+
+        dated_candidates: List[Tuple[Tuple[date, date], str]] = []
+        current_undated: List[str] = []
+
+        for path in candidates:
+            coverage = file_interval(path, frequency)
+            if coverage is None:
+                current_undated.append(path)
+            else:
+                dated_candidates.append((coverage, path))
+
+        used_code = False
+
+        for coverage, path in dated_candidates:
+            if coverage not in selected_by_interval:
+                selected_by_interval[coverage] = path
+                used_code = True
+
+        # Static/fixed fields have no temporal coverage. For those, select the
+        # first priority collection containing matching files.
+        if current_undated and undated_files is None:
+            undated_files = tuple(current_undated)
+            used_code = True
+
+        if used_code:
+            selected_codes.append(dataset_code)
+
+    if selected_by_interval:
+        files = tuple(
+            path
+            for _, path in sorted(
+                selected_by_interval.items(),
+                key=lambda item: (item[0][0], item[0][1], item[1]),
+            )
+        )
+    else:
+        files = undated_files or ()
+
+    return files, tuple(selected_codes), tuple(patterns)
 
 
 def resolve_records(
@@ -342,22 +484,31 @@ def resolve_records(
     dataset_cfg = mapper["datasets"][dataset]
     table_prefix = str(dataset_cfg["table_prefix"])
     dataset_priority = tuple(str(item) for item in dataset_cfg["priority"])
-    allowed_streams = set(str(item) for item in dataset_cfg.get("allowed_streams", ()))
+    allowed_streams = set(
+        str(item) for item in dataset_cfg.get("allowed_streams", ())
+    )
     frequencies_by_stream = {
         str(stream): set(str(freq) for freq in frequencies)
-        for stream, frequencies in dataset_cfg.get("frequencies_by_stream", {}).items()
+        for stream, frequencies in dataset_cfg.get(
+            "frequencies_by_stream",
+            {},
+        ).items()
     }
+
     if dataset == "era5":
-        dataset_priority = tuple(code for code in dataset_priority if code != "EL")
+        dataset_priority = tuple(
+            code for code in dataset_priority if code != "EL"
+        )
+
     requests = selected_variables(
         load_variable_requests(var_table),
         allowed_codes=dataset_priority,
         variables=variables,
     )
-
     start, end = interval
     records: List[SourceRecord] = []
     entry_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
     for frequency in frequencies:
         entry_cache[frequency] = load_cmor_variable_entries(
             cmor_tables_dir,
@@ -367,59 +518,75 @@ def resolve_records(
 
     for request in requests:
         for frequency in frequencies:
-            match = find_variable_entry(entry_cache[frequency], request.name)
+            match = find_variable_entry(
+                entry_cache[frequency],
+                request.name,
+            )
             if match is None:
                 continue
+
             table_variable, entry = match
-            parameter = str(entry.get("DKRZ_ID") or entry.get("grib_paramID") or "")
+            parameter = str(
+                entry.get("DKRZ_ID")
+                or entry.get("grib_paramID")
+                or ""
+            )
             if not parameter:
                 continue
             parameter = parameter.zfill(3)
+
             level_type = str(entry["level_type"])
             fields = parse_level_type(level_type, mapper)
+
             if allowed_streams and fields["stream"] not in allowed_streams:
                 continue
+
             allowed_frequencies = frequencies_by_stream.get(fields["stream"])
-            if allowed_frequencies is not None and frequency not in allowed_frequencies:
+            if (
+                allowed_frequencies is not None
+                and frequency not in allowed_frequencies
+            ):
                 continue
+
             fields["time_freq"] = str(mapper["frequency"][frequency])
             fields["parameter"] = parameter
 
-            for dataset_code in dataset_priority:
-                path_fields = dict(fields)
-                path_fields["dataset"] = dataset_code
-                pattern_template = str(mapper["source_path"])
-                if root:
-                    pattern_template = pattern_template.replace("/pool/data/ERA5", root.rstrip("/"))
-                pattern = pattern_template.format(**path_fields)
-                files = (
-                    tuple(
-                        file
-                        for file in sorted(glob(pattern))
-                        if overlaps_interval(file, frequency, start, end)
-                    )
-                    if glob_files
-                    else ()
+            files, selected_codes, patterns = resolve_priority_files(
+                mapper=mapper,
+                dataset_priority=dataset_priority,
+                fields=fields,
+                frequency=frequency,
+                start=start,
+                end=end,
+                root=root,
+                glob_files=glob_files,
+            )
+
+            # Keep one SourceRecord per variable/frequency. Its file list may
+            # combine multiple archive collections according to priority.
+            if selected_codes:
+                dataset_code = "+".join(selected_codes)
+            else:
+                dataset_code = dataset_priority[0]
+
+            records.append(
+                SourceRecord(
+                    variable=request.name,
+                    table_variable=table_variable,
+                    dataset=dataset,
+                    dataset_code=dataset_code,
+                    frequency=frequency,
+                    stream=fields["stream"],
+                    type=fields["type"],
+                    parameter=parameter,
+                    level_type=level_type,
+                    pattern=";".join(patterns),
+                    files=files,
+                    conversion_factor=parse_conversion_factor(entry),
+                    output_attrs=extract_output_attrs(entry),
                 )
-                records.append(
-                    SourceRecord(
-                        variable=request.name,
-                        table_variable=table_variable,
-                        dataset=dataset,
-                        dataset_code=dataset_code,
-                        frequency=frequency,
-                        stream=path_fields["stream"],
-                        type=path_fields["type"],
-                        parameter=parameter,
-                        level_type=level_type,
-                        pattern=pattern,
-                        files=files,
-                        conversion_factor=parse_conversion_factor(entry),
-                        output_attrs=extract_output_attrs(entry),
-                    )
-                )
-                if files:
-                    break
+            )
+
     return records
 
 
@@ -431,7 +598,11 @@ def unresolved_records(
 ) -> List[UnresolvedRecord]:
     """Return requested variable/frequency pairs with no source record."""
 
-    resolved_keys = {(record.variable, record.frequency) for record in records}
+    resolved_keys = {
+        (record.variable, record.frequency)
+        for record in records
+        if record.files
+    }
     return [
         UnresolvedRecord(
             variable=request.name,
