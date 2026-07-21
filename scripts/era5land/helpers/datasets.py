@@ -283,6 +283,54 @@ def normalise_reduced_gaussian_dataset(
     return ds
 
 
+def validate_one_value_per_day(
+    ds: xr.Dataset,
+    variable: str,
+) -> None:
+    """Ensure that a daily variable has at most one value per calendar day."""
+    if "time" not in ds.coords or ds.sizes.get("time", 0) < 2:
+        return
+
+    days = ds["time"].dt.floor("D").values
+
+    # The GRIB time axis is expected to be ordered, so checking adjacent
+    # normalized days is sufficient and avoids the sorting done by np.unique.
+    duplicate_positions = np.flatnonzero(days[1:] == days[:-1])
+    if duplicate_positions.size:
+        index = int(duplicate_positions[0])
+        raise ValueError(
+            f"{variable!r} contains multiple values for calendar day "
+            f"{days[index]!s}: {ds['time'].values[index]!s} and "
+            f"{ds['time'].values[index + 1]!s}."
+        )
+
+
+def normalise_time_for_frequency(
+    ds: xr.Dataset,
+    frequency: str,
+) -> xr.Dataset:
+    """Assign canonical representative times to aggregated data."""
+    if "time" not in ds.coords:
+        return ds
+
+    if frequency == "day":
+        return ds.assign_coords(
+            time=ds["time"].dt.floor("D") + np.timedelta64(12, "h")
+        )
+
+    if frequency == "mon":
+        month_start = (
+            ds["time"]
+            .astype("datetime64[M]")
+            .astype("datetime64[ns]")
+        )
+        return ds.assign_coords(
+            time=month_start + np.timedelta64(12, "h")
+        )
+
+    return ds
+
+
 def open_source_record_dataset(
     record: SourceRecord,
     *,
@@ -314,6 +362,13 @@ def open_source_record_dataset(
         use_inventory_cache=use_inventory_cache,
         use_input_cache=use_input_cache,
     )
+
+    if record.frequency == "day":
+        validate_one_value_per_day(ds, record.variable)
+
+    if record.frequency in {"day", "mon"}:
+        ds = normalise_time_for_frequency(ds, record.frequency)
+
     ds = select_time_interval(ds, interval)
 
     if record.variable in ds.data_vars:
@@ -410,12 +465,22 @@ def merge_frequency_dataset(
 
         datasets = [dataset for dataset in datasets_by_index if dataset is not None]
 
+    for record, ds in zip(resolved_records, datasets):
+        if "time" not in ds.indexes:
+            continue
+        if ds.indexes["time"].has_duplicates:
+            raise ValueError(
+                f"{record.variable!r} contains duplicate timestamps "
+                "after frequency normalization."
+            )
+
     return xr.merge(
         datasets,
         compat="override",
-        join="outer",
+        join="exact",
         combine_attrs="drop_conflicts",
     )
+
 
 def select_time_interval(
     ds: xr.Dataset,
