@@ -2,6 +2,7 @@
 """Unified entry point for the ERA5/ERA5-Land conversion workflow."""
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -66,6 +67,7 @@ STAGE_COLORS = {
     "frequency_skip_empty": "\033[90m",
     "attrs_only": "\033[32m",
 }
+_ACTIVE_BATCH_STATE_PATH: Optional[Path] = None
 
 
 class RichDefaultsHelpFormatter(
@@ -507,18 +509,32 @@ def build_batch_command(
 
 
 def _batch_state_path() -> Path:
-    """Return the writable path used to persist the active batch process state."""
+    """Return the writable per-job path used to persist active batch state."""
 
-    launch_dir_candidate = Path.cwd() / ".current_batch_pid.json"
-    try:
-        if launch_dir_candidate.exists():
-            return launch_dir_candidate
-        with launch_dir_candidate.open("w", encoding="utf-8") as handle:
-            json.dump({}, handle)
-        launch_dir_candidate.unlink()
-        return launch_dir_candidate
-    except OSError:
-        return SCRIPT_DIR / ".current_batch_pid.json"
+    global _ACTIVE_BATCH_STATE_PATH
+    if _ACTIVE_BATCH_STATE_PATH is not None:
+        return _ACTIVE_BATCH_STATE_PATH
+
+    job_token = hashlib.sha256(
+        f"{os.getpid()}:{Path.cwd()}:{SCRIPT_DIR}".encode("utf-8")
+    ).hexdigest()[:12]
+    filename = f".current_batch_pid.{job_token}.json"
+
+    for candidate_dir in (Path.cwd(), SCRIPT_DIR):
+        candidate_path = candidate_dir / filename
+        try:
+            candidate_dir.mkdir(parents=True, exist_ok=True)
+            with candidate_path.open("w", encoding="utf-8") as handle:
+                json.dump({}, handle)
+            candidate_path.unlink()
+            _ACTIVE_BATCH_STATE_PATH = candidate_path
+            return candidate_path
+        except OSError:
+            continue
+
+    fallback_path = SCRIPT_DIR / filename
+    _ACTIVE_BATCH_STATE_PATH = fallback_path
+    return fallback_path
 
 
 def write_batch_state(state: dict[str, Any]) -> Path:
