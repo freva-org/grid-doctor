@@ -30,7 +30,7 @@ from helpers.mapper import map_grib_to_healpix, update_healpix_attrs_only
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 0
-VERSION_MINOR = 3
+VERSION_MINOR = 4
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -178,6 +178,22 @@ def parse_coarsen_levels(value: Optional[str]) -> Optional[Tuple[int, ...]]:
     if not levels:
         raise ValueError("--coarsen-only requires at least one level when a value is provided.")
     return tuple(sorted(dict.fromkeys(levels), reverse=True))
+
+
+def parse_truncate_after(value: Optional[str]) -> Optional[str]:
+    """Parse an optional truncation cutoff date for existing Zarr stores.
+
+    The accepted formats mirror ``--interval`` date tokens: ``YYYY``, ``YYYYMM``,
+    ``YYYYMMDD`` and their hyphenated equivalents. The returned ISO date string is
+    used as an inclusive upper bound when selecting timestamps to keep.
+    """
+
+    if value in (None, ""):
+        return None
+    start, end = parse_interval(f"{value},{value}")
+    if start is None or end is None:
+        raise ValueError("--truncate-after requires a bounded date value.")
+    return start.isoformat()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -362,6 +378,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Delete the whole dataset output root before writing any new stores.",
     )
     convert.add_argument(
+        "--truncate-after",
+        default=None,
+        metavar="DATE",
+        help=(
+            "Before updating an existing time-based Zarr store, remove timestamps "
+            "strictly AFTER DATE. Accepts YYYY, YYYYMM, YYYYMMDD and hyphenated "
+            "equivalents. Useful for stitching a rerun cleanly from a cutoff date. "
+            "Does not work stand-alone."
+        ),
+    )
+    convert.add_argument(
         "-ao",
         "--attrs-only",
         action="store_true",
@@ -488,6 +515,8 @@ def build_batch_command(
         command.extend(["--root", args.root])
     if args.output_path is not None:
         command.extend(["--output-path", args.output_path])
+    if args.truncate_after is not None:
+        command.extend(["--truncate-after", args.truncate_after])
     if not args.use_inventory_cache:
         command.append("--no-inventory-cache")
     if args.use_input_cache:
@@ -774,6 +803,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
     variables = parse_arg_list(args.variables)
     frequencies = parse_frequencies(args.freq)
     interval = parse_interval(args.interval)
+    truncate_after = parse_truncate_after(args.truncate_after)
     coarsen_levels = parse_coarsen_levels(args.coarsen_only)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
     requested_variable_names = tuple(request.name for request in requests)
@@ -785,6 +815,8 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
 
     if args.from_scratch and args.attrs_only:
         raise ValueError("--from-scratch cannot be combined with --attrs-only.")
+    if truncate_after is not None and args.attrs_only:
+        raise ValueError("--truncate-after cannot be combined with --attrs-only.")
 
     if args.highest_level_only and args.pyramid_strategy != "stepwise":
         logger.info(
@@ -854,6 +886,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
             coarsen_levels=coarsen_levels,
             output_path=args.output_path,
             coarsen_interval=interval,
+            truncate_after=truncate_after,
         )
 
     intervals = batched_intervals(interval, batch_months=args.batches)

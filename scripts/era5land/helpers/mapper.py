@@ -114,6 +114,7 @@ def _write_zoom_level(
     clean: bool,
     zarr_format: int,
     output_path: str | Path | None = None,
+    truncate_after: str | None = None,
 ) -> None:
     """Write one zoom level with consistent progress logging."""
 
@@ -142,6 +143,7 @@ def _write_zoom_level(
         destination,
         clean=clean,
         zarr_format=zarr_format,
+        truncate_after=truncate_after,
     )
 
 
@@ -190,6 +192,7 @@ def _coarsen_existing_frequency(
     output_path: str | Path | None = None,
     interval: tuple[Optional[date], Optional[date]] = (None, None),
     target_levels: tuple[int, ...] | None = None,
+    truncate_after: str | None = None,
 ) -> tuple[int, ...]:
     """Build lower zoom levels from the highest existing Zarr store."""
 
@@ -258,6 +261,7 @@ def _coarsen_existing_frequency(
                     clean=clean,
                     zarr_format=zarr_format,
                     output_path=output_path,
+                    truncate_after=truncate_after,
                 )
             finally:
                 _close_dataset_quietly(coarsened)
@@ -402,6 +406,7 @@ def map_grib_to_healpix(
     coarsen_levels: tuple[int, ...] | None = None,
     output_path: str | Path | None = None,
     coarsen_interval: tuple[Optional[date], Optional[date]] = (None, None),
+    truncate_after: str | None = None,
 ) -> None:
     """Convert resolved GRIB records to per-frequency HEALPix Zarr pyramids."""
 
@@ -458,6 +463,7 @@ def map_grib_to_healpix(
                 output_path=output_path,
                 interval=coarsen_interval,
                 target_levels=selected_coarsen_levels,
+                truncate_after=truncate_after,
             )
             if special_requested_for_frequency:
                 _write_special_frequency(
@@ -561,6 +567,7 @@ def map_grib_to_healpix(
                         clean=clean,
                         zarr_format=zarr_format,
                         output_path=output_path,
+                        truncate_after=truncate_after,
                     )
                     if not highest_level_only:
                         remaining_zoom_numbers = tuple(range(max_level - 1, -1, -1))
@@ -579,6 +586,7 @@ def map_grib_to_healpix(
                                 clean=clean,
                                 zarr_format=zarr_format,
                                 output_path=output_path,
+                                truncate_after=truncate_after,
                             )
                         written_zoom_numbers += remaining_zoom_numbers
                 else:
@@ -600,6 +608,7 @@ def map_grib_to_healpix(
                             clean=clean,
                             zarr_format=zarr_format,
                             output_path=output_path,
+                            truncate_after=truncate_after,
                         )
                         if highest_level_only:
                             break

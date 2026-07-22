@@ -1,6 +1,7 @@
 """Zarr publication helpers for ERA5/ERA5-Land outputs."""
 
 import gc
+import logging
 from pathlib import Path
 import shutil
 import uuid
@@ -12,6 +13,8 @@ import zarr
 
 from .datasets import normalise_published_dataset
 from .metadata import clean_output_attrs
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _fill_value_for_dtype(dtype: np.dtype[Any]) -> Any:
@@ -168,6 +171,66 @@ def _rewrite_dataset_via_temp(
             shutil.rmtree(temp_path, ignore_errors=True)
 
 
+def truncate_zarr_store_after(
+    destination: str,
+    *,
+    cutoff: str,
+    zarr_format: int,
+) -> bool:
+    """Remove timestamps strictly after ``cutoff`` from one existing Zarr store.
+
+    Parameters
+    ----------
+    destination:
+        Path to the target Zarr store.
+    cutoff:
+        Inclusive ISO date string used as the upper bound of the retained time
+        selection.
+    zarr_format:
+        Output Zarr format version used when rewriting the truncated store.
+
+    Returns
+    -------
+    bool
+        ``True`` when the store was rewritten, else ``False``.
+    """
+
+    path = Path(destination)
+    if not path.exists():
+        return False
+
+    existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
+    truncated: xr.Dataset | None = None
+    try:
+        if "time" not in existing.dims:
+            return False
+
+        original_size = existing.sizes.get("time", 0)
+        truncated = existing.sel(time=slice(None, cutoff))
+        truncated_size = truncated.sizes.get("time", 0)
+        if truncated_size == original_size:
+            return False
+
+        LOGGER.info(
+            "Truncating existing Zarr store %s after %s (time: %s -> %s)",
+            destination,
+            cutoff,
+            original_size,
+            truncated_size,
+        )
+        _rewrite_dataset_via_temp(
+            truncated,
+            destination,
+            zarr_format=zarr_format,
+        )
+        return True
+    finally:
+        if truncated is not None:
+            truncated.close()
+        existing.close()
+        gc.collect()
+
+
 def _replace_public_attrs(zarr_array, attrs: dict[str, Any]) -> bool:
     keep = {}
     for key in ("_ARRAY_DIMENSIONS", "coordinates", "grid_mapping"):
@@ -251,7 +314,14 @@ def _merge_time_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Datas
 
     candidate = _pad_missing_existing_vars_for_append(candidate, existing)
     existing_only = existing.drop_sel(time=candidate.indexes["time"], errors="ignore")
-    merged = xr.concat([existing_only, candidate], dim="time", combine_attrs="override")
+    merged = xr.concat(
+        [existing_only, candidate],
+        dim="time",
+        data_vars="all",
+        coords="minimal",
+        compat="override",
+        combine_attrs="override",
+    )
     if "time" in merged.coords:
         merged = merged.sortby("time")
     return merged
@@ -397,6 +467,7 @@ def update_zarr_store(
     *,
     clean: bool,
     zarr_format: int,
+    truncate_after: str | None = None,
 ) -> None:
     """Incrementally update or recreate one destination Zarr store."""
 
@@ -412,6 +483,13 @@ def update_zarr_store(
         _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)
         return
+
+    if truncate_after is not None:
+        truncate_zarr_store_after(
+            destination,
+            cutoff=truncate_after,
+            zarr_format=zarr_format,
+        )
 
     existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
     try:
