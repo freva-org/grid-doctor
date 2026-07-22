@@ -304,34 +304,60 @@ class TestInitializeStore:
 
 
 class TestSlurmRegion:
-    @pytest.mark.parametrize("total_size", (10000,))
     @pytest.mark.parametrize(
-        "task_count,job_size",
-        [(1000, 10), (1009, 10)],
+        "total_size, task_count, chunk_size, ratio",
+        [
+            pytest.param(*x, id=f"{x[1]}x{x[2]} = {x[3][0]}/{x[3][1]}")
+            for x in [
+                (100, 10, 1, (10, 0)),
+                (100, 10, 50, (2, 8)),
+                (100, 10, 99, (2, 8)),
+                (100, 2, 1, (2, 0)),
+                (100, 2, 2, (2, 0)),
+                (100, 2, 25, (2, 0)),
+                (100, 2, 100, (1, 1)),
+                (100, 1000, 1, (100, 900)),
+                (100, 1000, 2, (50, 950)),
+                (100, 1000, 4, (25, 975)),
+                (100, 1000, 50, (2, 998)),
+                (100, 1000, 99, (2, 998)),
+                (100, 1000, 100, (1, 999)),
+                (100, 1000, 1000, (1, 999)),
+            ]
+        ],
     )
-    def test_get_slurm_region(self, total_size, task_count, job_size, caplog):
-        """Test first and last 2 tasks"""
-        assert task_count > 4
-
-        for task_id in (0, 1, task_count - 2, task_count - 1):
+    def test_get_slurm_region(
+        self,
+        total_size,
+        task_count,
+        chunk_size,
+        caplog,
+        ratio,
+    ):
+        op, noop = 0, 0
+        for task_id in range(task_count):
             with mock.patch.dict(
                 os.environ,
                 {
                     "SLURM_ARRAY_TASK_COUNT": str(task_count),
                     "SLURM_ARRAY_TASK_ID": str(task_id),
-                    "SLURM_ARRAY_TASK_MIN": "0",
+                    "SLURM_ARRAY_TASK_MIN": str(0),
                 },
                 clear=True,
             ):
-                expected = {
-                    "time": slice(
-                        task_id * job_size, min((task_id + 1) * job_size, total_size)
-                    )
-                }
-                if expected["time"].start >= expected["time"].stop:
-                    with caplog.at_level(logging.INFO):
-                        get_slurm_region(total_size, 1)
+                if task_id >= ratio[0]:
+                    with caplog.at_level(logging.DEBUG):
+                        get_slurm_region(total_size, chunk_size)
                         assert "Nothing to do, region outside dataset" in caplog.text
+                        noop += 1
                 else:
-                    region = get_slurm_region(total_size, 1)
+                    job_size = max(total_size // ratio[0], chunk_size)
+                    start, stop = (
+                        task_id * job_size,
+                        min((task_id + 1) * job_size, total_size),
+                    )
+                    expected = {"time": slice(start, stop)}
+                    region = get_slurm_region(total_size, chunk_size)
                     assert region == expected
+                    op += 1
+        assert (op, noop) == ratio

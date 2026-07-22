@@ -458,7 +458,7 @@ def get_slurm_region(total_size: int, chunk_size: int) -> Mapping[str, slice] | 
         environ.get("SLURM_ARRAY_TASK_MIN", 0)
     )
 
-    n = ceil(ceil(total_size / chunk_size) / n_jobs)
+    n = ceil(ceil(total_size / chunk_size) / n_jobs) * chunk_size
 
     start = t_id * n
     end = min((t_id + 1) * n, total_size)
