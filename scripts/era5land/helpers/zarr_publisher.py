@@ -240,9 +240,18 @@ def sync_named_variable_attrs(
 
 
 def _merge_time_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Dataset:
-    """Merge a candidate dataset into an existing one, preferring candidate values."""
+    """Merge disjoint time slices, preferring candidate values for rewritten times.
 
-    merged = candidate.combine_first(existing)
+    Overlapping timestamps are handled before this helper is called, so the
+    remaining merge only needs to combine disjoint slices along the time axis.
+    Using ``combine_first`` here can trigger a very large outer alignment across
+    multidimensional coordinates, so we rebuild the dataset with a concat-based
+    merge instead.
+    """
+
+    candidate = _pad_missing_existing_vars_for_append(candidate, existing)
+    existing_only = existing.drop_sel(time=candidate.indexes["time"], errors="ignore")
+    merged = xr.concat([existing_only, candidate], dim="time", combine_attrs="override")
     if "time" in merged.coords:
         merged = merged.sortby("time")
     return merged
