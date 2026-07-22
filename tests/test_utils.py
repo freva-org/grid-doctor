@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from unittest import mock
@@ -10,6 +11,7 @@ from unittest import mock
 import numpy as np
 import pytest
 import xarray as xr
+import zarr
 
 from grid_doctor.utils import (
     cache_dir,
@@ -17,6 +19,8 @@ from grid_doctor.utils import (
     cached_weights,
     get_s3_options,
     chunk_for_target_store_size,
+    init_full_zarr_store,
+    get_slurm_region,
 )
 
 
@@ -267,3 +271,67 @@ class TestCachedWeights:
         path1 = cached_weights(regular_ds, 1, method="nearest", cache_path=tmp_path)
         path2 = cached_weights(regular_ds, 2, method="nearest", cache_path=tmp_path)
         assert path1 != path2
+
+
+class TestInitializeStore:
+    def test_init_full_zarr_store(
+        self,
+        regular_lazy_ds: xr.Dataset,
+    ) -> None:
+        store = "memory://metadata-only.zarr"
+        init_full_zarr_store(regular_lazy_ds, store)
+        result_ds = xr.open_zarr(store)
+        assert result_ds == regular_lazy_ds
+        assert result_ds.drop_vars(result_ds.data_vars).identical(
+            regular_lazy_ds.drop_vars(regular_lazy_ds.data_vars)
+        )
+
+    def test_init_full_zarr_store_overwrite(
+        self,
+        regular_lazy_ds: xr.Dataset,
+    ) -> None:
+        store = "memory://metadata-only-overwrite.zarr"
+        init_full_zarr_store(regular_lazy_ds, store)
+        with pytest.raises(FileExistsError):
+            init_full_zarr_store(regular_lazy_ds, store)
+
+        init_full_zarr_store(regular_lazy_ds, store, overwrite=True)
+        result_ds = xr.open_zarr(store)
+        assert result_ds == regular_lazy_ds
+        assert result_ds.drop_vars(result_ds.data_vars).identical(
+            regular_lazy_ds.drop_vars(regular_lazy_ds.data_vars)
+        )
+
+
+class TestSlurmRegion:
+    @pytest.mark.parametrize("total_size", (10000,))
+    @pytest.mark.parametrize(
+        "task_count,job_size",
+        [(1000, 10), (1009, 10)],
+    )
+    def test_get_slurm_region(self, total_size, task_count, job_size, caplog):
+        """Test first and last 2 tasks"""
+        assert task_count > 4
+
+        for task_id in (0, 1, task_count - 2, task_count - 1):
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "SLURM_ARRAY_TASK_COUNT": str(task_count),
+                    "SLURM_ARRAY_TASK_ID": str(task_id),
+                    "SLURM_ARRAY_TASK_MIN": "0",
+                },
+                clear=True,
+            ):
+                expected = {
+                    "time": slice(
+                        task_id * job_size, min((task_id + 1) * job_size, total_size)
+                    )
+                }
+                if expected["time"].start >= expected["time"].stop:
+                    with caplog.at_level(logging.INFO):
+                        get_slurm_region(total_size, 1)
+                        assert "Nothing to do, region outside dataset" in caplog.text
+                else:
+                    region = get_slurm_region(total_size, 1)
+                    assert region == expected
