@@ -8,43 +8,27 @@ However 2023 was the last year for that source (to be confirmed)
 
 ## Current state
 
-As a prove of concept only hourly temperature and precipitation were converted and there's no precipitation data for the first 6 hours
-
-https://eu-dkrz-1.dkrz.cloud/browser/icdc/healpix/era5/
-
-https://gridlook.pages.dev/#https://s3.eu-dkrz-1.dkrz.cloud/icdc/healpix/era5/P1M/level_7
-
 ### Approach
 
 For each time frequency:
 
  - Open all the files that comprise the dataset via `open_mfdataset` and cache the resulting `xarray.Dataset`
 
- - Regrid the dataset `lazily` using `xr.apply_ufunc`
-  - `scipy.scipy.griddata(method=nearest)` is used
-  - Might consider pickle at this stage as well
+ - Regrid the dataset `lazily` to the max zoom level
 
- - If first time running: 
-   - Write metadata only first
+ - If first time running
+   - `--init` initialized only the coordinates and dimentions in the zarr store
 
- - Else:
-   - Launch jobs that write slices of the dataset (potencially in parallel)
+ - Otherwise:
+   - Launch jobs that write slices of the dataset in parallel.
 
-### Execution
+ - Lastly, use the coarsen tool for the lower levels
 
-`scripts/era5/slum.sh` prints the commands that launch the 2 jobs. The first to initialize the dataset, the second to schedule all the tasks that will populate it. For this readon the **first should succeed before the second is triggered**
+### Array job submission:
 
-It is taking roughly 3 hours and 30 min (max 4:40) for a time slice of 1440 values to be written accross **all** time frequencies for each zoom level (0-7)
-
-
-## Discuss
-
-  - `lat_bnds` and `lon_bnds` aren't taken into account during the regridding, should they?
-  - Only variables with spacial dimensions are kept, should it apply to all?
-
-### Improvements/Alternatives
-
-For this dataset it is possible to open and process the input files in a pipeline.
-The first file being processed creates the dataset and the subsequent ones append to it on the `time` dimension
-
-This approach might be benefic for cases were the ammount of input files is very large.
+```
+# Initialize hourly store
+python3 scripts/era5/convert.py --init hourly /work/ks1387/era5-redone
+# Write full hourly data using 1000 job arrays (max) it will split the time axis over total number of jobs
+sbatch -p compute -Ak20200 --mem 16G --array=0-999 --time 00:10:00  <(echo -e '#!/bin/sh\n~/micromamba/envs/grid-doctor/bin/python3 scripts/era5/convert.py hourly /work/ks1387/era5-redonev')
+```
