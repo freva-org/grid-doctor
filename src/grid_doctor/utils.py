@@ -9,6 +9,7 @@ import pickle
 import tempfile
 import warnings
 from collections.abc import Mapping
+from math import ceil
 from os import environ
 from pathlib import Path
 from typing import Any, Collection, Iterable, Literal, Set, cast
@@ -448,6 +449,25 @@ def init_full_zarr_store(
     # memory problems once loaded/computed
     for var in template_ds.data_vars:
         template_ds[var].chunks
+
+
+def get_slurm_region(total_size: int, chunk_size: int) -> Mapping[str, slice] | None:
+
+    n_jobs = int(environ.get("SLURM_ARRAY_TASK_COUNT", 1))
+    t_id = int(environ.get("SLURM_ARRAY_TASK_ID", 0)) - int(
+        environ.get("SLURM_ARRAY_TASK_MIN", 0)
+    )
+
+    n = ceil(ceil(total_size / chunk_size) / n_jobs)
+
+    start = t_id * n
+    end = min((t_id + 1) * n, total_size)
+
+    if start >= total_size or start >= end:
+        logging.info("Nothing to do, region outside dataset")
+        return None
+
+    return {"time": slice(start, end)}
 
 
 __all__ = [
