@@ -28,13 +28,14 @@ from helpers.special import split_special_variables
 from helpers.formatter import dataset_output_root, normalise_frequencies
 from helpers.mapper import (
     map_grib_to_healpix,
+    rechunk_existing_healpix_stores,
     truncate_existing_healpix_stores,
     update_healpix_attrs_only,
 )
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 0
-VERSION_MINOR = 6
+VERSION_MINOR = 7
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -343,6 +344,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Zarr format version for the output pyramid.",
     )
     convert.add_argument(
+        "--chunk-size-mb",
+        type=int,
+        default=16,
+        metavar="MB",
+        help=(
+            "Approximate Zarr chunk-size target in megabytes for newly written "
+            "or fully rewritten stores."
+        ),
+    )
+    convert.add_argument(
         "--no-cache",
         "--no-inventory-cache",
         action="store_false",
@@ -406,6 +417,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     convert.add_argument(
+        "--rechunk-existing",
+        action="store_true",
+        default=False,
+        help=(
+            "Before converting, rewrite matching existing Zarr stores using the "
+            "current --chunk-size-mb target."
+        ),
+    )
+    convert.add_argument(
         "-ao",
         "--attrs-only",
         action="store_true",
@@ -433,7 +453,7 @@ def build_parser() -> argparse.ArgumentParser:
             "higher-level Zarr store. Optionally provide comma-separated target "
             "levels such as 8,0, ranges such as 8-5, or a combination of both, "
             "such as 8-5,3-0. Without a value, all lower levels are rebuilt. "
-            "This can be combined with '--interval'."
+            "This can be combined with --interval."
         ),
     )
 
@@ -519,6 +539,8 @@ def build_batch_command(
         format_interval(interval),
         "--zarr-format",
         str(args.zarr_format),
+        "--chunk-size-mb",
+        str(args.chunk_size_mb),
         "--weights-dir",
         str(args.weights_dir),
         "--batch-mode",
@@ -835,6 +857,10 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         raise ValueError("--from-scratch cannot be combined with --attrs-only.")
     if truncate_after is not None and args.attrs_only:
         raise ValueError("--truncate-after cannot be combined with --attrs-only.")
+    if args.rechunk_existing and args.attrs_only:
+        raise ValueError("--rechunk-existing cannot be combined with --attrs-only.")
+    if args.chunk_size_mb <= 0:
+        raise ValueError("--chunk-size-mb must be a positive integer.")
 
     if args.highest_level_only and args.pyramid_strategy != "stepwise":
         logger.info(
@@ -870,6 +896,21 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
             "Completed pre-run truncation after %s for %s existing store(s).",
             truncate_after,
             truncated_count,
+        )
+
+    if args.rechunk_existing:
+        rechunked_count = rechunk_existing_healpix_stores(
+            dataset=args.dataset,
+            frequencies=effective_frequencies,
+            zarr_format=args.zarr_format,
+            target_chunk_mb=args.chunk_size_mb,
+            highest_level_only=args.highest_level_only,
+            output_path=args.output_path,
+        )
+        logger.info(
+            "Completed pre-run rechunking with target chunk size %s MB for %s existing store(s).",
+            args.chunk_size_mb,
+            rechunked_count,
         )
 
     def run_single_interval(
@@ -914,6 +955,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
             drop_duplicate_time_rows=(not args.fail_on_duplicate_times),
             weights_dir=args.weights_dir,
             clean=clean,
+            target_chunk_mb=args.chunk_size_mb,
             pyramid_strategy=args.pyramid_strategy,
             highest_level_only=args.highest_level_only,
             coarsen_only=(args.coarsen_only is not None),

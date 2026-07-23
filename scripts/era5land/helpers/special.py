@@ -200,6 +200,7 @@ def write_special_variables(
     zoom_numbers: Iterable[int],
     zarr_format: int,
     clean: bool,
+    target_chunk_mb: int,
     cmor_tables_dir: str | Path,
     mapper_path: str | Path,
     output_path: str | Path | None = None,
@@ -229,5 +230,6 @@ def write_special_variables(
                 destination,
                 clean=clean_store,
                 zarr_format=zarr_format,
+                target_chunk_mb=target_chunk_mb,
             )
             clean_store = False

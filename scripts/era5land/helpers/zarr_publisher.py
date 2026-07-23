@@ -15,6 +15,7 @@ from .datasets import normalise_published_dataset
 from .metadata import clean_output_attrs
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_TARGET_CHUNK_MB = 100
 
 
 def _fill_value_for_dtype(dtype: np.dtype[Any]) -> Any:
@@ -63,7 +64,7 @@ def _pad_missing_existing_vars_for_append(
 def _encoding_for_full_horizontal_chunks(
     dataset: xr.Dataset,
     *,
-    target_mb: int = 100,
+    target_mb: int = DEFAULT_TARGET_CHUNK_MB,
 ) -> dict[str, dict[str, tuple[int, ...]]]:
     """Return Zarr encoding with full horizontal chunks and bounded time chunks."""
 
@@ -103,6 +104,7 @@ def _write_dataset(
     mode: str,
     zarr_format: int,
     append_dim: Optional[str] = None,
+    target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
 ) -> None:
     """Write one dataset to a Zarr store with consistent options."""
 
@@ -119,7 +121,7 @@ def _write_dataset(
         dataset.to_zarr(destination, **options)
         return
 
-    encoding = _encoding_for_full_horizontal_chunks(dataset)
+    encoding = _encoding_for_full_horizontal_chunks(dataset, target_mb=target_chunk_mb)
 
     # Ensure Dask chunks match the explicit Zarr chunks.
     # Otherwise xarray may reject writes because one Zarr chunk overlaps
@@ -147,6 +149,7 @@ def _rewrite_dataset_via_temp(
     destination: str,
     *,
     zarr_format: int,
+    target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
 ) -> None:
     """Rewrite a store via a temporary path to avoid reading and writing it in place."""
 
@@ -162,6 +165,7 @@ def _rewrite_dataset_via_temp(
             str(temp_path),
             mode="w",
             zarr_format=zarr_format,
+            target_chunk_mb=target_chunk_mb,
         )
         if destination_path.exists():
             shutil.rmtree(destination_path)
@@ -263,6 +267,53 @@ def truncate_zarr_store_after(
             truncated_size,
         )
         return _shrink_time_arrays_in_place(destination, truncated_size)
+    finally:
+        existing.close()
+        gc.collect()
+
+
+def rechunk_zarr_store(
+    destination: str,
+    *,
+    zarr_format: int,
+    target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
+) -> bool:
+    """Rewrite one existing Zarr store with a new target chunk size.
+
+    Parameters
+    ----------
+    destination:
+        Path to the target Zarr store.
+    zarr_format:
+        Output Zarr format version used when rewriting the store.
+    target_chunk_mb:
+        Approximate chunk-size budget in megabytes used to derive the written
+        Zarr chunk layout.
+
+    Returns
+    -------
+    bool
+        ``True`` when the store existed and was rewritten, else ``False``.
+    """
+
+    path = Path(destination)
+    if not path.exists():
+        return False
+
+    existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
+    try:
+        LOGGER.info(
+            "📦 Rechunking existing Zarr store %s with target chunk size %s MB",
+            destination,
+            target_chunk_mb,
+        )
+        _rewrite_dataset_via_temp(
+            existing,
+            destination,
+            zarr_format=zarr_format,
+            target_chunk_mb=target_chunk_mb,
+        )
+        return True
     finally:
         existing.close()
         gc.collect()
@@ -409,6 +460,7 @@ def _write_missing_variables(
     destination: str,
     *,
     zarr_format: int,
+    target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
 ) -> xr.Dataset:
     """Add variables missing from an existing store across the current time axis."""
 
@@ -422,6 +474,7 @@ def _write_missing_variables(
         destination,
         mode="a",
         zarr_format=zarr_format,
+        target_chunk_mb=target_chunk_mb,
     )
     updated = existing.copy()
     for name in missing:
@@ -505,6 +558,7 @@ def update_zarr_store(
     clean: bool,
     zarr_format: int,
     truncate_after: str | None = None,
+    target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
 ) -> None:
     """Incrementally update or recreate one destination Zarr store."""
 
@@ -516,6 +570,7 @@ def update_zarr_store(
             destination,
             mode="w",
             zarr_format=zarr_format,
+            target_chunk_mb=target_chunk_mb,
         )
         _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)
@@ -539,6 +594,7 @@ def update_zarr_store(
                     merged,
                     destination,
                     zarr_format=zarr_format,
+                    target_chunk_mb=target_chunk_mb,
                 )
             elif missing:
                 _write_dataset(
@@ -546,6 +602,7 @@ def update_zarr_store(
                     destination,
                     mode="a",
                     zarr_format=zarr_format,
+                    target_chunk_mb=target_chunk_mb,
                 )
             _sync_global_attrs(dict(dataset.attrs), destination)
             _sync_variable_attrs(dataset, destination)
@@ -556,6 +613,7 @@ def update_zarr_store(
             dataset,
             destination,
             zarr_format=zarr_format,
+            target_chunk_mb=target_chunk_mb,
         )
 
         _rewrite_overlapping_times(
@@ -590,6 +648,7 @@ def update_zarr_store(
             merged,
             destination,
             zarr_format=zarr_format,
+            target_chunk_mb=target_chunk_mb,
         )
         _sync_global_attrs(dict(dataset.attrs), destination)
         _sync_variable_attrs(dataset, destination)

@@ -34,6 +34,7 @@ from .metadata import (
     global_attrs_for_records,
 )
 from .zarr_publisher import (
+    rechunk_zarr_store,
     sync_global_attrs,
     sync_named_variable_attrs,
     truncate_zarr_store_after,
@@ -126,6 +127,7 @@ def _write_zoom_level(
     global_attrs: dict[str, object],
     clean: bool,
     zarr_format: int,
+    target_chunk_mb: int,
     output_path: str | Path | None = None,
     truncate_after: str | None = None,
 ) -> None:
@@ -157,6 +159,7 @@ def _write_zoom_level(
         clean=clean,
         zarr_format=zarr_format,
         truncate_after=truncate_after,
+        target_chunk_mb=target_chunk_mb,
     )
 
 
@@ -254,6 +257,37 @@ def truncate_existing_healpix_stores(
     return truncated_count
 
 
+def rechunk_existing_healpix_stores(
+    *,
+    dataset: str,
+    frequencies: tuple[str, ...],
+    zarr_format: int,
+    target_chunk_mb: int,
+    highest_level_only: bool,
+    output_path: str | Path | None = None,
+) -> int:
+    """Rechunk selected existing HEALPix Zarr stores before a rerun."""
+
+    rewritten_count = 0
+    for frequency in frequencies:
+        destinations = _existing_level_destinations(
+            dataset,
+            frequency,
+            output_path=output_path,
+        )
+        if highest_level_only and destinations:
+            destinations = destinations[:1]
+
+        for _zoom_number, destination in destinations:
+            if rechunk_zarr_store(
+                destination,
+                zarr_format=zarr_format,
+                target_chunk_mb=target_chunk_mb,
+            ):
+                rewritten_count += 1
+    return rewritten_count
+
+
 def _coarsen_existing_frequency(
     *,
     source_dataset: str,
@@ -261,6 +295,7 @@ def _coarsen_existing_frequency(
     variables: str,
     zarr_format: int,
     clean: bool,
+    target_chunk_mb: int,
     output_path: str | Path | None = None,
     interval: tuple[Optional[date], Optional[date]] = (None, None),
     target_levels: tuple[int, ...] | None = None,
@@ -332,6 +367,7 @@ def _coarsen_existing_frequency(
                     global_attrs=global_attrs,
                     clean=clean,
                     zarr_format=zarr_format,
+                    target_chunk_mb=target_chunk_mb,
                     output_path=output_path,
                     truncate_after=truncate_after,
                 )
@@ -434,6 +470,7 @@ def _write_special_frequency(
     coarsen_only: bool,
     zarr_format: int,
     clean: bool,
+    target_chunk_mb: int,
     output_path: str | Path | None = None,
 ) -> None:
     """Write special-case variables for one output frequency."""
@@ -453,6 +490,7 @@ def _write_special_frequency(
         zoom_numbers=zoom_numbers,
         zarr_format=zarr_format,
         clean=clean,
+        target_chunk_mb=target_chunk_mb,
         cmor_tables_dir=CMOR_TABLES_DIR,
         mapper_path=SOURCE_MAPPER_PATH,
         output_path=output_path,
@@ -473,6 +511,7 @@ def map_grib_to_healpix(
     drop_duplicate_time_rows: bool = True,
     weights_dir: Optional[str] = None,
     clean: bool = False,
+    target_chunk_mb: int = 100,
     pyramid_strategy: str = "lazy",
     highest_level_only: bool = False,
     coarsen_only: bool = False,
@@ -533,6 +572,7 @@ def map_grib_to_healpix(
                 variables=variable_names,
                 zarr_format=zarr_format,
                 clean=clean,
+                target_chunk_mb=target_chunk_mb,
                 output_path=output_path,
                 interval=coarsen_interval,
                 target_levels=selected_coarsen_levels,
@@ -548,6 +588,7 @@ def map_grib_to_healpix(
                     coarsen_only=coarsen_only,
                     zarr_format=zarr_format,
                     clean=clean,
+                    target_chunk_mb=target_chunk_mb,
                     output_path=output_path,
                 )
             log_stage(LOGGER, "frequency_done", frequency=frequency, variables=variable_names)
@@ -680,6 +721,7 @@ def map_grib_to_healpix(
                         global_attrs=global_attrs,
                         clean=clean,
                         zarr_format=zarr_format,
+                        target_chunk_mb=target_chunk_mb,
                         output_path=output_path,
                         truncate_after=truncate_after,
                     )
@@ -699,6 +741,7 @@ def map_grib_to_healpix(
                                 global_attrs=global_attrs,
                                 clean=clean,
                                 zarr_format=zarr_format,
+                                target_chunk_mb=target_chunk_mb,
                                 output_path=output_path,
                                 truncate_after=truncate_after,
                             )
@@ -721,6 +764,7 @@ def map_grib_to_healpix(
                             global_attrs=global_attrs,
                             clean=clean,
                             zarr_format=zarr_format,
+                            target_chunk_mb=target_chunk_mb,
                             output_path=output_path,
                             truncate_after=truncate_after,
                         )
@@ -738,6 +782,7 @@ def map_grib_to_healpix(
                     coarsen_only=coarsen_only,
                     zarr_format=zarr_format,
                     clean=clean,
+                    target_chunk_mb=target_chunk_mb,
                     output_path=output_path,
                 )
 
