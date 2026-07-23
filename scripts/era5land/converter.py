@@ -344,7 +344,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Zarr format version for the output pyramid.",
     )
     convert.add_argument(
-        "--chunk-size-mb",
+        "--chunk-size",
         type=int,
         default=16,
         metavar="MB",
@@ -417,12 +417,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     convert.add_argument(
-        "--rechunk-existing",
+        "--rechunk-only",
         action="store_true",
         default=False,
         help=(
-            "Before converting, rewrite matching existing Zarr stores using the "
-            "current --chunk-size-mb target."
+            "Rewrite matching existing Zarr stores using the current "
+            "--chunk-size target and then exit without converting."
         ),
     )
     convert.add_argument(
@@ -539,8 +539,8 @@ def build_batch_command(
         format_interval(interval),
         "--zarr-format",
         str(args.zarr_format),
-        "--chunk-size-mb",
-        str(args.chunk_size_mb),
+        "--chunk-size",
+        str(args.chunk_size),
         "--weights-dir",
         str(args.weights_dir),
         "--batch-mode",
@@ -857,10 +857,10 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         raise ValueError("--from-scratch cannot be combined with --attrs-only.")
     if truncate_after is not None and args.attrs_only:
         raise ValueError("--truncate-after cannot be combined with --attrs-only.")
-    if args.rechunk_existing and args.attrs_only:
-        raise ValueError("--rechunk-existing cannot be combined with --attrs-only.")
-    if args.chunk_size_mb <= 0:
-        raise ValueError("--chunk-size-mb must be a positive integer.")
+    if args.rechunk_only and args.attrs_only:
+        raise ValueError("--rechunk-only cannot be combined with --attrs-only.")
+    if args.chunk_size <= 0:
+        raise ValueError("--chunk-size must be a positive integer.")
 
     if args.highest_level_only and args.pyramid_strategy != "stepwise":
         logger.info(
@@ -898,20 +898,21 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
             truncated_count,
         )
 
-    if args.rechunk_existing:
+    if args.rechunk_only:
         rechunked_count = rechunk_existing_healpix_stores(
             dataset=args.dataset,
             frequencies=effective_frequencies,
             zarr_format=args.zarr_format,
-            target_chunk_mb=args.chunk_size_mb,
+            target_chunk_mb=args.chunk_size,
             highest_level_only=args.highest_level_only,
             output_path=args.output_path,
         )
         logger.info(
-            "Completed pre-run rechunking with target chunk size %s MB for %s existing store(s).",
-            args.chunk_size_mb,
+            "Completed standalone rechunking with target chunk size %s MB for %s existing store(s).",
+            args.chunk_size,
             rechunked_count,
         )
+        return 0
 
     def run_single_interval(
         current_interval: Tuple[Optional[date], Optional[date]],
@@ -955,7 +956,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
             drop_duplicate_time_rows=(not args.fail_on_duplicate_times),
             weights_dir=args.weights_dir,
             clean=clean,
-            target_chunk_mb=args.chunk_size_mb,
+            target_chunk_mb=args.chunk_size,
             pyramid_strategy=args.pyramid_strategy,
             highest_level_only=args.highest_level_only,
             coarsen_only=(args.coarsen_only is not None),
