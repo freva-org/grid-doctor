@@ -26,6 +26,8 @@ LON_COORD_NAMES = ("longitude", "lon", "Longitude", "LONGITUDE", "x", "X")
 STATIC_COORD_NAMES = ("cell", "time", "crs", "surface")
 _REDUCED_GAUSSIAN_GEOMETRY_CACHE: dict[str, dict[str, np.ndarray]] = {}
 
+class EmptySourceDataError(ValueError):
+    """Raised when a resolved source contains no usable payload data."""
 
 def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> Optional[str]:
     """Return the first matching coordinate name from *candidates*."""
@@ -461,6 +463,13 @@ def open_source_record_dataset(
         ds_var = ds[[record.variable]]
     else:
         data_vars = get_vars(ds)
+        
+        if not data_vars:
+            raise EmptySourceDataError(
+                f"No GRIB payload data found for {record.variable!r} "
+                f"at frequency {record.frequency!r} in the requested interval."
+            )
+
         if len(data_vars) != 1:
             raise ValueError(
                 f"Expected exactly one GRIB payload variable for {record.variable!r}, "

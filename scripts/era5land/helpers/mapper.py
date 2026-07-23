@@ -17,6 +17,7 @@ from .special import (
     write_special_variables,
 )
 from .datasets import (
+    EmptySourceDataError,
     merge_frequency_dataset,
     normalise_reduced_gaussian_dataset,
 )
@@ -588,14 +589,33 @@ def map_grib_to_healpix(
         try:
             if freq_records:
                 global_attrs = global_attrs_for_records(freq_records)
-                ds = merge_frequency_dataset(
-                    freq_records,
-                    use_inventory_cache=use_inventory_cache,
-                    use_input_cache=use_input_cache,
-                    use_record_threads=use_record_threads,
-                    drop_duplicate_time_rows=drop_duplicate_time_rows,
-                    interval=interval,
-                )
+                
+                try:
+                    ds = merge_frequency_dataset(
+                        freq_records,
+                        use_inventory_cache=use_inventory_cache,
+                        use_input_cache=use_input_cache,
+                        use_record_threads=use_record_threads,
+                        drop_duplicate_time_rows=drop_duplicate_time_rows,
+                        interval=interval,
+                    )
+                except EmptySourceDataError as exc:
+                    LOGGER.warning(
+                        "Skipping %s frequency for %s because no source data was "
+                        "found in the requested interval: %s",
+                        frequency,
+                        dataset,
+                        exc,
+                    )
+                    log_stage(
+                        LOGGER,
+                        "frequency_skip_empty",
+                        frequency=frequency,
+                        variables=variable_names,
+                        reason=str(exc),
+                    )
+                    continue
+
                 ds.attrs.update(global_attrs)
                 if "time" in ds.dims and ds.sizes.get("time", 0) == 0:
                     log_stage(
