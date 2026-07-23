@@ -18,6 +18,52 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_TARGET_CHUNK_MB = 100
 
 
+def _resolve_target_chunks(
+    da: xr.DataArray,
+    *,
+    target_bytes: int,
+    cell_size: int,
+) -> tuple[int, ...]:
+    """Derive map-style chunks that preserve the full horizontal field.
+
+    For HEALPix outputs we keep ``cell`` as one full chunk. When a vertical
+    dimension such as ``plev`` is present, we chunk it as ``1`` so each chunk
+    represents one complete map at one level across a bounded number of time
+    steps. The remaining byte budget is then used to size the ``time`` chunk.
+    """
+
+    full_cell_chunk = int(da.sizes["cell"])
+    non_time_extent = 1
+    for dim in da.dims:
+        if dim == "time":
+            continue
+        if dim == "plev":
+            non_time_extent *= 1
+            continue
+        non_time_extent *= int(da.sizes[dim])
+
+    if non_time_extent <= 0:
+        non_time_extent = 1
+
+    resolved_time_chunk = None
+    if "time" in da.dims:
+        resolved_time_chunk = max(1, target_bytes // (cell_size * non_time_extent))
+        resolved_time_chunk = int(resolved_time_chunk)
+
+    chunks: list[int] = []
+    for dim in da.dims:
+        if dim == "time":
+            chunks.append(resolved_time_chunk)
+        elif dim == "plev":
+            chunks.append(1)
+        elif dim == "cell":
+            chunks.append(full_cell_chunk)
+        else:
+            chunks.append(int(da.sizes[dim]))
+
+    return tuple(chunks)
+
+
 def _fill_value_for_dtype(dtype: np.dtype[Any]) -> Any:
     """Return a sensible missing value for a dtype."""
 
@@ -61,12 +107,12 @@ def _pad_missing_existing_vars_for_append(
     ordered.extend(name for name in padded.data_vars if name not in ordered)
     return padded[ordered]
 
-def _encoding_for_full_horizontal_chunks(
+def _encoding_for_target_chunks(
     dataset: xr.Dataset,
     *,
     target_mb: int = DEFAULT_TARGET_CHUNK_MB,
 ) -> dict[str, dict[str, tuple[int, ...]]]:
-    """Return Zarr encoding with full horizontal chunks and bounded time chunks."""
+    """Return Zarr encoding that keeps chunk sizes near the requested budget."""
 
     target_bytes = target_mb * 1024**2
     encoding: dict[str, dict[str, tuple[int, ...]]] = {}
@@ -75,25 +121,13 @@ def _encoding_for_full_horizontal_chunks(
         if "cell" not in da.dims:
             continue
 
-        dtype_size = da.dtype.itemsize
-        ncell = dataset.sizes["cell"]
-        bytes_per_time = ncell * dtype_size
-
-        if "time" in da.dims:
-            resolved_time_chunk = max(1, target_bytes // bytes_per_time)
-        else:
-            resolved_time_chunk = None
-
-        chunks = []
-        for dim in da.dims:
-            if dim == "time":
-                chunks.append(resolved_time_chunk)
-            elif dim == "cell":
-                chunks.append(ncell)
-            else:
-                chunks.append(dataset.sizes[dim])
-
-        encoding[name] = {"chunks": tuple(chunks)}
+        encoding[name] = {
+            "chunks": _resolve_target_chunks(
+                da,
+                target_bytes=target_bytes,
+                cell_size=da.dtype.itemsize,
+            )
+        }
 
     return encoding
 
@@ -121,7 +155,7 @@ def _write_dataset(
         dataset.to_zarr(destination, **options)
         return
 
-    encoding = _encoding_for_full_horizontal_chunks(dataset, target_mb=target_chunk_mb)
+    encoding = _encoding_for_target_chunks(dataset, target_mb=target_chunk_mb)
 
     # Ensure Dask chunks match the explicit Zarr chunks.
     # Otherwise xarray may reject writes because one Zarr chunk overlaps

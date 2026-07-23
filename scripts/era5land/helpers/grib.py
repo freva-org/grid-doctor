@@ -47,6 +47,16 @@ EXCLUDE_NAMES = {
 SINGLETON_AUX_COORDS = {
     "number",
 }
+TIME_INDEX_COLUMNS = [
+    "ref_time",
+    "step_timedelta",
+    "valid_time",
+    "time_bnds_start",
+    "time_bnds_end",
+]
+VERTICAL_COORD_RENAMES = {
+    "isobaricInhPa": "plev",
+}
 
 
 def grib_inventory(files: Collection[str | Path]) -> pd.DataFrame:
@@ -234,16 +244,7 @@ def time_normalizer(
         is ``False``.
     """
     df = grib_time_df
-    duplicate_time_rows = df.duplicated(
-        subset=[
-            "ref_time",
-            "step_timedelta",
-            "valid_time",
-            "time_bnds_start",
-            "time_bnds_end",
-        ],
-        keep="first",
-    )
+    duplicate_time_rows = df.duplicated(subset=TIME_INDEX_COLUMNS, keep="first")
     if duplicate_time_rows.any():
         duplicate_count = int(duplicate_time_rows.sum())
         sample_file = str(df.iloc[0]["file"]) if "file" in df.columns and not df.empty else "<unknown>"
@@ -259,6 +260,14 @@ def time_normalizer(
         )
         _record_duplicate_time_rows(sample_file, duplicate_count)
         df = df.loc[~duplicate_time_rows].copy()
+    else:
+        df = df.copy()
+
+    # Multi-level GRIB groups legitimately repeat the same message-time
+    # metadata once per vertical level. Collapse those rows here so valid-time
+    # normalization preserves the vertical axis instead of duplicating or
+    # overwriting slices level-by-level.
+    df = df.drop_duplicates(subset=TIME_INDEX_COLUMNS, keep="first").reset_index(drop=True)
 
     vars_ = get_vars(ds)
 
@@ -318,6 +327,30 @@ def time_normalizer(
     return ds_out
 
 
+def normalise_vertical_coords(ds: xr.Dataset) -> xr.Dataset:
+    """Rename known GRIB vertical coordinates to stable output names.
+
+    Parameters
+    ----------
+    ds
+        Dataset opened from cfgrib.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset with standardized vertical coordinate names where applicable.
+    """
+
+    rename_map = {
+        source: target
+        for source, target in VERTICAL_COORD_RENAMES.items()
+        if source in ds.dims or source in ds.coords
+    }
+    if not rename_map:
+        return ds
+    return ds.rename(rename_map)
+
+
 def drop_singleton_auxiliary_coords(ds: xr.Dataset) -> xr.Dataset:
     """Drop scalar auxiliary coordinates that vary inconsistently across files.
 
@@ -347,7 +380,8 @@ def open_dataset(
     """Open GRIB files as a merged xarray dataset.
 
     Files are inventoried first, then opened one GRIB field group at a time
-    using cfgrib filters for ``shortName``, ``typeOfLevel``, and ``level``.
+    using cfgrib filters for ``shortName`` and ``typeOfLevel`` while keeping
+    compatible vertical levels together.
     Each per-variable dataset is normalized to valid time before all variables
     are merged.
 
@@ -376,12 +410,12 @@ def open_dataset(
 
     inv["_file_key"] = inv["file"].map(lambda file: str(Path(file).resolve()))
 
-    group_cols = ["shortName", "paramId", "typeOfLevel", "level"]
+    group_cols = ["shortName", "paramId", "typeOfLevel"]
 
     datasets: list[xr.Dataset] = []
 
     for key, g in inv.groupby(group_cols):
-        short_name, param_id, type_of_level, level = key
+        short_name, param_id, type_of_level = key
 
         files_for_var = [str(file) for file in sorted(g["file"].unique())]
         time_by_file = {
@@ -400,12 +434,14 @@ def open_dataset(
             except KeyError as exc:
                 raise KeyError(f"No GRIB inventory rows found for {source!r}") from exc
 
-            return drop_singleton_auxiliary_coords(
-                time_normalizer(
-                    ds,
-                    grib_time_df=grib_time_df,
-                    drop_duplicate_time_rows=drop_duplicate_time_rows,
-                    keep_time_bounds=False,
+            return normalise_vertical_coords(
+                drop_singleton_auxiliary_coords(
+                    time_normalizer(
+                        ds,
+                        grib_time_df=grib_time_df,
+                        drop_duplicate_time_rows=drop_duplicate_time_rows,
+                        keep_time_bounds=False,
+                    )
                 )
             )
 
@@ -416,7 +452,6 @@ def open_dataset(
                 "filter_by_keys": {
                     "shortName": short_name,
                     "typeOfLevel": type_of_level,
-                    "level": int(level),
                 },
             },
             "combine": "by_coords",
