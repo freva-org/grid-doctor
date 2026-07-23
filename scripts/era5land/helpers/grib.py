@@ -54,6 +54,7 @@ TIME_INDEX_COLUMNS = [
     "time_bnds_start",
     "time_bnds_end",
 ]
+DUPLICATE_TIME_COLUMNS = [*TIME_INDEX_COLUMNS, "level"]
 VERTICAL_COORD_RENAMES = {
     "isobaricInhPa": "plev",
 }
@@ -244,7 +245,7 @@ def time_normalizer(
         is ``False``.
     """
     df = grib_time_df
-    duplicate_time_rows = df.duplicated(subset=TIME_INDEX_COLUMNS, keep="first")
+    duplicate_time_rows = df.duplicated(subset=DUPLICATE_TIME_COLUMNS, keep="first")
     if duplicate_time_rows.any():
         duplicate_count = int(duplicate_time_rows.sum())
         sample_file = str(df.iloc[0]["file"]) if "file" in df.columns and not df.empty else "<unknown>"
