@@ -256,7 +256,7 @@ def truncate_zarr_store_after(
             return False
 
         LOGGER.info(
-            "Truncating existing Zarr store %s after %s (time: %s -> %s)",
+            "✂️ Truncating existing Zarr store %s after %s (time: %s -> %s)",
             destination,
             cutoff,
             original_size,

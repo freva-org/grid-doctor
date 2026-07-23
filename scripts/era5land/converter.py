@@ -647,7 +647,7 @@ def run_batched_subprocesses(
     try:
         for index, current_interval in enumerate(intervals, start=1):
             logger.info(
-                "Starting batch %s/%s for interval %s",
+                "🚀 Starting batch %s/%s for interval %s",
                 index,
                 len(intervals),
                 format_interval(current_interval),
@@ -927,7 +927,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
 
     if len(intervals) > 1:
         logger.info(
-            "Processing %s interval batches of %s month(s) each using %s mode.",
+            "📦 Processing %s interval batches of %s month(s) each using %s mode.",
             len(intervals),
             args.batches,
             args.batch_mode,
@@ -939,7 +939,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
     for index, current_interval in enumerate(intervals, start=1):
         if len(intervals) > 1:
             logger.info(
-                "Starting batch %s/%s for interval %s",
+                "🚀 Starting batch %s/%s for interval %s",
                 index,
                 len(intervals),
                 format_interval(current_interval),
