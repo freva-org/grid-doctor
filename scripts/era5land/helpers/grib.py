@@ -1,6 +1,7 @@
 import hashlib
 import json
 from collections.abc import Collection
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,6 +12,10 @@ from eccodes import codes_get, codes_grib_new_from_file, codes_release
 
 import grid_doctor as gd
 from grid_doctor.utils import cache_dir
+import logging
+
+LOGGER = logging.getLogger(__name__)
+DUPLICATE_TIME_ROWS_LOG = Path(__file__).resolve().parent.parent / "duplicate_grib_time_rows.log"
 
 GRIB_KEYS = [
     "shortName",
@@ -168,10 +173,28 @@ def get_vars(ds: xr.Dataset) -> list[str]:
     return candidates
 
 
+def _record_duplicate_time_rows(sample_file: str, duplicate_count: int) -> None:
+    """Append one duplicate-time-row event to the local diagnostics log."""
+
+    timestamp = datetime.now(UTC).isoformat(timespec="seconds")
+    try:
+        with DUPLICATE_TIME_ROWS_LOG.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"{timestamp}\tduplicates={duplicate_count}\tfile={sample_file}\n"
+            )
+    except OSError as exc:
+        LOGGER.warning(
+            "Could not append duplicate GRIB time-row log %s: %s",
+            DUPLICATE_TIME_ROWS_LOG,
+            exc,
+        )
+
+
 def time_normalizer(
     ds: xr.Dataset,
     *,
     grib_time_df: pd.DataFrame,
+    drop_duplicate_time_rows: bool = True,
     keep_time_bounds: bool = False,
 ) -> xr.Dataset:
     """Normalize cfgrib time coordinates to valid time.
@@ -191,6 +214,9 @@ def time_normalizer(
         ``ref_time``, ``step_timedelta``, ``valid_time``,
         ``time_bnds_start``, and ``time_bnds_end`` columns as produced by
         :func:`grib_inventory`.
+    drop_duplicate_time_rows : bool, optional
+        If ``True``, discard exact duplicate GRIB time rows before mapping the
+        dataset onto valid time. If ``False``, raise ``ValueError`` instead.
     keep_time_bounds : bool, optional
         If ``True``, add a two-column ``time_bnds`` variable and reference it
         from the ``time`` coordinate's ``bounds`` attribute.
@@ -203,9 +229,36 @@ def time_normalizer(
     Raises
     ------
     ValueError
-        If ``ds`` does not contain exactly one real data variable.
+        If ``ds`` does not contain exactly one real data variable, or when
+        duplicate GRIB time rows are found while ``drop_duplicate_time_rows``
+        is ``False``.
     """
     df = grib_time_df
+    duplicate_time_rows = df.duplicated(
+        subset=[
+            "ref_time",
+            "step_timedelta",
+            "valid_time",
+            "time_bnds_start",
+            "time_bnds_end",
+        ],
+        keep="first",
+    )
+    if duplicate_time_rows.any():
+        duplicate_count = int(duplicate_time_rows.sum())
+        sample_file = str(df.iloc[0]["file"]) if "file" in df.columns and not df.empty else "<unknown>"
+        if not drop_duplicate_time_rows:
+            raise ValueError(
+                f"Found {duplicate_count} duplicate GRIB time row(s) while "
+                f"normalizing {sample_file!r}."
+            )
+        LOGGER.warning(
+            "Dropping %s duplicate GRIB time row(s) while normalizing %s",
+            duplicate_count,
+            sample_file,
+        )
+        _record_duplicate_time_rows(sample_file, duplicate_count)
+        df = df.loc[~duplicate_time_rows].copy()
 
     vars_ = get_vars(ds)
 
@@ -289,6 +342,7 @@ def open_dataset(
     *,
     use_inventory_cache: bool = True,
     use_input_cache: bool = False,
+    drop_duplicate_time_rows: bool = True,
 ) -> xr.Dataset:
     """Open GRIB files as a merged xarray dataset.
 
@@ -308,6 +362,9 @@ def open_dataset(
         If ``True``, reuse cached multi-file dataset pickles through
         ``grid_doctor.cached_open_dataset``. If ``False``, open the datasets
         directly with ``xarray.open_mfdataset``.
+    drop_duplicate_time_rows : bool, optional
+        Whether exact duplicate GRIB time rows should be discarded during time
+        normalization instead of raising an error.
 
     Returns
     -------
@@ -347,6 +404,7 @@ def open_dataset(
                 time_normalizer(
                     ds,
                     grib_time_df=grib_time_df,
+                    drop_duplicate_time_rows=drop_duplicate_time_rows,
                     keep_time_bounds=False,
                 )
             )

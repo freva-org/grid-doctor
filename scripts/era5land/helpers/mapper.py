@@ -35,6 +35,7 @@ from .metadata import (
 from .zarr_publisher import (
     sync_global_attrs,
     sync_named_variable_attrs,
+    truncate_zarr_store_after,
     update_zarr_store,
 )
 
@@ -101,6 +102,17 @@ def _variable_names(
     names = {record.variable for record in records}
     names.update(str(name) for name in extra)
     return ",".join(sorted(names))
+
+
+def _missing_frequency_variables(
+    frequency_records: Iterable[SourceRecord],
+    resolved_frequency_records: Iterable[SourceRecord],
+) -> tuple[str, ...]:
+    """Return requested variable names with no resolved source files."""
+
+    requested = {record.variable for record in frequency_records}
+    resolved = {record.variable for record in resolved_frequency_records}
+    return tuple(sorted(requested - resolved))
 
 
 def _write_zoom_level(
@@ -180,6 +192,65 @@ def _existing_level_destinations(
             continue
         destinations.append((int(match.group("level")), destination))
     return sorted(destinations, reverse=True)
+
+
+def _truncate_frequency_destinations(
+    *,
+    dataset: str,
+    frequency: str,
+    zarr_format: int,
+    cutoff: str,
+    highest_level_only: bool,
+    output_path: str | Path | None = None,
+) -> int:
+    """Truncate the selected existing destinations for one output frequency."""
+
+    destinations = _existing_level_destinations(
+        dataset,
+        frequency,
+        output_path=output_path,
+    )
+    if highest_level_only and destinations:
+        destinations = destinations[:1]
+
+    truncated_count = 0
+    for _zoom_number, destination in destinations:
+        if truncate_zarr_store_after(
+            destination,
+            cutoff=cutoff,
+            zarr_format=zarr_format,
+        ):
+            truncated_count += 1
+    return truncated_count
+
+
+def truncate_existing_healpix_stores(
+    *,
+    dataset: str,
+    frequencies: tuple[str, ...],
+    zarr_format: int,
+    cutoff: str,
+    highest_level_only: bool,
+    output_path: str | Path | None = None,
+) -> int:
+    """Truncate existing time-based HEALPix Zarr stores before a rerun.
+
+    The truncation selection follows the CLI write targets. When
+    ``highest_level_only`` is enabled, only the highest existing zoom level for
+    each frequency is truncated.
+    """
+
+    truncated_count = 0
+    for frequency in frequencies:
+        truncated_count += _truncate_frequency_destinations(
+            dataset=dataset,
+            frequency=frequency,
+            zarr_format=zarr_format,
+            cutoff=cutoff,
+            highest_level_only=highest_level_only,
+            output_path=output_path,
+        )
+    return truncated_count
 
 
 def _coarsen_existing_frequency(
@@ -398,6 +469,7 @@ def map_grib_to_healpix(
     use_inventory_cache: bool = True,
     use_input_cache: bool = False,
     use_record_threads: bool = False,
+    drop_duplicate_time_rows: bool = True,
     weights_dir: Optional[str] = None,
     clean: bool = False,
     pyramid_strategy: str = "lazy",
@@ -484,6 +556,27 @@ def map_grib_to_healpix(
         if not variable_names:
             variable_names = _variable_names(freq_records)
 
+        missing_variables = _missing_frequency_variables(
+            frequency_records,
+            freq_records,
+        )
+        if missing_variables:
+            missing_names = ",".join(missing_variables)
+            LOGGER.warning(
+                "Skipping %s frequency for %s because source data is missing for %s.",
+                frequency,
+                dataset,
+                missing_names,
+            )
+            log_stage(
+                LOGGER,
+                "frequency_skip_missing",
+                frequency=frequency,
+                variables=variable_names,
+                missing=missing_names,
+            )
+            continue
+
         log_stage(
             LOGGER,
             "frequency_start",
@@ -500,6 +593,7 @@ def map_grib_to_healpix(
                     use_inventory_cache=use_inventory_cache,
                     use_input_cache=use_input_cache,
                     use_record_threads=use_record_threads,
+                    drop_duplicate_time_rows=drop_duplicate_time_rows,
                     interval=interval,
                 )
                 ds.attrs.update(global_attrs)
@@ -628,6 +722,19 @@ def map_grib_to_healpix(
                 )
 
             log_stage(LOGGER, "frequency_done", frequency=frequency, variables=variable_names)
+        except xr.AlignmentError as exc:
+            LOGGER.warning(
+                "Skipping %s frequency for %s because variable time coverage is incomplete: %s",
+                frequency,
+                dataset,
+                exc,
+            )
+            log_stage(
+                LOGGER,
+                "frequency_skip_incomplete",
+                frequency=frequency,
+                variables=variable_names,
+            )
         finally:
             _close_dataset_quietly(current)
             if finest is not current:

@@ -26,11 +26,15 @@ from helpers.file_fetcher import (
 )
 from helpers.special import split_special_variables
 from helpers.formatter import dataset_output_root, normalise_frequencies
-from helpers.mapper import map_grib_to_healpix, update_healpix_attrs_only
+from helpers.mapper import (
+    map_grib_to_healpix,
+    truncate_existing_healpix_stores,
+    update_healpix_attrs_only,
+)
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 0
-VERSION_MINOR = 4
+VERSION_MINOR = 5
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -361,6 +365,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Open source records in parallel within each frequency merge.",
     )
     convert.add_argument(
+        "-fdt","--fail-on-duplicate-times",
+        action="store_true",
+        dest="fail_on_duplicate_times",
+        default=False,
+        help=(
+            "Raise an error when exact duplicate GRIB time rows are found during "
+            "time normalization instead of dropping them. This finishes the run."
+        ),
+    )
+    convert.add_argument(
         "--weights-dir",
         default=str(source_mapper["weights_path"]),
         help="Directory where HEALPix weight files are stored and reused.",
@@ -369,7 +383,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--clean",
         action="store_true",
         default=False,
-        help="Overwrite existing Zarr outputs instead of updating them incrementally.",
+        help=(
+            "Overwrite existing Zarr stores with new outputs instead of updating "
+            "them incrementally. It wipes the store before starting."
+              ),
     )
     convert.add_argument(
         "--from-scratch",
@@ -415,7 +432,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Skip GRIB remapping and derive lower zoom levels from an existing "
             "higher-level Zarr store. Optionally provide comma-separated target "
             "levels such as 8,0, ranges such as 8-5, or a combination of both, "
-            "such as 8-5,3-0. Without a value, all lower levels are rebuilt."
+            "such as 8-5,3-0. Without a value, all lower levels are rebuilt. "
+            "This can be combined with '--interval'."
         ),
     )
 
@@ -515,14 +533,14 @@ def build_batch_command(
         command.extend(["--root", args.root])
     if args.output_path is not None:
         command.extend(["--output-path", args.output_path])
-    if args.truncate_after is not None:
-        command.extend(["--truncate-after", args.truncate_after])
     if not args.use_inventory_cache:
         command.append("--no-inventory-cache")
     if args.use_input_cache:
         command.append("--cache-input-datasets")
     if args.use_record_threads:
         command.append("--record-threads")
+    if args.fail_on_duplicate_times:
+        command.append("--fail-on-duplicate-times")
     if clean:
         command.append("--clean")
     if args.attrs_only:
@@ -839,6 +857,21 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
         else:
             logger.info("Dataset output root %s does not exist; nothing to delete.", root_path)
 
+    if truncate_after is not None:
+        truncated_count = truncate_existing_healpix_stores(
+            dataset=args.dataset,
+            frequencies=effective_frequencies,
+            zarr_format=args.zarr_format,
+            cutoff=truncate_after,
+            highest_level_only=args.highest_level_only,
+            output_path=args.output_path,
+        )
+        logger.info(
+            "Completed pre-run truncation after %s for %s existing store(s).",
+            truncate_after,
+            truncated_count,
+        )
+
     def run_single_interval(
         current_interval: Tuple[Optional[date], Optional[date]],
         *,
@@ -878,6 +911,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
             use_inventory_cache=args.use_inventory_cache,
             use_input_cache=args.use_input_cache,
             use_record_threads=args.use_record_threads,
+            drop_duplicate_time_rows=(not args.fail_on_duplicate_times),
             weights_dir=args.weights_dir,
             clean=clean,
             pyramid_strategy=args.pyramid_strategy,
@@ -886,8 +920,8 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
             coarsen_levels=coarsen_levels,
             output_path=args.output_path,
             coarsen_interval=interval,
-            truncate_after=truncate_after,
-        )
+            truncate_after=None,
+            )
 
     intervals = batched_intervals(interval, batch_months=args.batches)
 

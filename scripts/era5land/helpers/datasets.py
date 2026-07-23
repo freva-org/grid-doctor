@@ -1,7 +1,7 @@
 """Dataset opening and reshaping helpers for ERA5/ERA5-Land."""
 
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 import hashlib
 import logging
 from pathlib import Path
@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from grid_doctor.utils import cache_dir
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from .file_fetcher import SourceRecord
@@ -17,6 +18,9 @@ from .logging_utils import log_stage
 from .metadata import clean_output_attrs
 
 LOGGER = logging.getLogger(__name__)
+TIME_ALIGNMENT_MISMATCH_LOG = (
+    Path(__file__).resolve().parent.parent / "time_alignment_mismatches.log"
+)
 LAT_COORD_NAMES = ("latitude", "lat", "Latitude", "LATITUDE", "y", "Y")
 LON_COORD_NAMES = ("longitude", "lon", "Longitude", "LONGITUDE", "x", "X")
 STATIC_COORD_NAMES = ("cell", "time", "crs", "surface")
@@ -44,6 +48,83 @@ def normalise_published_dataset(ds: xr.Dataset) -> xr.Dataset:
     if not coord_names:
         return ds
     return ds.set_coords(sorted(coord_names))
+
+
+def _format_timestamp_dates(values: pd.Index) -> str:
+    """Summarize a timestamp index as sorted ISO calendar dates."""
+
+    if len(values) == 0:
+        return "-"
+    dates = pd.Index(pd.to_datetime(values).strftime("%Y-%m-%d")).unique()
+    return ",".join(str(value) for value in dates.tolist())
+
+
+def _record_time_alignment_mismatch(
+    records: list[SourceRecord],
+    datasets: list[xr.Dataset],
+) -> None:
+    """Log non-shared per-variable timestamps for trimming diagnostics."""
+
+    timed_records = [
+        (record, ds)
+        for record, ds in zip(records, datasets)
+        if "time" in ds.indexes
+    ]
+    if len(timed_records) < 2:
+        return
+
+    shared_time = timed_records[0][1].indexes["time"]
+    for _record, ds in timed_records[1:]:
+        shared_time = shared_time.intersection(ds.indexes["time"])
+
+    if all(ds.indexes["time"].equals(shared_time) for _record, ds in timed_records):
+        return
+
+    timestamp = datetime.now(UTC).isoformat(timespec="seconds")
+    lines: list[str] = []
+    for record, ds in timed_records:
+        non_shared = ds.indexes["time"].difference(shared_time)
+        if len(non_shared) == 0:
+            continue
+        lines.append(
+            "\t".join(
+                [
+                    timestamp,
+                    f"frequency={record.frequency}",
+                    f"variable={record.variable}",
+                    f"count={len(non_shared)}",
+                    f"dates={_format_timestamp_dates(non_shared)}",
+                    f"first={non_shared.min()}",
+                    f"last={non_shared.max()}",
+                ]
+            )
+        )
+
+    if not lines:
+        return
+
+    try:
+        with TIME_ALIGNMENT_MISMATCH_LOG.open("a", encoding="utf-8") as handle:
+            for line in lines:
+                handle.write(f"{line}\n")
+    except OSError as exc:
+        LOGGER.warning(
+            "Could not append time-alignment mismatch log %s: %s",
+            TIME_ALIGNMENT_MISMATCH_LOG,
+            exc,
+        )
+
+    for record, ds in timed_records:
+        non_shared = ds.indexes["time"].difference(shared_time)
+        if len(non_shared) == 0:
+            continue
+        LOGGER.warning(
+            "Non-shared %s timestamps for %s %s involve date(s): %s",
+            len(non_shared),
+            record.frequency,
+            record.variable,
+            _format_timestamp_dates(non_shared),
+        )
 
 
 def _circular_lon_bounds(lon_values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -337,6 +418,7 @@ def open_source_record_dataset(
     interval: tuple[Optional[date], Optional[date]] = (None, None),
     use_inventory_cache: bool = True,
     use_input_cache: bool = False,
+    drop_duplicate_time_rows: bool = True,
 ) -> xr.Dataset:
     """Open one source record, optionally slice it, and rename its payload.
 
@@ -351,6 +433,9 @@ def open_source_record_dataset(
         Whether to reuse cached GRIB inventories for this record.
     use_input_cache
         Whether to reuse cached multi-file input datasets for this record.
+    drop_duplicate_time_rows
+        Whether exact duplicate GRIB time rows should be discarded during time
+        normalization instead of raising an error.
 
     Returns
     -------
@@ -361,6 +446,7 @@ def open_source_record_dataset(
         record.files,
         use_inventory_cache=use_inventory_cache,
         use_input_cache=use_input_cache,
+        drop_duplicate_time_rows=drop_duplicate_time_rows,
     )
 
     if record.frequency == "day":
@@ -391,12 +477,84 @@ def open_source_record_dataset(
     return ds_var
 
 
+def _align_datasets_on_shared_time(
+    records: list[SourceRecord],
+    datasets: list[xr.Dataset],
+) -> list[xr.Dataset]:
+    """Trim per-variable datasets to the timestamps shared by every variable.
+
+    Parameters
+    ----------
+    records
+        Source records paired positionally with ``datasets``.
+    datasets
+        Datasets opened for each source record.
+
+    Returns
+    -------
+    list[xarray.Dataset]
+        Datasets whose ``time`` indexes match exactly wherever a time axis is
+        present.
+
+    Raises
+    ------
+    ValueError
+        If the datasets do not share any timestamps after alignment.
+    """
+    time_indexes: list[pd.Index] = [
+        ds.indexes["time"]
+        for ds in datasets
+        if "time" in ds.indexes
+    ]
+    if len(time_indexes) < 2:
+        return datasets
+
+    common_time = time_indexes[0]
+    for time_index in time_indexes[1:]:
+        common_time = common_time.intersection(time_index)
+
+    if common_time.empty:
+        variable_names = ",".join(record.variable for record in records)
+        raise ValueError(
+            "Resolved variables do not share any timestamps after GRIB time "
+            f"normalization: {variable_names}."
+        )
+
+    _record_time_alignment_mismatch(records, datasets)
+
+    aligned_datasets: list[xr.Dataset] = []
+    for record, ds in zip(records, datasets):
+        if "time" not in ds.indexes:
+            aligned_datasets.append(ds)
+            continue
+
+        time_index = ds.indexes["time"]
+        if time_index.equals(common_time):
+            aligned_datasets.append(ds)
+            continue
+
+        dropped_count = len(time_index.difference(common_time))
+        dropped_dates = _format_timestamp_dates(time_index.difference(common_time))
+        LOGGER.warning(
+            "Trimming %s timestamp(s) from %s %s data so variables share a "
+            "common time axis; affected date(s): %s.",
+            dropped_count,
+            record.frequency,
+            record.variable,
+            dropped_dates,
+        )
+        aligned_datasets.append(ds.sel(time=common_time))
+
+    return aligned_datasets
+
+
 def merge_frequency_dataset(
     records: list[SourceRecord],
     *,
     use_inventory_cache: bool = True,
     use_input_cache: bool = False,
     use_record_threads: bool = False,
+    drop_duplicate_time_rows: bool = True,
     interval: tuple[Optional[date], Optional[date]] = (None, None),
 ) -> xr.Dataset:
     """Open and merge all resolved variables for one output frequency.
@@ -413,6 +571,9 @@ def merge_frequency_dataset(
     use_record_threads
         Whether to open source records in parallel with one worker per
         resolved record for the current frequency.
+    drop_duplicate_time_rows
+        Whether exact duplicate GRIB time rows should be discarded during time
+        normalization instead of raising an error.
     interval
         Inclusive start/end date bounds applied to each per-record dataset
         immediately after it is opened.
@@ -434,6 +595,7 @@ def merge_frequency_dataset(
                 interval=interval,
                 use_inventory_cache=use_inventory_cache,
                 use_input_cache=use_input_cache,
+                drop_duplicate_time_rows=drop_duplicate_time_rows,
             )
             datasets.append(ds)
     else:
@@ -457,6 +619,7 @@ def merge_frequency_dataset(
                     interval=interval,
                     use_inventory_cache=use_inventory_cache,
                     use_input_cache=use_input_cache,
+                    drop_duplicate_time_rows=drop_duplicate_time_rows,
                 ): index
                 for index, record in enumerate(resolved_records)
             }
@@ -473,6 +636,8 @@ def merge_frequency_dataset(
                 f"{record.variable!r} contains duplicate timestamps "
                 "after frequency normalization."
             )
+
+    datasets = _align_datasets_on_shared_time(resolved_records, datasets)
 
     return xr.merge(
         datasets,
