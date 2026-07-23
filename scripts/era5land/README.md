@@ -175,6 +175,37 @@ python3 converter.py convert-healpix \
 `--record-threads` is disabled by default. When enabled, the per-record open
 stage in `merge_frequency_dataset(...)` uses a thread pool.
 
+### Chunk Layout
+
+By default, new or fully rewritten Zarr stores target about `100` MB per chunk.
+You can override that budget explicitly:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas,pr \
+  --freq 1hr \
+  --interval 202603,202603 \
+  --chunk-size 256
+```
+
+The chunk-size target is applied when a store is created from scratch, rewritten
+with `--clean`, or otherwise rebuilt during an incremental merge.
+
+To rechunk already existing matching Zarr stores and then exit without
+continuing into remapping, add `--rechunk-only`:
+
+```console
+python3 converter.py convert-healpix \
+  --var tas,pr \
+  --freq 1hr \
+  --interval 202603,202603 \
+  --chunk-size 256 \
+  --rechunk-only
+```
+
+When combined with `--highest-level-only`, only the finest existing level for
+each selected frequency is rechunked in that standalone pass.
+
 ### Pyramid Modes
 
 Write only the finest HEALPix level for each selected frequency:
