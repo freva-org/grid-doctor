@@ -143,7 +143,7 @@ def truncate_zarr_store_after(
             return False
 
         LOGGER.info(
-            "Truncating existing Zarr store %s after %s (time: %s -> %s)",
+            "✂️ Truncating existing Zarr store %s after %s (time: %s -> %s)",
             destination,
             cutoff,
             original_size,
@@ -255,7 +255,7 @@ def remove_variables_from_frequency_stores(
             continue
         if deleted_store:
             actions.append(
-                f"deleted {destination} after removing all variables: {','.join(removed)}"
+                f"❌ deleted {destination} after removing all variables: {','.join(removed)}"
             )
         else:
             actions.append(
@@ -344,7 +344,7 @@ def delete_frequency_level_stores(
             actions.append(f"would delete {destination} (level {level})")
             continue
         shutil.rmtree(destination)
-        actions.append(f"deleted {destination} (level {level})")
+        actions.append(f"❌ deleted {destination} (level {level})")
     return actions
 
 
@@ -370,7 +370,7 @@ def delete_frequency_directory(
         return [f"would delete frequency directory {frequency_dir}"]
 
     shutil.rmtree(frequency_dir)
-    return [f"deleted frequency directory {frequency_dir}"]
+    return [f"❌ deleted frequency directory {frequency_dir}"]
 
 
 def delete_dataset_root(
@@ -387,4 +387,4 @@ def delete_dataset_root(
     if dry_run:
         return [f"would delete dataset output root {root_path}"]
     shutil.rmtree(root_path)
-    return [f"deleted dataset output root {root_path}"]
+    return [f"❌ deleted dataset output root {root_path}"]
