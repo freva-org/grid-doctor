@@ -1,6 +1,5 @@
 """Dataset opening and reshaping helpers for ERA5/ERA5-Land."""
 
-from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 import hashlib
 import logging
@@ -14,7 +13,6 @@ import xarray as xr
 
 from .file_fetcher import SourceRecord
 from .grib import get_vars, open_dataset
-from .logging_utils import log_stage
 from .metadata import clean_output_attrs
 
 LOGGER = logging.getLogger(__name__)
@@ -562,7 +560,6 @@ def merge_frequency_dataset(
     *,
     use_inventory_cache: bool = True,
     use_input_cache: bool = False,
-    use_record_threads: bool = False,
     drop_duplicate_time_rows: bool = True,
     interval: tuple[Optional[date], Optional[date]] = (None, None),
 ) -> xr.Dataset:
@@ -577,9 +574,6 @@ def merge_frequency_dataset(
     use_input_cache
         Whether to reuse cached multi-file GRIB input datasets while opening
         records.
-    use_record_threads
-        Whether to open source records in parallel with one worker per
-        resolved record for the current frequency.
     drop_duplicate_time_rows
         Whether exact duplicate GRIB time rows should be discarded during time
         normalization instead of raising an error.
@@ -596,46 +590,16 @@ def merge_frequency_dataset(
     if not resolved_records:
         raise ValueError("No source files were resolved for this frequency.")
 
-    if len(resolved_records) == 1 or not use_record_threads:
-        datasets = []
-        for record in resolved_records:
-            ds = open_source_record_dataset(
-                record,
-                interval=interval,
-                use_inventory_cache=use_inventory_cache,
-                use_input_cache=use_input_cache,
-                drop_duplicate_time_rows=drop_duplicate_time_rows,
-            )
-            datasets.append(ds)
-    else:
-        total_files = sum(len(record.files) for record in resolved_records)
-        max_workers = len(resolved_records)
-        log_stage(
-            LOGGER,
-            "grib_read_parallel",
-            frequency=resolved_records[0].frequency,
-            record_tasks=len(resolved_records),
-            total_files=total_files,
-            workers=max_workers,
+    datasets = []
+    for record in resolved_records:
+        ds = open_source_record_dataset(
+            record,
+            interval=interval,
+            use_inventory_cache=use_inventory_cache,
+            use_input_cache=use_input_cache,
+            drop_duplicate_time_rows=drop_duplicate_time_rows,
         )
-        datasets_by_index: list[Optional[xr.Dataset]] = [None] * len(resolved_records)
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures: dict[Future[xr.Dataset], int] = {
-                executor.submit(
-                    open_source_record_dataset,
-                    record,
-                    interval=interval,
-                    use_inventory_cache=use_inventory_cache,
-                    use_input_cache=use_input_cache,
-                    drop_duplicate_time_rows=drop_duplicate_time_rows,
-                ): index
-                for index, record in enumerate(resolved_records)
-            }
-            for future, index in futures.items():
-                datasets_by_index[index] = future.result()
-
-        datasets = [dataset for dataset in datasets_by_index if dataset is not None]
+        datasets.append(ds)
 
     for record, ds in zip(resolved_records, datasets):
         if "time" not in ds.indexes:

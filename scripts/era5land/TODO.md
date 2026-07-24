@@ -1,10 +1,17 @@
 # TODO
 
 
-- areacella calculation
-- update to the altest dates with quirugicall record replacement
-- the batchfolders in era5
-- cf checking?
+
+- [x] remove batch-mode, leave it subprocess
+- [x] remove the option of record-thread from the code (is already false)
+- [x] remove the lazy pyramid strategy, default is already stepwise
+---
+- [x] vertical level correct adding
+- [] areacella calculation
+- [] update to the latest dates with quirugicall record replacement
+- [] the batchfolders in era5
+- [] reflow to be able to send multiple jobs and then collect them.
+- [] cf checking?
 
 ---
 if I need some extra info (`cache_key`) to create pickeld filenames in [grib.py](helpers/grib.py)
@@ -113,4 +120,3 @@ the rough idea is that we have a flag that says --update or so, this:
     - we check that we have the complete datetime range to extend to the "present" (this will be a combo between likely temp and stable data)
     - we will need to replace data in the zarr pyramid of already remapped values to update temporary batch with the stable values
 3. we will need to update the global attribute of "stable batch" until latest datetime - 4 months (the latest timestamped file with the earliest data) 
-

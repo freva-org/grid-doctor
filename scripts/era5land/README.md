@@ -162,19 +162,6 @@ python3 converter.py convert-healpix \
   --cache-input-datasets
 ```
 
-Open source records in parallel within each frequency merge:
-
-```console
-python3 converter.py convert-healpix \
-  --var tas,pr \
-  --freq 1hr \
-  --interval 202603,202603 \
-  --record-threads
-```
-
-`--record-threads` is disabled by default. When enabled, the per-record open
-stage in `merge_frequency_dataset(...)` uses a thread pool.
-
 ### Chunk Layout
 
 By default, new or fully rewritten Zarr stores target about `100` MB per chunk.
@@ -219,8 +206,8 @@ python3 converter.py convert-healpix \
   --highest-level-only
 ```
 
-`--highest-level-only` automatically forces the stepwise highest-first path. You
-do not need to also pass `--pyramid-strategy stepwise`.
+`--highest-level-only` keeps only the highest HEALPix level and skips the
+coarsening pass for lower zoom levels.
 
 Build lower zoom levels from an already existing highest-level Zarr store:
 
@@ -278,20 +265,8 @@ When you pass explicit target levels, each requested level assumes its
 immediate parent level already exists. For example, `--coarsen-only 8,0`
 requires both `level_9.zarr` and `level_1.zarr` to already be present.
 
-Select the pyramid construction strategy explicitly:
-
-```console
-python3 converter.py convert-healpix \
-  --var tas,pr \
-  --freq 1hr \
-  --interval 202603,202603 \
-  --pyramid-strategy stepwise
-```
-
-Available strategies:
-
-- `lazy`: keep `grid_doctor`'s default lazy pyramid construction
-- `stepwise`: remap the highest level first, materialise it, then coarsen level by level
+The converter always remaps the highest level first, materialises it, then
+coarsens level by level when lower zoom levels are requested.
 
 ### Batched Execution
 
@@ -307,12 +282,8 @@ python3 converter.py convert-healpix \
   --from-scratch
 ```
 
-By default, batched runs use isolated child processes:
-
-- `--batch-mode subprocess`: default; each batch runs in a fresh Python process
-- `--batch-mode inprocess`: legacy single-process loop
-
-The subprocess mode keeps all batches inside the same job allocation, node, and
+Batched runs use isolated child processes. This keeps all batches inside the
+same job allocation, node, and
 environment, but releases the batch-local memory floor when each child exits.
 
 While a batched subprocess run is active, the converter writes the current batch
@@ -340,17 +311,6 @@ kill -- -12345
 In practice, `kill <batch_pid>` stops the current child batch, while
 `kill -- -<batch_pgid>` targets the whole active batch process group.
 
-If you explicitly want the legacy behavior for debugging or profiling:
-
-```console
-python3 converter.py convert-healpix \
-  --var tas \
-  --freq 1hr \
-  --interval 1950,1951 \
-  --batches 2 \
-  --batch-mode inprocess
-```
-
 ### Metadata-Only Maintenance
 
 Refresh metadata on already-published Zarr stores without remapping data:
@@ -371,7 +331,6 @@ deliberately milestone-based rather than per-file noisy. Typical stages include:
 
 - `convert_start`
 - `frequency_start`
-- `grib_read_parallel`
 - `grib_merge_done`
 - `weight_calculation`
 - `remap_start`
@@ -380,8 +339,6 @@ deliberately milestone-based rather than per-file noisy. Typical stages include:
 - `frequency_done`
 
 If stderr is attached to an interactive terminal, these stages are colorised.
-`grib_read_parallel` appears only when `--record-threads` is enabled and there
-is more than one resolved record for the current frequency.
 
 ## Development Checks
 

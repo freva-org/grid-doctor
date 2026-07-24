@@ -34,8 +34,8 @@ from helpers.mapper import (
 )
 
 VERSION_SERIES = "2026.07"
-VERSION_MAJOR = 0
-VERSION_MINOR = 8
+VERSION_MAJOR = 1
+VERSION_MINOR = 0
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -44,7 +44,6 @@ DEFAULT_VAR_TABLE = SCRIPT_DIR / "assets" / "default_variables.csv"
 DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / "assets" / "source_mapper.json"
 DEFAULT_CMOR_TABLES = SCRIPT_DIR / "tables" / "era5-cmor-tables" / "Tables"
 FREQUENCIES = ("1hr", "day", "mon", "fx")
-BATCH_EXECUTION_MODES = ("subprocess", "inprocess")
 UNRESOLVED_REASON = (
     "not found in CMOR table, unsupported stream/frequency, "
     "or has no DKRZ_ID/grib_paramID"
@@ -61,7 +60,6 @@ LEVEL_COLORS = {
 STAGE_COLORS = {
     "convert_start": "\033[1;36m",
     "frequency_start": "\033[1;94m",
-    "grib_read_parallel": "\033[94m",
     "grib_merge_done": "\033[36m",
     "weight_calculation": "\033[93m",
     "remap_start": "\033[1;95m",
@@ -313,17 +311,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     convert.add_argument(
-        "--batch-mode",
-        choices=BATCH_EXECUTION_MODES,
-        default="subprocess",
-        help=(
-            "Execution mode for --batches. "
-            "'subprocess' runs each batch in a fresh child process to release "
-            "memory between intervals, while 'inprocess' keeps the legacy "
-            "single-process loop."
-        ),
-    )
-    convert.add_argument(
         "--root",
         default=None,
         help="Override /pool/data/ERA5 for tests or alternate mounts.",
@@ -367,13 +354,6 @@ def build_parser() -> argparse.ArgumentParser:
         dest="use_input_cache",
         default=False,
         help="Enable cached multi-file input dataset pickles.",
-    )
-    convert.add_argument(
-        "--record-threads",
-        action="store_true",
-        dest="use_record_threads",
-        default=False,
-        help="Open source records in parallel within each frequency merge.",
     )
     convert.add_argument(
         "-fdt","--fail-on-duplicate-times",
@@ -457,17 +437,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    convert.add_argument(
-        "-ps",
-        "--pyramid-strategy",
-        choices=("lazy", "stepwise"),
-        default="stepwise",
-        help=(
-            "Build the HEALPix pyramid lazily with grid_doctor's default path, "
-            "or materialize the highest zoom first and coarsen stepwise in memory."
-        ),
-    )
-
     return parser
 
 
@@ -543,10 +512,6 @@ def build_batch_command(
         str(args.chunk_size),
         "--weights-dir",
         str(args.weights_dir),
-        "--batch-mode",
-        "inprocess",
-        "--pyramid-strategy",
-        args.pyramid_strategy,
     ]
 
     if args.variables is not None:
@@ -559,8 +524,6 @@ def build_batch_command(
         command.append("--no-inventory-cache")
     if args.use_input_cache:
         command.append("--cache-input-datasets")
-    if args.use_record_threads:
-        command.append("--record-threads")
     if args.fail_on_duplicate_times:
         command.append("--fail-on-duplicate-times")
     if clean:
@@ -689,7 +652,6 @@ def run_batched_subprocesses(
                     "batch_index": index,
                     "batch_count": len(intervals),
                     "batch_interval": format_interval(current_interval),
-                    "batch_mode": "subprocess",
                     "batch_pgid": active_process.pid,
                     "batch_pid": active_process.pid,
                     "command": command,
@@ -862,19 +824,6 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
     if args.chunk_size <= 0:
         raise ValueError("--chunk-size must be a positive integer.")
 
-    if args.highest_level_only and args.pyramid_strategy != "stepwise":
-        logger.info(
-            "Forcing pyramid strategy to 'stepwise' because --highest-level-only was requested."
-        )
-        args.pyramid_strategy = "stepwise"
-
-    if args.coarsen_only is not None and args.pyramid_strategy != "lazy":
-        logger.info(
-            "Ignoring --pyramid-strategy=%s because --coarsen-only does not remap.",
-            args.pyramid_strategy,
-        )
-        args.pyramid_strategy = "lazy"
-
     if args.from_scratch:
         root_path = dataset_output_root(args.dataset, output_path=args.output_path)
         if root_path.exists():
@@ -952,12 +901,10 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
             zarr_format=args.zarr_format,
             use_inventory_cache=args.use_inventory_cache,
             use_input_cache=args.use_input_cache,
-            use_record_threads=args.use_record_threads,
             drop_duplicate_time_rows=(not args.fail_on_duplicate_times),
             weights_dir=args.weights_dir,
             clean=clean,
             target_chunk_mb=args.chunk_size,
-            pyramid_strategy=args.pyramid_strategy,
             highest_level_only=args.highest_level_only,
             coarsen_only=(args.coarsen_only is not None),
             coarsen_levels=coarsen_levels,
@@ -970,24 +917,15 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
 
     if len(intervals) > 1:
         logger.info(
-            "📦 Processing %s interval batches of %s month(s) each using %s mode.",
+            "📦 Processing %s interval batches of %s month(s) each using isolated subprocesses.",
             len(intervals),
             args.batches,
-            args.batch_mode,
         )
 
-    if len(intervals) > 1 and args.batch_mode == "subprocess":
+    if len(intervals) > 1:
         return run_batched_subprocesses(args, intervals)
 
-    for index, current_interval in enumerate(intervals, start=1):
-        if len(intervals) > 1:
-            logger.info(
-                "🚀 Starting batch %s/%s for interval %s",
-                index,
-                len(intervals),
-                format_interval(current_interval),
-            )
-        run_single_interval(current_interval, clean=(args.clean and index == 1))
+    run_single_interval(intervals[0], clean=args.clean)
 
     return 0
 
