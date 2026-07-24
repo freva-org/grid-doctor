@@ -208,104 +208,6 @@ def _rewrite_dataset_via_temp(
         if temp_path.exists():
             shutil.rmtree(temp_path, ignore_errors=True)
 
-
-def _time_axis_info(zarr_array) -> tuple[int, int] | None:
-    """Return the time-axis position and chunk length for one Zarr array."""
-
-    dims = tuple(str(dim) for dim in zarr_array.attrs.get("_ARRAY_DIMENSIONS", ()))
-    if "time" not in dims:
-        return None
-
-    axis = dims.index("time")
-    return axis, int(zarr_array.chunks[axis])
-
-
-def _shrink_time_arrays_in_place(destination: str, keep_size: int) -> bool:
-    """Shrink all time-bearing arrays in one store without rewriting kept chunks.
-
-    Zarr's in-place ``resize`` removes chunks that fall completely outside the
-    new shape, which makes tail truncation much cheaper than rebuilding the
-    entire retained dataset. Boundary chunks are intentionally left intact by
-    Zarr when they straddle the new array edge; those now-inaccessible values
-    remain hidden unless the store is later expanded again.
-    """
-
-    root = zarr.open_group(destination, mode="a")
-    changed = False
-
-    for name in root.array_keys():
-        zarr_array = root[name]
-        time_axis = _time_axis_info(zarr_array)
-        if time_axis is None:
-            continue
-
-        axis, _time_chunk = time_axis
-        old_size = int(zarr_array.shape[axis])
-        if keep_size >= old_size:
-            continue
-
-        new_shape = list(zarr_array.shape)
-        new_shape[axis] = keep_size
-        zarr_array.resize(tuple(new_shape))
-        changed = True
-
-    if changed:
-        zarr.consolidate_metadata(destination)
-    return changed
-
-
-def truncate_zarr_store_after(
-    destination: str,
-    *,
-    cutoff: str,
-    zarr_format: int,
-) -> bool:
-    """Remove timestamps strictly after ``cutoff`` from one existing Zarr store.
-
-    Parameters
-    ----------
-    destination:
-        Path to the target Zarr store.
-    cutoff:
-        Inclusive ISO date string used as the upper bound of the retained time
-        selection.
-    zarr_format:
-        Output Zarr format version used when rewriting the truncated store.
-
-    Returns
-    -------
-    bool
-        ``True`` when the store was rewritten, else ``False``.
-    """
-
-    path = Path(destination)
-    if not path.exists():
-        return False
-
-    existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
-    try:
-        if "time" not in existing.dims:
-            return False
-
-        original_size = existing.sizes.get("time", 0)
-        retained_time = existing["time"].sel(time=slice(None, cutoff))
-        truncated_size = retained_time.sizes.get("time", 0)
-        if truncated_size == original_size:
-            return False
-
-        LOGGER.info(
-            "✂️ Truncating existing Zarr store %s after %s (time: %s -> %s)",
-            destination,
-            cutoff,
-            original_size,
-            truncated_size,
-        )
-        return _shrink_time_arrays_in_place(destination, truncated_size)
-    finally:
-        existing.close()
-        gc.collect()
-
-
 def rechunk_zarr_store(
     destination: str,
     *,
@@ -629,6 +531,8 @@ def update_zarr_store(
         return
 
     if truncate_after is not None:
+        from .cleanup import truncate_zarr_store_after
+
         truncate_zarr_store_after(
             destination,
             cutoff=truncate_after,

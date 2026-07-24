@@ -37,7 +37,6 @@ from .zarr_publisher import (
     rechunk_zarr_store,
     sync_global_attrs,
     sync_named_variable_attrs,
-    truncate_zarr_store_after,
     update_zarr_store,
 )
 
@@ -196,65 +195,6 @@ def _existing_level_destinations(
             continue
         destinations.append((int(match.group("level")), destination))
     return sorted(destinations, reverse=True)
-
-
-def _truncate_frequency_destinations(
-    *,
-    dataset: str,
-    frequency: str,
-    zarr_format: int,
-    cutoff: str,
-    highest_level_only: bool,
-    output_path: str | Path | None = None,
-) -> int:
-    """Truncate the selected existing destinations for one output frequency."""
-
-    destinations = _existing_level_destinations(
-        dataset,
-        frequency,
-        output_path=output_path,
-    )
-    if highest_level_only and destinations:
-        destinations = destinations[:1]
-
-    truncated_count = 0
-    for _zoom_number, destination in destinations:
-        if truncate_zarr_store_after(
-            destination,
-            cutoff=cutoff,
-            zarr_format=zarr_format,
-        ):
-            truncated_count += 1
-    return truncated_count
-
-
-def truncate_existing_healpix_stores(
-    *,
-    dataset: str,
-    frequencies: tuple[str, ...],
-    zarr_format: int,
-    cutoff: str,
-    highest_level_only: bool,
-    output_path: str | Path | None = None,
-) -> int:
-    """Truncate existing time-based HEALPix Zarr stores before a rerun.
-
-    The truncation selection follows the CLI write targets. When
-    ``highest_level_only`` is enabled, only the highest existing zoom level for
-    each frequency is truncated.
-    """
-
-    truncated_count = 0
-    for frequency in frequencies:
-        truncated_count += _truncate_frequency_destinations(
-            dataset=dataset,
-            frequency=frequency,
-            zarr_format=zarr_format,
-            cutoff=cutoff,
-            highest_level_only=highest_level_only,
-            output_path=output_path,
-        )
-    return truncated_count
 
 
 def rechunk_existing_healpix_stores(

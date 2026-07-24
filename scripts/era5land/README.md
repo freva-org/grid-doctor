@@ -67,7 +67,7 @@ Before converting, you can inspect which GRIB files the CMOR mapping resolves:
 
 ```console
 cd scripts/era5land
-python3 converter.py fetch-files --var tas,pr --freq 1hr,day --interval 202603,202603
+python3 converter.py fetch --var tas,pr --freq 1hr,day --interval 202603,202603
 ```
 
 Useful variants:
@@ -81,13 +81,13 @@ Useful variants:
 From the `scripts/era5land` directory:
 
 ```console
-python3 converter.py convert-healpix --help
+python3 converter.py remap --help
 ```
 
 Typical full conversion:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq 1hr,day,mon \
   --interval 202603,202603 \
@@ -97,7 +97,7 @@ python3 converter.py convert-healpix \
 Write test output to a different publication root:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq mon \
   --interval 202603,202603 \
@@ -120,11 +120,70 @@ published through the `fx` output path while still being requestable via `--var`
 Example:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq mon \
   --interval 202603,202603 \
   --from-scratch
+```
+
+## Cleaning Existing Outputs
+
+Use `clean` when you want to remove already published content without
+starting a new conversion. The cleanup scope is inferred from the selectors you
+pass:
+
+- no `--var`, no `--freq`, no `--levels`: delete the dataset root
+- `--var`: remove variables from matching stores
+- `--levels` without `--var`: delete matching whole level stores
+- `--freq` without `--var` or `--levels`: delete matching whole frequency directories
+
+Preview a cleanup without changing anything:
+
+```console
+python3 converter.py clean \
+  --freq mon \
+  --var tas,pr \
+  --dry-run
+```
+
+Remove variables from all existing levels of one frequency:
+
+```console
+python3 converter.py clean \
+  --freq mon \
+  --var tas,pr
+```
+
+Remove variables only from selected levels:
+
+```console
+python3 converter.py clean \
+  --freq 1hr \
+  --var tas \
+  --levels 8-6
+```
+
+Delete whole level stores:
+
+```console
+python3 converter.py clean \
+  --freq 1hr,day \
+  --levels 3,2,1
+```
+
+Delete whole output-frequency directories:
+
+```console
+python3 converter.py clean \
+  --freq fx,mon
+```
+
+Delete the whole dataset publication root:
+
+```console
+python3 converter.py clean \
+  --dataset era5
 ```
 
 ### Cache And Parallelism
@@ -142,7 +201,7 @@ disappears or becomes unreadable, the converter regenerates it automatically.
 Disable the inventory cache:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq 1hr \
   --interval 202603,202603 \
@@ -155,7 +214,7 @@ also disables the reduced-Gaussian geometry cache for the run.
 Enable the pickled multi-file input-dataset cache explicitly:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq 1hr \
   --interval 202603,202603 \
@@ -164,11 +223,11 @@ python3 converter.py convert-healpix \
 
 ### Chunk Layout
 
-By default, new or fully rewritten Zarr stores target about `100` MB per chunk.
+By default, new or fully rewritten Zarr stores target about `16` MB per chunk.
 You can override that budget explicitly:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq 1hr \
   --interval 202603,202603 \
@@ -182,7 +241,7 @@ To rechunk already existing matching Zarr stores and then exit without
 continuing into remapping, add `--rechunk-only`:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq 1hr \
   --interval 202603,202603 \
@@ -198,7 +257,7 @@ each selected frequency is rechunked in that standalone pass.
 Write only the finest HEALPix level for each selected frequency:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq 1hr \
   --interval 202603,202603 \
@@ -212,7 +271,7 @@ coarsening pass for lower zoom levels.
 Build lower zoom levels from an already existing highest-level Zarr store:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq 1hr \
   --coarsen-only \
@@ -231,7 +290,7 @@ source store is read, not replaced.
 Restrict coarsening to one time interval in an already existing Zarr store:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq 1hr \
   --coarsen-only \
@@ -242,7 +301,7 @@ python3 converter.py convert-healpix \
 Target only specific zoom levels instead of rebuilding every lower level:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq 1hr \
   --coarsen-only 8,0 \
@@ -253,7 +312,7 @@ python3 converter.py convert-healpix \
 You can also use descending ranges:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq 1hr \
   --coarsen-only 8-0 \
@@ -273,7 +332,7 @@ coarsens level by level when lower zoom levels are requested.
 Split a long interval into sequential month-sized batches:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas \
   --freq 1hr,day,mon \
   --interval 1950,1962 \
@@ -316,7 +375,7 @@ In practice, `kill <batch_pid>` stops the current child batch, while
 Refresh metadata on already-published Zarr stores without remapping data:
 
 ```console
-python3 converter.py convert-healpix \
+python3 converter.py remap \
   --var tas,pr \
   --freq 1hr,day,mon \
   --attrs-only

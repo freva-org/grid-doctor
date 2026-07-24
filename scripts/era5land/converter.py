@@ -24,17 +24,23 @@ from helpers.file_fetcher import (
     split_csv_list,
     unresolved_records,
 )
+from helpers.cleanup import (
+    delete_dataset_root,
+    delete_frequency_directory,
+    delete_frequency_level_stores,
+    remove_variables_from_frequency_stores,
+    truncate_existing_healpix_stores,
+)
 from helpers.special import split_special_variables
 from helpers.formatter import dataset_output_root, normalise_frequencies
 from helpers.mapper import (
     map_grib_to_healpix,
     rechunk_existing_healpix_stores,
-    truncate_existing_healpix_stores,
     update_healpix_attrs_only,
 )
 
 VERSION_SERIES = "2026.07"
-VERSION_MAJOR = 1
+VERSION_MAJOR = 2
 VERSION_MINOR = 0
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
@@ -199,6 +205,12 @@ def parse_truncate_after(value: Optional[str]) -> Optional[str]:
     return start.isoformat()
 
 
+def parse_level_selection(value: Optional[str]) -> Optional[Tuple[int, ...]]:
+    """Parse optional HEALPix level selections from CLI arguments."""
+
+    return parse_coarsen_levels(value)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level command parser."""
 
@@ -217,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     fetch = subparsers.add_parser(
-        "fetch-files",
+        "fetch",
         help="Resolve source GRIB files from the CMOR tables.",
         formatter_class=RichDefaultsHelpFormatter,
     )
@@ -271,7 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     convert = subparsers.add_parser(
-        "convert-healpix",
+        "remap",
         help="Resolve GRIB files and convert them to HEALPix Zarr pyramids.",
         formatter_class=RichDefaultsHelpFormatter,
     )
@@ -437,6 +449,50 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    clean_cmd = subparsers.add_parser(
+        "clean",
+        help="Remove variables, levels, frequencies, or the whole HEALPix output root.",
+        formatter_class=RichDefaultsHelpFormatter,
+    )
+    clean_cmd.add_argument(
+        "--dataset",
+        choices=("era5land", "era5"),
+        default="era5land",
+        help="Dataset to clean.",
+    )
+    clean_cmd.add_argument(
+        "--var",
+        dest="variables",
+        default=None,
+        help="Comma-separated variables to remove from matching stores.",
+    )
+    clean_cmd.add_argument(
+        "--freq",
+        default=None,
+        help="Comma-separated frequencies to target: 1hr,day,mon,fx.",
+    )
+    clean_cmd.add_argument(
+        "--levels",
+        default=None,
+        metavar="LEVELS",
+        help=(
+            "Optional comma-separated or descending-range level selection such as "
+            "8,0 or 8-5. When omitted, all existing levels for each selected "
+            "frequency are targeted."
+        ),
+    )
+    clean_cmd.add_argument(
+        "--output-path",
+        default=None,
+        help="Override the published HEALPix output root directory.",
+    )
+    clean_cmd.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Print what would be removed without changing anything.",
+    )
+
     return parser
 
 
@@ -499,7 +555,7 @@ def build_batch_command(
     command = [
         sys.executable,
         str(Path(__file__).resolve()),
-        "convert-healpix",
+        "remap",
         "--dataset",
         args.dataset,
         "--freq",
@@ -930,8 +986,69 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_clean_healpix(args: argparse.Namespace) -> int:
+    """Clean existing HEALPix outputs at variable, level, frequency, or root scope."""
+
+    logger = logging.getLogger(__name__)
+    variables = parse_arg_list(args.variables)
+    levels = parse_level_selection(args.levels)
+    frequencies = parse_frequencies(args.freq or "all")
+
+    actions: list[str] = []
+
+    if variables is None and levels is None and args.freq is None:
+        actions.extend(
+            delete_dataset_root(
+                dataset=args.dataset,
+                output_path=args.output_path,
+                dry_run=args.dry_run,
+            )
+        )
+    elif variables is None and levels is None:
+        for frequency in frequencies:
+            actions.extend(
+                delete_frequency_directory(
+                    dataset=args.dataset,
+                    frequency=frequency,
+                    output_path=args.output_path,
+                    dry_run=args.dry_run,
+                )
+            )
+    else:
+        for frequency in frequencies:
+            if variables:
+                actions.extend(
+                    remove_variables_from_frequency_stores(
+                        dataset=args.dataset,
+                        frequency=frequency,
+                        variable_names=variables,
+                        levels=levels,
+                        output_path=args.output_path,
+                        dry_run=args.dry_run,
+                    )
+                )
+            elif levels is not None:
+                actions.extend(
+                    delete_frequency_level_stores(
+                        dataset=args.dataset,
+                        frequency=frequency,
+                        levels=levels,
+                        output_path=args.output_path,
+                        dry_run=args.dry_run,
+                    )
+                )
+
+    if not actions:
+        logger.info("No matching HEALPix outputs found for the requested cleanup.")
+        return 0
+
+    for action in actions:
+        logger.info(action)
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
-    """Run the ERA5-Land converter."""
+    """Run the ERA5/ERA5-Land converter."""
 
     configure_logging()
     parser = build_parser()
@@ -941,11 +1058,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.print_help()
         return 2
 
-    if args.command == "fetch-files":
+    if args.command == "fetch":
         return run_fetch_files(args)
 
-    if args.command == "convert-healpix":
+    if args.command == "remap":
         return run_convert_healpix(args)
+
+    if args.command == "clean":
+        return run_clean_healpix(args)
 
     parser.error(f"Unsupported command {args.command!r}")
     return 2
