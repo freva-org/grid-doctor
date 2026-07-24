@@ -432,6 +432,43 @@ def _existing_zoom_numbers(
     )
 
 
+def _fallback_special_zoom_numbers(
+    *,
+    dataset: str,
+    highest_level_only: bool,
+    coarsen_only: bool,
+    output_path: str | Path | None = None,
+) -> tuple[int, ...]:
+    """Infer special-variable zoom levels from existing non-`fx` outputs.
+
+    The static `fx` products should mirror the highest HEALPix level already
+    published for the data-bearing frequencies. We prefer monthly outputs
+    first, then daily, then hourly, because those stores are typically present
+    earlier in a publication workflow while still advertising the intended
+    pyramid depth for the dataset.
+    """
+
+    for candidate_frequency in ("mon", "day", "1hr"):
+        existing_zoom_numbers = _existing_zoom_numbers(
+            dataset,
+            candidate_frequency,
+            output_path=output_path,
+        )
+        if not existing_zoom_numbers:
+            continue
+        max_level = existing_zoom_numbers[0]
+        return special_zoom_numbers(
+            max_level=max_level,
+            highest_level_only=highest_level_only,
+            coarsen_only=coarsen_only,
+        )
+
+    return special_zoom_numbers(
+        highest_level_only=highest_level_only,
+        coarsen_only=coarsen_only,
+    )
+
+
 def _special_zoom_numbers_for_frequency(
     *,
     dataset: str,
@@ -454,9 +491,11 @@ def _special_zoom_numbers_for_frequency(
     if existing_zoom_numbers:
         return existing_zoom_numbers
 
-    return special_zoom_numbers(
+    return _fallback_special_zoom_numbers(
+        dataset=dataset,
         highest_level_only=highest_level_only,
         coarsen_only=coarsen_only,
+        output_path=output_path,
     )
 
 

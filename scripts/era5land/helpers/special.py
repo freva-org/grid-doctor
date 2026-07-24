@@ -215,7 +215,7 @@ def write_special_variables(
             zoom_number,
             output_path=output_path,
         )
-        clean_store = bool(clean and not Path(destination).exists())
+        clean_store = bool(clean)
         for variable_name in variable_names:
             special_ds = build_special_variable_dataset(
                 dataset=dataset,
