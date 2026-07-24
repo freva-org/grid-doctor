@@ -241,7 +241,7 @@ def _coarsen_existing_frequency(
     target_levels: tuple[int, ...] | None = None,
     truncate_after: str | None = None,
 ) -> tuple[int, ...]:
-    """Build lower zoom levels from the highest existing Zarr store."""
+    """Build lower zoom levels from the nearest available higher Zarr store."""
 
     existing = _existing_level_destinations(
         source_dataset,
@@ -253,33 +253,40 @@ def _coarsen_existing_frequency(
             f"No existing HEALPix Zarr stores found for frequency {frequency!r}."
         )
 
-    highest_level, highest_destination = existing[0]
-    log_stage(
-        LOGGER,
-        "coarsen_source_open",
-        frequency=frequency,
-        variables=variables,
-        zoom=highest_level,
-        source=highest_destination,
-    )
+    highest_level = existing[0][0]
     start, end = interval
     selected_levels = _resolve_requested_coarsen_levels(
         highest_level=highest_level,
         requested_levels=target_levels,
         available_levels=tuple(level for level, _ in existing),
     )
+    available_destinations = {
+        level: destination
+        for level, destination in existing
+    }
     written_levels: list[int] = []
+
     for zoom_number in selected_levels:
-        source_level = zoom_number + 1
-        source_destination = (
-            highest_destination
-            if source_level == highest_level
-            else destination_for_level(
-                source_dataset,
-                frequency,
-                source_level,
-                output_path=output_path,
+        higher_levels = [
+            level
+            for level in available_destinations
+            if level > zoom_number
+        ]
+        if not higher_levels:
+            raise ValueError(
+                f"Cannot coarsen level {zoom_number}: no higher HEALPix level exists."
             )
+
+        source_level = min(higher_levels)
+        source_destination = available_destinations[source_level]
+        log_stage(
+            LOGGER,
+            "coarsen_source_open",
+            frequency=frequency,
+            variables=variables,
+            zoom=source_level,
+            target_zoom=zoom_number,
+            source=source_destination,
         )
         current: xr.Dataset | None = xr.open_zarr(
             source_destination,
@@ -314,6 +321,12 @@ def _coarsen_existing_frequency(
             finally:
                 _close_dataset_quietly(coarsened)
             written_levels.append(zoom_number)
+            available_destinations[zoom_number] = destination_for_level(
+                source_dataset,
+                frequency,
+                zoom_number,
+                output_path=output_path,
+            )
         finally:
             _close_dataset_quietly(current)
     return tuple(written_levels)
@@ -330,28 +343,23 @@ def _resolve_requested_coarsen_levels(
     if requested_levels is None:
         return tuple(range(highest_level - 1, -1, -1))
 
-    invalid = [level for level in requested_levels if level >= highest_level]
+    invalid = [
+        level
+        for level in requested_levels
+        if level < 0 or level >= highest_level
+    ]
     if invalid:
         invalid_text = ", ".join(str(level) for level in invalid)
         raise ValueError(
-            f"Requested coarsen levels must be lower than the highest existing level "
-            f"{highest_level}: {invalid_text}"
+            "Requested coarsen levels must be non-negative and lower than "
+            f"the highest existing level {highest_level}: {invalid_text}"
         )
 
-    resolved_levels: list[int] = []
     available = set(int(level) for level in available_levels)
-    for level in requested_levels:
-        parent_level = level + 1
-        if parent_level not in available:
-            raise ValueError(
-                f"Cannot coarsen level {level}: required parent level {parent_level} "
-                "does not exist. Requested sparse coarsening assumes the immediate "
-                "higher level is already present."
-            )
-        resolved_levels.append(level)
-        available.add(level)
+    if not available:
+        raise ValueError("No existing HEALPix levels are available for coarsening.")
 
-    return tuple(resolved_levels)
+    return tuple(sorted(set(requested_levels), reverse=True))
 
 
 def _existing_zoom_numbers(
