@@ -1,7 +1,7 @@
 # TODO
 
 
-
+- [ ] create a merge mode to merge the zarr stores of folder1 into folder2
 - [x] remove batch-mode, leave it subprocess
 - [x] remove the option of record-thread from the code (is already false)
 - [x] remove the lazy pyramid strategy, default is already stepwise

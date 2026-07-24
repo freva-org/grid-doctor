@@ -1,0 +1,30 @@
+varname|reanalysis|level_type
+areacella|E5, EL|fixed
+cli|E5|pressure
+clivi|E5|surface
+clt|E5|surface
+clw|E5|pressure
+clwvi|E5|surface
+crcw|E5|pressure
+cswc|E5|pressure
+evspsbl|E5, EL|surface
+hfls|E5, EL|surface
+hfss|E5, EL|surface
+hur|E5|pressure
+hus|E5|pressure
+pr|E5, EL|surface
+prw|E5|surface
+ps|E5, EL|surface
+psl|E5|surface
+ta|E5|pressure
+tas|E5, EL|surface
+tauu|E5|surface
+tauv|E5|surface
+tos|E5|surface
+ua|E5|pressure
+uas|E5|surface
+va|E5|pressure
+vas|E5|surface
+wap|E5|pressure
+z|E5|pressure
+zg|E5|pressure

@@ -40,8 +40,8 @@ from helpers.mapper import (
 )
 
 VERSION_SERIES = "2026.07"
-VERSION_MAJOR = 2
-VERSION_MINOR = 1
+VERSION_MAJOR = 3
+VERSION_MINOR = 0
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -64,7 +64,7 @@ LEVEL_COLORS = {
     logging.CRITICAL: "\033[1;31m",
 }
 STAGE_COLORS = {
-    "convert_start": "\033[1;36m",
+    "remap_start": "\033[1;36m",
     "frequency_start": "\033[1;94m",
     "grib_merge_done": "\033[36m",
     "weight_calculation": "\033[93m",
@@ -224,7 +224,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-v","--version",
         action="version",
         version=f"%(prog)s {__version__}",
-        help="Show the converter version and exit.",
+        help="Show the remapper version and exit.",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -282,29 +282,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exit non-zero if any resolved source has no matching files.",
     )
 
-    convert = subparsers.add_parser(
+    remap = subparsers.add_parser(
         "remap",
-        help="Resolve GRIB files and convert them to HEALPix Zarr pyramids.",
+        help="Resolve GRIB files and remap them to HEALPix Zarr pyramids.",
         formatter_class=RichDefaultsHelpFormatter,
     )
-    convert.add_argument(
+    remap.add_argument(
         "--dataset",
         choices=("era5land", "era5"),
         default="era5land",
         help="Dataset to process.",
     )
-    convert.add_argument(
+    remap.add_argument(
         "--var",
         dest="variables",
         default=None,
         help="Comma-separated variables.",
     )
-    convert.add_argument(
+    remap.add_argument(
         "--freq",
         default="all",
         help="Comma-separated frequencies: 1hr,day,mon,fx.",
     )
-    convert.add_argument(
+    remap.add_argument(
         "--interval",
         default=None,
         help=(
@@ -312,7 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
             "(hyphens optional). Empty END means today."
         ),
     )
-    convert.add_argument(
+    remap.add_argument(
         "--batches",
         type=int,
         default=None,
@@ -322,12 +322,12 @@ def build_parser() -> argparse.ArgumentParser:
             "and process each batch in a loop."
         ),
     )
-    convert.add_argument(
+    remap.add_argument(
         "--root",
         default=None,
         help="Override /pool/data/ERA5 for tests or alternate mounts.",
     )
-    convert.add_argument(
+    remap.add_argument(
         "--output-path",
         default=None,
         help=(
@@ -335,14 +335,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Useful for test runs that should write outside the default location."
         ),
     )
-    convert.add_argument(
+    remap.add_argument(
         "--zarr-format",
         type=int,
         choices=(2, 3),
         default=2,
         help="Zarr format version for the output pyramid.",
     )
-    convert.add_argument(
+    remap.add_argument(
         "--chunk-size",
         type=int,
         default=16,
@@ -352,7 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
             "or fully rewritten stores."
         ),
     )
-    convert.add_argument(
+    remap.add_argument(
         "--no-cache",
         "--no-inventory-cache",
         action="store_false",
@@ -360,14 +360,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="Disable cached GRIB inventories.",
     )
-    convert.add_argument(
+    remap.add_argument(
         "--cache-input-datasets",
         action="store_true",
         dest="use_input_cache",
         default=False,
         help="Enable cached multi-file input dataset pickles.",
     )
-    convert.add_argument(
+    remap.add_argument(
         "-fdt","--fail-on-duplicate-times",
         action="store_true",
         dest="fail_on_duplicate_times",
@@ -377,12 +377,12 @@ def build_parser() -> argparse.ArgumentParser:
             "time normalization instead of dropping them. This finishes the run."
         ),
     )
-    convert.add_argument(
+    remap.add_argument(
         "--weights-dir",
         default=str(source_mapper["weights_path"]),
         help="Directory where HEALPix weight files are stored and reused.",
     )
-    convert.add_argument(
+    remap.add_argument(
         "--clean",
         action="store_true",
         default=False,
@@ -391,13 +391,13 @@ def build_parser() -> argparse.ArgumentParser:
             "them incrementally. It wipes the store before starting."
               ),
     )
-    convert.add_argument(
+    remap.add_argument(
         "--from-scratch",
         action="store_true",
         default=False,
         help="Delete the whole dataset output root before writing any new stores.",
     )
-    convert.add_argument(
+    remap.add_argument(
         "--truncate-after",
         default=None,
         metavar="DATE",
@@ -408,16 +408,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Does not work stand-alone."
         ),
     )
-    convert.add_argument(
+    remap.add_argument(
         "--rechunk-only",
         action="store_true",
         default=False,
         help=(
             "Rewrite matching existing Zarr stores using the current "
-            "--chunk-size target and then exit without converting."
+            "--chunk-size target and then exit without remaping."
         ),
     )
-    convert.add_argument(
+    remap.add_argument(
         "-ao",
         "--attrs-only",
         action="store_true",
@@ -425,7 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Refresh variable attrs on existing Zarr outputs without remapping data.",
     )
 
-    mode_group = convert.add_mutually_exclusive_group()
+    mode_group = remap.add_mutually_exclusive_group()
     mode_group.add_argument(
         "-hlo",
         "--highest-level-only",
@@ -446,6 +446,25 @@ def build_parser() -> argparse.ArgumentParser:
             "levels such as 8,0, ranges such as 8-5, or a combination of both, "
             "such as 8-5,3-0. Without a value, all lower levels are rebuilt. "
             "This can be combined with --interval."
+        ),
+    )
+
+    reflow_cmd = subparsers.add_parser(
+        "remap-reflow",
+        help="Run the scheduler-backed Reflow remap workflow.",
+        formatter_class=RichDefaultsHelpFormatter,
+        description=(
+            "Forward commands to the ERA5/ERA5-Land Reflow workflow. "
+            "Examples: `remap-reflow submit ...`, `remap-reflow runs`, "
+            "`remap-reflow status <run-id>`."
+        ),
+    )
+    reflow_cmd.add_argument(
+        "reflow_args",
+        nargs=argparse.REMAINDER,
+        help=(
+            "Arguments forwarded to scripts/era5land/helpers/reflow_workflow.py. "
+            "For example: `submit --run-dir /scratch/$USER/era5land ...`."
         ),
     )
 
@@ -784,7 +803,7 @@ def selected_requests(
     return source_mapper, requests
 
 
-def run_fetch_files(args: argparse.Namespace) -> int:
+def run_fetch(args: argparse.Namespace) -> int:
     """Resolve source files and print either JSON records or paths."""
 
     variables = parse_arg_list(args.variables)
@@ -854,7 +873,7 @@ def run_fetch_files(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_convert_healpix(args: argparse.Namespace) -> int:
+def run_remap(args: argparse.Namespace) -> int:
     """Resolve source files, remap them with grid_doctor, and write Zarr output."""
 
     logger = logging.getLogger(__name__)
@@ -986,7 +1005,7 @@ def run_convert_healpix(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_clean_healpix(args: argparse.Namespace) -> int:
+def run_clean(args: argparse.Namespace) -> int:
     """Clean existing HEALPix outputs at variable, level, frequency, or root scope."""
 
     logger = logging.getLogger(__name__)
@@ -1047,25 +1066,41 @@ def run_clean_healpix(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_reflow(reflow_args: Sequence[str]) -> int:
+    """Forward one Reflow workflow command through the main ERA5-Land CLI."""
+
+    workflow_script = SCRIPT_DIR / "helpers" / "reflow_workflow.py"
+    command = [sys.executable, str(workflow_script), *reflow_args]
+    completed = subprocess.run(command, check=False)
+    return int(completed.returncode)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
-    """Run the ERA5/ERA5-Land converter."""
+    """Run the ERA5/ERA5-Land remapper."""
 
     configure_logging()
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    if raw_argv and raw_argv[0] == "remap-reflow":
+        return run_reflow(raw_argv[1:])
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_argv)
 
     if args.command is None:
         parser.print_help()
         return 2
 
     if args.command == "fetch":
-        return run_fetch_files(args)
+        return run_fetch(args)
 
     if args.command == "remap":
-        return run_convert_healpix(args)
+        return run_remap(args)
 
     if args.command == "clean":
-        return run_clean_healpix(args)
+        return run_clean(args)
+
+    if args.command == "remap-reflow":
+        return run_reflow(args.reflow_args)
 
     parser.error(f"Unsupported command {args.command!r}")
     return 2

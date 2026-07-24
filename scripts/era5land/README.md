@@ -94,6 +94,51 @@ python3 converter.py remap \
   --clean
 ```
 
+Submit the same kind of work as independent scheduler jobs with Reflow:
+
+```console
+python3 converter.py remap-reflow submit \
+  --run-dir /scratch/$USER/era5land-reflow \
+  --dataset era5land \
+  --variables tas pr \
+  --freq 1hr,day,mon \
+  --interval 202603,202603 \
+  --output-path /scratch/$USER/era5land-final \
+  --clean
+```
+
+This workflow follows the standard Reflow pattern described in the
+[Reflow user guide](https://reflow-docs.org/latest/guide/):
+
+- `gather_plan`: resolves the requested variable and frequency work once
+- `gather_work_items`: fans that plan out into independent `variable x frequency` items
+- `convert_variable_frequency`: runs one array job per item and writes into an
+  isolated temporary output root below `--run-dir`
+- `finalize_outputs`: merges the temporary Zarr stores into the final
+  publication root and consolidates metadata through the existing publisher
+
+The shared `--run-dir` should point to a filesystem visible from every worker
+node, for example scratch. Temporary worker outputs are written below
+`<run-dir>/worker-output/`.
+
+Check the submitted workflow with the generated Reflow CLI:
+
+```console
+python3 converter.py remap-reflow runs
+python3 converter.py remap-reflow status <run-id>
+```
+
+At the moment the Reflow workflow is intentionally focused on the main remap
+path. It supports the fan-out/gather publication flow plus `--clean`,
+`--from-scratch`, `--highest-level-only`, and the input-cache flags. More
+specialized maintenance modes such as `--coarsen-only`, `--attrs-only`, and
+`--rechunk-only` still live in `converter.py`.
+
+Internally, `converter.py remap-reflow ...` forwards the command to
+`scripts/era5land/helpers/reflow_workflow.py`, so there is now one public CLI
+for both direct and scheduler-backed operation while the Reflow implementation
+stays private.
+
 Write test output to a different publication root:
 
 ```console
