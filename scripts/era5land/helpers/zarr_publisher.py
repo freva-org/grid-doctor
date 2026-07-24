@@ -502,18 +502,36 @@ def _write_missing_variables(
     if not missing:
         return existing
 
-    add_ds = candidate[missing].reindex(time=existing["time"].values)
-    _write_dataset(
-        add_ds,
-        destination,
-        mode="a",
-        zarr_format=zarr_format,
-        target_chunk_mb=target_chunk_mb,
+    root = zarr.open_group(destination, mode="a")
+    encoding = _encoding_for_target_chunks(
+        candidate[missing],
+        target_mb=target_chunk_mb,
     )
-    updated = existing.copy()
+
     for name in missing:
-        updated[name] = add_ds[name]
-    return updated
+        data = candidate[name]
+        shape = tuple(
+            int(existing.sizes.get(dim, data.sizes[dim]))
+            for dim in data.dims
+        )
+        array = root.create_dataset(
+            name,
+            shape=shape,
+            chunks=encoding.get(name, {}).get("chunks", shape),
+            dtype=data.dtype,
+            fill_value=_fill_value_for_dtype(data.dtype),
+        )
+        attrs = clean_output_attrs(dict(data.attrs))
+        attrs["_ARRAY_DIMENSIONS"] = list(data.dims)
+        for key in ("coordinates", "grid_mapping"):
+            value = data.attrs.get(key)
+            if value not in ("", None):
+                attrs[key] = value
+        array.attrs.update(attrs)
+
+    if zarr_format == 2:
+        zarr.consolidate_metadata(destination)
+    return existing
 
 
 def _merge_static_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Dataset:
