@@ -7,7 +7,9 @@
 - [x] remove the lazy pyramid strategy, default is already stepwise
 ---
 - [x] vertical level correct adding
-- [] areacella calculation
+- [x] areacella calculation
+- [] add level_tpye, tier info into the csv file: var,dataset,level_type,tier so at 
+some point it can be processed also by --level_type (surface,pressure) or --tier 1,2,3...
 - [] update to the latest dates with quirugicall record replacement
 - [] the batchfolders in era5
 - [] reflow to be able to send multiple jobs and then collect them.
