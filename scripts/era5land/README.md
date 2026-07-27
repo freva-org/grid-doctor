@@ -171,6 +171,28 @@ Internally, `converter.py remap-reflow ...` forwards the command to
 for both direct and scheduler-backed operation while the Reflow implementation
 stays private.
 
+## Merging Temporary Outputs
+
+Use `merge` when you already have one or more temporary HEALPix output roots
+and want to publish or combine them into a final target tree without running a
+new remap:
+
+```console
+python3 converter.py merge \
+  --source /scratch/$USER/worker-001/era5land/1H,/scratch/$USER/worker-002/era5land/1H \
+  --output-path /scratch/$USER/era5land-final/era5land/1H
+```
+
+This command reuses the same incremental Zarr merge behavior as the normal
+publication path. Add `--clean` if the first merge into each touched
+destination store should recreate that store instead of updating it in place.
+
+**NOTE:**
+for `merge`, the source directories and target directory should point directly
+at one output-frequency directory, for example `.../era5land/1H` or
+`.../era5/day`. The command merges matching `level_<n>.zarr` stores from the
+source directories into the target directory in the order they are listed.
+
 Write test output to a different publication root:
 
 ```console

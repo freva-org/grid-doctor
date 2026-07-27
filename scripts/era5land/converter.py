@@ -25,9 +25,10 @@ from helpers.file_fetcher import (
     unresolved_records,
 )
 from helpers.formatter import dataset_output_root, normalise_frequencies
+from helpers.zarr_publisher import merge_zarr_store_directories
 
 VERSION_SERIES = "2026.07"
-VERSION_MAJOR = 3
+VERSION_MAJOR = 4
 VERSION_MINOR = 0
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
@@ -36,6 +37,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_VAR_TABLE = SCRIPT_DIR / "assets" / "default_variables.csv"
 DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / "assets" / "source_mapper.json"
 DEFAULT_CMOR_TABLES = SCRIPT_DIR / "tables" / "era5-cmor-tables" / "Tables"
+DEFAULT_CHUNK_SIZE: int = 16
 FREQUENCIES = ("1hr", "day", "mon", "fx")
 UNRESOLVED_REASON = (
     "not found in CMOR table, unsupported stream/frequency, "
@@ -215,29 +217,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    fetch = subparsers.add_parser(
+    fetch_cmd = subparsers.add_parser(
         "fetch",
         help="Resolve source GRIB files from the CMOR tables.",
         formatter_class=RichDefaultsHelpFormatter,
     )
-    fetch.add_argument(
+    fetch_cmd.add_argument(
         "--dataset",
         choices=("era5land", "era5"),
         default="era5land",
         help="Dataset to process.",
     )
-    fetch.add_argument(
+    fetch_cmd.add_argument(
         "--var",
         dest="variables",
         default=None,
         help="Comma-separated variables.",
     )
-    fetch.add_argument(
+    fetch_cmd.add_argument(
         "--freq",
         default="all",
         help="Comma-separated frequencies: 1hr,day,mon,fx.",
     )
-    fetch.add_argument(
+    fetch_cmd.add_argument(
         "--interval",
         default=None,
         help=(
@@ -245,53 +247,53 @@ def build_parser() -> argparse.ArgumentParser:
             "(hyphens optional). Empty END means today."
         ),
     )
-    fetch.add_argument(
+    fetch_cmd.add_argument(
         "--root",
         default=None,
         help="Override /pool/data/ERA5 for tests or alternate mounts.",
     )
-    fetch.add_argument(
+    fetch_cmd.add_argument(
         "--json",
         action="store_true",
         default=False,
         help="Print records, missing matches, and unresolved requests as JSON.",
     )
-    fetch.add_argument(
+    fetch_cmd.add_argument(
         "--show-patterns",
         action="store_true",
         default=False,
         help="Print resolved glob patterns instead of matching files.",
     )
-    fetch.add_argument(
+    fetch_cmd.add_argument(
         "--strict",
         action="store_true",
         default=False,
         help="Exit non-zero if any resolved source has no matching files.",
     )
 
-    remap = subparsers.add_parser(
+    remap_cmd = subparsers.add_parser(
         "remap",
         help="Resolve GRIB files and remap them to HEALPix Zarr pyramids.",
         formatter_class=RichDefaultsHelpFormatter,
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--dataset",
         choices=("era5land", "era5"),
         default="era5land",
         help="Dataset to process.",
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--var",
         dest="variables",
         default=None,
         help="Comma-separated variables.",
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--freq",
         default="all",
         help="Comma-separated frequencies: 1hr,day,mon,fx.",
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--interval",
         default=None,
         help=(
@@ -299,7 +301,7 @@ def build_parser() -> argparse.ArgumentParser:
             "(hyphens optional). Empty END means today."
         ),
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--batches",
         type=int,
         default=None,
@@ -309,12 +311,12 @@ def build_parser() -> argparse.ArgumentParser:
             "and process each batch in a loop."
         ),
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--root",
         default=None,
         help="Override /pool/data/ERA5 for tests or alternate mounts.",
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--output-path",
         default=None,
         help=(
@@ -322,24 +324,24 @@ def build_parser() -> argparse.ArgumentParser:
             "Useful for test runs that should write outside the default location."
         ),
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--zarr-format",
         type=int,
         choices=(2, 3),
         default=2,
         help="Zarr format version for the output pyramid.",
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--chunk-size",
         type=int,
-        default=16,
+        default=DEFAULT_CHUNK_SIZE,
         metavar="MB",
         help=(
             "Approximate Zarr chunk-size target in megabytes for newly written "
             "or fully rewritten stores."
         ),
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--no-cache",
         "--no-inventory-cache",
         action="store_false",
@@ -347,14 +349,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="Disable cached GRIB inventories.",
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--cache-input-datasets",
         action="store_true",
         dest="use_input_cache",
         default=False,
         help="Enable cached multi-file input dataset pickles.",
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "-fdt","--fail-on-duplicate-times",
         action="store_true",
         dest="fail_on_duplicate_times",
@@ -364,12 +366,12 @@ def build_parser() -> argparse.ArgumentParser:
             "time normalization instead of dropping them. This finishes the run."
         ),
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--weights-dir",
         default=str(source_mapper["weights_path"]),
         help="Directory where HEALPix weight files are stored and reused.",
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--clean",
         action="store_true",
         default=False,
@@ -378,13 +380,13 @@ def build_parser() -> argparse.ArgumentParser:
             "them incrementally. It wipes the store before starting."
               ),
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--from-scratch",
         action="store_true",
         default=False,
         help="Delete the whole dataset output root before writing any new stores.",
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--truncate-after",
         default=None,
         metavar="DATE",
@@ -395,7 +397,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Does not work stand-alone."
         ),
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "--rechunk-only",
         action="store_true",
         default=False,
@@ -404,7 +406,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--chunk-size target and then exit without remaping."
         ),
     )
-    remap.add_argument(
+    remap_cmd.add_argument(
         "-ao",
         "--attrs-only",
         action="store_true",
@@ -412,7 +414,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Refresh variable attrs on existing Zarr outputs without remapping data.",
     )
 
-    mode_group = remap.add_mutually_exclusive_group()
+    mode_group = remap_cmd.add_mutually_exclusive_group()
     mode_group.add_argument(
         "-hlo",
         "--highest-level-only",
@@ -497,6 +499,54 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Print what would be removed without changing anything.",
+    )
+
+    merge_cmd = subparsers.add_parser(
+        "merge",
+        help="Merge one or more frequency directories into a target frequency directory.",
+        formatter_class=RichDefaultsHelpFormatter,
+    )
+    merge_cmd.add_argument(
+        "--source",
+        dest="source_dirs",
+        required=True,
+        help=(
+            "Comma-separated source directories that directly contain "
+            "`level_*.zarr` stores (path1/to/reanalysis/freq,path2/to/reanalysis/freq)."
+        ),
+    )
+    merge_cmd.add_argument(
+        "--output-path",
+        required=True,
+        help=(
+            "Target directory that directly contains the merged `level_*.zarr` stores."
+        ),
+    )
+    merge_cmd.add_argument(
+        "--zarr-format",
+        type=int,
+        choices=(2, 3),
+        default=2,
+        help="Zarr format version for the destination stores.",
+    )
+    merge_cmd.add_argument(
+        "--chunk-size",
+        type=int,
+        default=DEFAULT_CHUNK_SIZE,
+        metavar="MB",
+        help=(
+            "Approximate Zarr chunk-size target in megabytes for rewritten "
+            "destination stores."
+        ),
+    )
+    merge_cmd.add_argument(
+        "--clean",
+        action="store_true",
+        default=False,
+        help=(
+            "Recreate each touched destination store on the first merge instead "
+            "of updating it incrementally."
+        ),
     )
 
     return parser
@@ -1071,6 +1121,34 @@ def run_clean(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_merge(args: argparse.Namespace) -> int:
+    """Merge one or more frequency directories into a target frequency directory."""
+
+    logger = logging.getLogger(__name__)
+    source_dirs = parse_arg_list(args.source_dirs)
+    if source_dirs is None:
+        raise ValueError("Expected at least one comma-separated value.")
+
+    if args.chunk_size <= 0:
+        raise ValueError("--chunk-size must be a positive integer.")
+
+    merged_destinations = merge_zarr_store_directories(
+        source_dirs=source_dirs,
+        target_dir=args.output_path,
+        clean=args.clean,
+        zarr_format=args.zarr_format,
+        target_chunk_mb=args.chunk_size,
+    )
+
+    if not merged_destinations:
+        logger.info("No matching temporary Zarr stores were found in the requested source directories.")
+        return 0
+
+    for destination in sorted(set(merged_destinations)):
+        logger.info("🔗 Merged into %s", destination)
+    return 0
+
+
 def run_reflow(reflow_args: Sequence[str]) -> int:
     """Forward one Reflow workflow command through the main ERA5-Land CLI."""
 
@@ -1103,6 +1181,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "clean":
         return run_clean(args)
+
+    if args.command == "merge":
+        return run_merge(args)
 
     if args.command == "remap-reflow":
         return run_reflow(args.reflow_args)

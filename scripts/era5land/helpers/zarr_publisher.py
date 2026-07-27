@@ -3,19 +3,22 @@
 import gc
 import logging
 from pathlib import Path
+import re
 import shutil
 import uuid
-from typing import Any, Optional
+from typing import Any, Iterable, Optional, Union
 
 import numpy as np
 import xarray as xr
 import zarr
 
 from .datasets import normalise_published_dataset
+from .formatter import destination_for_level, existing_destinations_for_frequency
 from .metadata import clean_output_attrs
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_TARGET_CHUNK_MB = 100
+LEVEL_RE = re.compile(r"level_(?P<level>\d+)\.zarr$")
 
 
 def _resolve_target_chunks(
@@ -611,3 +614,147 @@ def update_zarr_store(
     finally:
         existing.close()
         gc.collect()
+
+
+def merge_zarr_store_roots(
+    *,
+    dataset: str,
+    frequency: str,
+    source_roots: Iterable[Union[str, Path]],
+    target_root: Optional[Union[str, Path]],
+    clean: bool,
+    zarr_format: int,
+    target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
+) -> list[str]:
+    """Merge one or more source output roots into a target publication root.
+
+    Parameters
+    ----------
+    dataset:
+        Dataset identifier such as ``"era5land"`` or ``"era5"``.
+    frequency:
+        Output frequency whose stores should be merged.
+    source_roots:
+        Directories that contain dataset/frequency/``level_*.zarr`` stores.
+    target_root:
+        Destination publication root. When ``None``, the configured default
+        publication root is used.
+    clean:
+        Whether to recreate each touched destination store on its first merge.
+    zarr_format:
+        Output Zarr format version used to read source stores and write the
+        merged destination stores.
+    target_chunk_mb:
+        Approximate target chunk size in megabytes for rewritten destination
+        stores.
+
+    Returns
+    -------
+    list[str]
+        Sorted unique destination store paths that received merged data.
+    """
+
+    cleaned_destinations: set[str] = set()
+    merged_destinations: list[str] = []
+
+    for source_root in source_roots:
+        for store_name in existing_destinations_for_frequency(
+            dataset,
+            frequency,
+            output_path=source_root,
+        ):
+            source_store = Path(store_name)
+            match = LEVEL_RE.search(source_store.name)
+            if match is None:
+                continue
+
+            destination = destination_for_level(
+                dataset,
+                frequency,
+                int(match.group("level")),
+                output_path=target_root,
+            )
+            source_dataset = xr.open_zarr(
+                str(source_store),
+                consolidated=(zarr_format == 2),
+            )
+            try:
+                update_zarr_store(
+                    source_dataset,
+                    destination,
+                    clean=(clean and destination not in cleaned_destinations),
+                    zarr_format=zarr_format,
+                    target_chunk_mb=target_chunk_mb,
+                )
+            finally:
+                source_dataset.close()
+
+            cleaned_destinations.add(destination)
+            merged_destinations.append(destination)
+
+    return sorted(set(merged_destinations))
+
+
+def merge_zarr_store_directories(
+    *,
+    source_dirs: Iterable[Union[str, Path]],
+    target_dir: Union[str, Path],
+    clean: bool,
+    zarr_format: int,
+    target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
+) -> list[str]:
+    """Merge one or more directories of ``level_*.zarr`` stores into a target.
+
+    Parameters
+    ----------
+    source_dirs:
+        Directories that directly contain ``level_*.zarr`` stores.
+    target_dir:
+        Destination directory that should receive merged ``level_*.zarr``
+        stores.
+    clean:
+        Whether to recreate each touched destination store on its first merge.
+    zarr_format:
+        Output Zarr format version used to read source stores and write merged
+        destination stores.
+    target_chunk_mb:
+        Approximate target chunk size in megabytes for rewritten destination
+        stores.
+
+    Returns
+    -------
+    list[str]
+        Sorted unique destination store paths that received merged data.
+    """
+
+    cleaned_destinations: set[str] = set()
+    merged_destinations: list[str] = []
+    target_path = Path(target_dir)
+
+    for source_dir in source_dirs:
+        source_path = Path(source_dir)
+        for source_store in sorted(source_path.glob("level_*.zarr")):
+            match = LEVEL_RE.search(source_store.name)
+            if match is None:
+                continue
+
+            destination = target_path / source_store.name
+            source_dataset = xr.open_zarr(
+                str(source_store),
+                consolidated=(zarr_format == 2),
+            )
+            try:
+                update_zarr_store(
+                    source_dataset,
+                    str(destination),
+                    clean=(clean and str(destination) not in cleaned_destinations),
+                    zarr_format=zarr_format,
+                    target_chunk_mb=target_chunk_mb,
+                )
+            finally:
+                source_dataset.close()
+
+            cleaned_destinations.add(str(destination))
+            merged_destinations.append(str(destination))
+
+    return sorted(set(merged_destinations))

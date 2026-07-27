@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 import shutil
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -42,9 +43,8 @@ from converter import (
 from helpers.file_fetcher import SourceRecord, load_json, resolve_records, split_csv_list
 from helpers.formatter import (
     dataset_output_root,
-    destination_for_level,
-    existing_destinations_for_frequency,
 )
+from helpers.zarr_publisher import merge_zarr_store_roots
 
 wf = Workflow("era5land_healpix")
 
@@ -77,55 +77,6 @@ def _worker_output_root(run_dir: Path, item_index: int, frequency: str, variable
     safe_variable = re.sub(r"[^A-Za-z0-9._-]+", "_", variable).strip("_") or "var"
     safe_frequency = re.sub(r"[^A-Za-z0-9._-]+", "_", frequency).strip("_") or "freq"
     return run_dir / "worker-output" / f"{item_index:04d}-{safe_frequency}-{safe_variable}"
-
-
-def _existing_temp_stores(
-    *,
-    temp_output_root: Path,
-    dataset: str,
-    frequency: str,
-) -> list[tuple[int, Path]]:
-    """Return all temporary stores for one frequency with parsed zoom levels."""
-
-    stores: list[tuple[int, Path]] = []
-    for store_name in existing_destinations_for_frequency(
-        dataset,
-        frequency,
-        output_path=temp_output_root,
-    ):
-        store_path = Path(store_name)
-        match = LEVEL_RE.search(store_path.name)
-        if match is None:
-            continue
-        stores.append((int(match.group("level")), store_path))
-    return sorted(stores, reverse=True)
-
-
-def _merge_temp_store(
-    *,
-    source_store: Path,
-    destination: str,
-    clean: bool,
-    zarr_format: int,
-    target_chunk_mb: int,
-) -> None:
-    """Merge one temporary Zarr store into the final publication store."""
-
-    import xarray as xr
-
-    from helpers.zarr_publisher import update_zarr_store
-
-    dataset = xr.open_zarr(str(source_store), consolidated=(zarr_format == 2))
-    try:
-        update_zarr_store(
-            dataset,
-            destination,
-            clean=clean,
-            zarr_format=zarr_format,
-            target_chunk_mb=target_chunk_mb,
-        )
-    finally:
-        dataset.close()
 
 
 def _batch_months_for_item(
@@ -449,7 +400,7 @@ def finalize_outputs(
     clean = bool(plan["clean"])
     output_path = plan["output_path"]
     merged_destinations: list[str] = []
-    cleaned_destinations: set[str] = set()
+    worker_roots_by_frequency: dict[str, list[Path]] = defaultdict(list)
 
     if bool(plan["from_scratch"]):
         root_path = dataset_output_root(
@@ -469,26 +420,20 @@ def finalize_outputs(
     ):
         temp_output_root = Path(str(result["output_root"]))
         frequency = str(result["frequency"])
-        for level, temp_store in _existing_temp_stores(
-            temp_output_root=temp_output_root,
-            dataset=dataset,
-            frequency=frequency,
-        ):
-            destination = destination_for_level(
-                dataset,
-                frequency,
-                level,
-                output_path=output_path,
-            )
-            _merge_temp_store(
-                source_store=temp_store,
-                destination=destination,
-                clean=(clean and destination not in cleaned_destinations),
+        worker_roots_by_frequency[frequency].append(temp_output_root)
+
+    for frequency, source_roots in worker_roots_by_frequency.items():
+        merged_destinations.extend(
+            merge_zarr_store_roots(
+                dataset=dataset,
+                frequency=frequency,
+                source_roots=source_roots,
+                target_root=output_path,
+                clean=clean,
                 zarr_format=zarr_format,
                 target_chunk_mb=target_chunk_mb,
             )
-            cleaned_destinations.add(destination)
-            merged_destinations.append(destination)
+        )
 
     requested_variables = tuple(str(name) for name in plan["requested_variables"])
     _source_variables, special_variables = split_special_variables(requested_variables)
