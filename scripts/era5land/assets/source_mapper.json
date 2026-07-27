@@ -41,7 +41,39 @@
     "mon": "P1M",
     "fx": "fx"
   },
-  "SLURM_ACCOUNT": "1187",
+  "reflow_batching_policy": {
+    "wave_size": 1,
+    "defaults": {
+      "surface": {
+        "1hr": 6,
+        "day": 120,
+        "mon": 360,
+        "fx": null
+      },
+      "pressure": {
+        "1hr": 1,
+        "day": 12,
+        "mon": 120,
+        "fx": null
+      },
+      "fixed": {
+        "1hr": null,
+        "day": null,
+        "mon": null,
+        "fx": null
+      }
+    },
+    "datasets": {
+      "era5land": {
+        "surface": {
+          "1hr": 1,
+          "day": 12,
+          "mon": 300,
+          "fx": null
+        }
+      }
+    }
+  },
   "output_path": "/work/ks1387/gw/data/reanalysis/healpix/{dataset}/{output_frequency}/level_{zoom_number}.zarr",
   "weights_path": "/work/ks1387/healpix-weights",
   "var_attrs": [

@@ -21,7 +21,6 @@ import sys
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-import xarray as xr
 from reflow import Param, Result, RunDir, Workflow
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -31,27 +30,45 @@ if str(ERA5LAND_DIR) not in sys.path:
 
 from converter import (
     DEFAULT_CMOR_TABLES,
-    DEFAULT_SOURCE_MAPPER,
     DEFAULT_VAR_TABLE,
+    DEFAULT_SOURCE_MAPPER,
+    batched_intervals,
     extend_frequencies_for_special_variables,
+    format_interval,
     parse_frequencies,
     parse_interval,
     selected_requests,
 )
-from helpers.file_fetcher import SourceRecord, load_json, resolve_records
+from helpers.file_fetcher import SourceRecord, load_json, resolve_records, split_csv_list
 from helpers.formatter import (
     dataset_output_root,
     destination_for_level,
     existing_destinations_for_frequency,
 )
-from helpers.mapper import map_grib_to_healpix
-from helpers.special import split_special_variables
-from helpers.zarr_publisher import update_zarr_store
 
 wf = Workflow("era5land_healpix")
 
 LEVEL_RE = re.compile(r"level_(?P<level>\d+)\.zarr$")
-SLURM_ACCOUNT = str(load_json(DEFAULT_SOURCE_MAPPER)["SLURM_ACCOUNT"])
+SOURCE_MAPPER = load_json(DEFAULT_SOURCE_MAPPER)
+REFLOW_BATCHING_POLICY = SOURCE_MAPPER.get("reflow_batching_policy", {})
+REFLOW_WAVE_SIZE = int(REFLOW_BATCHING_POLICY.get("wave_size", 12))
+
+
+def _batching_level_type(record: SourceRecord) -> str:
+    """Classify one resolved record for Reflow batching policy lookup.
+
+    The CMOR tables expose raw ERA5 level types such as ``pl_an`` and
+    ``sfc_fc``. Reflow batching uses the coarser categories ``pressure``,
+    ``surface``, and ``fixed``.
+    """
+
+    if record.frequency == "fx":
+        return "fixed"
+
+    raw_level_type = str(record.output_attrs.get("level_type") or record.level_type)
+    if raw_level_type.startswith("pl"):
+        return "pressure"
+    return "surface"
 
 
 def _worker_output_root(run_dir: Path, item_index: int, frequency: str, variable: str) -> Path:
@@ -94,6 +111,10 @@ def _merge_temp_store(
 ) -> None:
     """Merge one temporary Zarr store into the final publication store."""
 
+    import xarray as xr
+
+    from helpers.zarr_publisher import update_zarr_store
+
     dataset = xr.open_zarr(str(source_store), consolidated=(zarr_format == 2))
     try:
         update_zarr_store(
@@ -107,7 +128,92 @@ def _merge_temp_store(
         dataset.close()
 
 
-@wf.job(cpus=2, time="00:20:00", mem="2GB", partition="compute", account=SLURM_ACCOUNT)
+def _batch_months_for_item(
+    *,
+    policy: dict[str, Any],
+    dataset: str,
+    frequency: str,
+    level_type: str | None,
+) -> int | None:
+    """Return the configured batch size in months for one workload item."""
+
+    dataset_policy = policy.get("datasets", {}).get(dataset, {})
+    if isinstance(dataset_policy, dict) and level_type:
+        level_policy = dataset_policy.get(level_type)
+        if isinstance(level_policy, dict):
+            frequency_value = level_policy.get(frequency)
+            if frequency_value is not None:
+                return int(frequency_value)
+            if frequency in level_policy:
+                return None
+
+    default_policy = policy.get("defaults", {})
+    if isinstance(default_policy, dict) and level_type:
+        level_policy = default_policy.get(level_type)
+        if isinstance(level_policy, dict):
+            frequency_value = level_policy.get(frequency)
+            if frequency_value is not None:
+                return int(frequency_value)
+            if frequency in level_policy:
+                return None
+
+    return None
+
+
+def _normalise_requested_variables(variables: list[str] | None) -> tuple[str, ...] | None:
+    """Flatten comma-separated variable tokens from the Reflow CLI."""
+
+    if not variables:
+        return None
+
+    flattened: list[str] = []
+    for value in variables:
+        flattened.extend(split_csv_list(value))
+    return tuple(flattened)
+
+
+def _batched_work_items(
+    *,
+    records: list[SourceRecord],
+    parsed_interval: tuple[object | None, object | None],
+    dataset: str,
+) -> list[dict[str, Any]]:
+    """Expand resolved records into workload-aware Reflow array items."""
+
+    policy = SOURCE_MAPPER.get("reflow_batching_policy", {})
+    work_items: list[dict[str, Any]] = []
+
+    for record in records:
+        if not record.files:
+            continue
+
+        level_type = _batching_level_type(record)
+        batch_months = _batch_months_for_item(
+            policy=policy,
+            dataset=dataset,
+            frequency=record.frequency,
+            level_type=level_type,
+        )
+        intervals = batched_intervals(parsed_interval, batch_months=batch_months)
+
+        for batch_index, batch_interval in enumerate(intervals):
+            work_items.append(
+                {
+                    "batch_index": batch_index,
+                    "batch_interval": format_interval(batch_interval),
+                    "batch_months": batch_months,
+                    "frequency": record.frequency,
+                    "level_type": level_type,
+                    "variable": record.variable,
+                }
+            )
+
+    for item_index, item in enumerate(work_items):
+        item["item_index"] = item_index
+    return work_items
+
+
+@wf.job(cpus=2, time="00:20:00", mem="20GB", partition="shared")
 def gather_plan(
     dataset: Annotated[
         Literal["era5land", "era5"],
@@ -175,15 +281,21 @@ def gather_plan(
         Param(help="Raise on duplicate GRIB timestamps instead of dropping them"),
     ] = False,
 ) -> dict[str, Any]:
-    """Resolve the requested work into a serializable plan for downstream steps."""
+    """Resolve the requested work into workload-aware array-job plan items."""
+
+    from helpers.special import split_special_variables
 
     if chunk_size <= 0:
         raise ValueError("--chunk-size must be a positive integer.")
 
-    variable_filter = tuple(variables) if variables else None
+    variable_filter = _normalise_requested_variables(variables)
     frequencies = parse_frequencies(freq)
     parsed_interval = parse_interval(interval)
-    _, requests = selected_requests(dataset=dataset, variables=variable_filter)
+    _, requests = selected_requests(
+        dataset=dataset,
+        variables=variable_filter,
+        var_table=DEFAULT_VAR_TABLE,
+    )
     requested_variable_names = tuple(request.name for request in requests)
     source_variables, _special_variables = split_special_variables(requested_variable_names)
     effective_frequencies = extend_frequencies_for_special_variables(
@@ -194,7 +306,6 @@ def gather_plan(
     records = resolve_records(
         var_table=DEFAULT_VAR_TABLE,
         cmor_tables_dir=DEFAULT_CMOR_TABLES,
-        mapper_path=DEFAULT_SOURCE_MAPPER,
         dataset=dataset,
         variables=source_variables,
         frequencies=frequencies,
@@ -202,21 +313,14 @@ def gather_plan(
         root=root,
         glob_files=True,
     )
-
-    work_items: list[dict[str, Any]] = []
-    for item_index, record in enumerate(records):
-        if not record.files:
-            continue
-        work_items.append(
-            {
-                "item_index": item_index,
-                "frequency": record.frequency,
-                "variable": record.variable,
-                "record": record._asdict(),
-            }
-        )
+    work_items = _batched_work_items(
+        records=records,
+        parsed_interval=parsed_interval,
+        dataset=dataset,
+    )
 
     return {
+        "batching_policy": SOURCE_MAPPER.get("reflow_batching_policy", {}),
         "dataset": dataset,
         "effective_frequencies": list(effective_frequencies),
         "fail_on_duplicate_times": fail_on_duplicate_times,
@@ -229,29 +333,42 @@ def gather_plan(
         "use_input_cache": use_input_cache,
         "use_inventory_cache": use_inventory_cache,
         "weights_dir": weights_dir,
-        "work_items": work_items,
+        "work_item_count": len(work_items),
         "zarr_format": zarr_format,
         "chunk_size": chunk_size,
         "clean": clean,
     }
 
 
-@wf.job(cpus=1, time="00:02:00", mem="1GB", partition="compute", account=SLURM_ACCOUNT)
+@wf.job(cpus=1, time="00:02:00", mem="1GB", partition="shared")
 def gather_work_items(
     plan: Annotated[dict[str, Any], Result(step="gather_plan")],
 ) -> list[dict[str, Any]]:
-    """Extract the array-job inputs from the shared plan."""
+    """Build lightweight array-job inputs from the shared plan."""
 
-    return list(plan["work_items"])
+    records = resolve_records(
+        var_table=DEFAULT_VAR_TABLE,
+        cmor_tables_dir=DEFAULT_CMOR_TABLES,
+        dataset=str(plan["dataset"]),
+        variables=tuple(str(name) for name in plan["requested_variables"]),
+        frequencies=tuple(str(name) for name in plan["effective_frequencies"] if name != "fx"),
+        interval=parse_interval(plan["interval"]),
+        root=(str(plan["root"]) if plan["root"] is not None else None),
+        glob_files=True,
+    )
+    return _batched_work_items(
+        records=records,
+        parsed_interval=parse_interval(plan["interval"]),
+        dataset=str(plan["dataset"]),
+    )
 
 
 @wf.array_job(
     cpus=32,
     time="08:00:00",
     mem="0",
-    partition="compute",
-    account=SLURM_ACCOUNT,
-    array_parallelism=12,
+    partition="shared",
+    array_parallelism=REFLOW_WAVE_SIZE,
     after=["gather_plan"],
 )
 def convert_variable_frequency(
@@ -259,9 +376,27 @@ def convert_variable_frequency(
     plan: Annotated[dict[str, Any], Result(step="gather_plan", broadcast=True)],
     run_dir: RunDir = RunDir(),
 ) -> dict[str, Any]:
-    """Remap one ``variable x frequency`` unit into a private temporary output root."""
+    """Remap one ``variable x frequency x interval-batch`` unit into temp output."""
 
-    record = SourceRecord(**item["record"])
+    from helpers.mapper import map_grib_to_healpix
+
+    records = resolve_records(
+        var_table=DEFAULT_VAR_TABLE,
+        cmor_tables_dir=DEFAULT_CMOR_TABLES,
+        dataset=str(plan["dataset"]),
+        variables=(str(item["variable"]),),
+        frequencies=(str(item["frequency"]),),
+        interval=parse_interval(str(item["batch_interval"])),
+        root=(str(plan["root"]) if plan["root"] is not None else None),
+        glob_files=True,
+    )
+    if len(records) != 1:
+        raise ValueError(
+            "Expected exactly one resolved source record for "
+            f"{item['variable']} {item['frequency']} {item['batch_interval']}, "
+            f"got {len(records)}."
+        )
+    record = records[0]
     temp_output_root = _worker_output_root(
         Path(run_dir),
         int(item["item_index"]),
@@ -275,7 +410,7 @@ def convert_variable_frequency(
         dataset=str(plan["dataset"]),
         frequencies=(str(item["frequency"]),),
         requested_variables=(str(item["variable"]),),
-        interval=parse_interval(plan["interval"]),
+        interval=parse_interval(str(item["batch_interval"])),
         zarr_format=int(plan["zarr_format"]),
         use_inventory_cache=bool(plan["use_inventory_cache"]),
         use_input_cache=bool(plan["use_input_cache"]),
@@ -288,6 +423,8 @@ def convert_variable_frequency(
     )
 
     return {
+        "batch_index": item["batch_index"],
+        "batch_interval": item["batch_interval"],
         "frequency": item["frequency"],
         "item_index": item["item_index"],
         "output_root": str(temp_output_root),
@@ -295,13 +432,16 @@ def convert_variable_frequency(
     }
 
 
-@wf.job(cpus=8, time="04:00:00", mem="0", partition="compute", account=SLURM_ACCOUNT)
+@wf.job(cpus=8, time="04:00:00", mem="0", partition="shared")
 def finalize_outputs(
     worker_results: Annotated[list[dict[str, Any]], Result(step="convert_variable_frequency")],
     plan: Annotated[dict[str, Any], Result(step="gather_plan")],
     run_dir: RunDir = RunDir(),
 ) -> list[str]:
     """Merge all worker stores into the final publication root and consolidate metadata."""
+
+    from helpers.mapper import map_grib_to_healpix
+    from helpers.special import split_special_variables
 
     dataset = str(plan["dataset"])
     zarr_format = int(plan["zarr_format"])

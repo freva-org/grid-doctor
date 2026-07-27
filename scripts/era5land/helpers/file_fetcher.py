@@ -40,6 +40,7 @@ class VariableRequest(NamedTuple):
 
     name: str
     reanalysis: Tuple[str, ...]
+    commentary: str | None = None
 
 
 class SourceRecord(NamedTuple):
@@ -127,7 +128,11 @@ def split_csv_list(value: str) -> Tuple[str, ...]:
 
 
 def load_variable_requests(path: Union[str, Path]) -> List[VariableRequest]:
-    """Read the variable selection CSV."""
+    """Read the variable selection CSV.
+
+    The table must provide ``varname`` and ``reanalysis`` columns. Any
+    additional columns are treated as optional human-facing commentary only.
+    """
 
     with Path(path).open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle, delimiter="|")
@@ -135,6 +140,9 @@ def load_variable_requests(path: Union[str, Path]) -> List[VariableRequest]:
             VariableRequest(
                 name=str(row["varname"]).strip(),
                 reanalysis=split_csv_list(str(row["reanalysis"])),
+                commentary=(
+                    str(row.get("commentary", "")).strip() or None
+                ),
             )
             for row in reader
         ]
@@ -470,7 +478,6 @@ def resolve_records(
     *,
     var_table: Union[str, Path],
     cmor_tables_dir: Union[str, Path],
-    mapper_path: Union[str, Path],
     dataset: str,
     variables: Optional[Tuple[str, ...]],
     frequencies: Tuple[str, ...],
@@ -480,7 +487,7 @@ def resolve_records(
 ) -> List[SourceRecord]:
     """Resolve source records and matching files."""
 
-    mapper = load_json(mapper_path)
+    mapper = SOURCE_MAPPER
     dataset_cfg = mapper["datasets"][dataset]
     table_prefix = str(dataset_cfg["table_prefix"])
     dataset_priority = tuple(str(item) for item in dataset_cfg["priority"])

@@ -1,30 +1,30 @@
-varname|reanalysis
-areacella|E5, EL
-cli|E5
-clivi|E5
-clt|E5
-clw|E5
-clwvi|E5
-crcw|E5
-cswc|E5
-evspsbl|E5, EL
-hfls|E5, EL
-hfss|E5, EL
-hur|E5
-hus|E5
-pr|E5, EL
-prw|E5
-ps|E5, EL
-psl|E5
-ta|E5
-tas|E5, EL
-tauu|E5
-tauv|E5
-tos|E5
-uas|E5
-ua|E5
-va|E5
-vas|E5
-wap|E5
-z|E5
-zg|E5
+varname|reanalysis|commentary
+areacella|E5, EL|# fixed
+cli|E5|# pressure
+clivi|E5|# surface
+clt|E5|# surface
+clw|E5|# pressure
+clwvi|E5|# surface
+crcw|E5|# pressure
+cswc|E5|# pressure
+evspsbl|E5, EL|# surface
+hfls|E5, EL|# surface
+hfss|E5, EL|# surface
+hur|E5|# pressure
+hus|E5|# pressure
+pr|E5, EL|# surface
+prw|E5|# surface
+ps|E5, EL|# surface
+psl|E5|# surface
+ta|E5|# pressure
+tas|E5, EL|# surface
+tauu|E5|# surface
+tauv|E5|# surface
+tos|E5|# surface
+ua|E5|# pressure
+uas|E5|# surface
+va|E5|# pressure
+vas|E5|# surface
+wap|E5|# pressure
+z|E5|# pressure
+zg|E5|# pressure

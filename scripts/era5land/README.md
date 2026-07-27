@@ -110,12 +110,44 @@ python3 converter.py remap-reflow submit \
 This workflow follows the standard Reflow pattern described in the
 [Reflow user guide](https://reflow-docs.org/latest/guide/):
 
+- `dispatch`: Reflow's own coordinator process. It reads the workflow
+  manifest, submits ready jobs, tracks dependencies, and triggers downstream
+  tasks. It is not one of the ERA5-Land remap tasks below.
 - `gather_plan`: resolves the requested variable and frequency work once
 - `gather_work_items`: fans that plan out into independent `variable x frequency` items
 - `convert_variable_frequency`: runs one array job per item and writes into an
   isolated temporary output root below `--run-dir`
 - `finalize_outputs`: merges the temporary Zarr stores into the final
   publication root and consolidates metadata through the existing publisher
+
+ASCII DAG for quick lookup:
+
+```text
+dispatch (Reflow coordinator)
+    |
+    +--> gather_plan
+            |
+            +--> gather_work_items
+            |       |
+            |       +--> convert_variable_frequency[*]
+            |                  |
+            +------------------+
+                               |
+                               +--> finalize_outputs
+```
+
+Where:
+
+- `gather_plan` builds the shared plan dict, including resolved source records,
+  batching choices, and the full list of work items.
+- `gather_work_items` extracts `plan["work_items"]` so Reflow can fan them out
+  into an array job.
+- `convert_variable_frequency[*]` is the parallel worker stage. Each array item
+  handles one `variable x frequency x interval-batch` unit and writes temporary
+  Zarr output below `<run-dir>/worker-output/`.
+- `finalize_outputs` gathers all temporary worker outputs, merges them into the
+  final publication tree, publishes special variables such as `areacella` if
+  needed, and removes the temporary worker directory.
 
 The shared `--run-dir` should point to a filesystem visible from every worker
 node, for example scratch. Temporary worker outputs are written below

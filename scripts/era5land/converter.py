@@ -24,20 +24,7 @@ from helpers.file_fetcher import (
     split_csv_list,
     unresolved_records,
 )
-from helpers.cleanup import (
-    delete_dataset_root,
-    delete_frequency_directory,
-    delete_frequency_level_stores,
-    remove_variables_from_frequency_stores,
-    truncate_existing_healpix_stores,
-)
-from helpers.special import split_special_variables
 from helpers.formatter import dataset_output_root, normalise_frequencies
-from helpers.mapper import (
-    map_grib_to_healpix,
-    rechunk_existing_healpix_stores,
-    update_healpix_attrs_only,
-)
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 3
@@ -778,6 +765,8 @@ def extend_frequencies_for_special_variables(
 ) -> Tuple[str, ...]:
     """Add the `fx` publication pass when special variables are requested."""
 
+    from helpers.special import split_special_variables
+
     _, special_variables = split_special_variables(requested_variables)
     if not special_variables or "fx" in frequencies:
         return frequencies
@@ -788,6 +777,7 @@ def selected_requests(
     *,
     dataset: str,
     variables: Optional[Tuple[str, ...]],
+    var_table: Path = DEFAULT_VAR_TABLE,
 ):
     """Resolve the requested variables for one dataset selection."""
 
@@ -796,7 +786,7 @@ def selected_requests(
         str(code) for code in source_mapper["datasets"][dataset]["priority"]
     )
     requests = selected_variables(
-        load_variable_requests(DEFAULT_VAR_TABLE),
+        load_variable_requests(var_table),
         allowed_codes=dataset_codes,
         variables=variables,
     )
@@ -805,6 +795,8 @@ def selected_requests(
 
 def run_fetch(args: argparse.Namespace) -> int:
     """Resolve source files and print either JSON records or paths."""
+
+    from helpers.special import split_special_variables
 
     variables = parse_arg_list(args.variables)
     frequencies = parse_frequencies(args.freq)
@@ -819,7 +811,6 @@ def run_fetch(args: argparse.Namespace) -> int:
     records = resolve_records(
         var_table=DEFAULT_VAR_TABLE,
         cmor_tables_dir=DEFAULT_CMOR_TABLES,
-        mapper_path=DEFAULT_SOURCE_MAPPER,
         dataset=args.dataset,
         variables=source_variables,
         frequencies=frequencies,
@@ -875,6 +866,14 @@ def run_fetch(args: argparse.Namespace) -> int:
 
 def run_remap(args: argparse.Namespace) -> int:
     """Resolve source files, remap them with grid_doctor, and write Zarr output."""
+
+    from helpers.cleanup import truncate_existing_healpix_stores
+    from helpers.mapper import (
+        map_grib_to_healpix,
+        rechunk_existing_healpix_stores,
+        update_healpix_attrs_only,
+    )
+    from helpers.special import split_special_variables
 
     logger = logging.getLogger(__name__)
     variables = parse_arg_list(args.variables)
@@ -948,7 +947,6 @@ def run_remap(args: argparse.Namespace) -> int:
         records = resolve_records(
             var_table=DEFAULT_VAR_TABLE,
             cmor_tables_dir=DEFAULT_CMOR_TABLES,
-            mapper_path=DEFAULT_SOURCE_MAPPER,
             dataset=args.dataset,
             variables=source_variables,
             frequencies=frequencies,
@@ -1007,6 +1005,13 @@ def run_remap(args: argparse.Namespace) -> int:
 
 def run_clean(args: argparse.Namespace) -> int:
     """Clean existing HEALPix outputs at variable, level, frequency, or root scope."""
+
+    from helpers.cleanup import (
+        delete_dataset_root,
+        delete_frequency_directory,
+        delete_frequency_level_stores,
+        remove_variables_from_frequency_stores,
+    )
 
     logger = logging.getLogger(__name__)
     variables = parse_arg_list(args.variables)
