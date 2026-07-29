@@ -187,8 +187,8 @@ new remap:
 
 ```console
 python3 converter.py merge \
-  --source /scratch/$USER/worker-001/era5land/1H,/scratch/$USER/worker-002/era5land/1H \
-  --output-path /scratch/$USER/era5land-final/era5land/1H
+  --source '/scratch/k/k204229/worker-*/era5land/1H' \
+  --output-path /scratch/k/$USER/era5land-final/era5land/1H
 ```
 
 This command reuses the same incremental Zarr merge behavior as the normal
@@ -200,8 +200,9 @@ for `merge`, the source directories and target directory should point directly
 at one output-frequency directory, for example `.../era5land/1H` or
 `.../era5/day`. The command merges matching `level_<n>.zarr` stores from the
 source directories into the target directory in the order they are listed.
-`--source` accepts one comma-separated argument; shell globs must be expanded
-into a comma-separated list before calling `converter.py merge`.
+`--source` accepts glob patterns, multiple source values, and comma-separated
+values. Quote a glob so the command receives it as a single pattern, for
+example `--source '/scratch/k/k204229/worker-output/*-1hr-zg/era5/PT1H'`.
 
 Write test output to a different publication root:
 

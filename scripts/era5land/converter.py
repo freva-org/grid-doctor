@@ -2,6 +2,7 @@
 """Unified entry point for the ERA5/ERA5-Land conversion workflow."""
 
 import argparse
+from glob import glob, has_magic
 import hashlib
 import json
 import logging
@@ -30,7 +31,7 @@ from helpers.zarr_publisher import merge_zarr_store_directories
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 5
-VERSION_MINOR = 1
+VERSION_MINOR = 2
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -534,10 +535,11 @@ def build_parser() -> argparse.ArgumentParser:
     merge_cmd.add_argument(
         "--source",
         dest="source_dirs",
+        nargs="+",
         required=True,
         help=(
-            "Comma-separated source directories that directly contain "
-            "`level_*.zarr` stores (path1/to/reanalysis/freq,path2/to/reanalysis/freq)."
+            "Source directories or glob patterns that directly contain "
+            "`level_*.zarr` stores. Values may be comma-separated or repeated."
         ),
     )
     merge_cmd.add_argument(
@@ -941,6 +943,25 @@ def parse_cli_args(value: Optional[str]) -> Optional[Tuple[str, ...]]:
     if value is None:
         return None
     return split_csv_list(value)
+
+
+def expand_source_dirs(values: Sequence[str]) -> Tuple[str, ...]:
+    """Expand comma-separated source paths and glob patterns for ``merge``."""
+
+    sources: list[str] = []
+    for value in values:
+        parsed = parse_cli_args(value)
+        if parsed:
+            sources.extend(parsed)
+
+    expanded: list[str] = []
+    for source in sources:
+        matches = sorted(glob(source)) if has_magic(source) else []
+        if has_magic(source) and not matches:
+            raise ValueError(f"Source pattern did not match any paths: {source}")
+        expanded.extend(matches or [source])
+
+    return tuple(dict.fromkeys(expanded))
 
 
 def validate_remap_args(args: argparse.Namespace) -> None:
@@ -1458,8 +1479,8 @@ def run_merge(args: argparse.Namespace) -> int:
     """Merge one or more frequency directories into a target frequency directory."""
 
     logger = logging.getLogger(__name__)
-    source_dirs = parse_cli_args(args.source_dirs)
-    if source_dirs is None:
+    source_dirs = expand_source_dirs(args.source_dirs)
+    if not source_dirs:
         raise ValueError("Expected at least one comma-separated value.")
 
     if args.chunk_size <= 0:
