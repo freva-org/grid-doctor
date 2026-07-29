@@ -31,7 +31,7 @@ from helpers.zarr_publisher import merge_zarr_store_directories
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 5
-VERSION_MINOR = 2
+VERSION_MINOR = 3
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
