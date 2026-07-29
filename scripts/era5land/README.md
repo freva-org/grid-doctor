@@ -295,6 +295,18 @@ python3 converter.py clean \
   --dataset era5
 ```
 
+Truncate existing time-based stores without deleting or remapping anything:
+
+```console
+python3 converter.py clean \
+  --dataset era5 \
+  --freq 1hr,day,mon \
+  --truncate-after 1942
+```
+
+`--truncate-after` removes timestamps strictly after the cutoff across all
+existing levels. It cannot be combined with `--var`, `--levels`, or `--dry-run`.
+
 ### Cache And Parallelism
 
 The converter separates the two input-side caches:

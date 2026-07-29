@@ -268,9 +268,9 @@ def truncate_frequency_destinations(
     *,
     dataset: str,
     frequency: str,
-    zarr_format: int,
+    zarr_format: int = 2,
     cutoff: str,
-    highest_level_only: bool,
+    highest_level_only: bool = False,
     output_path: str | Path | None = None,
 ) -> int:
     """Truncate the selected existing destinations for one output frequency."""
@@ -298,9 +298,9 @@ def truncate_existing_healpix_stores(
     *,
     dataset: str,
     frequencies: tuple[str, ...],
-    zarr_format: int,
     cutoff: str,
-    highest_level_only: bool,
+    zarr_format: int = 2,
+    highest_level_only: bool = False,
     output_path: str | Path | None = None,
 ) -> int:
     """Truncate existing time-based HEALPix Zarr stores before a rerun.

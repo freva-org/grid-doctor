@@ -511,6 +511,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the published HEALPix output root directory.",
     )
     clean_cmd.add_argument(
+        "--truncate-after",
+        default=None,
+        metavar="DATE",
+        help=(
+            "Truncate existing time-based stores, removing timestamps strictly "
+            "after DATE."
+        ),
+    )
+    clean_cmd.add_argument(
         "--dry-run",
         action="store_true",
         default=False,
@@ -1360,12 +1369,37 @@ def run_clean(args: argparse.Namespace) -> int:
         delete_frequency_directory,
         delete_frequency_level_stores,
         remove_variables_from_frequency_stores,
+        truncate_existing_healpix_stores,
     )
 
     logger = logging.getLogger(__name__)
     variables = parse_cli_args(args.variables)
     levels = parse_level_selection(args.levels)
     frequencies = parse_cli_freqs(args.freq or "all")
+
+    if args.truncate_after is not None:
+        if variables is not None or levels is not None:
+            raise ValueError(
+                "--truncate-after cannot be combined with --var or --levels."
+            )
+        if args.dry_run:
+            raise ValueError("--truncate-after does not support --dry-run.")
+
+        cutoff = parse_truncate_after(args.truncate_after)
+        if cutoff is None:
+            raise ValueError("--truncate-after requires a bounded date value.")
+        truncated_count = truncate_existing_healpix_stores(
+            dataset=args.dataset,
+            frequencies=frequencies,
+            cutoff=cutoff,
+            output_path=args.output_path,
+        )
+        logger.info(
+            "Truncated %s existing store(s) after %s.",
+            truncated_count,
+            cutoff,
+        )
+        return 0
 
     actions: list[str] = []
 
