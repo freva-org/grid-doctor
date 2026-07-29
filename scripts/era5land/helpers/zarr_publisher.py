@@ -153,8 +153,9 @@ def _write_dataset(
     }
     if append_dim is not None:
         options["append_dim"] = append_dim
-        # Do not pass encoding when appending along time.
-        # xarray rejects encoding for variables that already exist.        
+        # Let xarray rechunk the append region when its start is not aligned
+        # with the existing Zarr chunk grid.
+        options["align_chunks"] = True
         dataset.to_zarr(destination, **options)
         return
 
@@ -453,6 +454,27 @@ def _merge_static_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Dat
     return candidate.combine_first(existing)
 
 
+def _align_to_existing_chunks(
+    dataset: xr.Dataset,
+    existing: xr.Dataset,
+) -> xr.Dataset:
+    """Rechunk a dataset to the Zarr chunks already used by an existing store."""
+
+    aligned = dataset.copy(deep=False)
+    chunk_map: dict[str, int] = {}
+    for name, data in aligned.data_vars.items():
+        if name not in existing:
+            continue
+        chunks = existing[name].encoding.get("chunks")
+        if chunks is None:
+            continue
+        chunk_map.update(dict(zip(data.dims, (int(size) for size in chunks))))
+        aligned[name].encoding = dict(aligned[name].encoding)
+        aligned[name].encoding["chunks"] = tuple(int(size) for size in chunks)
+
+    return aligned.chunk(chunk_map) if chunk_map else aligned
+
+
 def _append_new_times(
     existing: xr.Dataset,
     candidate: xr.Dataset,
@@ -473,6 +495,7 @@ def _append_new_times(
         candidate.sel(time=new_time_values),
         existing,
     )
+    append_ds = _align_to_existing_chunks(append_ds, existing)
     _write_dataset(
         append_ds,
         destination,
@@ -506,6 +529,7 @@ def _rewrite_overlapping_times(
             if "time" not in var.dims
         }
         region_ds = region_ds.drop_vars(to_drop, errors="ignore")
+        region_ds = _align_to_existing_chunks(region_ds, existing)
         region = {"time": time_slice}
         region_ds.to_zarr(
             destination,
@@ -513,6 +537,7 @@ def _rewrite_overlapping_times(
             region=region,
             zarr_format=zarr_format,
             consolidated=(zarr_format == 2),
+            align_chunks=True,
         )
 
 
