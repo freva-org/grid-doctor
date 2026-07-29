@@ -13,7 +13,7 @@ import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, List, NamedTuple, Optional, Sequence, Tuple
 
 from helpers.file_fetcher import (
     batched_source_record_files,
@@ -30,7 +30,7 @@ from helpers.zarr_publisher import merge_zarr_store_directories
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 5
-VERSION_MINOR = 0
+VERSION_MINOR = 1
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -70,6 +70,14 @@ _ACTIVE_BATCH_STATE_PATH: Optional[Path] = None
 _BATCH_FILES_CHILD_INDEX_ENV = "ERA5_BATCH_FILES_CHILD_INDEX"
 _BATCH_FILES_CHILD_COUNT_ENV = "ERA5_BATCH_FILES_CHILD_COUNT"
 _BATCH_FILES_INCLUDE_SPECIAL_ENV = "ERA5_BATCH_FILES_INCLUDE_SPECIAL"
+
+
+class BatchFileChildState(NamedTuple):
+    """Describe the selected file batch when running inside a child process."""
+
+    index: int | None
+    count: int | None
+    include_special: bool
 
 
 class RichDefaultsHelpFormatter(
@@ -926,6 +934,99 @@ def parse_cli_args(value: Optional[str]) -> Optional[Tuple[str, ...]]:
     return split_csv_list(value)
 
 
+def validate_remap_args(args: argparse.Namespace) -> None:
+    """Validate remap options that cannot be expressed by argparse alone."""
+
+    if args.from_scratch and args.attrs_only:
+        raise ValueError("--from-scratch cannot be combined with --attrs-only.")
+    if args.truncate_after is not None and args.attrs_only:
+        raise ValueError("--truncate-after cannot be combined with --attrs-only.")
+    if args.rechunk_only and args.attrs_only:
+        raise ValueError("--rechunk-only cannot be combined with --attrs-only.")
+    if args.chunk_size <= 0:
+        raise ValueError("--chunk-size must be a positive integer.")
+    if args.batch_months is not None and args.batch_files is not None:
+        raise ValueError("--batch-months and --batch-files are mutually exclusive.")
+    if args.batch_files is not None and args.batch_files <= 0:
+        raise ValueError("--batch-files must be a positive integer.")
+    if args.batch_files is not None and args.attrs_only:
+        raise ValueError("--batch-files cannot be combined with --attrs-only.")
+    if args.batch_files is not None and args.coarsen_only is not None:
+        raise ValueError("--batch-files cannot be combined with --coarsen-only.")
+    if args.batch_files is not None and args.rechunk_only:
+        raise ValueError("--batch-files cannot be combined with --rechunk-only.")
+
+
+def batch_file_child_state() -> BatchFileChildState:
+    """Read and validate the environment used to select one file-batch child."""
+
+    index_text = os.environ.get(_BATCH_FILES_CHILD_INDEX_ENV)
+    count_text = os.environ.get(_BATCH_FILES_CHILD_COUNT_ENV)
+    if (index_text is None) != (count_text is None):
+        raise ValueError(
+            "Internal file-batch child environment is incomplete; "
+            "expected both child index and child count."
+        )
+
+    return BatchFileChildState(
+        index=int(index_text) if index_text is not None else None,
+        count=int(count_text) if count_text is not None else None,
+        include_special=(
+            os.environ.get(_BATCH_FILES_INCLUDE_SPECIAL_ENV, "0") == "1"
+        ),
+    )
+
+
+def map_records(
+    records: Sequence[Any],
+    *,
+    args: argparse.Namespace,
+    frequencies: Tuple[str, ...],
+    requested_variables: Tuple[str, ...],
+    interval: Tuple[Optional[date], Optional[date]],
+    clean: bool,
+    coarsen_only: bool = False,
+    coarsen_levels: Optional[Tuple[int, ...]] = None,
+    use_input_cache: Optional[bool] = None,
+    drop_duplicate_time_rows: Optional[bool] = None,
+    coarsen_interval: Optional[Tuple[Optional[date], Optional[date]]] = None,
+) -> None:
+    """Map records using the common remap settings from the CLI namespace.
+
+    Batch and special-variable paths use this adapter with narrower frequency or
+    variable selections while inheriting the same output and caching settings.
+    """
+
+    from helpers.mapper import map_grib_to_healpix
+
+    map_grib_to_healpix(
+        list(records),
+        dataset=args.dataset,
+        frequencies=frequencies,
+        requested_variables=requested_variables,
+        interval=interval,
+        zarr_format=args.zarr_format,
+        use_inventory_cache=args.use_inventory_cache,
+        use_input_cache=(
+            args.use_input_cache if use_input_cache is None else use_input_cache
+        ),
+        drop_duplicate_time_rows=(
+            not args.fail_on_duplicate_times
+            if drop_duplicate_time_rows is None
+            else drop_duplicate_time_rows
+        ),
+        weights_dir=args.weights_dir,
+        clean=clean,
+        target_chunk_mb=args.chunk_size,
+        highest_level_only=args.highest_level_only,
+        coarsen_only=coarsen_only,
+        coarsen_levels=coarsen_levels,
+        output_path=args.output_path,
+        coarsen_interval=interval if coarsen_interval is None else coarsen_interval,
+        truncate_after=None,
+    )
+
+
 def build_file_batch_plan(
     records: Sequence[Any],
     *,
@@ -1047,7 +1148,6 @@ def run_remap(args: argparse.Namespace) -> int:
 
     from helpers.cleanup import truncate_existing_healpix_stores
     from helpers.mapper import (
-        map_grib_to_healpix,
         rechunk_existing_healpix_stores,
         update_healpix_attrs_only,
     )
@@ -1067,41 +1167,8 @@ def run_remap(args: argparse.Namespace) -> int:
         requested_variable_names,
     )
 
-    if args.from_scratch and args.attrs_only:
-        raise ValueError("--from-scratch cannot be combined with --attrs-only.")
-    if truncate_after is not None and args.attrs_only:
-        raise ValueError("--truncate-after cannot be combined with --attrs-only.")
-    if args.rechunk_only and args.attrs_only:
-        raise ValueError("--rechunk-only cannot be combined with --attrs-only.")
-    if args.chunk_size <= 0:
-        raise ValueError("--chunk-size must be a positive integer.")
-    if args.batch_months is not None and args.batch_files is not None:
-        raise ValueError("--batch-months and --batch-files are mutually exclusive.")
-    if args.batch_files is not None and args.batch_files <= 0:
-        raise ValueError("--batch-files must be a positive integer.")
-    if args.batch_files is not None and args.attrs_only:
-        raise ValueError("--batch-files cannot be combined with --attrs-only.")
-    if args.batch_files is not None and args.coarsen_only is not None:
-        raise ValueError("--batch-files cannot be combined with --coarsen-only.")
-    if args.batch_files is not None and args.rechunk_only:
-        raise ValueError("--batch-files cannot be combined with --rechunk-only.")
-
-    batch_files_child_index_env = os.environ.get(_BATCH_FILES_CHILD_INDEX_ENV)
-    batch_files_child_count_env = os.environ.get(_BATCH_FILES_CHILD_COUNT_ENV)
-    batch_files_include_special = (
-        os.environ.get(_BATCH_FILES_INCLUDE_SPECIAL_ENV, "0") == "1"
-    )
-    if (batch_files_child_index_env is None) != (batch_files_child_count_env is None):
-        raise ValueError(
-            "Internal file-batch child environment is incomplete; "
-            "expected both child index and child count."
-        )
-    batch_files_child_index = (
-        int(batch_files_child_index_env) if batch_files_child_index_env is not None else None
-    )
-    batch_files_child_count = (
-        int(batch_files_child_count_env) if batch_files_child_count_env is not None else None
-    )
+    validate_remap_args(args)
+    file_child = batch_file_child_state()
 
     if args.from_scratch:
         root_path = dataset_output_root(args.dataset, output_path=args.output_path)
@@ -1178,31 +1245,20 @@ def run_remap(args: argparse.Namespace) -> int:
             )
 
             if not batched_records:
-                map_grib_to_healpix(
+                map_records(
                     records,
-                    dataset=args.dataset,
+                    args=args,
                     frequencies=effective_frequencies,
                     requested_variables=requested_variable_names,
                     interval=current_interval,
-                    zarr_format=args.zarr_format,
-                    use_inventory_cache=args.use_inventory_cache,
-                    use_input_cache=args.use_input_cache,
-                    drop_duplicate_time_rows=(not args.fail_on_duplicate_times),
-                    weights_dir=args.weights_dir,
                     clean=clean,
-                    target_chunk_mb=args.chunk_size,
-                    highest_level_only=args.highest_level_only,
-                    coarsen_only=False,
-                    coarsen_levels=None,
-                    output_path=args.output_path,
                     coarsen_interval=interval,
-                    truncate_after=None,
                 )
                 return
 
             if (
-                batch_files_child_index is None
-                and batch_files_child_count is None
+                file_child.index is None
+                and file_child.count is None
             ):
                 logger.info(
                     "📦 Processing %s file batches of up to %s file(s) each using isolated subprocesses.",
@@ -1219,14 +1275,14 @@ def run_remap(args: argparse.Namespace) -> int:
                 return
 
             selected_batches = batched_records
-            if batch_files_child_index is not None:
+            if file_child.index is not None:
                 batch_count = len(batched_records)
-                if batch_files_child_count != batch_count:
+                if file_child.count != batch_count:
                     raise ValueError(
                         "Resolved file-batch count does not match the parent batch plan: "
-                        f"expected {batch_files_child_count}, got {batch_count}."
+                        f"expected {file_child.count}, got {batch_count}."
                     )
-                child_index = batch_files_child_index
+                child_index = file_child.index
                 if child_index < 1 or child_index > batch_count:
                     raise ValueError(
                         f"--batch-files-child-index must be between 1 and {batch_count}."
@@ -1239,73 +1295,44 @@ def run_remap(args: argparse.Namespace) -> int:
                     "📦 Processing batch %s",
                     batch_label,
                 )
-                map_grib_to_healpix(
+                map_records(
                     [batched_record],
-                    dataset=args.dataset,
+                    args=args,
                     frequencies=(batched_record.frequency,),
                     requested_variables=(batched_record.variable,),
                     interval=batch_interval,
-                    zarr_format=args.zarr_format,
-                    use_inventory_cache=args.use_inventory_cache,
-                    use_input_cache=args.use_input_cache,
-                    drop_duplicate_time_rows=(not args.fail_on_duplicate_times),
-                    weights_dir=args.weights_dir,
                     clean=clean_remaining,
-                    target_chunk_mb=args.chunk_size,
-                    highest_level_only=args.highest_level_only,
-                    coarsen_only=False,
-                    coarsen_levels=None,
-                    output_path=args.output_path,
                     coarsen_interval=interval,
-                    truncate_after=None,
                 )
                 clean_remaining = False
 
             if special_variables and (
-                batch_files_child_index is None or batch_files_include_special
+                file_child.index is None or file_child.include_special
             ):
-                map_grib_to_healpix(
+                map_records(
                     [],
-                    dataset=args.dataset,
+                    args=args,
                     frequencies=("fx",),
                     requested_variables=special_variables,
                     interval=current_interval,
-                    zarr_format=args.zarr_format,
-                    use_inventory_cache=args.use_inventory_cache,
+                    clean=False,
                     use_input_cache=False,
                     drop_duplicate_time_rows=True,
-                    weights_dir=args.weights_dir,
-                    clean=False,
-                    target_chunk_mb=args.chunk_size,
-                    highest_level_only=args.highest_level_only,
-                    coarsen_only=False,
-                    coarsen_levels=None,
-                    output_path=args.output_path,
                     coarsen_interval=interval,
-                    truncate_after=None,
                 )
             return
 
-        map_grib_to_healpix(
+        map_records(
             records,
-            dataset=args.dataset,
+            args=args,
             frequencies=effective_frequencies,
             requested_variables=requested_variable_names,
             interval=current_interval,
-            zarr_format=args.zarr_format,
-            use_inventory_cache=args.use_inventory_cache,
-            use_input_cache=args.use_input_cache,
-            drop_duplicate_time_rows=(not args.fail_on_duplicate_times),
-            weights_dir=args.weights_dir,
             clean=clean,
-            target_chunk_mb=args.chunk_size,
-            highest_level_only=args.highest_level_only,
             coarsen_only=(args.coarsen_only is not None),
             coarsen_levels=coarsen_levels,
-            output_path=args.output_path,
             coarsen_interval=interval,
-            truncate_after=None,
-            )
+        )
 
     intervals = (
         (interval,)
