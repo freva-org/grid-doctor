@@ -575,6 +575,15 @@ def build_parser() -> argparse.ArgumentParser:
             "of updating it incrementally."
         ),
     )
+    merge_cmd.add_argument(
+        "--from-scratch",
+        action="store_true",
+        default=False,
+        help=(
+            "Delete the complete target directory before merging. This is "
+            "broader than --clean."
+        ),
+    )
 
     return parser
 
@@ -1486,9 +1495,14 @@ def run_merge(args: argparse.Namespace) -> int:
     if args.chunk_size <= 0:
         raise ValueError("--chunk-size must be a positive integer.")
 
+    target_dir = Path(args.output_path)
+    if args.from_scratch and target_dir.exists():
+        logger.warning("Deleting merge target directory %s", target_dir)
+        shutil.rmtree(target_dir)
+
     merged_destinations = merge_zarr_store_directories(
         source_dirs=source_dirs,
-        target_dir=args.output_path,
+        target_dir=target_dir,
         clean=args.clean,
         zarr_format=args.zarr_format,
         target_chunk_mb=args.chunk_size,
