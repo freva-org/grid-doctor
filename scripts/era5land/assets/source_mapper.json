@@ -42,34 +42,147 @@
     "fx": "fx"
   },
   "reflow_batching_policy": {
-    "wave_size": 1,
-    "defaults": {
-      "surface": {
-        "1hr": 6,
-        "day": 120,
-        "mon": 360,
-        "fx": null
-      },
-      "pressure": {
-        "1hr": 1,
-        "day": 12,
-        "mon": 120,
-        "fx": null
-      },
-      "fixed": {
-        "1hr": null,
-        "day": null,
-        "mon": null,
-        "fx": null
-      }
-    },
     "datasets": {
+      "era5": {
+        "surface": {
+          "wave_size": 20,
+          "pressure_level_group_size": 0,
+          "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
+          "frequencies": {
+            "1hr": {
+              "batch_months": 6,
+              "batch_files": null
+            },
+            "day": {
+              "batch_months": 120,
+              "batch_files": null
+            },
+            "mon": {
+              "batch_months": 360,
+              "batch_files": null
+            },
+            "fx": {
+              "batch_months": null,
+              "batch_files": null
+            }
+          }
+        },
+        "pressure": {
+          "wave_size": 20,
+          "pressure_level_group_size": 0,
+          "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
+          "frequencies": {
+            "1hr": {
+              "batch_months": null,
+              "batch_files": 6
+            },
+            "day": {
+              "batch_months": 12,
+              "batch_files": null
+            },
+            "mon": {
+              "batch_months": 120,
+              "batch_files": null
+            },
+            "fx": {
+              "batch_months": null,
+              "batch_files": null
+            }
+          }
+        },
+        "fixed": {
+          "wave_size": 0,
+          "pressure_level_group_size": 0,
+          "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
+          "frequencies": {
+            "1hr": {
+              "batch_months": null,
+              "batch_files": null
+            },
+            "day": {
+              "batch_months": null,
+              "batch_files": null
+            },
+            "mon": {
+              "batch_months": null,
+              "batch_files": null
+            },
+            "fx": {
+              "batch_months": null,
+              "batch_files": null
+            }
+          }
+        }
+      },
       "era5land": {
         "surface": {
-          "1hr": 1,
-          "day": 12,
-          "mon": 300,
-          "fx": null
+          "wave_size": 3,
+          "pressure_level_group_size": 0,
+          "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
+          "frequencies": {
+            "1hr": {
+              "batch_months": 1,
+              "batch_files": null
+            },
+            "day": {
+              "batch_months": 12,
+              "batch_files": null
+            },
+            "mon": {
+              "batch_months": 300,
+              "batch_files": null
+            },
+            "fx": {
+              "batch_months": null,
+              "batch_files": null
+            }
+          }
+        },
+        "pressure": {
+          "wave_size": 3,
+          "pressure_level_group_size": 0,
+          "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
+          "frequencies": {
+            "1hr": {
+              "batch_months": 1,
+              "batch_files": null
+            },
+            "day": {
+              "batch_months": 12,
+              "batch_files": null
+            },
+            "mon": {
+              "batch_months": 120,
+              "batch_files": null
+            },
+            "fx": {
+              "batch_months": null,
+              "batch_files": null
+            }
+          }
+        },
+        "fixed": {
+          "wave_size": 3,
+          "pressure_level_group_size": 0,
+          "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
+          "frequencies": {
+            "1hr": {
+              "batch_months": null,
+              "batch_files": null
+            },
+            "day": {
+              "batch_months": null,
+              "batch_files": null
+            },
+            "mon": {
+              "batch_months": null,
+              "batch_files": null
+            },
+            "fx": {
+              "batch_months": null,
+              "batch_files": null
+            }
+          }
         }
       }
     }

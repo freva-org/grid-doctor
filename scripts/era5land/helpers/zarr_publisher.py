@@ -354,6 +354,14 @@ def _merge_time_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Datas
     return merged
 
 
+def _requires_vertical_rewrite(existing: xr.Dataset, candidate: xr.Dataset) -> bool:
+    """Return True when a candidate updates only a subset of vertical levels."""
+
+    if "plev" not in existing.indexes or "plev" not in candidate.indexes:
+        return False
+    return not candidate.indexes["plev"].equals(existing.indexes["plev"])
+
+
 def _contiguous_slices(indices: np.ndarray) -> list[slice]:
     """Convert sorted integer indices into contiguous slices."""
 
@@ -544,6 +552,20 @@ def update_zarr_store(
 
     existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
     try:
+        if _requires_vertical_rewrite(existing, dataset):
+            merged = dataset.combine_first(existing)
+            if "time" in merged.coords:
+                merged = merged.sortby("time")
+            _rewrite_dataset_via_temp(
+                merged,
+                destination,
+                zarr_format=zarr_format,
+                target_chunk_mb=target_chunk_mb,
+            )
+            _sync_global_attrs(dict(dataset.attrs), destination)
+            _sync_variable_attrs(dataset, destination)
+            return
+
         if "time" not in dataset.dims or "time" not in existing.dims:
             missing = [name for name in dataset.data_vars if name not in existing.data_vars]
             overlapping = [name for name in dataset.data_vars if name in existing.data_vars]

@@ -94,6 +94,15 @@ python3 converter.py remap \
   --clean
 ```
 
+Two batching modes are available for larger remaps:
+
+- `--batch-months N`: split a bounded `--interval` into sequential calendar windows
+- `--batch-files N`: split each resolved source record into sequential groups of `N` files
+
+`--batch-files` and `--batch-months` are mutually exclusive. The file-based mode
+is useful when pressure-level or long-running ERA5 workloads need finer-grained
+subprocess isolation than calendar batching provides.
+
 Submit the same kind of work as independent scheduler jobs with Reflow:
 
 ```console
@@ -113,9 +122,9 @@ This workflow follows the standard Reflow pattern described in the
 - `dispatch`: Reflow's own coordinator process. It reads the workflow
   manifest, submits ready jobs, tracks dependencies, and triggers downstream
   tasks. It is not one of the ERA5-Land remap tasks below.
-- `gather_plan`: resolves the requested variable and frequency work once
-- `gather_work_items`: fans that plan out into independent `variable x frequency` items
-- `convert_variable_frequency`: runs one array job per item and writes into an
+- `gather_plan`: resolves the requested variable and frequency work once and
+  returns self-contained array payloads
+- `remap_variable_frequency`: runs one array job per item and writes into an
   isolated temporary output root below `--run-dir`
 - `finalize_outputs`: merges the temporary Zarr stores into the final
   publication root and consolidates metadata through the existing publisher
@@ -126,11 +135,9 @@ ASCII DAG for quick lookup:
 dispatch (Reflow coordinator)
     |
     +--> gather_plan
-            |
-            +--> gather_work_items
-            |       |
-            |       +--> convert_variable_frequency[*]
-            |                  |
+                    |
+                    +--> remap_variable_frequency[*]
+                               |
             +------------------+
                                |
                                +--> finalize_outputs
@@ -138,13 +145,14 @@ dispatch (Reflow coordinator)
 
 Where:
 
-- `gather_plan` builds the shared plan dict, including resolved source records,
-  batching choices, and the full list of work items.
-- `gather_work_items` extracts `plan["work_items"]` so Reflow can fan them out
-  into an array job.
-- `convert_variable_frequency[*]` is the parallel worker stage. Each array item
-  handles one `variable x frequency x interval-batch` unit and writes temporary
-  Zarr output below `<run-dir>/worker-output/`.
+- `gather_plan` resolves source records, discovers pressure-level groups,
+  computes batching choices, writes the resolved records once to the shared
+  run directory, and returns one payload per work item. Each payload contains
+  a record key and shared run settings.
+- `remap_variable_frequency[*]` is the parallel worker stage. Each array item
+  handles one `variable x frequency x interval-batch` unit, optionally slices
+  pressure levels for pressure-level variables, and writes temporary Zarr output
+  below `<run-dir>/worker-output/`.
 - `finalize_outputs` gathers all temporary worker outputs, merges them into the
   final publication tree, publishes special variables such as `areacella` if
   needed, and removes the temporary worker directory.
@@ -192,6 +200,8 @@ for `merge`, the source directories and target directory should point directly
 at one output-frequency directory, for example `.../era5land/1H` or
 `.../era5/day`. The command merges matching `level_<n>.zarr` stores from the
 source directories into the target directory in the order they are listed.
+`--source` accepts one comma-separated argument; shell globs must be expanded
+into a comma-separated list before calling `converter.py merge`.
 
 Write test output to a different publication root:
 

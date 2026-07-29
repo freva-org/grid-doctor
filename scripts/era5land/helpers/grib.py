@@ -377,6 +377,7 @@ def open_dataset(
     use_inventory_cache: bool = True,
     use_input_cache: bool = False,
     drop_duplicate_time_rows: bool = True,
+    pressure_levels: tuple[int, ...] | None = None,
 ) -> xr.Dataset:
     """Open GRIB files as a merged xarray dataset.
 
@@ -400,6 +401,8 @@ def open_dataset(
     drop_duplicate_time_rows : bool, optional
         Whether exact duplicate GRIB time rows should be discarded during time
         normalization instead of raising an error.
+    pressure_levels : tuple[int, ...] | None, optional
+        Optional pressure levels to retain when opening isobaric datasets.
 
     Returns
     -------
@@ -417,6 +420,10 @@ def open_dataset(
 
     for key, g in inv.groupby(group_cols):
         short_name, param_id, type_of_level = key
+        if pressure_levels is not None and type_of_level == "isobaricInhPa":
+            g = g[g["level"].isin(pressure_levels)]
+            if g.empty:
+                continue
 
         files_for_var = [str(file) for file in sorted(g["file"].unique())]
         time_by_file = {
@@ -470,6 +477,9 @@ def open_dataset(
                 parallel=True,
                 chunks="auto",
             )
+
+        if pressure_levels is not None and "plev" in ds_raw.coords:
+            ds_raw = ds_raw.sel(plev=list(pressure_levels))
 
         datasets.append(ds_raw)
 

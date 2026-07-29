@@ -495,6 +495,7 @@ def map_grib_to_healpix(
     use_inventory_cache: bool = True,
     use_input_cache: bool = False,
     drop_duplicate_time_rows: bool = True,
+    pressure_levels: tuple[int, ...] | None = None,
     weights_dir: Optional[str] = None,
     clean: bool = False,
     target_chunk_mb: int = 100,
@@ -623,6 +624,7 @@ def map_grib_to_healpix(
                         use_input_cache=use_input_cache,
                         drop_duplicate_time_rows=drop_duplicate_time_rows,
                         interval=interval,
+                        pressure_levels=pressure_levels,
                     )
                 except EmptySourceDataError as exc:
                     LOGGER.warning(

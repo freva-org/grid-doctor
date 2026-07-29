@@ -321,6 +321,54 @@ def file_interval(path: str, frequency: str) -> Optional[Tuple[date, date]]:
     return None
 
 
+def files_interval(
+    files: Iterable[str | Path],
+    *,
+    frequency: str,
+) -> Optional[Tuple[date, date]]:
+    """Return the inclusive interval covered by one ordered file collection."""
+
+    intervals: list[Tuple[date, date]] = []
+    for file in files:
+        current_interval = file_interval(str(file), frequency)
+        if current_interval is None:
+            return None
+        intervals.append(current_interval)
+
+    if not intervals:
+        return None
+
+    starts = [start for start, _ in intervals]
+    ends = [end for _, end in intervals]
+    return min(starts), max(ends)
+
+
+def batched_source_record_files(
+    record: SourceRecord,
+    *,
+    batch_files: Optional[int],
+    fallback_interval: Tuple[Optional[date], Optional[date]],
+) -> Tuple[Tuple[SourceRecord, Tuple[Optional[date], Optional[date]]], ...]:
+    """Split one resolved source record into file-count batches."""
+
+    if batch_files is None or not record.files:
+        return ((record, fallback_interval),)
+    if batch_files <= 0:
+        raise ValueError("--batch-files must be a positive integer.")
+
+    batches: list[Tuple[SourceRecord, Tuple[Optional[date], Optional[date]]]] = []
+    for index in range(0, len(record.files), batch_files):
+        current_files = tuple(record.files[index:index + batch_files])
+        current_interval = files_interval(current_files, frequency=record.frequency)
+        batches.append(
+            (
+                record._replace(files=current_files),
+                current_interval if current_interval is not None else fallback_interval,
+            )
+        )
+    return tuple(batches)
+
+
 def overlaps_interval(
     path: str,
     frequency: str,

@@ -1,7 +1,14 @@
 # TODO
 
+- [x] there must be a mode where I can fan out things in the following fashion:
+    - batches: either months or files, tbd
+    - vertical-levels: for vertical variables
+    - each batch x vertical_group would land in a temp folder like path/to/era5,era5land/var-tmphash/freq/
+    - and then gathering to path/to/era5,era5land/freq/
 
-- [ ] create a merge mode to merge the zarr stores of folder1 into folder2
+
+
+- [x] create a merge mode to merge the zarr stores of folder1 into folder2
 - [x] remove batch-mode, leave it subprocess
 - [x] remove the option of record-thread from the code (is already false)
 - [x] remove the lazy pyramid strategy, default is already stepwise
@@ -12,7 +19,7 @@
 some point it can be processed also by --level_type (surface,pressure) or --tier 1,2,3...
 - [] update to the latest dates with quirugicall record replacement
 - [] the batchfolders in era5
-- [] reflow to be able to send multiple jobs and then collect them.
+- [x] reflow to be able to send multiple jobs and then collect them.
 - [] cf checking?
 
 ---

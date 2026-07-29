@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 from helpers.file_fetcher import (
+    batched_source_record_files,
     load_json,
     load_variable_requests,
     parse_interval,
@@ -28,7 +29,7 @@ from helpers.formatter import dataset_output_root, normalise_frequencies
 from helpers.zarr_publisher import merge_zarr_store_directories
 
 VERSION_SERIES = "2026.07"
-VERSION_MAJOR = 4
+VERSION_MAJOR = 5
 VERSION_MINOR = 0
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
@@ -66,6 +67,9 @@ STAGE_COLORS = {
     "attrs_only": "\033[32m",
 }
 _ACTIVE_BATCH_STATE_PATH: Optional[Path] = None
+_BATCH_FILES_CHILD_INDEX_ENV = "ERA5_BATCH_FILES_CHILD_INDEX"
+_BATCH_FILES_CHILD_COUNT_ENV = "ERA5_BATCH_FILES_CHILD_COUNT"
+_BATCH_FILES_INCLUDE_SPECIAL_ENV = "ERA5_BATCH_FILES_INCLUDE_SPECIAL"
 
 
 class RichDefaultsHelpFormatter(
@@ -123,14 +127,6 @@ def configure_logging() -> None:
     root_logger.handlers.clear()
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(handler)
-
-
-def parse_arg_list(value: Optional[str]) -> Optional[Tuple[str, ...]]:
-    """Parse a comma-separated CLI option."""
-
-    if value is None:
-        return None
-    return split_csv_list(value)
 
 
 def parse_coarsen_levels(value: Optional[str]) -> Optional[Tuple[int, ...]]:
@@ -302,13 +298,25 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     remap_cmd.add_argument(
-        "--batches",
+        "--batch-months",
+        dest="batch_months",
         type=int,
         default=None,
         metavar="MONTHS",
         help=(
             "Split the requested interval into sequential batches of N months "
             "and process each batch in a loop."
+        ),
+    )
+    remap_cmd.add_argument(
+        "--batch-files",
+        type=int,
+        default=None,
+        metavar="FILES",
+        help=(
+            "Split the requested interval into sequential batches of N files"
+            "and process each batch in a loop. When set, this replaces "
+            "calendar-month batching for remap execution."
         ),
     )
     remap_cmd.add_argument(
@@ -570,11 +578,13 @@ def batched_intervals(
     if batch_months is None:
         return (interval,)
     if batch_months <= 0:
-        raise ValueError("--batches must be a positive integer number of months.")
+        raise ValueError("--batch-months must be a positive integer number of months.")
 
     start, end = interval
     if start is None or end is None:
-        raise ValueError("--batches requires a bounded --interval with a start and end date.")
+        raise ValueError(
+            "--batch-months requires a bounded --interval with a start and end date."
+        )
 
     intervals: list[Tuple[date, date]] = []
     current_start = start
@@ -632,6 +642,8 @@ def build_batch_command(
         command.extend(["--root", args.root])
     if args.output_path is not None:
         command.extend(["--output-path", args.output_path])
+    if args.batch_files is not None:
+        command.extend(["--batch-files", str(args.batch_files)])
     if not args.use_inventory_cache:
         command.append("--no-inventory-cache")
     if args.use_input_cache:
@@ -698,11 +710,37 @@ def clear_batch_state() -> None:
     state_path.unlink(missing_ok=True)
 
 
-def run_batched_subprocesses(
+def run_batched_months(
     args: argparse.Namespace,
     intervals: Sequence[Tuple[Optional[date], Optional[date]]],
 ) -> int:
-    """Run each batch interval in a fresh child process on the same node."""
+    """Run each interval batch in a fresh child process on the same node."""
+
+    batch_months = args.batch_months if args.batch_months is not None else 1
+    batch_plans = [
+        {
+            "batch_index": index,
+            "batch_count": len(intervals),
+            "batch_label": interval_batch_label(
+                current_interval,
+                batch_index=index,
+                batch_count=len(intervals),
+                batch_months=batch_months,
+            ),
+            "batch_interval": format_interval(current_interval),
+            "command_interval": current_interval,
+            "env": None,
+        }
+        for index, current_interval in enumerate(intervals, start=1)
+    ]
+    return _run_subprocess(args, batch_plans)
+
+
+def _run_subprocess(
+    args: argparse.Namespace,
+    batch_plans: Sequence[dict[str, Any]],
+) -> int:
+    """Run one or more prepared batch plans in isolated child subprocesses."""
 
     logger = logging.getLogger(__name__)
     active_process: subprocess.Popen[str] | None = None
@@ -742,38 +780,47 @@ def run_batched_subprocesses(
     _install_handler(signal.SIGTERM, forward_signal)
 
     try:
-        for index, current_interval in enumerate(intervals, start=1):
+        for batch_plan in batch_plans:
+            batch_label = str(batch_plan["batch_label"])
             logger.info(
-                "🚀 Starting batch %s/%s for interval %s",
-                index,
-                len(intervals),
-                format_interval(current_interval),
+                "🚀 Starting batch %s",
+                batch_label,
             )
             command = build_batch_command(
                 args,
-                interval=current_interval,
-                clean=(args.clean and index == 1),
+                interval=batch_plan["command_interval"],
+                clean=(args.clean and int(batch_plan["batch_index"]) == 1),
             )
+            child_env = (
+                os.environ.copy()
+                if batch_plan.get("env")
+                else None
+            )
+            if child_env is not None:
+                child_env.update(
+                    {str(key): str(value) for key, value in dict(batch_plan["env"]).items()}
+                )
             active_process = subprocess.Popen(
                 command,
                 start_new_session=True,
                 text=True,
+                env=child_env,
             )
-            state_path = write_batch_state(
+            state = dict(batch_plan)
+            state.pop("command_interval", None)
+            state.pop("env", None)
+            state.update(
                 {
-                    "batch_index": index,
-                    "batch_count": len(intervals),
-                    "batch_interval": format_interval(current_interval),
                     "batch_pgid": active_process.pid,
                     "batch_pid": active_process.pid,
                     "command": command,
                     "parent_pid": os.getpid(),
                 }
             )
+            state_path = write_batch_state(state)
             logger.info(
-                "Launched isolated batch process %s/%s batch_pid=%s batch_pgid=%s state_file=%s",
-                index,
-                len(intervals),
+                "Launched isolated batch process %s batch_pid=%s batch_pgid=%s state_file=%s",
+                batch_label,
                 active_process.pid,
                 active_process.pid,
                 state_path,
@@ -795,7 +842,35 @@ def run_batched_subprocesses(
     return 0
 
 
-def parse_frequencies(value: str) -> Tuple[str, ...]:
+def run_batched_files(
+    args: argparse.Namespace,
+    *,
+    current_interval: Tuple[Optional[date], Optional[date]],
+    batch_labels: Sequence[str],
+) -> int:
+    """Run each file-count batch in a fresh child process on the same node."""
+
+    batch_count = len(batch_labels)
+    batch_plans = [
+        {
+            "batch_index": index,
+            "batch_count": batch_count,
+            "batch_label": batch_label,
+            "batch_interval": format_interval(current_interval),
+            "batch_mode": "files",
+            "command_interval": current_interval,
+            "env": {
+                _BATCH_FILES_CHILD_INDEX_ENV: index,
+                _BATCH_FILES_CHILD_COUNT_ENV: batch_count,
+                _BATCH_FILES_INCLUDE_SPECIAL_ENV: 1 if index == batch_count else 0,
+            },
+        }
+        for index, batch_label in enumerate(batch_labels, start=1)
+    ]
+    return _run_subprocess(args, batch_plans)
+
+
+def parse_cli_freqs(value: str) -> Tuple[str, ...]:
     """Parse and validate a frequency CLI option."""
 
     frequencies = (
@@ -843,16 +918,69 @@ def selected_requests(
     return source_mapper, requests
 
 
+def parse_cli_args(value: Optional[str]) -> Optional[Tuple[str, ...]]:
+    """Parse a comma-separated CLI option."""
+
+    if value is None:
+        return None
+    return split_csv_list(value)
+
+
+def build_file_batch_plan(
+    records: Sequence[Any],
+    *,
+    batch_files: int,
+    fallback_interval: Tuple[Optional[date], Optional[date]],
+) -> list[tuple[Any, Tuple[Optional[date], Optional[date]], str]]:
+    """Expand resolved records into a stable global file-batch execution plan."""
+
+    plan: list[tuple[Any, Tuple[Optional[date], Optional[date]], str]] = []
+    for record in records:
+        record_batches = batched_source_record_files(
+            record,
+            batch_files=batch_files,
+            fallback_interval=fallback_interval,
+        )
+        batch_count = len(record_batches)
+        for batch_index, (batched_record, batch_interval) in enumerate(
+            record_batches,
+            start=1,
+        ):
+            label = (
+                f"{batched_record.variable} {batched_record.frequency} "
+                f"{batch_index}/{batch_count} {format_interval(batch_interval)} "
+                f"({len(batched_record.files)} file{'s' if len(batched_record.files) != 1 else ''})"
+            )
+            plan.append((batched_record, batch_interval, label))
+    return plan
+
+
+def interval_batch_label(
+    interval: Tuple[Optional[date], Optional[date]],
+    *,
+    batch_index: int,
+    batch_count: int,
+    batch_months: int,
+) -> str:
+    """Return one human-readable label for an interval batch."""
+
+    month_text = "month" if batch_months == 1 else "months"
+    return (
+        f"interval {batch_index}/{batch_count} "
+        f"{format_interval(interval)} ({batch_months} {month_text})"
+    )
+
+
 def run_fetch(args: argparse.Namespace) -> int:
     """Resolve source files and print either JSON records or paths."""
 
     from helpers.special import split_special_variables
 
-    variables = parse_arg_list(args.variables)
-    frequencies = parse_frequencies(args.freq)
+    variables = parse_cli_args(args.variables)
+    frequencies = parse_cli_freqs(args.freq)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
     requested_variable_names = tuple(request.name for request in requests)
-    source_variables, _ = split_special_variables(requested_variable_names)
+    source_variables, special_variables = split_special_variables(requested_variable_names)
     effective_frequencies = extend_frequencies_for_special_variables(
         frequencies,
         requested_variable_names,
@@ -926,14 +1054,14 @@ def run_remap(args: argparse.Namespace) -> int:
     from helpers.special import split_special_variables
 
     logger = logging.getLogger(__name__)
-    variables = parse_arg_list(args.variables)
-    frequencies = parse_frequencies(args.freq)
+    variables = parse_cli_args(args.variables)
+    frequencies = parse_cli_freqs(args.freq)
     interval = parse_interval(args.interval)
     truncate_after = parse_truncate_after(args.truncate_after)
     coarsen_levels = parse_coarsen_levels(args.coarsen_only)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
     requested_variable_names = tuple(request.name for request in requests)
-    source_variables, _ = split_special_variables(requested_variable_names)
+    source_variables, special_variables = split_special_variables(requested_variable_names)
     effective_frequencies = extend_frequencies_for_special_variables(
         frequencies,
         requested_variable_names,
@@ -947,6 +1075,33 @@ def run_remap(args: argparse.Namespace) -> int:
         raise ValueError("--rechunk-only cannot be combined with --attrs-only.")
     if args.chunk_size <= 0:
         raise ValueError("--chunk-size must be a positive integer.")
+    if args.batch_months is not None and args.batch_files is not None:
+        raise ValueError("--batch-months and --batch-files are mutually exclusive.")
+    if args.batch_files is not None and args.batch_files <= 0:
+        raise ValueError("--batch-files must be a positive integer.")
+    if args.batch_files is not None and args.attrs_only:
+        raise ValueError("--batch-files cannot be combined with --attrs-only.")
+    if args.batch_files is not None and args.coarsen_only is not None:
+        raise ValueError("--batch-files cannot be combined with --coarsen-only.")
+    if args.batch_files is not None and args.rechunk_only:
+        raise ValueError("--batch-files cannot be combined with --rechunk-only.")
+
+    batch_files_child_index_env = os.environ.get(_BATCH_FILES_CHILD_INDEX_ENV)
+    batch_files_child_count_env = os.environ.get(_BATCH_FILES_CHILD_COUNT_ENV)
+    batch_files_include_special = (
+        os.environ.get(_BATCH_FILES_INCLUDE_SPECIAL_ENV, "0") == "1"
+    )
+    if (batch_files_child_index_env is None) != (batch_files_child_count_env is None):
+        raise ValueError(
+            "Internal file-batch child environment is incomplete; "
+            "expected both child index and child count."
+        )
+    batch_files_child_index = (
+        int(batch_files_child_index_env) if batch_files_child_index_env is not None else None
+    )
+    batch_files_child_count = (
+        int(batch_files_child_count_env) if batch_files_child_count_env is not None else None
+    )
 
     if args.from_scratch:
         root_path = dataset_output_root(args.dataset, output_path=args.output_path)
@@ -1015,6 +1170,122 @@ def run_remap(args: argparse.Namespace) -> int:
             )
             return
 
+        if args.batch_files is not None:
+            batched_records = build_file_batch_plan(
+                records,
+                batch_files=args.batch_files,
+                fallback_interval=current_interval,
+            )
+
+            if not batched_records:
+                map_grib_to_healpix(
+                    records,
+                    dataset=args.dataset,
+                    frequencies=effective_frequencies,
+                    requested_variables=requested_variable_names,
+                    interval=current_interval,
+                    zarr_format=args.zarr_format,
+                    use_inventory_cache=args.use_inventory_cache,
+                    use_input_cache=args.use_input_cache,
+                    drop_duplicate_time_rows=(not args.fail_on_duplicate_times),
+                    weights_dir=args.weights_dir,
+                    clean=clean,
+                    target_chunk_mb=args.chunk_size,
+                    highest_level_only=args.highest_level_only,
+                    coarsen_only=False,
+                    coarsen_levels=None,
+                    output_path=args.output_path,
+                    coarsen_interval=interval,
+                    truncate_after=None,
+                )
+                return
+
+            if (
+                batch_files_child_index is None
+                and batch_files_child_count is None
+            ):
+                logger.info(
+                    "📦 Processing %s file batches of up to %s file(s) each using isolated subprocesses.",
+                    len(batched_records),
+                    args.batch_files,
+                )
+                return_code = run_batched_files(
+                    args,
+                    current_interval=current_interval,
+                    batch_labels=[label for _, _, label in batched_records],
+                )
+                if return_code != 0:
+                    raise SystemExit(return_code)
+                return
+
+            selected_batches = batched_records
+            if batch_files_child_index is not None:
+                batch_count = len(batched_records)
+                if batch_files_child_count != batch_count:
+                    raise ValueError(
+                        "Resolved file-batch count does not match the parent batch plan: "
+                        f"expected {batch_files_child_count}, got {batch_count}."
+                    )
+                child_index = batch_files_child_index
+                if child_index < 1 or child_index > batch_count:
+                    raise ValueError(
+                        f"--batch-files-child-index must be between 1 and {batch_count}."
+                    )
+                selected_batches = [batched_records[child_index - 1]]
+
+            clean_remaining = clean
+            for batched_record, batch_interval, batch_label in selected_batches:
+                logger.info(
+                    "📦 Processing batch %s",
+                    batch_label,
+                )
+                map_grib_to_healpix(
+                    [batched_record],
+                    dataset=args.dataset,
+                    frequencies=(batched_record.frequency,),
+                    requested_variables=(batched_record.variable,),
+                    interval=batch_interval,
+                    zarr_format=args.zarr_format,
+                    use_inventory_cache=args.use_inventory_cache,
+                    use_input_cache=args.use_input_cache,
+                    drop_duplicate_time_rows=(not args.fail_on_duplicate_times),
+                    weights_dir=args.weights_dir,
+                    clean=clean_remaining,
+                    target_chunk_mb=args.chunk_size,
+                    highest_level_only=args.highest_level_only,
+                    coarsen_only=False,
+                    coarsen_levels=None,
+                    output_path=args.output_path,
+                    coarsen_interval=interval,
+                    truncate_after=None,
+                )
+                clean_remaining = False
+
+            if special_variables and (
+                batch_files_child_index is None or batch_files_include_special
+            ):
+                map_grib_to_healpix(
+                    [],
+                    dataset=args.dataset,
+                    frequencies=("fx",),
+                    requested_variables=special_variables,
+                    interval=current_interval,
+                    zarr_format=args.zarr_format,
+                    use_inventory_cache=args.use_inventory_cache,
+                    use_input_cache=False,
+                    drop_duplicate_time_rows=True,
+                    weights_dir=args.weights_dir,
+                    clean=False,
+                    target_chunk_mb=args.chunk_size,
+                    highest_level_only=args.highest_level_only,
+                    coarsen_only=False,
+                    coarsen_levels=None,
+                    output_path=args.output_path,
+                    coarsen_interval=interval,
+                    truncate_after=None,
+                )
+            return
+
         map_grib_to_healpix(
             records,
             dataset=args.dataset,
@@ -1036,17 +1307,18 @@ def run_remap(args: argparse.Namespace) -> int:
             truncate_after=None,
             )
 
-    intervals = batched_intervals(interval, batch_months=args.batches)
+    intervals = (
+        (interval,)
+        if args.batch_files is not None
+        else batched_intervals(interval, batch_months=args.batch_months)
+    )
 
     if len(intervals) > 1:
         logger.info(
-            "📦 Processing %s interval batches of %s month(s) each using isolated subprocesses.",
+            "📦 Processing %s batches using isolated subprocesses.",
             len(intervals),
-            args.batches,
         )
-
-    if len(intervals) > 1:
-        return run_batched_subprocesses(args, intervals)
+        return run_batched_months(args, intervals)
 
     run_single_interval(intervals[0], clean=args.clean)
 
@@ -1064,9 +1336,9 @@ def run_clean(args: argparse.Namespace) -> int:
     )
 
     logger = logging.getLogger(__name__)
-    variables = parse_arg_list(args.variables)
+    variables = parse_cli_args(args.variables)
     levels = parse_level_selection(args.levels)
-    frequencies = parse_frequencies(args.freq or "all")
+    frequencies = parse_cli_freqs(args.freq or "all")
 
     actions: list[str] = []
 
@@ -1125,7 +1397,7 @@ def run_merge(args: argparse.Namespace) -> int:
     """Merge one or more frequency directories into a target frequency directory."""
 
     logger = logging.getLogger(__name__)
-    source_dirs = parse_arg_list(args.source_dirs)
+    source_dirs = parse_cli_args(args.source_dirs)
     if source_dirs is None:
         raise ValueError("Expected at least one comma-separated value.")
 

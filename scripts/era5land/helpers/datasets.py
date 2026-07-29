@@ -412,13 +412,14 @@ def normalise_time_for_frequency(
     return ds
 
 
-def open_source_record_dataset(
+def open_record_dataset(
     record: SourceRecord,
     *,
     interval: tuple[Optional[date], Optional[date]] = (None, None),
     use_inventory_cache: bool = True,
     use_input_cache: bool = False,
     drop_duplicate_time_rows: bool = True,
+    pressure_levels: tuple[int, ...] | None = None,
 ) -> xr.Dataset:
     """Open one source record, optionally slice it, and rename its payload.
 
@@ -436,6 +437,8 @@ def open_source_record_dataset(
     drop_duplicate_time_rows
         Whether exact duplicate GRIB time rows should be discarded during time
         normalization instead of raising an error.
+    pressure_levels
+        Optional pressure levels to retain for pressure-level variables.
 
     Returns
     -------
@@ -447,6 +450,7 @@ def open_source_record_dataset(
         use_inventory_cache=use_inventory_cache,
         use_input_cache=use_input_cache,
         drop_duplicate_time_rows=drop_duplicate_time_rows,
+        pressure_levels=pressure_levels,
     )
 
     if record.frequency == "day":
@@ -562,6 +566,7 @@ def merge_frequency_dataset(
     use_input_cache: bool = False,
     drop_duplicate_time_rows: bool = True,
     interval: tuple[Optional[date], Optional[date]] = (None, None),
+    pressure_levels: tuple[int, ...] | None = None,
 ) -> xr.Dataset:
     """Open and merge all resolved variables for one output frequency.
 
@@ -580,6 +585,8 @@ def merge_frequency_dataset(
     interval
         Inclusive start/end date bounds applied to each per-record dataset
         immediately after it is opened.
+    pressure_levels
+        Optional pressure levels to retain for pressure-level variables.
 
     Returns
     -------
@@ -592,12 +599,13 @@ def merge_frequency_dataset(
 
     datasets = []
     for record in resolved_records:
-        ds = open_source_record_dataset(
+        ds = open_record_dataset(
             record,
             interval=interval,
             use_inventory_cache=use_inventory_cache,
             use_input_cache=use_input_cache,
             drop_duplicate_time_rows=drop_duplicate_time_rows,
+            pressure_levels=pressure_levels,
         )
         datasets.append(ds)
 
