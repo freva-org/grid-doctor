@@ -179,6 +179,61 @@ Internally, `converter.py remap-reflow ...` forwards the command to
 for both direct and scheduler-backed operation while the Reflow implementation
 stays private.
 
+### Queueing Long Reflow Campaigns
+
+`reflow_queue.py` is a lightweight controller for campaigns that must be split
+into several interval-scoped Reflow runs. It submits one interval, polls the
+run until its worker and `finalize_outputs` tasks finish, and then submits the
+next interval. This keeps only one interval run active while allowing a long
+campaign to continue without manual resubmission. The controller stores its
+progress in a JSON state file and can be restarted with the same arguments.
+
+Create a plan file with one interval per line. For example, this plan covers
+1943 through 2026:
+
+```console
+1943,1952
+1953,1962
+1963,1972
+1973,1982
+1983,1992
+1993,2002
+2003,2012
+2013,2022
+2023,2026
+```
+
+Save it as `/work/ks1387/era5_from_grib_reflow/zg_1hr_intervals.txt` (or use
+another path in `--plan`). Then submit the controller as a long-running,
+low-resource Slurm job:
+
+```console
+sbatch \
+  --account=ch1187 \
+  --partition=shared \
+  --job-name=era5-reflow-queue \
+  --time=7-00:00:00 \
+  --cpus-per-task=1 \
+  --mem=2G \
+  --output=/work/ks1387/era5_from_grib_reflow/controller-%j.out \
+  --wrap 'cd /work/bm1159/XCES/xces-work/k204229/MYWORK/CLINT/data/grid-doctor/scripts/era5land && /home/k/k204229/.conda/envs/grid_doctor_stable/bin/python reflow_queue.py --plan /work/ks1387/era5_from_grib_reflow/zg_1hr_intervals.txt --run-dir-root /work/ks1387/era5_from_grib_reflow/queue_runs --poll-seconds 300 --max-active-runs 1 --command-template "/home/k/k204229/.conda/envs/grid_doctor_stable/bin/python converter.py remap-reflow submit --dataset era5 --freq 1hr --var zg --interval {interval} --batch-files 8 --run-dir {run_dir} --output-path /work/ks1387/era5_from_grib_reflow/merged"'
+```
+
+The `{interval}` and `{run_dir}` values in `--command-template` are
+placeholders. The controller replaces them automatically for each plan entry;
+they do not need to be filled in manually. It creates separate directories
+such as `queue_runs/001-1943_1952/` for each interval and merges all intervals
+into the configured output path in sequence.
+
+Each Reflow run still submits one Slurm array containing its generated worker
+items. `--max-active-runs 1` does not reduce the size of that array, and Slurm
+array syntax such as `--array=0-799%20` still counts 800 submitted jobs. Choose
+intervals so each generated array remains safely below the user's remaining
+job limit, leaving room for Reflow's coordinator jobs and other workloads.
+Do not use `--from-scratch` for every queued interval because it can delete
+output published by earlier intervals. Use separate run directories, but one
+shared output path, as in the example above.
+
 ## Merging Temporary Outputs
 
 Use `merge` when you already have one or more temporary HEALPix output roots
