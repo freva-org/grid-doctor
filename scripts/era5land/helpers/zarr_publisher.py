@@ -312,6 +312,13 @@ def _sync_variable_attrs(dataset: xr.Dataset, destination: str) -> None:
         zarr.consolidate_metadata(destination)
 
 
+def _sync_dataset_metadata(dataset: xr.Dataset, destination: str) -> None:
+    """Synchronize root and variable metadata after a publication update."""
+
+    _sync_global_attrs(dict(dataset.attrs), destination)
+    _sync_variable_attrs(dataset, destination)
+
+
 def sync_named_variable_attrs(
     attrs_by_name: dict[str, dict[str, Any]],
     destination: str,
@@ -562,8 +569,7 @@ def update_zarr_store(
             zarr_format=zarr_format,
             target_chunk_mb=target_chunk_mb,
         )
-        _sync_global_attrs(dict(dataset.attrs), destination)
-        _sync_variable_attrs(dataset, destination)
+        _sync_dataset_metadata(dataset, destination)
         return
 
     if truncate_after is not None:
@@ -587,8 +593,7 @@ def update_zarr_store(
                 zarr_format=zarr_format,
                 target_chunk_mb=target_chunk_mb,
             )
-            _sync_global_attrs(dict(dataset.attrs), destination)
-            _sync_variable_attrs(dataset, destination)
+            _sync_dataset_metadata(dataset, destination)
             return
 
         if "time" not in dataset.dims or "time" not in existing.dims:
@@ -610,8 +615,7 @@ def update_zarr_store(
                     zarr_format=zarr_format,
                     target_chunk_mb=target_chunk_mb,
                 )
-            _sync_global_attrs(dict(dataset.attrs), destination)
-            _sync_variable_attrs(dataset, destination)
+            _sync_dataset_metadata(dataset, destination)
             return
 
         existing = _write_missing_variables(
@@ -633,8 +637,7 @@ def update_zarr_store(
         existing_times = existing.indexes["time"]
         new_times = candidate_times.difference(existing_times)
         if len(new_times) == 0:
-            _sync_global_attrs(dict(dataset.attrs), destination)
-            _sync_variable_attrs(dataset, destination)
+            _sync_dataset_metadata(dataset, destination)
             return
 
         appendable_candidate = dataset.sel(time=new_times.values)
@@ -645,8 +648,7 @@ def update_zarr_store(
                 destination,
                 zarr_format=zarr_format,
             )
-            _sync_global_attrs(dict(dataset.attrs), destination)
-            _sync_variable_attrs(dataset, destination)
+            _sync_dataset_metadata(dataset, destination)
             return
 
         merged = _merge_time_updates(existing, dataset)
@@ -656,11 +658,43 @@ def update_zarr_store(
             zarr_format=zarr_format,
             target_chunk_mb=target_chunk_mb,
         )
-        _sync_global_attrs(dict(dataset.attrs), destination)
-        _sync_variable_attrs(dataset, destination)
+        _sync_dataset_metadata(dataset, destination)
     finally:
         existing.close()
         gc.collect()
+
+
+def _merge_source_stores(
+    source_destinations: Iterable[tuple[Path, str]],
+    *,
+    clean: bool,
+    zarr_format: int,
+    target_chunk_mb: int,
+) -> list[str]:
+    """Merge source stores into destinations, cleaning each destination once."""
+
+    cleaned_destinations: set[str] = set()
+    merged_destinations: list[str] = []
+    for source_store, destination in source_destinations:
+        source_dataset = xr.open_zarr(
+            str(source_store),
+            consolidated=(zarr_format == 2),
+        )
+        try:
+            update_zarr_store(
+                source_dataset,
+                destination,
+                clean=(clean and destination not in cleaned_destinations),
+                zarr_format=zarr_format,
+                target_chunk_mb=target_chunk_mb,
+            )
+        finally:
+            source_dataset.close()
+
+        cleaned_destinations.add(destination)
+        merged_destinations.append(destination)
+
+    return sorted(set(merged_destinations))
 
 
 def merge_zarr_store_roots(
@@ -701,45 +735,30 @@ def merge_zarr_store_roots(
         Sorted unique destination store paths that received merged data.
     """
 
-    cleaned_destinations: set[str] = set()
-    merged_destinations: list[str] = []
-
-    for source_root in source_roots:
+    source_destinations = (
+        (
+            Path(store_name),
+            destination_for_level(
+                dataset,
+                frequency,
+                int(LEVEL_RE.search(Path(store_name).name).group("level")),
+                output_path=target_root,
+            ),
+        )
+        for source_root in source_roots
         for store_name in existing_destinations_for_frequency(
             dataset,
             frequency,
             output_path=source_root,
-        ):
-            source_store = Path(store_name)
-            match = LEVEL_RE.search(source_store.name)
-            if match is None:
-                continue
-
-            destination = destination_for_level(
-                dataset,
-                frequency,
-                int(match.group("level")),
-                output_path=target_root,
-            )
-            source_dataset = xr.open_zarr(
-                str(source_store),
-                consolidated=(zarr_format == 2),
-            )
-            try:
-                update_zarr_store(
-                    source_dataset,
-                    destination,
-                    clean=(clean and destination not in cleaned_destinations),
-                    zarr_format=zarr_format,
-                    target_chunk_mb=target_chunk_mb,
-                )
-            finally:
-                source_dataset.close()
-
-            cleaned_destinations.add(destination)
-            merged_destinations.append(destination)
-
-    return sorted(set(merged_destinations))
+        )
+        if LEVEL_RE.search(Path(store_name).name) is not None
+    )
+    return _merge_source_stores(
+        source_destinations,
+        clean=clean,
+        zarr_format=zarr_format,
+        target_chunk_mb=target_chunk_mb,
+    )
 
 
 def merge_zarr_store_directories(
@@ -774,34 +793,16 @@ def merge_zarr_store_directories(
         Sorted unique destination store paths that received merged data.
     """
 
-    cleaned_destinations: set[str] = set()
-    merged_destinations: list[str] = []
     target_path = Path(target_dir)
-
-    for source_dir in source_dirs:
-        source_path = Path(source_dir)
-        for source_store in sorted(source_path.glob("level_*.zarr")):
-            match = LEVEL_RE.search(source_store.name)
-            if match is None:
-                continue
-
-            destination = target_path / source_store.name
-            source_dataset = xr.open_zarr(
-                str(source_store),
-                consolidated=(zarr_format == 2),
-            )
-            try:
-                update_zarr_store(
-                    source_dataset,
-                    str(destination),
-                    clean=(clean and str(destination) not in cleaned_destinations),
-                    zarr_format=zarr_format,
-                    target_chunk_mb=target_chunk_mb,
-                )
-            finally:
-                source_dataset.close()
-
-            cleaned_destinations.add(str(destination))
-            merged_destinations.append(str(destination))
-
-    return sorted(set(merged_destinations))
+    source_destinations = (
+        (source_store, str(target_path / source_store.name))
+        for source_dir in source_dirs
+        for source_store in sorted(Path(source_dir).glob("level_*.zarr"))
+        if LEVEL_RE.search(source_store.name) is not None
+    )
+    return _merge_source_stores(
+        source_destinations,
+        clean=clean,
+        zarr_format=zarr_format,
+        target_chunk_mb=target_chunk_mb,
+    )
