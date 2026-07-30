@@ -194,6 +194,8 @@ python3 converter.py merge \
 This command reuses the same incremental Zarr merge behavior as the normal
 publication path. Add `--clean` if the first merge into each touched
 destination store should recreate that store instead of updating it in place.
+Use `--from-scratch` to delete the complete target directory before merging;
+this is broader than `--clean`.
 
 **NOTE:**
 for `merge`, the source directories and target directory should point directly

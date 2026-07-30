@@ -15,10 +15,12 @@ and metadata-consolidation behavior as the existing CLI workflow.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
 import sys
+import uuid
 from collections import defaultdict
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -109,12 +111,22 @@ def _batching_level_type(record: SourceRecord) -> str:
     return "surface"
 
 
-def _worker_output_root(run_dir: Path, item_index: int, frequency: str, variable: str) -> Path:
-    """Return the private temporary output root for one worker item."""
+def _worker_output_root(
+    run_dir: Path,
+    item_index: int,
+    frequency: str,
+    variable: str,
+    run_token: str,
+) -> Path:
+    """Return a collision-resistant temporary output root for one worker."""
 
     safe_variable = re.sub(r"[^A-Za-z0-9._-]+", "_", variable).strip("_") or "var"
     safe_frequency = re.sub(r"[^A-Za-z0-9._-]+", "_", frequency).strip("_") or "freq"
-    return run_dir / "worker-output" / f"{item_index:05d}-{safe_frequency}-{safe_variable}"
+    identity = f"{run_token}:{item_index}:{frequency}:{variable}".encode("utf-8")
+    output_hash = hashlib.sha256(identity).hexdigest()[:12]
+    return run_dir / "worker-output" / (
+        f"{item_index:05d}-{output_hash}-{safe_frequency}-{safe_variable}"
+    )
 
 
 def _batch_settings_for_item(
@@ -419,7 +431,8 @@ def gather_plan(
         batch_months=batch_months,
         pressure_level_group_size=pressure_level_group_size,
     )
-    record_cache_path = Path(run_dir) / "source-records.json"
+    worker_output_token = uuid.uuid4().hex
+    record_cache_path = Path(run_dir) / f"source-records-{worker_output_token}.json"
     record_cache_path.parent.mkdir(parents=True, exist_ok=True)
     with record_cache_path.open("w", encoding="utf-8") as handle:
         json.dump(
@@ -450,6 +463,7 @@ def gather_plan(
         "use_inventory_cache": use_inventory_cache,
         "weights_dir": weights_dir,
         "work_item_count": len(work_items),
+        "worker_output_token": worker_output_token,
         "zarr_format": zarr_format,
         "chunk_size": chunk_size,
         "clean": clean,
@@ -490,6 +504,7 @@ def remap_variable_frequency(
         int(item["item_index"]),
         str(item["frequency"]),
         str(item["variable"]),
+        str(plan["worker_output_token"]),
     )
     temp_output_root.mkdir(parents=True, exist_ok=True)
 
@@ -601,9 +616,14 @@ def finalize_outputs(
             output_path=output_path,
         )
 
+    for result in worker_results:
+        shutil.rmtree(Path(str(result["output_root"])), ignore_errors=True)
+
     worker_root = Path(run_dir) / "worker-output"
-    if worker_root.exists():
-        shutil.rmtree(worker_root, ignore_errors=True)
+    try:
+        worker_root.rmdir()
+    except OSError:
+        pass
 
     return sorted(set(merged_destinations))
 
