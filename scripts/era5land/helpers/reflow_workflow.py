@@ -543,7 +543,7 @@ def remap_variable_frequency(
     }
 
 
-@wf.job(cpus=137, time="20:00:00", mem="128", partition="shared")
+@wf.job(cpus=137, time="20:00:00", mem="128GB", partition="shared")
 def finalize_outputs(
     worker_results: Annotated[list[dict[str, Any]], Result(step="remap_variable_frequency")],
     plan_payloads: Annotated[list[dict[str, Any]], Result(step="gather_plan")],
