@@ -234,6 +234,13 @@ Do not use `--from-scratch` for every queued interval because it can delete
 output published by earlier intervals. Use separate run directories, but one
 shared output path, as in the example above.
 
+The Reflow workflow reads the default weight-cache directory from
+`assets/source_mapper.json` (`weights_path`), and all workers reuse the same
+shared cache. The configured directory must already exist and be writable on
+the shared filesystem before submission. Override it only when the configured
+path is unavailable on the worker nodes by adding
+`--weights-dir /path/to/shared/weights` to the Reflow submission template.
+
 ## Merging Temporary Outputs
 
 Use `merge` when you already have one or more temporary HEALPix output roots

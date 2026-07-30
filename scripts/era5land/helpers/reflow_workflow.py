@@ -62,6 +62,7 @@ wf = Workflow("era5land_healpix")
 LEVEL_RE = re.compile(r"level_(?P<level>\d+)\.zarr$")
 SOURCE_MAPPER = load_json(DEFAULT_SOURCE_MAPPER)
 REFLOW_BATCHING_POLICY = SOURCE_MAPPER.get("reflow_batching_policy", {})
+DEFAULT_WEIGHTS_DIR = str(SOURCE_MAPPER["weights_path"])
 
 
 def _level_policy(dataset: str, level_type: str) -> dict[str, Any]:
@@ -345,7 +346,7 @@ def gather_plan(
     weights_dir: Annotated[
         str,
         Param(help="Directory where HEALPix weight files are stored and reused"),
-    ] = "/tmp/healpix-weights",
+    ] = DEFAULT_WEIGHTS_DIR,
     clean: Annotated[
         bool,
         Param(help="Rewrite touched destination stores during the merge step"),
