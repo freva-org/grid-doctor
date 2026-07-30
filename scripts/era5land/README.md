@@ -206,6 +206,32 @@ source directories into the target directory in the order they are listed.
 values. Quote a glob so the command receives it as a single pattern, for
 example `--source '/scratch/k/k204229/worker-output/*-1hr-zg/era5/PT1H'`.
 
+For Reflow worker output, the nested dataset and frequency paths can be
+derived from the worker directory names:
+
+```console
+python3 converter.py merge \
+  --source /scratch/k/k204229/era5land-reflow/worker-output \
+  --dataset era5 \
+  --freq 1hr \
+  --var zg \
+  --output-path /scratch/k/k204229/era5land-final/era5
+```
+
+`--dataset` can be used alone to merge all discovered frequencies and
+variables. Add `--freq` to restrict frequencies, and optionally add `--var` to
+restrict variables. The output path is a dataset root in selector mode.
+
+For example, merge two frequencies and all variables:
+
+```console
+python3 converter.py merge \
+  --source /scratch/k/k204229/era5land-reflow/worker-output \
+  --dataset era5 \
+  --freq day,mon \
+  --output-path /scratch/k/k204229/era5land-final/era5
+```
+
 Write test output to a different publication root:
 
 ```console

@@ -27,11 +27,11 @@ from helpers.file_fetcher import (
     unresolved_records,
 )
 from helpers.formatter import dataset_output_root, normalise_frequencies
-from helpers.zarr_publisher import merge_zarr_store_directories
+from helpers.zarr_publisher import merge_zarr_stores
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 5
-VERSION_MINOR = 3
+VERSION_MINOR = 4
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -538,9 +538,26 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         required=True,
         help=(
-            "Source directories or glob patterns that directly contain "
-            "`level_*.zarr` stores. Values may be comma-separated or repeated."
+            "Source directories, worker-output roots, or glob patterns. Values "
+            "may be comma-separated or repeated."
         ),
+    )
+    merge_cmd.add_argument(
+        "--dataset",
+        choices=("era5land", "era5"),
+        default=None,
+        help="Dataset encoded in worker-output directories.",
+    )
+    merge_cmd.add_argument(
+        "--freq",
+        default=None,
+        help="Optional comma-separated frequencies encoded in worker-output directories.",
+    )
+    merge_cmd.add_argument(
+        "--var",
+        dest="merge_variable",
+        default=None,
+        help="Variable encoded in worker-output directory names.",
     )
     merge_cmd.add_argument(
         "--output-path",
@@ -1488,9 +1505,13 @@ def run_merge(args: argparse.Namespace) -> int:
     """Merge one or more frequency directories into a target frequency directory."""
 
     logger = logging.getLogger(__name__)
+    selectors = (args.dataset, args.freq, args.merge_variable)
+    if args.dataset is None and any(value is not None for value in selectors[1:]):
+        raise ValueError("--dataset is required when --freq or --var is provided.")
+
     source_dirs = expand_source_dirs(args.source_dirs)
     if not source_dirs:
-        raise ValueError("Expected at least one comma-separated value.")
+        raise ValueError("No matching merge source directories were found.")
 
     if args.chunk_size <= 0:
         raise ValueError("--chunk-size must be a positive integer.")
@@ -1500,9 +1521,12 @@ def run_merge(args: argparse.Namespace) -> int:
         logger.warning("Deleting merge target directory %s", target_dir)
         shutil.rmtree(target_dir)
 
-    merged_destinations = merge_zarr_store_directories(
-        source_dirs=source_dirs,
+    merged_destinations = merge_zarr_stores(
+        sources=source_dirs,
         target_dir=target_dir,
+        dataset=args.dataset,
+        frequency=args.freq,
+        variable=args.merge_variable,
         clean=args.clean,
         zarr_format=args.zarr_format,
         target_chunk_mb=args.chunk_size,

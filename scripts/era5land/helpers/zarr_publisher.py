@@ -13,7 +13,7 @@ import xarray as xr
 import zarr
 
 from .datasets import normalise_published_dataset
-from .formatter import destination_for_level, existing_destinations_for_frequency
+from .file_fetcher import SOURCE_MAPPER
 from .metadata import clean_output_attrs
 
 LOGGER = logging.getLogger(__name__)
@@ -697,109 +697,158 @@ def _merge_source_stores(
     return sorted(set(merged_destinations))
 
 
-def merge_zarr_store_roots(
+def _worker_output_roots(
+    sources: Iterable[Union[str, Path]],
     *,
     dataset: str,
-    frequency: str,
-    source_roots: Iterable[Union[str, Path]],
-    target_root: Optional[Union[str, Path]],
-    clean: bool,
-    zarr_format: int,
-    target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
-) -> list[str]:
-    """Merge one or more source output roots into a target publication root.
+    frequencies: tuple[str, ...] | None,
+    variables: tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    """Resolve worker-output roots into matching worker item directories."""
 
-    Parameters
-    ----------
-    dataset:
-        Dataset identifier such as ``"era5land"`` or ``"era5"``.
-    frequency:
-        Output frequency whose stores should be merged.
-    source_roots:
-        Directories that contain dataset/frequency/``level_*.zarr`` stores.
-    target_root:
-        Destination publication root. When ``None``, the configured default
-        publication root is used.
-    clean:
-        Whether to recreate each touched destination store on its first merge.
-    zarr_format:
-        Output Zarr format version used to read source stores and write the
-        merged destination stores.
-    target_chunk_mb:
-        Approximate target chunk size in megabytes for rewritten destination
-        stores.
+    roots: list[str] = []
+    for source in sources:
+        path = Path(source)
+        if path.name == dataset:
+            roots.append(str(path))
+            continue
+        candidates = sorted(path.glob("*")) if path.name == "worker-output" else [path]
+        for candidate in candidates:
+            name = candidate.name
+            if frequencies and not any(f"-{frequency}-" in name for frequency in frequencies):
+                continue
+            if variables and not any(name.endswith(f"-{variable}") for variable in variables):
+                continue
+            if candidate.is_dir():
+                roots.append(str(candidate))
+    return tuple(dict.fromkeys(roots))
 
-    Returns
-    -------
-    list[str]
-        Sorted unique destination store paths that received merged data.
-    """
 
-    source_destinations = (
-        (
-            Path(store_name),
-            destination_for_level(
-                dataset,
-                frequency,
-                int(LEVEL_RE.search(Path(store_name).name).group("level")),
-                output_path=target_root,
-            ),
-        )
-        for source_root in source_roots
-        for store_name in existing_destinations_for_frequency(
-            dataset,
-            frequency,
-            output_path=source_root,
-        )
-        if LEVEL_RE.search(Path(store_name).name) is not None
+def _frequency_names(value: str | Iterable[str] | None) -> tuple[str, ...] | None:
+    """Normalize optional frequency selections to canonical CLI names."""
+
+    if value is None:
+        return None
+    values = (value,) if isinstance(value, str) else tuple(value)
+    selected = tuple(
+        item.strip()
+        for value_item in values
+        for item in str(value_item).split(",")
+        if item.strip()
     )
-    return _merge_source_stores(
-        source_destinations,
-        clean=clean,
-        zarr_format=zarr_format,
-        target_chunk_mb=target_chunk_mb,
+    if selected == ("all",):
+        return tuple(SOURCE_MAPPER["output_frequency"])
+    unknown = sorted(set(selected) - set(SOURCE_MAPPER["output_frequency"]))
+    if unknown:
+        raise ValueError(f"Unsupported merge frequencies: {', '.join(unknown)}")
+    return tuple(dict.fromkeys(selected))
+
+
+def _variable_names(value: str | Iterable[str] | None) -> tuple[str, ...] | None:
+    """Normalize optional variable selections."""
+
+    if value is None:
+        return None
+    values = (value,) if isinstance(value, str) else tuple(value)
+    selected = tuple(
+        item.strip()
+        for value_item in values
+        for item in str(value_item).split(",")
+        if item.strip()
     )
+    return tuple(dict.fromkeys(selected))
 
 
-def merge_zarr_store_directories(
+def _dataset_root_destinations(
+    source_roots: Iterable[str],
     *,
-    source_dirs: Iterable[Union[str, Path]],
+    dataset: str,
+    frequencies: tuple[str, ...] | None,
+    target_root: Union[str, Path],
+) -> Iterable[tuple[Path, str]]:
+    """Yield store pairs from worker roots organized by dataset/frequency."""
+
+    output_frequency = SOURCE_MAPPER["output_frequency"]
+    selected_output_frequencies = {
+        output_frequency[frequency]
+        for frequency in frequencies
+    } if frequencies else None
+
+    for source_root in source_roots:
+        source_path = Path(source_root)
+        dataset_root = source_path if source_path.name == dataset else source_path / dataset
+        frequency_dirs = sorted(dataset_root.iterdir()) if dataset_root.is_dir() else ()
+        for source_frequency in frequency_dirs:
+            if not source_frequency.is_dir():
+                continue
+            if selected_output_frequencies and source_frequency.name not in selected_output_frequencies:
+                continue
+            frequency = next(
+                (
+                    name
+                    for name, output_name in output_frequency.items()
+                    if output_name == source_frequency.name
+                ),
+                None,
+            )
+            if frequency is None:
+                continue
+            target_frequency = Path(target_root) / source_frequency.name
+            for source_store in sorted(source_frequency.glob("level_*.zarr")):
+                if LEVEL_RE.search(source_store.name) is not None:
+                    yield source_store, str(target_frequency / source_store.name)
+
+
+def merge_zarr_stores(
+    *,
+    sources: Iterable[Union[str, Path]],
     target_dir: Union[str, Path],
     clean: bool,
     zarr_format: int,
     target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
+    dataset: str | None = None,
+    frequency: str | Iterable[str] | None = None,
+    variable: str | Iterable[str] | None = None,
 ) -> list[str]:
-    """Merge one or more directories of ``level_*.zarr`` stores into a target.
+    """Merge direct stores or selected Reflow worker roots into one target.
 
-    Parameters
-    ----------
-    source_dirs:
-        Directories that directly contain ``level_*.zarr`` stores.
-    target_dir:
-        Destination directory that should receive merged ``level_*.zarr``
-        stores.
-    clean:
-        Whether to recreate each touched destination store on its first merge.
-    zarr_format:
-        Output Zarr format version used to read source stores and write merged
-        destination stores.
-    target_chunk_mb:
-        Approximate target chunk size in megabytes for rewritten destination
-        stores.
-
-    Returns
-    -------
-    list[str]
-        Sorted unique destination store paths that received merged data.
+    When ``dataset`` is provided, ``sources`` are treated as Reflow worker-output
+    roots and nested dataset/frequency stores are resolved automatically.
+    ``frequency`` and ``variable`` optionally filter those worker directories.
+    Without ``dataset``, sources must directly contain ``level_*.zarr`` stores.
     """
 
-    target_path = Path(target_dir)
-    source_destinations = (
-        (source_store, str(target_path / source_store.name))
-        for source_dir in source_dirs
-        for source_store in sorted(Path(source_dir).glob("level_*.zarr"))
-        if LEVEL_RE.search(source_store.name) is not None
-    )
+    selected_frequencies = _frequency_names(frequency)
+    selected_variables = _variable_names(variable)
+    if dataset is not None:
+        worker_roots = _worker_output_roots(
+            sources,
+            dataset=dataset,
+            frequencies=selected_frequencies,
+            variables=selected_variables,
+        )
+        source_destinations = _dataset_root_destinations(
+            worker_roots,
+            dataset=dataset,
+            frequencies=selected_frequencies,
+            target_root=(
+                Path(target_dir).parent
+                if selected_frequencies
+                and len(selected_frequencies) == 1
+                and Path(target_dir).name
+                == SOURCE_MAPPER["output_frequency"][selected_frequencies[0]]
+                else target_dir
+            ),
+        )
+    else:
+        target_path = Path(target_dir)
+        source_destinations = (
+            (source_store, str(target_path / source_store.name))
+            for source in sources
+            for source_store in sorted(Path(source).glob("level_*.zarr"))
+            if LEVEL_RE.search(source_store.name) is not None
+        )
+
     return _merge_source_stores(
         source_destinations,
         clean=clean,

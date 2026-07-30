@@ -53,8 +53,9 @@ from helpers.file_fetcher import (
 from helpers.grib import cached_grib_inventory
 from helpers.formatter import (
     dataset_output_root,
+    destination_for_level,
 )
-from helpers.zarr_publisher import merge_zarr_store_roots
+from helpers.zarr_publisher import merge_zarr_stores
 
 wf = Workflow("era5land_healpix")
 
@@ -584,12 +585,20 @@ def finalize_outputs(
         worker_roots_by_frequency[frequency].append(temp_output_root)
 
     for frequency, source_roots in worker_roots_by_frequency.items():
+        target_dir = Path(
+            destination_for_level(
+                dataset,
+                frequency,
+                0,
+                output_path=output_path,
+            )
+        ).parent.parent
         merged_destinations.extend(
-            merge_zarr_store_roots(
+            merge_zarr_stores(
+                sources=source_roots,
+                target_dir=target_dir,
                 dataset=dataset,
                 frequency=frequency,
-                source_roots=source_roots,
-                target_root=output_path,
                 clean=clean,
                 zarr_format=zarr_format,
                 target_chunk_mb=target_chunk_mb,
