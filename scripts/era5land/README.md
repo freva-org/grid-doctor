@@ -1,4 +1,4 @@
-# ERA5-Land
+# ERA5 & ERA5-Land
 
 ERA5-Land in this repository is a script-driven workflow that:
 
@@ -168,6 +168,143 @@ python3 converter.py remap-reflow runs
 python3 converter.py remap-reflow status <run-id>
 ```
 
+### Reflow Operations
+
+For operational work on an existing run, it is usually best to pass both the
+interval run directory and the shared manifest database explicitly. The run
+directory holds the per-run files and logs, while the SQLite manifest store
+tracks run and task state across commands:
+
+```console
+python3 converter.py remap-reflow status \
+  era5land_healpix-20260731-c66e \
+  --run-dir /shared/era5_from_grib_reflow/queue_runs/002-1953_1962 \
+  --store-path $HOME/.cache/reflow/manifest.db
+```
+
+Typical status output shows the top-level run state plus one line per task:
+
+```text
+Run      era5land_healpix-20260731-c66e
+Workflow era5land_healpix
+Status   RUNNING
+
+  gather_plan               SUCCESS=1
+  remap_variable_frequency  FAILED=1, SUCCESS=456
+    [167]   FAILED       job=26577980
+```
+
+Read this as:
+
+- `Status` is the overall workflow state.
+- `gather_plan`, `remap_variable_frequency`, and `finalize_outputs` are the
+  workflow tasks.
+- Array tasks show one summary line plus per-shard lines for failed items.
+- `job=<slurm-id>` is the Slurm job that handled that task instance.
+
+Useful variants:
+
+- `--task remap_variable_frequency`: only show one task
+- `--json`: emit machine-readable state for scripting
+- `--errors`: include captured traceback text for failed instances
+
+Retry only the failed or cancelled instances of a task with:
+
+```console
+python3 converter.py remap-reflow retry \
+  era5land_healpix-20260731-c66e \
+  --task remap_variable_frequency \
+  --run-dir /shared/era5_from_grib_reflow/queue_runs/002-1953_1962 \
+  --store-path $HOME/.cache/reflow/manifest.db
+```
+
+If only shard `167` failed, the retry command should mark only that failed
+instance. It does not resubmit every successful shard of the same array task.
+For example, after:
+
+```text
+  remap_variable_frequency  FAILED=1, SUCCESS=456
+    [167]   FAILED       job=26577980
+```
+
+the retry command should report one task instance marked for retry, and the
+workflow should later advance to `finalize_outputs`.
+
+Cancelling a run or one active task uses the same run lookup arguments:
+
+```console
+python3 converter.py remap-reflow cancel \
+  era5land_healpix-20260731-c66e \
+  --task finalize_outputs \
+  --run-dir /shared/era5_from_grib_reflow/queue_runs/002-1953_1962 \
+  --store-path $HOME/.cache/reflow/manifest.db
+```
+
+This is intended for active work. If a task is already terminal, `cancel`
+should not change its final state.
+
+The Reflow manifest store is important during debugging and recovery:
+
+- `--run-dir` points to the per-run working directory where task logs, worker
+  outputs, and other run-local files live.
+- `--store-path` points to the shared SQLite manifest database. This is where
+  Reflow remembers runs, task states, retries, and cancellations.
+- If commands unexpectedly report `Marked 0 task instance(s) for retry`, first
+  confirm that `--store-path` matches the manifest that was used when the run
+  was submitted.
+
+Basic manifest-oriented commands for day-to-day operations:
+
+```console
+# List recent runs known to the manifest DB.
+python3 converter.py remap-reflow runs \
+  --store-path $HOME/.cache/reflow/manifest.db
+
+# Show one run from the manifest DB, without relying on the current directory.
+python3 converter.py remap-reflow status \
+  era5land_healpix-20260731-c66e \
+  --store-path $HOME/.cache/reflow/manifest.db
+
+# Show one task only, which is useful for large array jobs.
+python3 converter.py remap-reflow status \
+  era5land_healpix-20260731-c66e \
+  --task remap_variable_frequency \
+  --store-path $HOME/.cache/reflow/manifest.db
+
+# Show the same status as JSON for scripting or jq.
+python3 converter.py remap-reflow status \
+  era5land_healpix-20260731-c66e \
+  --json \
+  --store-path $HOME/.cache/reflow/manifest.db
+
+# Include captured Python tracebacks for failed task instances.
+python3 converter.py remap-reflow status \
+  era5land_healpix-20260731-c66e \
+  --errors \
+  --store-path $HOME/.cache/reflow/manifest.db
+
+# Retry failed or cancelled instances recorded in the manifest DB.
+python3 converter.py remap-reflow retry \
+  era5land_healpix-20260731-c66e \
+  --task remap_variable_frequency \
+  --store-path $HOME/.cache/reflow/manifest.db
+
+# Cancel active work for one run recorded in the manifest DB.
+python3 converter.py remap-reflow cancel \
+  era5land_healpix-20260731-c66e \
+  --store-path $HOME/.cache/reflow/manifest.db
+```
+
+These commands all read or update the same SQLite manifest, so using the same
+`--store-path` consistently matters more than the shell you run them from.
+
+When a queue-controlled campaign is restarted after manual recovery, the
+controller state file `reflow-queue-state.json` must also reflect reality.
+`reflow_queue.py` stores campaign progress separately from the Reflow manifest.
+As of this repository version, the controller refreshes submitted entries
+against the actual Reflow run state on startup, so a restarted controller can
+reconcile stale `FAILED` entries after a successful manual retry.
+
 At the moment the Reflow workflow is intentionally focused on the main remap
 path. It supports the fan-out/gather publication flow plus `--clean`,
 `--from-scratch`, `--highest-level-only`, and the input-cache flags. More
@@ -203,7 +340,7 @@ Create a plan file with one interval per line. For example, this plan covers
 2023,2026
 ```
 
-Save it as `/work/ks1387/era5_from_grib_reflow/zg_1hr_intervals.txt` (or use
+Save it as `/shared/era5_from_grib_reflow/zg_1hr_intervals.txt` (or use
 another path in `--plan`). Then submit the controller as a long-running,
 low-resource Slurm job:
 
@@ -215,8 +352,8 @@ sbatch \
   --time=7-00:00:00 \
   --cpus-per-task=1 \
   --mem=2G \
-  --output=/work/ks1387/era5_from_grib_reflow/controller-%j.out \
-  --wrap 'cd /work/bm1159/XCES/xces-work/k204229/MYWORK/CLINT/data/grid-doctor/scripts/era5land && /home/k/k204229/.conda/envs/grid_doctor_stable/bin/python reflow_queue.py --plan /work/ks1387/era5_from_grib_reflow/zg_1hr_intervals.txt --run-dir-root /work/ks1387/era5_from_grib_reflow/queue_runs --poll-seconds 300 --max-active-runs 1 --command-template "/home/k/k204229/.conda/envs/grid_doctor_stable/bin/python converter.py remap-reflow submit --dataset era5 --freq 1hr --var zg --interval {interval} --batch-files 8 --run-dir {run_dir} --output-path /work/ks1387/era5_from_grib_reflow/merged"'
+  --output=/shared/era5_from_grib_reflow/controller-%j.out \
+  --wrap 'cd /path/to/grid-doctor/scripts/era5land && /path/to/python reflow_queue.py --plan /shared/era5_from_grib_reflow/zg_1hr_intervals.txt --run-dir-root /shared/era5_from_grib_reflow/queue_runs --poll-seconds 300 --max-active-runs 1 --command-template "/path/to/python converter.py remap-reflow submit --dataset era5 --freq 1hr --var zg --interval {interval} --batch-files 8 --run-dir {run_dir} --output-path /shared/era5_from_grib_reflow/merged"'
 ```
 
 The `{interval}` and `{run_dir}` values in `--command-template` are
@@ -224,6 +361,46 @@ placeholders. The controller replaces them automatically for each plan entry;
 they do not need to be filled in manually. It creates separate directories
 such as `queue_runs/001-1943_1952/` for each interval and merges all intervals
 into the configured output path in sequence.
+
+If you prefer a reusable file over a long `sbatch --wrap ...` command, generate
+an sbatch wrapper script directly from the controller configuration:
+
+```console
+/path/to/python reflow_queue.py \
+  --plan /shared/era5_from_grib_reflow/zg_1hr_intervals.txt \
+  --run-dir-root /shared/era5_from_grib_reflow/queue_runs \
+  --poll-seconds 300 \
+  --max-active-runs 1 \
+  --store-path $HOME/.cache/reflow/manifest.db \
+  --command-template "/path/to/python converter.py remap-reflow submit --dataset era5 --freq 1hr --var zg --interval {interval} --batch-files 8 --run-dir {run_dir} --output-path /shared/era5_from_grib_reflow/merged" \
+  --write-sbatch /shared/era5_from_grib_reflow/run_reflow_queue.sh \
+  --sbatch-account ch1187 \
+  --sbatch-partition shared \
+  --sbatch-job-name era5-reflow-queue \
+  --sbatch-time 7-00:00:00 \
+  --sbatch-cpus-per-task 1 \
+  --sbatch-mem 2G \
+  --sbatch-output /shared/era5_from_grib_reflow/controller-%j.out
+```
+
+Then submit that generated script with:
+
+```console
+sbatch /shared/era5_from_grib_reflow/run_reflow_queue.sh
+```
+
+Two queue-controller options are worth calling out explicitly:
+
+- `--state-path` overrides the controller's own JSON checkpoint file. By
+  default, the controller stores its progress at
+  `<run-dir-root>/reflow-queue-state.json`. This file is separate from the
+  Reflow manifest database and records queue-level information such as which
+  intervals were submitted, which `run_id` belongs to each interval, and
+  whether the controller considers each interval complete.
+- `--continue-on-failure` tells the controller to keep submitting later
+  intervals even after one interval run reaches `FAILED` or `CANCELLED`.
+  Without this flag, the controller stops at the first failed interval so that
+  the campaign can be inspected and repaired before more work is launched.
 
 Each Reflow run still submits one Slurm array containing its generated worker
 items. `--max-active-runs 1` does not reduce the size of that array, and Slurm
@@ -249,8 +426,8 @@ new remap:
 
 ```console
 python3 converter.py merge \
-  --source '/scratch/k/k204229/worker-*/era5land/1H' \
-  --output-path /scratch/k/$USER/era5land-final/era5land/1H
+  --source '/scratch/$USER/worker-*/era5land/1H' \
+  --output-path /scratch/$USER/era5land-final/era5land/1H
 ```
 
 This command reuses the same incremental Zarr merge behavior as the normal
@@ -266,18 +443,18 @@ at one output-frequency directory, for example `.../era5land/1H` or
 source directories into the target directory in the order they are listed.
 `--source` accepts glob patterns, multiple source values, and comma-separated
 values. Quote a glob so the command receives it as a single pattern, for
-example `--source '/scratch/k/k204229/worker-output/*-1hr-zg/era5/PT1H'`.
+example `--source '/scratch/$USER/worker-output/*-1hr-zg/era5/PT1H'`.
 
 For Reflow worker output, the nested dataset and frequency paths can be
 derived from the worker directory names:
 
 ```console
 python3 converter.py merge \
-  --source /scratch/k/k204229/era5land-reflow/worker-output \
+  --source /scratch/$USER/era5land-reflow/worker-output \
   --dataset era5 \
   --freq 1hr \
   --var zg \
-  --output-path /scratch/k/k204229/era5land-final/era5
+  --output-path /scratch/$USER/era5land-final/era5
 ```
 
 `--dataset` can be used alone to merge all discovered frequencies and
@@ -288,10 +465,10 @@ For example, merge two frequencies and all variables:
 
 ```console
 python3 converter.py merge \
-  --source /scratch/k/k204229/era5land-reflow/worker-output \
+  --source /scratch/$USER/era5land-reflow/worker-output \
   --dataset era5 \
   --freq day,mon \
-  --output-path /scratch/k/k204229/era5land-final/era5
+  --output-path /scratch/$USER/era5land-final/era5
 ```
 
 Write test output to a different publication root:

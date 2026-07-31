@@ -19,7 +19,7 @@ import shlex
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
@@ -31,9 +31,15 @@ RUN_ID_RE = re.compile(r"run_id\s*=\s*(\S+)")
 def log(message, *args):
     """Print one timestamped log line to stdout."""
 
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     text = message % args if args else message
     print("[%s] %s" % (timestamp, text), flush=True)
+
+
+def utc_timestamp():
+    """Return one ISO-8601 timestamp string in the local timezone."""
+
+    return datetime.now().astimezone().isoformat()
 
 
 def parse_args():
@@ -95,6 +101,53 @@ def parse_args():
         action="store_true",
         default=False,
         help="Keep submitting later intervals even if one run fails.",
+    )
+    parser.add_argument(
+        "--write-sbatch",
+        default=None,
+        help=(
+            "Optional path where an sbatch wrapper script should be written and "
+            "the controller should exit without running."
+        ),
+    )
+    parser.add_argument(
+        "--sbatch-account",
+        default=None,
+        help="Account to place in the generated sbatch wrapper.",
+    )
+    parser.add_argument(
+        "--sbatch-partition",
+        default=None,
+        help="Partition to place in the generated sbatch wrapper.",
+    )
+    parser.add_argument(
+        "--sbatch-job-name",
+        default="era5-reflow-queue",
+        help="Job name to place in the generated sbatch wrapper.",
+    )
+    parser.add_argument(
+        "--sbatch-time",
+        default="7-00:00:00",
+        help="Wall-clock time limit to place in the generated sbatch wrapper.",
+    )
+    parser.add_argument(
+        "--sbatch-cpus-per-task",
+        type=int,
+        default=1,
+        help="CPU count to place in the generated sbatch wrapper.",
+    )
+    parser.add_argument(
+        "--sbatch-mem",
+        default="2G",
+        help="Memory request to place in the generated sbatch wrapper.",
+    )
+    parser.add_argument(
+        "--sbatch-output",
+        default=None,
+        help=(
+            "Optional stdout/stderr path for the generated sbatch wrapper. "
+            "Defaults to <run-dir-root>/controller-%%j.out."
+        ),
     )
     return parser.parse_args()
 
@@ -264,6 +317,14 @@ def query_status(python_executable, converter_path, entry, store_path, workdir):
     return str(run_info.get("status", "UNKNOWN")).upper()
 
 
+def needs_status_refresh(entry):
+    """Return whether an entry should be re-polled on controller restart."""
+
+    if not entry.get("submitted") or not entry.get("run_id"):
+        return False
+    return (not entry.get("completed")) or entry.get("status") in ("FAILED", "CANCELLED", "SUBMITTED", "RUNNING")
+
+
 def active_entries(entries):
     """Return submitted entries whose runs are not yet terminal."""
 
@@ -307,7 +368,39 @@ def update_active_statuses(args, state, converter_path, workdir):
             )
         if status in TERMINAL_STATES:
             entry["completed"] = True
-            entry["completed_at"] = datetime.utcnow().isoformat() + "Z"
+            entry["completed_at"] = utc_timestamp()
+
+
+def refresh_submitted_statuses(args, state, converter_path, workdir):
+    """Reconcile persisted controller state with current Reflow run statuses."""
+
+    for entry in state["entries"]:
+        if not needs_status_refresh(entry):
+            continue
+        status = query_status(
+            python_executable=args.python_executable,
+            converter_path=converter_path,
+            entry=entry,
+            store_path=args.store_path,
+            workdir=workdir,
+        )
+        previous = entry.get("status")
+        previous_completed = bool(entry.get("completed"))
+        entry["status"] = status
+        if status in TERMINAL_STATES:
+            entry["completed"] = True
+            entry.setdefault("completed_at", utc_timestamp())
+        else:
+            entry["completed"] = False
+            entry.pop("completed_at", None)
+        if previous != status or previous_completed != entry["completed"]:
+            log(
+                "Reconciled interval %s run %s: status=%s completed=%s",
+                entry["interval"],
+                entry["run_id"],
+                entry["status"],
+                entry["completed"],
+            )
 
 
 def submit_available_entries(args, state, workdir):
@@ -322,7 +415,7 @@ def submit_available_entries(args, state, workdir):
         run_id = submit_entry(args.command_template, entry, workdir)
         entry["run_id"] = run_id
         entry["submitted"] = True
-        entry["submitted_at"] = datetime.utcnow().isoformat() + "Z"
+        entry["submitted_at"] = utc_timestamp()
         entry["status"] = "SUBMITTED"
         log("Submitted interval %s as run %s", entry["interval"], run_id)
 
@@ -343,6 +436,67 @@ def all_done(entries):
         if not entry.get("completed"):
             return False
     return True
+
+
+def shell_quote_join(parts):
+    """Return one shell-safe command line assembled from argument tokens."""
+
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def build_controller_command(args, script_path):
+    """Return the command used to run this controller with the current arguments."""
+
+    command = [
+        args.python_executable,
+        str(script_path),
+        "--plan",
+        args.plan,
+        "--command-template",
+        args.command_template,
+        "--run-dir-root",
+        args.run_dir_root,
+        "--poll-seconds",
+        str(args.poll_seconds),
+        "--max-active-runs",
+        str(args.max_active_runs),
+        "--python-executable",
+        args.python_executable,
+    ]
+    if args.state_path:
+        command.extend(["--state-path", args.state_path])
+    if args.store_path:
+        command.extend(["--store-path", args.store_path])
+    if args.continue_on_failure:
+        command.append("--continue-on-failure")
+    return command
+
+
+def render_sbatch_script(args, script_path):
+    """Return a reusable sbatch wrapper script for the queue controller."""
+
+    output_path = args.sbatch_output or str(
+        Path(args.run_dir_root).expanduser().resolve() / "controller-%j.out"
+    )
+    lines = ["#!/bin/bash", "#SBATCH --job-name=%s" % args.sbatch_job_name]
+    if args.sbatch_account:
+        lines.append("#SBATCH --account=%s" % args.sbatch_account)
+    if args.sbatch_partition:
+        lines.append("#SBATCH --partition=%s" % args.sbatch_partition)
+    lines.extend(
+        [
+            "#SBATCH --time=%s" % args.sbatch_time,
+            "#SBATCH --cpus-per-task=%d" % args.sbatch_cpus_per_task,
+            "#SBATCH --mem=%s" % args.sbatch_mem,
+            "#SBATCH --output=%s" % output_path,
+            "",
+            "set -euo pipefail",
+            "cd %s" % shlex.quote(str(script_path.parent)),
+            shell_quote_join(build_controller_command(args, script_path)),
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def main():
@@ -369,6 +523,17 @@ def main():
         intervals=intervals,
         run_dir_root=run_dir_root,
     )
+    if args.write_sbatch:
+        sbatch_path = Path(args.write_sbatch).expanduser().resolve()
+        sbatch_path.write_text(
+            render_sbatch_script(args, Path(__file__).resolve()),
+            encoding="utf-8",
+        )
+        os.chmod(sbatch_path, 0o755)
+        log("\n Wrote sbatch wrapper to %s", sbatch_path)
+        return 0
+
+    refresh_submitted_statuses(args, state, converter_path, workdir)
     save_state(state_path, state)
     log("Loaded %d intervals from %s", len(intervals), args.plan)
     log("State file: %s", state_path)
