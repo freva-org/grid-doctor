@@ -5,8 +5,22 @@ site_url: https://waterpark.dkrz.de
 site_dir: site-data
 docs_dir: .build/data
 
+
+theme:
+  custom_dir: docs/data/overrides
+
+copyright: >
+  Need support? <a href="mailto:waterpark@support.dkrz.de">waterpark@support.dkrz.de</a>
+
+extra:
+  social:
+    - icon: material/email
+      link: mailto:waterpark@support.dkrz.de
+      name: Support - waterpark@support.dkrz.de
+
 nav:
   - Overview: index.md
+  - Data Browser: databrowser.md
   - STAC Browser: stac-browser.md
   - Storage Concepts:
       - HEALPix in Zarr on S3: storage_concepts/index.md
@@ -18,3 +32,4 @@ nav:
       - Remapping and benchmark: appendix-remapping-benchmark.md
 exclude_docs: |
   technical/**
+  overrides/**

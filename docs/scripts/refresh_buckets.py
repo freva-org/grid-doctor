@@ -1,6 +1,7 @@
 """
 Refresh docs/assets/waterpark-datasets.json from the live bucket listing.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -14,10 +15,43 @@ import s3fs
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUT = HERE.parent.parent / "docs" / "assets" / "waterpark-datasets.json"
 
+#: Override directory registered as ``theme.custom_dir`` in
+#: mkdocs.data.yml (docs/data/overrides). NOTE: this lives inside the
+#: docs tree, so it must stay listed under ``exclude_docs`` -- otherwise
+#: the raw Jinja template is shipped as a page of the built site.
+OVERRIDE_FILE = HERE.parent.parent / "docs" / "data" / "overrides" / "main.html"
+
+
+def render_announcement(text: str, target: Path = OVERRIDE_FILE) -> None:
+    """Mirror *text* into the announce block; empty text clears it.
+
+    Written unconditionally so that clearing the variable removes the
+    banner on the next run. The message is wrapped in ``{% raw %}`` so
+    stray braces in it cannot break the Jinja build, and no
+    ``str.format`` touches user text (a literal ``{`` would raise).
+    """
+    if text:
+        body = (
+            '{% extends "base.html" %}\n\n'
+            "{% block announce %}\n"
+            "  {% raw %}" + text + "{% endraw %}\n"
+            "{% endblock %}\n"
+        )
+    else:
+        body = '{% extends "base.html" %}\n'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists() or target.read_text() != body:
+        target.write_text(body)
+        print(
+            f"announcement updated: {text!r}" if text else "announcement cleared",
+            file=sys.stderr,
+        )
+
 
 def list_buckets(endpoint: str, key: str, secret: str) -> list[str]:
-    fs = s3fs.S3FileSystem(key=key, secret=secret,
-                           client_kwargs={"endpoint_url": endpoint})
+    fs = s3fs.S3FileSystem(
+        key=key, secret=secret, client_kwargs={"endpoint_url": endpoint}
+    )
     names: list[str] = []
     for root in ("", "/"):
         try:
@@ -28,14 +62,17 @@ def list_buckets(endpoint: str, key: str, secret: str) -> list[str]:
         except Exception:
             continue
     if not names:
-        raise SystemExit(f"could not list buckets from {endpoint} "
-                         f"(check admin credentials / gateway permissions)")
+        raise SystemExit(
+            f"could not list buckets from {endpoint} "
+            f"(check admin credentials / gateway permissions)"
+        )
     return sorted(names)
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--endpoint", default="https://s3.waterpark.dkrz.de")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = ap.parse_args()
@@ -43,12 +80,18 @@ def main() -> None:
     key = os.environ.get("WATERPARK_S3_KEY")
     secret = os.environ.get("WATERPARK_S3_SECRET")
     if not key or not secret:
-        raise SystemExit("set WATERPARK_S3_KEY and WATERPARK_S3_SECRET in the environment")
+        raise SystemExit(
+            "set WATERPARK_S3_KEY and WATERPARK_S3_SECRET in the environment"
+        )
 
     buckets = list_buckets(args.endpoint, key, secret)
 
     # Blacklist
-    blacklist = {b.strip() for b in os.environ.get("WATERPARK_BUCKET_BLACKLIST", "").split(",") if b.strip()}
+    blacklist = {
+        b.strip()
+        for b in os.environ.get("WATERPARK_BUCKET_BLACKLIST", "").split(",")
+        if b.strip()
+    }
     if blacklist:
         buckets = [b for b in buckets if b not in blacklist]
 
@@ -75,6 +118,7 @@ def main() -> None:
         print(f"added (no description): {', '.join(added)}", file=sys.stderr)
     if removed:
         print(f"removed: {', '.join(removed)}", file=sys.stderr)
+    render_announcement(os.getenv("WATERPARK_ANNOUNCEMENT", "").strip())
 
 
 if __name__ == "__main__":

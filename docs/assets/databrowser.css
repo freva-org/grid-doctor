@@ -1,0 +1,54 @@
+/*
+ * Freva Data Browser embed; host-side layout only.
+ */
+
+/* Full-bleed: drop Material's content max-width / centering on this page. */
+body.waterpark-databrowser-page .md-main__inner,
+body.waterpark-databrowser-page .md-content,
+body.waterpark-databrowser-page .md-content__inner {
+  max-width: none;
+  margin: 0;
+}
+
+body.waterpark-databrowser-page .md-content__inner {
+  padding: 0;
+  min-height: 0;
+}
+body.waterpark-databrowser-page .md-content__inner > h1:first-child {
+  display: none;
+}
+body.waterpark-databrowser-page .md-content__inner::before {
+  display: none;
+}
+
+/* 2. Mount sizing */
+.waterpark-databrowser-wrapper {
+  width: 100%;
+}
+body.waterpark-databrowser-page #databrowser-mount {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: calc(100vh - var(--md-header-height, 48px));
+  min-height: 680px;
+  overflow: hidden;
+}
+
+/* Accent to Waterpark dominant colour (teal `--md-primary-fg-color`). */
+body.waterpark-databrowser-page .freva-db {
+  --accent: var(--md-primary-fg-color, #009688);
+  --accent-2: var(--md-primary-fg-color--dark, #00695c);
+}
+
+/* Loader error fallback */
+.waterpark-databrowser-error {
+  margin: 2rem auto;
+  max-width: 40rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--md-default-fg-color--lightest, #ddd);
+  border-left: 4px solid var(--md-primary-fg-color, #009688);
+  border-radius: 6px;
+  color: var(--md-default-fg-color, #333);
+  background: var(--md-default-bg-color, #fff);
+  font-size: 0.8rem;
+}

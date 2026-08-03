@@ -1,16 +1,12 @@
 name: Refresh Waterpark bucket list
 
-# Regenerates docs/assets/waterpark-datasets.json (the bucket list)
-
-
 on:
   schedule:
-    - cron: "0 4 * * *"  # every 24h at 4am UTC
-  workflow_dispatch: {}
+    - cron: "0 4 * * *"
+  workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: refresh-buckets
@@ -19,7 +15,17 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+
     steps:
+      - name: Create freva-bot token
+        id: freva-bot-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.FREVA_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.FREVA_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -29,27 +35,33 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install s3fs
+        run: pip install s3fs tox
 
       - name: Refresh bucket list
         env:
           WATERPARK_S3_KEY: ${{ secrets.WATERPARK_S3_KEY }}
           WATERPARK_S3_SECRET: ${{ secrets.WATERPARK_S3_SECRET }}
           WATERPARK_BUCKET_BLACKLIST: ${{ vars.WATERPARK_BUCKET_BLACKLIST }}
+          # rendered into docs/data/overrides/main.html by refresh_buckets.py;
+          # empty/unset clears the banner on the next run
+          WATERPARK_ANNOUNCEMENT: ${{ vars.WATERPARK_ANNOUNCEMENT }}
         run: |
           if [ -z "$WATERPARK_S3_KEY" ] || [ -z "$WATERPARK_S3_SECRET" ]; then
             echo "::error::WATERPARK_S3_KEY / WATERPARK_S3_SECRET secrets are not set."
             exit 1
           fi
+
           python docs/scripts/refresh_buckets.py \
             --endpoint https://s3.waterpark.dkrz.de \
             --out docs/assets/waterpark-datasets.json
 
-      - name: Open a PR if the bucket list changed
-        uses: peter-evans/create-pull-request@v6
+      - name: Open a PR if anything changed
+        uses: peter-evans/create-pull-request@v8
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          add-paths: docs/assets/waterpark-datasets.json
+          token: ${{ steps.freva-bot-token.outputs.token }}
+          add-paths: |
+            docs/assets/waterpark-datasets.json
+            docs/data/overrides/main.html
           branch: bump-waterpark-buckets
           delete-branch: true
           commit-message: "chore(waterpark): refresh bucket list"
@@ -58,10 +70,12 @@ jobs:
           base: main
           title: "chore(waterpark): refresh dataset bucket list"
           body: |
-            Automated refresh of `docs/assets/waterpark-datasets.json`
-            the bucket list (and labels) the live dataset tree reads.
+            Automated refresh of `docs/assets/waterpark-datasets.json`,
+            the bucket list and labels read by the live dataset tree,
+            and of the announcement banner
+            (from the `WATERPARK_ANNOUNCEMENT` repository variable).
 
-            The live page fetches this JSON directly from GitHub,
+            The live page fetches the JSON directly from GitHub,
             so the tree updates as soon as this lands on `main`.
           labels: |
             automated
