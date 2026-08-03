@@ -22,12 +22,22 @@ uploaded per dataset — with the regional additions from the
 
 Pipeline
 --------
-gather_sources → create_weights → plan_regrid → regrid_file → group_for_upload → combine_and_upload
-  (singleton)     (singleton)      (singleton)    (array)       (singleton)         (array)
+gather_sources → create_weights → scan_staging → regrid_batch → group_for_upload → combine_and_upload
+  (singleton)     (singleton)      (singleton)     (array)        (singleton)         (array)
+
+Throughput
+----------
+One array task is a *batch* of source files, not a single file: with
+~1 h per file and an 8 h wall-time, one task runs ``workers`` files
+concurrently on a node for as many rounds as fit.  ``scan_staging``
+classifies every planned item against the staging directory first, so
+work already on disk from an earlier run is never redone and a
+cancelled run resumes at item granularity.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, TypedDict
 
@@ -57,6 +67,18 @@ CELL_CHUNK_EXPONENT = 8  # 4**8 = 65536 cells per spatial chunk
 COVERAGE_VAR = "coverage_fraction"
 
 _CELL_DIM_CANDIDATES = ("cell", "cells", "value", "values", "pix", "ipix")
+
+# --- Batching / resume -----------------------------------------------------
+# DEFAULT_TIME_CHUNK is the *part* boundary: staging files are named
+# ``..._part_PPP_...`` where PPP indexes a slice of this many time steps.
+# Changing it mid-conversion re-slices the time axis, so old and new parts
+# would overlap and the combine would concatenate duplicated timestamps.
+# Treat it as frozen for the lifetime of a staging directory.
+DEFAULT_TIME_CHUNK = 120
+DEFAULT_ITEMS_PER_BATCH = 56  # 8 workers x 7 rounds at ~1 h/item within 8 h
+DEFAULT_WORKERS = 8  # concurrent items per node; see sizing note in scan log
+DONE_SUFFIX = ".done"  # per-item completion marker written by _regrid_one
+EXPECTED_FILE = "expected.json"  # per-dataset item count, written by the scan
 
 
 class WeightInfo(TypedDict):
@@ -239,6 +261,166 @@ def _mask_with_coverage(
             var = var.transpose(..., cell)
             var.values[..., invalid] = np.nan
     return ds
+
+
+# ---------------------------------------------------------------------------
+# Staging bookkeeping: what is already on disk?
+# ---------------------------------------------------------------------------
+# An item is complete when every ``part_PPP_level_L.nc`` exists for every
+# part and level.  Three tiers, cheapest first:
+#
+#   1. a ``file_XXXXX.done`` marker matching this run's time_chunk/max_level
+#      -> complete, no I/O beyond the directory listing;
+#   2. part files present but no marker (the legacy items from a run that
+#      predates markers) -> verify by header read, then write the marker so
+#      tier 2 is paid exactly once;
+#   3. nothing present -> to do.
+#
+# New writes go through ``_atomic_to_netcdf``, so from this run onwards a
+# file bearing its final name is by construction complete and tier 2 shrinks
+# to nothing.
+def _marker_path(out_dir: Path, file_index: int) -> Path:
+    return out_dir / f"file_{file_index:05d}{DONE_SUFFIX}"
+
+
+def _part_prefix(file_index: int) -> str:
+    return f"file_{file_index:05d}_part_"
+
+
+def _expected_parts(source_file: str, time_chunk: int) -> int:
+    """Number of time slices this source file is cut into.
+
+    Header read only — no decoding, no data touched.
+    """
+    import xarray as xr
+
+    with xr.open_dataset(source_file, decode_times=False, decode_cf=False) as ds:
+        n_time = int(ds.sizes.get("time", 0))
+    return max(1, -(-n_time // time_chunk)) if n_time else 1
+
+
+def _marker_ok(item: RegridItem, names: set[str], time_chunk: int) -> bool:
+    """Tier 1: trust a marker only if it describes *this* part layout."""
+    name = f"file_{item['file_index']:05d}{DONE_SUFFIX}"
+    if name not in names:
+        return False
+    try:
+        meta = json.loads((Path(item["output_dir"]) / name).read_text())
+    except Exception:
+        return False
+    return (
+        meta.get("time_chunk") == time_chunk
+        and meta.get("max_level") == item["max_level"]
+    )
+
+
+def _verify_and_mark(item: RegridItem, time_chunk: int) -> bool:
+    """Tier 2: prove an unmarked item is complete, then mark it.
+
+    Write order in ``_regrid_one`` is parts outer, levels max->0 inner, so
+    ``part_PPP_level_0.nc`` is the last file of its part and the final part's
+    level 0 is the last file overall — the only one that can be torn by a
+    ``scancel``.  Existence covers the rest; the last one is opened.
+    """
+    import xarray as xr
+
+    out_dir = Path(item["output_dir"])
+    idx, max_level = item["file_index"], item["max_level"]
+    try:
+        n_parts = _expected_parts(item["source_file"], time_chunk)
+    except Exception as exc:
+        print(f"  cannot read source header for {item['source_file']}: {exc!r}")
+        return False
+
+    last: Path | None = None
+    for part in range(n_parts):
+        for lvl in range(max_level, -1, -1):
+            f = out_dir / f"file_{idx:05d}_part_{part:03d}_level_{lvl}.nc"
+            try:
+                if f.stat().st_size == 0:
+                    return False
+            except OSError:
+                return False
+            last = f
+    if last is not None:
+        try:
+            with xr.open_dataset(last):
+                pass
+        except Exception:
+            return False
+
+    _write_marker(out_dir, idx, n_parts, time_chunk, max_level)
+    return True
+
+
+def _write_marker(
+    out_dir: Path, file_index: int, parts: int, time_chunk: int, max_level: int
+) -> None:
+    _marker_path(out_dir, file_index).write_text(
+        json.dumps(
+            {
+                "parts": parts,
+                "time_chunk": time_chunk,
+                "max_level": max_level,
+            }
+        )
+    )
+
+
+def _purge_partial(out_dir: Path, file_index: int) -> None:
+    """Drop any staging debris for this item before rewriting it.
+
+    A re-run under a different part layout must not leave orphaned
+    ``part_003`` files behind for the combine's glob to pick up.
+    """
+    for stale in out_dir.glob(f"{_part_prefix(file_index)}*"):
+        stale.unlink(missing_ok=True)
+    _marker_path(out_dir, file_index).unlink(missing_ok=True)
+
+
+def _atomic_to_netcdf(ds: xr.Dataset, path: Path, **kwargs: object) -> None:
+    """Write via a temp name and rename, so a killed job leaves no torn file.
+
+    ``os.replace`` is atomic within a directory on Lustre, so a staging file
+    that exists under its final name is complete by construction.
+    """
+    import os
+
+    tmp = path.with_name(path.name + ".tmp")
+    ds.to_netcdf(tmp, **kwargs)  # type: ignore[arg-type]
+    os.replace(tmp, path)
+
+
+def _balanced_batches(
+    items: list[RegridItem], size: int
+) -> list[list[RegridItem]]:
+    """Greedy longest-first bin packing into batches of roughly equal cost.
+
+    A batch finishes when its slowest round does, so mixing decadal files
+    with single-year ones into arbitrary batches wastes wall-time.  Source
+    file size is a free and good-enough proxy for regrid cost.  Ties break
+    toward the emptier bin, which keeps items of one dataset — and hence one
+    weight file — loosely together.
+    """
+    if not items:
+        return []
+    n_bins = max(1, -(-len(items) // size))
+
+    def cost(item: RegridItem) -> int:
+        try:
+            return Path(item["source_file"]).stat().st_size
+        except OSError:
+            return 0
+
+    bins: list[list[RegridItem]] = [[] for _ in range(n_bins)]
+    load = [0] * n_bins
+    for item in sorted(items, key=cost, reverse=True):
+        j = min(range(n_bins), key=lambda k: (load[k], len(bins[k])))
+        bins[j].append(item)
+        load[j] += cost(item)
+    for b in bins:
+        b.sort(key=lambda i: (i["s3_path"], i["weight_file"], i["file_index"]))
+    return [b for b in bins if b]
 
 
 # ---------------------------------------------------------------------------
@@ -439,15 +621,20 @@ def create_weights(
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Explode into per-file work items
+# Step 3: Explode into per-file work items, drop what is staged, batch the rest
 # ---------------------------------------------------------------------------
-@wf.job(cpus=1, time="00:05:00", mem="1GB", partition="shared", version="2")
-def plan_regrid(
-    sources: Annotated[list[tuple[str, list[str]]], Result(step="gather_sources")],
-    weights: Annotated[list[WeightInfo], Result(step="create_weights")],
-    run_dir: RunDir,
+def _plan_items(
+    sources: list[tuple[str, list[str]]],
+    weights: list[WeightInfo],
+    run_dir: Path,
 ) -> list[RegridItem]:
-    """Flatten into one work item per file, attaching weight + coverage."""
+    """Flatten into one work item per file, attaching weight + coverage.
+
+    Pure: depends only on its arguments, never on the filesystem.  The
+    ``file_index`` assigned here is what the staging filenames are keyed on,
+    so ``sorted(source_files)`` must stay stable across runs — it is the
+    contract that lets a cancelled run resume.
+    """
     lookup: dict[str, WeightInfo] = {w["s3_path"]: w for w in weights}
 
     staging = run_dir / "staging"
@@ -481,38 +668,206 @@ def plan_regrid(
                     "file_index": idx,
                 }
             )
+    return items
 
-    print(f"Planned {len(items)} regrid tasks across {len(sources)} datasets")
+
+@wf.job(cpus=8, time="00:30:00", mem="8GB", partition="shared", version="1")
+def scan_staging(
+    sources: Annotated[list[tuple[str, list[str]]], Result(step="gather_sources")],
+    weights: Annotated[list[WeightInfo], Result(step="create_weights")],
+    run_dir: RunDir,
+    time_chunk: Annotated[
+        int,
+        Param(help="Time steps per staging part; FROZEN per staging directory"),
+    ] = DEFAULT_TIME_CHUNK,
+    items_per_batch: Annotated[
+        int, Param(help="Source files per array task")
+    ] = DEFAULT_ITEMS_PER_BATCH,
+) -> list[list[RegridItem]]:
+    """Classify every planned item against staging; batch only the outstanding.
+
+    This is the one step whose result depends on the filesystem rather than
+    on its declared inputs, so it must never be served from the Merkle
+    cache — a replayed scan would re-dispatch work that is already on disk.
+    ``version`` is bumped by hand whenever the classification logic changes;
+    if reflow grows a per-step ``cache=False``, use that instead.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    items = _plan_items(sources, weights, run_dir)
+    print(f"Planned {len(items)} regrid items across {len(sources)} datasets")
     if sources and not items:
         raise RuntimeError(
             "Planned zero regrid tasks although sources exist — every "
             "dataset was dropped for missing weights. Fix create_weights "
             "and retry."
         )
-    return items
+
+    # One directory listing per dataset, not one stat per item.
+    listings: dict[str, set[str]] = {}
+    for item in items:
+        d = item["output_dir"]
+        if d not in listings:
+            p = Path(d)
+            listings[d] = {f.name for f in p.iterdir()} if p.is_dir() else set()
+
+    fast_done: list[RegridItem] = []
+    ambiguous: list[RegridItem] = []
+    todo: list[RegridItem] = []
+    for item in items:
+        names = listings[item["output_dir"]]
+        if _marker_ok(item, names, time_chunk):
+            fast_done.append(item)
+        elif any(n.startswith(_part_prefix(item["file_index"])) for n in names):
+            ambiguous.append(item)
+        else:
+            todo.append(item)
+
+    # Metadata-bound rather than CPU-bound: threads, and Lustre rewards the
+    # concurrency. This tier is empty on every run after the first.
+    verified: list[bool] = []
+    if ambiguous:
+        print(f"Verifying {len(ambiguous)} unmarked items by header read...")
+        with ThreadPoolExecutor(max_workers=32) as pool:
+            verified = list(
+                pool.map(lambda it: _verify_and_mark(it, time_chunk), ambiguous)
+            )
+        todo += [it for it, ok in zip(ambiguous, verified) if not ok]
+
+    n_done = len(fast_done) + sum(verified)
+
+    # The combine needs to know how many items a complete dataset has, so it
+    # can refuse to publish a store with silent time gaps.
+    per_dataset: dict[str, tuple[str, int]] = {}
+    for item in items:
+        s3_path, out_dir = item["s3_path"], item["output_dir"]
+        _, count = per_dataset.get(s3_path, (out_dir, 0))
+        per_dataset[s3_path] = (out_dir, count + 1)
+    for s3_path, (out_dir, count) in per_dataset.items():
+        p = Path(out_dir)
+        p.mkdir(parents=True, exist_ok=True)
+        (p / EXPECTED_FILE).write_text(
+            json.dumps({"s3_path": s3_path, "items": count})
+        )
+
+    batches = _balanced_batches(todo, items_per_batch)
+    print(
+        f"scan: {n_done} items already staged, {len(todo)} outstanding, "
+        f"{len(batches)} batches of <= {items_per_batch} "
+        f"({len(ambiguous)} verified by header read)"
+    )
+    levels = sorted({w["max_level"] for w in weights})
+    print(
+        f"max_level in play: {levels} — size --workers against "
+        f"12*4**level*8 bytes * time_chunk peak per item"
+    )
+    return batches
 
 
 # ---------------------------------------------------------------------------
 # Step 4: Regrid one file → mask at finest level → coarsen → per-level NetCDF
 # ---------------------------------------------------------------------------
 @wf.array_job(
-    cpus=32,
-    time="04:00:00",
+    cpus=128,
+    time="08:00:00",
     mem="0",
     partition="compute",
-    array_parallelism=6,
-    version="3",
+    array_parallelism=0,
+    version="4",
 )
-def regrid_file(
-    item: Annotated[RegridItem, Result(step="plan_regrid")],
+def regrid_batch(
+    batch: Annotated[list[RegridItem], Result(step="scan_staging")],
     coverage_threshold: Annotated[
         float,
         Param(help="Cells with domain coverage below this become NaN"),
     ] = 0.5,
     time_chunk: Annotated[
         int,
-        Param(help="Time steps regridded per slice (memory ceiling)"),
-    ] = 120,
+        Param(help="Time steps per staging part; FROZEN per staging directory"),
+    ] = DEFAULT_TIME_CHUNK,
+    workers: Annotated[
+        int, Param(help="Items regridded concurrently on this node")
+    ] = DEFAULT_WORKERS,
+) -> list[RegridResult]:
+    """Regrid a batch of source files, ``workers`` at a time, on one node.
+
+    One array task is a batch rather than a single file: the cluster grants
+    only a handful of concurrent tasks, so throughput is work-per-task times
+    tasks-in-flight and the first factor is the one under our control.  With
+    ~1 h per item, 8 h of wall-time and ``workers`` processes on a node, one
+    task retires ``workers * 7`` items instead of one.
+
+    Failures are per item: a poison file must not cost the other 55.  Items
+    already staged are skipped, so a re-dispatch after ``scancel`` is cheap
+    even for batches that were half-finished.
+    """
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    done: list[RegridResult] = []
+    pending: list[RegridItem] = []
+    for item in batch:
+        if _already_staged(item, time_chunk):
+            done.append(
+                {
+                    "s3_path": item["s3_path"],
+                    "output_dir": item["output_dir"],
+                    "max_level": item["max_level"],
+                }
+            )
+        else:
+            pending.append(item)
+    if done:
+        print(f"Skipping {len(done)} already-staged items in this batch")
+
+    failures: list[str] = []
+    if pending:
+        # grid_doctor is imported at module scope, so OpenMP is already
+        # initialised by now and setting OMP_NUM_THREADS here would be a
+        # no-op; threadpoolctl retargets the live pools instead. Without it
+        # every worker grabs all 128 cores and they thrash.
+        from threadpoolctl import threadpool_limits
+
+        per_worker = max(1, 128 // max(1, workers))
+        with threadpool_limits(limits=per_worker):
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(
+                        _regrid_one, item, coverage_threshold, time_chunk
+                    ): item
+                    for item in pending
+                }
+                for fut in as_completed(futures):
+                    item = futures[fut]
+                    try:
+                        done.append(fut.result())
+                    except Exception as exc:
+                        failures.append(item["source_file"])
+                        print(f"FAILED {item['source_file']}: {exc!r}")
+
+    print(
+        f"batch complete: {len(done)} staged, {len(failures)} failed"
+        + (f" ({failures})" if failures else "")
+    )
+    return done
+
+
+def _already_staged(item: RegridItem, time_chunk: int) -> bool:
+    """Marker-or-verify check, for use inside the worker node."""
+    out_dir = Path(item["output_dir"])
+    if not out_dir.is_dir():
+        return False
+    names = {f.name for f in out_dir.iterdir()}
+    if _marker_ok(item, names, time_chunk):
+        return True
+    if not any(n.startswith(_part_prefix(item["file_index"])) for n in names):
+        return False
+    return _verify_and_mark(item, time_chunk)
+
+
+def _regrid_one(
+    item: RegridItem,
+    coverage_threshold: float,
+    time_chunk: int,
 ) -> RegridResult:
     """Regrid one source file, mask boundary cells, write pyramid levels.
 
@@ -546,6 +901,10 @@ def regrid_file(
     out_dir = Path(item["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     file_idx = item["file_index"]
+
+    # Any debris from an interrupted earlier attempt must go, or the
+    # combine's glob would pick up orphaned parts alongside the new ones.
+    _purge_partial(out_dir, file_idx)
 
     print(f"Regridding {src}")
     ds = xr.open_dataset(src)
@@ -615,13 +974,16 @@ def regrid_file(
             # ~805 MB per part file at level 11; drop them from staging
             # and re-attach once in the combine step.
             slim = current.drop_vars(["latitude", "longitude", "cell"], errors="ignore")
-            slim.load().to_netcdf(nc_path, encoding=_encoding(slim))
+            _atomic_to_netcdf(slim.load(), nc_path, encoding=_encoding(slim))
             del slim
             if lvl:
                 coarser = gd.coarsen_healpix(current, lvl - 1)
                 del current
                 current = coarser
         del current, finest
+
+    # Written last: its presence means every part and level landed.
+    _write_marker(out_dir, file_idx, len(slices), time_chunk, max_level)
 
     return {
         "s3_path": item["s3_path"],
@@ -633,22 +995,36 @@ def regrid_file(
 # ---------------------------------------------------------------------------
 # Step 5: Group per-file results back by dataset
 # ---------------------------------------------------------------------------
-@wf.job(cpus=1, time="00:05:00", mem="1GB", partition="shared")
+@wf.job(cpus=1, time="00:10:00", mem="2GB", partition="shared", version="3")
 def group_for_upload(
-    results: Annotated[list[RegridResult], Result(step="regrid_file")],
+    weights: Annotated[list[WeightInfo], Result(step="create_weights")],
+    results: Annotated[list[list[RegridResult]], Result(step="regrid_batch")],
+    run_dir: RunDir,
 ) -> list[RegridResult]:
-    """Gather per-file outputs and group by target S3 path."""
-    groups: dict[str, RegridResult] = {}
-    for r in results:
-        key = r["s3_path"]
-        if key not in groups:
-            groups[key] = {
-                "s3_path": key,
-                "output_dir": r["output_dir"],
-                "max_level": r["max_level"],
-            }
+    """Enumerate every dataset that has weights, not just the ones re-run.
 
-    out = sorted(groups.values(), key=lambda g: g["s3_path"])
+    The group list comes from ``create_weights``, because a dataset whose
+    items were all staged by an earlier run produces no regrid output this
+    time and would otherwise never be uploaded.  The ``results`` edge is
+    kept purely for ordering — it makes the combine wait for the regrids.
+    Completeness is enforced in ``combine_and_upload`` against the counts
+    ``scan_staging`` recorded, not by counting what came back here.
+    """
+    staged = 0
+    for chunk in results:
+        staged += len(chunk) if isinstance(chunk, list) else 1
+    print(f"regrid_batch returned {staged} staged items")
+
+    staging = run_dir / "staging"
+    out: list[RegridResult] = [
+        {
+            "s3_path": w["s3_path"],
+            "output_dir": str(staging / w["s3_path"].replace("/", "__")),
+            "max_level": w["max_level"],
+        }
+        for w in weights
+    ]
+    out.sort(key=lambda g: g["s3_path"])
     for g in out:
         print(f"  {g['s3_path']}: level 0-{g['max_level']}")
     return out
@@ -662,7 +1038,8 @@ def group_for_upload(
     time="08:00:00",
     mem="0",
     partition="compute",
-    array_parallelism=8,
+    array_parallelism=0,
+    version="2",
 )
 def combine_and_upload(
     group: Annotated[RegridResult, Result(step="group_for_upload")],
@@ -688,7 +1065,27 @@ def combine_and_upload(
     out_dir = group["output_dir"]
     max_level = group["max_level"]
 
-    print(f"Combining and uploading {s3_path}")
+    # Datasets now reach this step whether or not anything was regridded for
+    # them this run, so the "did every item land?" check has to be explicit.
+    # Without it a dataset missing 3 of 40 source files sails through — the
+    # per-level glob is non-empty — and publishes a store with silent time
+    # gaps, which is far worse than a failed job.
+    expected_path = Path(out_dir) / EXPECTED_FILE
+    if not expected_path.exists():
+        raise FileNotFoundError(
+            f"{s3_path}: no {EXPECTED_FILE} in {out_dir}; re-run scan_staging "
+            "so the expected item count is recorded before uploading."
+        )
+    expected = int(json.loads(expected_path.read_text())["items"])
+    actual = len(list(Path(out_dir).glob(f"file_*{DONE_SUFFIX}")))
+    if actual != expected:
+        raise RuntimeError(
+            f"{s3_path}: {actual}/{expected} items staged; refusing to upload "
+            "an incomplete store. Re-run to fill the gaps (staged items are "
+            "skipped), or delete the staging dir to start this dataset over."
+        )
+
+    print(f"Combining and uploading {s3_path} ({expected} items staged)")
 
     pyramid: dict[int, xr.Dataset] = {}
     bbox: dict[str, float] | None = None
