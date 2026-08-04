@@ -293,6 +293,10 @@ class TestCoarsenHealpix:
         assert coarse.coords["crs"].attrs["healpix_level"] == 1
         assert coarse.coords["crs"].attrs["healpix_order"] == "nested"
 
+        assert coarse.coords["crs"].attrs["grid_mapping_name"] == "healpix"
+        assert coarse.coords["crs"].attrs["refinement_level"] == "1"
+        assert coarse.coords["crs"].attrs["indexing_scheme"] == "nested"
+
         assert coarse.attrs["grid_mapping_name"] == "healpix"
         assert coarse.attrs["refinement_level"] == "1"
         assert coarse.attrs["indexing_scheme"] == "nested"
