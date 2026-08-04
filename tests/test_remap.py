@@ -678,8 +678,12 @@ class TestAttachHealpixCoords:
             ),
         )
         ds = xr.Dataset({"t": ("cell", np.array([1.0, 2.0]))})
-        result = _attach_healpix_coords(ds, level=2, nest=False)
+        level = 2
+        result = _attach_healpix_coords(ds, level=level, nest=False)
         assert "latitude" in result.coords
         assert "longitude" in result.coords
         assert result.attrs["healpix_nside"] == 4
         assert result.attrs["healpix_order"] == "ring"
+        assert result.attrs["grid_mapping_name"] == "healpix"
+        assert result.attrs["indexing_scheme"] == "ring"
+        assert result.attrs["refinement_level"] == str(level)

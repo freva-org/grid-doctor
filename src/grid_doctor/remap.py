@@ -24,6 +24,9 @@ from typing import Any, cast
 import numpy as np
 import xarray as xr
 
+from .cf import (
+    _healpix_cf_attrs,
+)
 from .remap_apply import (
     apply_weights_nd,
     extract_sparse_weights,
@@ -540,6 +543,8 @@ def _attach_healpix_coords(
     ds_hp.attrs["grid_doctor_version"] = _gd.__version__
     if method is not None:
         ds_hp.attrs["grid_doctor_method"] = method
+
+    ds_hp.attrs.update(_healpix_cf_attrs(order, level))
 
     return ds_hp
 
