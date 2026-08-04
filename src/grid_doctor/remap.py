@@ -576,7 +576,7 @@ def _make_crs_variable(
             "healpix_nside": nside,
             "healpix_level": level,
             "healpix_order": order,
-        } | _healpix_cf_attrs(order, level)
+        } | dict(_healpix_cf_attrs(order, level))
     )
 
 
