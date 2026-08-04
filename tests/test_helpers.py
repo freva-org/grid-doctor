@@ -177,6 +177,9 @@ class TestCoarsenHealpix:
         coarse = coarsen_healpix(healpix_ds, target_level=1)
         assert coarse.sizes["cell"] == 48
         assert coarse.attrs["healpix_level"] == 1
+        assert coarse.attrs["grid_mapping_name"] == "healpix"
+        assert coarse.attrs["refinement_level"] == "1"
+        assert coarse.attrs["indexing_scheme"] == "nested"
 
     def test_rejects_ring_order(self, healpix_ds: xr.Dataset) -> None:
         ds = healpix_ds.copy()
@@ -289,6 +292,10 @@ class TestCoarsenHealpix:
         assert coarse.coords["crs"].attrs["healpix_nside"] == 2
         assert coarse.coords["crs"].attrs["healpix_level"] == 1
         assert coarse.coords["crs"].attrs["healpix_order"] == "nested"
+
+        assert coarse.attrs["grid_mapping_name"] == "healpix"
+        assert coarse.attrs["refinement_level"] == "1"
+        assert coarse.attrs["indexing_scheme"] == "nested"
 
     def test_data_vars_have_grid_mapping(
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
