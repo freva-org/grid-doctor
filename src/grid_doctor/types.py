@@ -38,6 +38,9 @@ MissingPolicy = Literal["renormalize", "propagate"]
 ApplyBackend = Literal["auto", "scipy", "numba", "cupy"]
 """Which application backend to use."""
 
+HealpixIndexScheme = Literal["nested", "ring", "zuniq", "nuniq"]
+"""Allowed Healpix indexing schemes."""
+
 
 class ZarrOptions(TypedDict, total=False):
     """Definitions of possible to_zarr arguments."""
