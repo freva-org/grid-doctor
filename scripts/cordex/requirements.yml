@@ -1,0 +1,10 @@
+channels:
+ - conda-forge
+dependencies:
+  - requests
+  - dateparser
+  - "esmf=*=mpi_openmpi_*"
+  - xarray
+  - pip:
+    - threadpoolctl
+    - reflow
