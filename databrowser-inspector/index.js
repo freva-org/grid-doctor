@@ -532,7 +532,7 @@ class mt extends HTMLElement {
     const t = this._q("#nc-dropdown-menu");
     t && (t.hidden = !this._dropdownOpen);
   }
-  // ── Accessibility: focus trap, initial focus, Escape-to-close ──────────────-
+  // ── Accessibility: focus trap, initial focus, Escape-to-close ─────────────
   _focusables() {
     const t = this._q(".di-modal");
     return t ? Array.from(t.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')).filter(
