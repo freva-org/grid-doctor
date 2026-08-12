@@ -6,6 +6,7 @@
     "eerie",
     "icdc",
     "icon-dream",
+    "icon-lam",
     "nextgems",
     "obs",
     "palmod",
@@ -42,6 +43,9 @@
       "title": "ICON-DREAM",
       "label": "DWD ICON Reanalysis",
       "href": "https://opendata.dwd.de/climate_environment/CDC/help/landing_pages/doi_landingpage_ICON-DREAM_v1-en.html"
+    },
+    "icon-lam": {
+      "title": "icon-lam"
     },
     "nextgems": {
       "title": "nextGEMS",
