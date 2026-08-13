@@ -779,16 +779,60 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#selecting-a-region" class="md-nav__link">
+  <a href="#selecting-a-region-by-hand" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Selecting a region
+        Selecting a region by hand
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Selecting a region">
+    <nav class="md-nav" aria-label="Selecting a region by hand">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-cover-the-region-at-a-coarse-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Cover the region at a coarse level
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-expand-parents-to-contiguous-fine-level-slices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Expand parents to contiguous fine-level slices
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-attach-coordinates-and-cut-the-exact-region" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Attach coordinates and cut the exact region
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#circular-regions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Circular regions
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#why-this-is-fast" class="md-nav__link">
@@ -912,22 +956,32 @@
 
 
 <h1 id="accessing-high-resolution-regional-data">Accessing High-Resolution Regional Data<a class="headerlink" href="#accessing-high-resolution-regional-data" title="Permanent link">&para;</a></h1>
-<p>Some datasets in the hub cover a small area — a city, an island, a
-catchment — at very high HEALPix levels (16 ≈ 100 m, 20 ≈ 6 m cells).
-These stores look different from the global pyramids in two ways, and
-both change how you load them:</p>
+<p>Some datasets in the hub cover a small area (a city, an island, a
+catchment) at very high HEALPix levels (16 is roughly 100 m, 20 roughly
+6 m cells).  These stores look different from the global pyramids in
+two ways, and both change how you load them:</p>
 <ol>
 <li><strong>No coordinate arrays.</strong>  The global cell dimension at level 16 has
-   ~5.2 × 10¹⁰ entries; materialised <code>latitude</code>/<code>longitude</code> arrays would
-   cost hundreds of gigabytes while carrying no information — HEALPix
-   coordinates are a pure function of the cell index.  These stores
-   carry only the <code>crs</code> variable and the <code>healpix_*</code> attributes
-   (<code>grid_doctor_implicit_coords = 1</code> marks them), and coordinates are
-   computed on the fly for whatever cells you actually read.</li>
+   about 5.2 × 10¹⁰ entries; materialised <code>latitude</code>/<code>longitude</code> arrays
+   would cost hundreds of gigabytes while carrying no information,
+   because HEALPix coordinates are a pure function of the cell index.
+   These stores carry only the <code>crs</code> variable and the <code>healpix_*</code>
+   attributes (<code>grid_doctor_implicit_coords = 1</code> marks them), and
+   coordinates are computed on the fly for whatever cells you actually
+   read.</li>
 <li><strong>All access is region-driven.</strong>  Nobody loads the full cell
    dimension, the same way nobody downloads a complete XYZ tile set.
    You select a region; the selection is small by construction.</li>
 </ol>
+<div class="admonition note">
+<p class="admonition-title">Status</p>
+<p>A dedicated client package with one-call region selection is in
+preparation and will be announced here.  Until then, this page
+shows how to do everything with tools that exist today: <code>xarray</code>,
+<code>numpy</code>, and <a href="https://github.com/GRID4EARTH/healpix-geo">healpix-geo</a>
+(<code>pip install healpix-geo</code>).  The workflow is a few lines longer
+but uses the exact mechanics the client package will wrap.</p>
+</div>
 <h2 id="opening-always-chunksnone">Opening: always <code>chunks=None</code><a class="headerlink" href="#opening-always-chunksnone" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">xarray</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">xr</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
@@ -939,69 +993,142 @@ both change how you load them:</p>
 </code></pre></div>
 <p><code>chunks=None</code> gives you plain lazy Zarr-backed arrays that slice in
 O(selection).  With the default dask chunking, xarray eagerly builds a
-chunk-grid description proportional to the <strong>global</strong> chunk count —
+chunk-grid description proportional to the <strong>global</strong> chunk count:
 millions of entries at level 16, nearly a billion at level 20.  Opening
 would hang long before any data moves.</p>
 <p>The opened dataset has an enormous nominal shape and no coordinates.
-That is fine — do not call <code>.load()</code>, do not print <code>.values</code>.  Select
+That is fine.  Do not call <code>.load()</code>, do not print <code>.values</code>.  Select
 first.</p>
-<h2 id="selecting-a-region">Selecting a region<a class="headerlink" href="#selecting-a-region" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">grid_doctor</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gd</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">berlin</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">select_bbox</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">lon</span><span class="o">=</span><span class="p">(</span><span class="mf">13.1</span><span class="p">,</span> <span class="mf">13.8</span><span class="p">),</span> <span class="n">lat</span><span class="o">=</span><span class="p">(</span><span class="mf">52.3</span><span class="p">,</span> <span class="mf">52.7</span><span class="p">))</span>
+<h2 id="selecting-a-region-by-hand">Selecting a region by hand<a class="headerlink" href="#selecting-a-region-by-hand" title="Permanent link">&para;</a></h2>
+<p>The key property is the nested ordering: every cell at a coarse level
+corresponds to one <em>contiguous</em> index range at the fine level.  A
+region selection therefore has three steps: find the coarse cells that
+cover your region, expand each to its contiguous fine-level slice, and
+compute coordinates for exactly those cells.</p>
+<h3 id="1-cover-the-region-at-a-coarse-level">1. Cover the region at a coarse level<a class="headerlink" href="#1-cover-the-region-at-a-coarse-level" title="Permanent link">&para;</a></h3>
+<p>Rasterise the bounding box by sampling points and indexing them at a
+coarse level (level 10 cells are about 6 km, a good default for
+city-sized boxes):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">healpix_geo</span><span class="w"> </span><span class="kn">import</span> <span class="n">nested</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">level</span><span class="p">,</span> <span class="n">coarse</span> <span class="o">=</span> <span class="mi">16</span><span class="p">,</span> <span class="mi">10</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">lon_min</span><span class="p">,</span> <span class="n">lon_max</span><span class="p">,</span> <span class="n">lat_min</span><span class="p">,</span> <span class="n">lat_max</span> <span class="o">=</span> <span class="mf">13.1</span><span class="p">,</span> <span class="mf">13.8</span><span class="p">,</span> <span class="mf">52.3</span><span class="p">,</span> <span class="mf">52.7</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">lon_s</span><span class="p">,</span> <span class="n">lat_s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="n">lon_min</span><span class="p">,</span> <span class="n">lon_max</span><span class="p">,</span> <span class="mi">256</span><span class="p">),</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="n">lat_min</span><span class="p">,</span> <span class="n">lat_max</span><span class="p">,</span> <span class="mi">256</span><span class="p">),</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="p">)</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="n">parents</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="n">nested</span><span class="o">.</span><span class="n">lonlat_to_healpix</span><span class="p">(</span><span class="n">lon_s</span><span class="o">.</span><span class="n">ravel</span><span class="p">(),</span> <span class="n">lat_s</span><span class="o">.</span><span class="n">ravel</span><span class="p">(),</span> <span class="n">coarse</span><span class="p">)</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="p">)</span>
 </code></pre></div>
-<p>That one call is fully loaded and ready:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;t2m&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>                       <span class="c1"># data is in memory</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;latitude&quot;</span><span class="p">],</span> <span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;longitude&quot;</span><span class="p">]</span>    <span class="c1"># computed for these cells only</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;cell&quot;</span><span class="p">]</span>                             <span class="c1"># the global HEALPix indices</span>
+<p>Make the sampling comfortably denser than the coarse cell size so no
+cell inside the box is missed.</p>
+<h3 id="2-expand-parents-to-contiguous-fine-level-slices">2. Expand parents to contiguous fine-level slices<a class="headerlink" href="#2-expand-parents-to-contiguous-fine-level-slices" title="Permanent link">&para;</a></h3>
+<p>Each coarse parent covers <code>4**(level - coarse)</code> consecutive fine cells,
+so a parent <code>p</code> becomes the slice <code>[p &lt;&lt; shift, (p + 1) &lt;&lt; shift)</code> with
+<code>shift = 2 * (level - coarse)</code>.  Merging runs of adjacent parents keeps
+the number of reads minimal:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">shift</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="n">level</span> <span class="o">-</span> <span class="n">coarse</span><span class="p">)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">merge_ranges</span><span class="p">(</span><span class="n">parents</span><span class="p">,</span> <span class="n">shift</span><span class="p">):</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">starts</span><span class="p">,</span> <span class="n">stops</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">np</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">parents</span><span class="p">):</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>        <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="n">shift</span><span class="p">,</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="n">shift</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>        <span class="k">if</span> <span class="n">stops</span> <span class="ow">and</span> <span class="n">lo</span> <span class="o">==</span> <span class="n">stops</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]:</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>            <span class="n">stops</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">hi</span>          <span class="c1"># extend the previous run</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>            <span class="n">starts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lo</span><span class="p">)</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>            <span class="n">stops</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">hi</span><span class="p">)</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">starts</span><span class="p">,</span> <span class="n">stops</span><span class="p">))</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="n">ranges</span> <span class="o">=</span> <span class="n">merge_ranges</span><span class="p">(</span><span class="n">parents</span><span class="p">,</span> <span class="n">shift</span><span class="p">)</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="n">region</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    <span class="p">[</span><span class="n">ds</span><span class="o">.</span><span class="n">isel</span><span class="p">(</span><span class="n">cell</span><span class="o">=</span><span class="nb">slice</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">))</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">ranges</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="s2">&quot;cell&quot;</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="p">)</span>
 </code></pre></div>
-<p>A circular region works the same way:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">station</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">select_cone</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">lon</span><span class="o">=</span><span class="mf">13.41</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">52.52</span><span class="p">,</span> <span class="n">radius</span><span class="o">=</span><span class="mf">0.05</span><span class="p">)</span>
+<p>Because the store's cell dimension is the plain nested index,
+positional <code>isel</code> slices and cell IDs coincide, and each slice maps to
+a handful of contiguous byte-range reads from S3.</p>
+<h3 id="3-attach-coordinates-and-cut-the-exact-region">3. Attach coordinates and cut the exact region<a class="headerlink" href="#3-attach-coordinates-and-cut-the-exact-region" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">cell_ids</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;uint64&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">ranges</span><span class="p">]</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="p">)</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">lon_c</span><span class="p">,</span> <span class="n">lat_c</span> <span class="o">=</span> <span class="n">nested</span><span class="o">.</span><span class="n">healpix_to_lonlat</span><span class="p">(</span><span class="n">cell_ids</span><span class="p">,</span> <span class="n">level</span><span class="p">)</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">region</span> <span class="o">=</span> <span class="n">region</span><span class="o">.</span><span class="n">assign_coords</span><span class="p">(</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">cell</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;cell&quot;</span><span class="p">,</span> <span class="n">cell_ids</span><span class="p">),</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">longitude</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;cell&quot;</span><span class="p">,</span> <span class="n">lon_c</span><span class="p">),</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">latitude</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;cell&quot;</span><span class="p">,</span> <span class="n">lat_c</span><span class="p">),</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="p">)</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="n">inside</span> <span class="o">=</span> <span class="p">(</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="p">(</span><span class="n">lon_c</span> <span class="o">&gt;=</span> <span class="n">lon_min</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">lon_c</span> <span class="o">&lt;=</span> <span class="n">lon_max</span><span class="p">)</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    <span class="o">&amp;</span> <span class="p">(</span><span class="n">lat_c</span> <span class="o">&gt;=</span> <span class="n">lat_min</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">lat_c</span> <span class="o">&lt;=</span> <span class="n">lat_max</span><span class="p">)</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="p">)</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="n">berlin</span> <span class="o">=</span> <span class="n">region</span><span class="o">.</span><span class="n">isel</span><span class="p">(</span><span class="n">cell</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">inside</span><span class="p">))</span><span class="o">.</span><span class="n">load</span><span class="p">()</span>
 </code></pre></div>
-<p>and if you already know the cell IDs (e.g. from a previous selection or
-another dataset):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">subset</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">select_cells</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">my_cell_ids</span><span class="p">)</span>
+<p><code>berlin</code> is now a small, fully loaded dataset with per-cell
+coordinates and the global HEALPix indices in <code>berlin["cell"]</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;t2m&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+</code></pre></div>
+<h3 id="circular-regions">Circular regions<a class="headerlink" href="#circular-regions" title="Permanent link">&para;</a></h3>
+<p>Select a bounding box around the centre as above, then mask by
+great-circle distance instead of the box test:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">gc_distance_deg</span><span class="p">(</span><span class="n">lon</span><span class="p">,</span> <span class="n">lat</span><span class="p">,</span> <span class="n">lon0</span><span class="p">,</span> <span class="n">lat0</span><span class="p">):</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="n">lam</span><span class="p">,</span> <span class="n">phi</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">lon</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">lat</span><span class="p">)</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">lam0</span><span class="p">,</span> <span class="n">phi0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">lon0</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">lat0</span><span class="p">)</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">s</span> <span class="o">=</span> <span class="p">(</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>        <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">((</span><span class="n">phi</span> <span class="o">-</span> <span class="n">phi0</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>        <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">phi</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">phi0</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">((</span><span class="n">lam</span> <span class="o">-</span> <span class="n">lam0</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="p">)</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">degrees</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">arcsin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">s</span><span class="p">)))</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">inside</span> <span class="o">=</span> <span class="n">gc_distance_deg</span><span class="p">(</span><span class="n">lon_c</span><span class="p">,</span> <span class="n">lat_c</span><span class="p">,</span> <span class="mf">13.41</span><span class="p">,</span> <span class="mf">52.52</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mf">0.05</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="n">station</span> <span class="o">=</span> <span class="n">region</span><span class="o">.</span><span class="n">isel</span><span class="p">(</span><span class="n">cell</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">inside</span><span class="p">))</span><span class="o">.</span><span class="n">load</span><span class="p">()</span>
 </code></pre></div>
 <h3 id="why-this-is-fast">Why this is fast<a class="headerlink" href="#why-this-is-fast" title="Permanent link">&para;</a></h3>
-<p>In nested ordering, every cell at a coarse level corresponds to one
-<em>contiguous</em> index range at the fine level.  <code>select_bbox</code> rasterises
-your box at a coarse level (a cheap geometric query), and each coarse
-parent becomes a single contiguous slice — which is exactly one Zarr
-chunk when the store is chunked at a power of four.  A city-sized box
-resolves to a handful of contiguous byte-range reads from S3, with
-nothing wasted.  The <code>query_delta</code> parameter controls the granularity:
-the selection arrives in whole blocks of <code>4**query_delta</code> cells, so
-matching it to the store's chunk exponent gives zero-waste reads.</p>
+<p>In nested ordering, a coarse parent is exactly one contiguous slice at
+the fine level, which is exactly one Zarr chunk when the store is
+chunked at a power of four.  A city-sized box resolves to a handful of
+contiguous byte-range reads from S3, with nothing wasted.  Choosing the
+coarse cover level so that <code>level - coarse</code> matches the store's chunk
+exponent gives zero-waste reads; a coarser cover reads whole aligned
+blocks, a finer one reads partial chunks.</p>
 <h2 id="plotting">Plotting<a class="headerlink" href="#plotting" title="Permanent link">&para;</a></h2>
 <p>The selection is a normal xarray dataset with per-cell coordinates:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">plt</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;longitude&quot;</span><span class="p">],</span> <span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;latitude&quot;</span><span class="p">],</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">c</span><span class="o">=</span><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;t2m&quot;</span><span class="p">],</span> <span class="n">s</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s2">&quot;viridis&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">)</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">plt</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;t2m&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">plt</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;longitude&quot;</span><span class="p">],</span> <span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;latitude&quot;</span><span class="p">],</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">c</span><span class="o">=</span><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;t2m&quot;</span><span class="p">],</span> <span class="n">s</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s2">&quot;viridis&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="p">)</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">plt</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;t2m&quot;</span><span class="p">)</span>
 </code></pre></div>
 <p>For publication-quality regional maps, bin the cells into a local
-raster or use any HEALPix-aware plotting path — at level 16 a scatter
+raster or use any HEALPix-aware plotting path.  At level 16 a scatter
 of cell centres is visually indistinguishable from a raster at typical
 figure sizes.</p>
 <h2 id="comparing-across-levels-and-datasets">Comparing across levels and datasets<a class="headerlink" href="#comparing-across-levels-and-datasets" title="Permanent link">&para;</a></h2>
 <p>Nested cell IDs make cross-level alignment a bit shift: the level-9
 parent of a level-16 cell is <code>cell_id &gt;&gt; 14</code> (two bits per level).  To
-place your high-resolution selection onto, say, an ERA5 pyramid level:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">parents_l9</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;cell&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span> <span class="o">&gt;&gt;</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="mi">16</span> <span class="o">-</span> <span class="mi">9</span><span class="p">)))</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">era5_region</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">select_cells</span><span class="p">(</span><span class="n">era5_level9</span><span class="p">,</span> <span class="n">parents_l9</span><span class="p">)</span>
+place your high-resolution selection onto, say, an ERA5 pyramid level,
+reuse the slice expansion from above at the coarser level:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">parents_l9</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">berlin</span><span class="p">[</span><span class="s2">&quot;cell&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span> <span class="o">&gt;&gt;</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="mi">16</span> <span class="o">-</span> <span class="mi">9</span><span class="p">)))</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">era5_region</span> <span class="o">=</span> <span class="n">era5_level9</span><span class="o">.</span><span class="n">isel</span><span class="p">(</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">cell</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">p</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">parents_l9</span><span class="p">])</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="p">)</span>
 </code></pre></div>
-<p>No interpolation, no index join — the hierarchies coincide by
+<p>No interpolation, no index join.  The hierarchies coincide by
 construction, which is one of the reasons the hub uses nested ordering
 everywhere.</p>
 <h2 id="coarser-overview-levels">Coarser overview levels<a class="headerlink" href="#coarser-overview-levels" title="Permanent link">&para;</a></h2>
 <p>High-level stores are still pyramids.  For a quick overview, open a
-coarse level of the <em>same</em> store — levels at or below the coordinate
+coarse level of the <em>same</em> store.  Levels at or below the coordinate
 threshold are written with materialised coordinates and behave exactly
 like every other dataset in the hub, including in the browser viewer:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">overview</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">open_zarr</span><span class="p">(</span><span class="s2">&quot;.../city-example.zarr/level_8.zarr&quot;</span><span class="p">,</span> <span class="n">chunks</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">overview</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">open_zarr</span><span class="p">(</span><span class="s2">&quot;.../city-example.zarr/level_8.zarr&quot;</span><span class="p">,</span> <span class="n">chunks</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="common-mistakes">Common mistakes<a class="headerlink" href="#common-mistakes" title="Permanent link">&para;</a></h2>
 <table>
@@ -1026,12 +1153,17 @@ like every other dataset in the hub, including in the browser viewer:</p>
 <tr>
 <td>"no latitude coordinate"</td>
 <td>store has implicit coordinates</td>
-<td>use the selectors, or <code>gd.select_cells</code> + the returned coords</td>
+<td>compute coordinates from cell IDs (step 3 above)</td>
 </tr>
 <tr>
 <td>Slow S3 reads for a small box</td>
-<td><code>query_delta</code> misaligned with store chunks</td>
-<td>match <code>query_delta</code> to the chunk exponent</td>
+<td>cover level misaligned with store chunks</td>
+<td>match <code>level - coarse</code> to the chunk exponent</td>
+</tr>
+<tr>
+<td>Cells missing at the box edge</td>
+<td>sampling grid too sparse in step 1</td>
+<td>sample denser than the coarse cell size</td>
 </tr>
 </tbody>
 </table>
