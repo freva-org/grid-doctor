@@ -553,7 +553,7 @@ def _make_crs_variable(
     *,
     level: int,
     nside: int,
-    order: str,
+    order: HealpixIndexScheme,
 ) -> xr.DataArray:
     """Create a scalar CRS coordinate variable for HEALPix.
 

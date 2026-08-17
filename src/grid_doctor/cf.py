@@ -1,7 +1,7 @@
 """High-level helpers for CF conventions.
 
 Provides abstractions to convert remapping terms (level, order, grid type)
-to the respective CF vocabolary.
+to the respective CF vocabulary.
 """
 
 from typing import Mapping
@@ -19,9 +19,9 @@ class CFKey:
 
 
 def _healpix_cf_attrs(
-    scheme: str | HealpixIndexScheme, level: int | None = None
+    scheme: str, level: int | None = None
 ) -> Mapping[str, str]:
-    """Given a level and an scheme, returns a dictionary with the values mapped as attributes."""
+    """Given a level and a scheme, returns a dictionary with the values mapped as attributes."""
     _schemes: tuple[str] = get_type_args(HealpixIndexScheme)
     if scheme not in _schemes:
         raise ValueError(
