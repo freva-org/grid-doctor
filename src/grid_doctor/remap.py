@@ -26,7 +26,7 @@ import xarray as xr
 
 from .cf import (
     HealpixIndexScheme,
-    _healpix_cf_attrs,
+    healpix_grid_mapping_attrs,
 )
 from .remap_apply import (
     apply_weights_nd,
@@ -545,7 +545,7 @@ def _attach_healpix_coords(
     if method is not None:
         ds_hp.attrs["grid_doctor_method"] = method
 
-    ds_hp.attrs.update(_healpix_cf_attrs(order, level))
+    ds_hp.attrs.update(healpix_grid_mapping_attrs(order, level))
 
     return ds_hp
 
@@ -577,7 +577,7 @@ def _make_crs_variable(
             "healpix_nside": nside,
             "healpix_level": level,
             "healpix_order": order,
-        } | dict(_healpix_cf_attrs(order, level))
+        } | dict(healpix_grid_mapping_attrs(order, level))
     )
 
 

@@ -130,7 +130,7 @@ class CFHealpixGridAttrs:
         return dict(self)
 
 
-def _healpix_cf_attrs(
+def healpix_grid_mapping_attrs(
     scheme: str,
     level: int | None = None,
 ) -> Mapping[str, str | int]:

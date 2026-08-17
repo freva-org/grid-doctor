@@ -22,7 +22,7 @@ import s3fs
 import xarray as xr
 
 from .cf import (
-    _healpix_cf_attrs,
+    healpix_grid_mapping_attrs,
 )
 from .remap import (
     _make_crs_variable,
@@ -366,7 +366,7 @@ def coarsen_healpix(
         ),
     )
 
-    cf_attrs = _healpix_cf_attrs(scheme='nested', level=target_level)
+    cf_attrs = healpix_grid_mapping_attrs(scheme='nested', level=target_level)
     # Tag every spatially-mapped data variable.
     for name in result.data_vars:
         if "cell" in result[name].dims:

@@ -6,7 +6,7 @@ import pytest
 
 from dataclasses import FrozenInstanceError
 from grid_doctor.cf import (
-    _healpix_cf_attrs,
+    healpix_grid_mapping_attrs,
     CFConventions,
     CFHealpixGridAttrs,
 )
