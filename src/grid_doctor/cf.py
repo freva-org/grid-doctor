@@ -6,6 +6,7 @@ to the respective CF vocabulary.
 
 import operator
 from dataclasses import (
+    asdict,
     dataclass,
     field,
 )
@@ -28,6 +29,19 @@ _LEVEL_NEEDED = frozenset(
         "ring",
     }
 )
+
+_CONV_VERSION = 1.13
+
+
+@dataclass(frozen=True, slots=True)
+class CFConventions:
+    """Model global `Conventions` CF attribute."""
+
+    Conventions: str = f"CF-{_CONV_VERSION}"
+
+    def to_dict(self) -> dict[str, str]:
+        """Convert class to dictionary."""
+        return asdict(self)
 
 
 @dataclass
@@ -61,9 +75,7 @@ class CFHealpixGridAttrs:
             # `refinement_level` is mandatory for `nested` and `ring` but must be omitted for *uniq
             # https://cfconventions.org/cf-conventions/cf-conventions.html#healpix
             if self.refinement_level is None:
-                raise ValueError(
-                    f"Indexing scheme {self.indexing_scheme!r} requires a `refinement_level` to be set."
-                )
+                raise ValueError(f"Indexing scheme {self.indexing_scheme!r} requires a `refinement_level` to be set.")
 
             try:
                 operator.index(self.refinement_level)
@@ -71,9 +83,7 @@ class CFHealpixGridAttrs:
                 TypeError,
                 ValueError,
             ):
-                raise ValueError(
-                    f"Invalid `refinement_level`: '{self.refinement_level}'; Must be integer."
-                )
+                raise ValueError(f"Invalid `refinement_level`: '{self.refinement_level}'; Must be integer.")
 
             if self.refinement_level < 0:
                 raise ValueError(f"Cannot set negative `refinement_level`: '{self.refinement_level}'.")

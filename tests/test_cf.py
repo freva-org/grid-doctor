@@ -6,8 +6,17 @@ import pytest
 
 from grid_doctor.cf import (
     _healpix_cf_attrs,
+    CFConventions,
     CFHealpixGridAttrs,
 )
+
+
+class TestCFConventions:
+    def test_version(self):
+        cf = CFConventions()
+        assert cf.Conventions == 'CF-1.13'
+        assert cf.to_dict() == { 'Conventions': 'CF-1.13' }
+
 
 # ===================================================================
 # Test CFHealpixGridAttrs
