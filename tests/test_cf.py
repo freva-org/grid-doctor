@@ -105,6 +105,7 @@ class TestDictIntegrationCFHealpixGridAttrs:
             {"refinement_level": level} if level else {}
         )
         assert dict(attrs) == expected
+        assert attrs.to_dict()== expected
 
     def test_dict_no_radius(self):
         attrs = CFHealpixGridAttrs(indexing_scheme='zuniq',earth_radius=None)

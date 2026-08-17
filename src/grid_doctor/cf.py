@@ -126,6 +126,10 @@ class CFHealpixGridAttrs:
         if self.earth_radius:
             yield ("earth_radius", self.earth_radius)
 
+    def to_dict(self) -> dict[str, str | int]:
+        """Convert class instance into an equivalent dictionary."""
+        return dict(self)
+
 
 def _healpix_cf_attrs(
     scheme: str,
