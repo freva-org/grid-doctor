@@ -37,6 +37,7 @@ class CFHealpixGridAttrs:
     - grid_mapping_name is always "healpix"
     - indexing_scheme can be one of "nested", "ring", "nuniq", "zuniq".
     - refinement_level is a positive int, required only for "nested" or "ring" indexing_schemes.
+    - earth-radius is the optional radius of the sphere, in meters.
     """
 
     grid_mapping_name: Literal["healpix"] = field(
@@ -45,6 +46,7 @@ class CFHealpixGridAttrs:
     )
     indexing_scheme: HealpixIndexScheme
     refinement_level: int | None = None
+    earth_radius: int | None = 6371009
 
     def __post_init__(
         self,
@@ -81,6 +83,13 @@ class CFHealpixGridAttrs:
                     f"`refinement_level` cannot be specified when `indexing_scheme` is {self.indexing_scheme!r}."
                 )
 
+        # Validate earth_radius if provided
+        if self.earth_radius:
+            try:
+                operator.index(self.earth_radius)
+            except (TypeError, ValueError):
+                raise ValueError(f"Invalid `earth_radius`: {self.earth_radius!r}; Must be integer, in meters!")
+
     def __iter__(
         self,
     ) -> Iterator[
@@ -98,11 +107,14 @@ class CFHealpixGridAttrs:
             "indexing_scheme",
             self.indexing_scheme,
         )
+
         if self.refinement_level:
             yield (
                 "refinement_level",
                 self.refinement_level,
             )
+        if self.earth_radius:
+            yield ("earth_radius", self.earth_radius)
 
 
 def _healpix_cf_attrs(

@@ -73,6 +73,11 @@ class TestCFHealpixGridAttrs:
         ):
             CFHealpixGridAttrs(indexing_scheme=scheme)
 
+    def test_earth_radius(self):
+        attrs = CFHealpixGridAttrs(indexing_scheme='zuniq')
+        assert attrs.earth_radius is not None
+        assert attrs.earth_radius == 6371009
+
 
 class TestDictIntegrationCFHealpixGridAttrs:
     @pytest.mark.parametrize(
@@ -80,7 +85,11 @@ class TestDictIntegrationCFHealpixGridAttrs:
     )
     def test_dict_construct(self, scheme, level):
         attrs = CFHealpixGridAttrs(indexing_scheme=scheme, refinement_level=level)
-        expected = {"grid_mapping_name": "healpix", "indexing_scheme": scheme} | (
+        expected = {"grid_mapping_name": "healpix", "indexing_scheme": scheme, "earth_radius": 6371009 } | (
             {"refinement_level": level} if level else {}
         )
         assert dict(attrs) == expected
+
+    def test_dict_no_radius(self):
+        attrs = CFHealpixGridAttrs(indexing_scheme='zuniq',earth_radius=None)
+        assert 'earth_radius' not in dict(attrs)
