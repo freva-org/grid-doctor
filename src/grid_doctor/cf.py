@@ -144,3 +144,6 @@ def healpix_grid_mapping_attrs(
             refinement_level=level,
         )
     )
+
+
+__all__ = ["HealpixIndexScheme", "healpix_grid_mapping_attrs"]
