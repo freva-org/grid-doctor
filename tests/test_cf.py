@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from dataclasses import FrozenInstanceError
 from grid_doctor.cf import (
     _healpix_cf_attrs,
     CFConventions,
@@ -86,6 +87,12 @@ class TestCFHealpixGridAttrs:
         attrs = CFHealpixGridAttrs(indexing_scheme='zuniq')
         assert attrs.earth_radius is not None
         assert attrs.earth_radius == 6371009
+
+    def test_immutability(self):
+        with pytest.raises(FrozenInstanceError, match = r"cannot assign to field 'scheme'"):
+            attrs = CFHealpixGridAttrs(indexing_scheme='zuniq')
+            attrs.scheme = 'bad'
+
 
 
 class TestDictIntegrationCFHealpixGridAttrs:

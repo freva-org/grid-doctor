@@ -44,7 +44,7 @@ class CFConventions:
         return asdict(self)
 
 
-@dataclass
+@dataclass(frozen=True)
 class CFHealpixGridAttrs:
     """Models `healpix` grid mapping attribute according to CF conventions.
 
