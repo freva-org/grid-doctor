@@ -46,6 +46,7 @@ from .remap_backend import (
 from .types import (
     ApplyBackend,
     FloatArray,
+    HealpixIndexScheme,
     MissingPolicy,
     RemapMethod,
     SourceKind,
@@ -519,7 +520,7 @@ def _attach_healpix_coords(
     import grid_doctor as _gd
 
     nside = 2**level
-    order = "nested" if nest else "ring"
+    order: HealpixIndexScheme = "nested" if nest else "ring"
 
     lat_deg, lon_deg = _healpix_centres(level, nest=nest)
     ds_hp = ds_hp.assign_coords(

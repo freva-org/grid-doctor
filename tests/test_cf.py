@@ -6,95 +6,81 @@ import pytest
 
 from grid_doctor.cf import (
     _healpix_cf_attrs,
-    CFKey,
+    CFHealpixGridAttrs,
 )
 
 # ===================================================================
-#
+# Test CFHealpixGridAttrs
 # ===================================================================
 
 
-class TestCFAttributes:
+class TestCFHealpixGridAttrs:
     @pytest.mark.parametrize(
-        "scheme,level,expected",
+        "scheme, level", [("nested", 1), ("ring", 2), ("zuniq", None), ("nuniq", None)]
+    )
+    def test_construct(self, scheme, level):
+        attrs = CFHealpixGridAttrs(indexing_scheme=scheme, refinement_level=level)
+        assert attrs.indexing_scheme == scheme
+        assert attrs.refinement_level == level
+        assert attrs.grid_mapping_name == "healpix"
+
+    @pytest.mark.parametrize(
+        "scheme,level,msg",
         [
             (
-                "ring",
-                0,
-                {
-                    "grid_mapping_name": "healpix",
-                    "indexing_scheme": "ring",
-                    "refinement_level": "0",
-                },
-            ),
-            (
                 "nested",
+                "1",
+                "Invalid `refinement_level`: '1'; Must be integer."
+            ),
+            ("ring", -1, "Cannot set negative `refinement_level`: '-1'."),
+            (
+                "zuniq",
                 1,
-                {
-                    "grid_mapping_name": "healpix",
-                    "indexing_scheme": "nested",
-                    "refinement_level": "1",
-                },
+                "`refinement_level` cannot be specified when `indexing_scheme` is 'zuniq'.",
             ),
             (
                 "nuniq",
-                2,
-                {
-                    "grid_mapping_name": "healpix",
-                    "indexing_scheme": "nuniq",
-                },
-            ),
-            (
-                "zuniq",
-                None,
-                {
-                    "grid_mapping_name": "healpix",
-                    "indexing_scheme": "zuniq",
-                },
+                0.2,
+                "`refinement_level` cannot be specified when `indexing_scheme` is 'nuniq'.",
             ),
         ],
-        ids=["ring", "nested", "nuniq", "zuniq"],
     )
-    def test_healpix_cf_attrs(self, scheme, level, expected) -> None:
-        r = _healpix_cf_attrs(scheme, level)
-        assert r == expected
+    def test_invalid_construct(self, scheme, level, msg):
+        with pytest.raises(ValueError, match=msg):
+            CFHealpixGridAttrs(indexing_scheme=scheme, refinement_level=level)
 
-    @pytest.mark.parametrize(
-        "level,match",
-        [
-            (0.0, r"Cannot set invalid refinement level: '0.0' \(must be integer\)\."),
-            ("0", r"Cannot set invalid refinement level: '0' \(must be integer\)\."),
-            (-1, r"Cannot set negative refinement level: '-1'"),
-        ],
-        ids=["float", "str", "-negative"],
-    )
-    def test_healpix_cf_attrs_error_level(self, level, match) -> None:
-        with pytest.raises(ValueError, match=match):
-            _healpix_cf_attrs("ring", level)
-
-    @pytest.mark.parametrize(
-        "scheme,match",
-        [
-            ("RING", r"Cannot attach unsupported scheme.*"),
-        ],
-        ids=[
-            "upper",
-        ],
-    )
-    def test_healpix_cf_attrs_error_scheme(self, scheme, match) -> None:
-        with pytest.raises(ValueError, match=match):
-            _healpix_cf_attrs(scheme, 0)
-
-    @pytest.mark.parametrize(
-        "scheme",
-        [
-            "ring",
-            "nested",
-        ],
-    )
-    def test_healpix_cf_attr_mandatory_level(self, scheme):
+    @pytest.mark.parametrize("scheme", ["nested", "ring"])
+    def test_mandatory_level_construct(self, scheme):
         with pytest.raises(
             ValueError,
-            match=f"Indexing scheme {scheme} requires a valid healpix refinement level.",
+            match=f"Indexing scheme {scheme!r} requires a `refinement_level` to be set."
         ):
-            _healpix_cf_attrs(scheme, None)
+            CFHealpixGridAttrs(indexing_scheme=scheme)
+
+    @pytest.mark.parametrize("scheme", ["zuniq", "nuniq"])
+    def test_optional_level_construct(self, scheme):
+        attrs = CFHealpixGridAttrs(indexing_scheme=scheme)
+        assert attrs.grid_mapping_name == "healpix"
+        assert attrs.refinement_level == None
+        assert attrs.indexing_scheme == scheme
+
+    @pytest.mark.parametrize("scheme", ["NESTED", "bad"])
+    def test_unknown_scheme(self, scheme):
+        with pytest.raises(
+            ValueError,
+            match=r"`indexing_scheme` must be one of \['nested', 'nuniq', 'ring', 'zuniq'\], not "
+            + f"{scheme!r}",
+        ):
+            CFHealpixGridAttrs(indexing_scheme=scheme)
+
+
+class TestDictIntegrationCFHealpixGridAttrs:
+    @pytest.mark.parametrize(
+        "scheme, level", [("nested", 1), ("ring", 2), ("zuniq", None), ("nuniq", None)]
+    )
+    def test_dict_construct(self, scheme, level):
+        attrs = CFHealpixGridAttrs(indexing_scheme=scheme, refinement_level=level)
+        expected = {"grid_mapping_name": "healpix", "indexing_scheme": scheme} | (
+            {"refinement_level": level} if level else {}
+        )
+        assert dict(attrs) == expected
