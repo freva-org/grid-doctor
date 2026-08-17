@@ -18,9 +18,8 @@ from typing import (
 )
 from typing import get_args as get_type_args
 
-from grid_doctor.types import (
-    HealpixIndexScheme,
-)
+HealpixIndexScheme = Literal["nested", "ring", "zuniq", "nuniq"]
+"""Allowed Healpix indexing schemes."""
 
 _ALLOWED_SCHEMES = frozenset(get_type_args(HealpixIndexScheme))
 _LEVEL_NEEDED = frozenset(

@@ -25,6 +25,7 @@ import numpy as np
 import xarray as xr
 
 from .cf import (
+    HealpixIndexScheme,
     _healpix_cf_attrs,
 )
 from .remap_apply import (
@@ -46,7 +47,6 @@ from .remap_backend import (
 from .types import (
     ApplyBackend,
     FloatArray,
-    HealpixIndexScheme,
     MissingPolicy,
     RemapMethod,
     SourceKind,
