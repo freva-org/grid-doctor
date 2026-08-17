@@ -35,7 +35,14 @@ from .remap_backend import (
     _get_unstructured_dim,
     _is_unstructured,
 )
-from .types import CoarsenMode, FloatArray, ZarrOptions
+from .types import (
+    HEALPIX_LEVEL,
+    HEALPIX_NSIDE,
+    HEALPIX_ORDER,
+    CoarsenMode,
+    FloatArray,
+    ZarrOptions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -298,12 +305,12 @@ def coarsen_healpix(
         When the ordering is not nested, or *target_level* is not
         lower than the current level.
     """
-    current_nside = int(ds.attrs["healpix_nside"])
+    current_nside = int(ds.attrs[HEALPIX_NSIDE])
     target_nside = 2**target_level
     if target_nside >= current_nside:
         raise ValueError("target_level must be lower than the current HEALPix level.")
 
-    is_nested = str(ds.attrs.get("healpix_order", HealpixNested)) in {HealpixNested, "nest"}
+    is_nested = str(ds.attrs.get(HEALPIX_ORDER, HealpixNested)) in {HealpixNested, "nest"}
     if not is_nested:
         raise ValueError(
             "coarsen_healpix only supports nested HEALPix ordering. "
@@ -311,7 +318,7 @@ def coarsen_healpix(
             "regenerate ring levels directly."
         )
 
-    current_level = int(ds.attrs.get("healpix_level", int(np.log2(current_nside))))
+    current_level = int(ds.attrs.get(HEALPIX_LEVEL, int(np.log2(current_nside))))
     delta_level = current_level - target_level
     if delta_level <= 0:
         raise ValueError("target_level must be lower than the current HEALPix level.")
@@ -373,9 +380,9 @@ def coarsen_healpix(
         if "cell" in result[name].dims:
             result[name].attrs["grid_mapping"] = "crs"
 
-    result.attrs["healpix_nside"] = target_nside
-    result.attrs["healpix_level"] = target_level
-    result.attrs["healpix_order"] = HealpixNested
+    result.attrs[HEALPIX_NSIDE] = target_nside
+    result.attrs[HEALPIX_LEVEL] = target_level
+    result.attrs[HEALPIX_ORDER] = HealpixNested
     result.attrs["grid_doctor_coarsened_from_level"] = current_level
     result.attrs.update(cf_attrs)
     return result

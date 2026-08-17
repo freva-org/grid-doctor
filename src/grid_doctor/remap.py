@@ -47,6 +47,9 @@ from .remap_backend import (
     compute_healpix_weights_backend,
 )
 from .types import (
+    HEALPIX_LEVEL,
+    HEALPIX_NSIDE,
+    HEALPIX_ORDER,
     ApplyBackend,
     FloatArray,
     MissingPolicy,
@@ -538,9 +541,9 @@ def _attach_healpix_coords(
             ds_hp[name].attrs["grid_mapping"] = "crs"
 
     # Global HEALPix metadata.
-    ds_hp.attrs["healpix_level"] = level
-    ds_hp.attrs["healpix_nside"] = nside
-    ds_hp.attrs["healpix_order"] = order
+    ds_hp.attrs[HEALPIX_LEVEL] = level
+    ds_hp.attrs[HEALPIX_NSIDE] = nside
+    ds_hp.attrs[HEALPIX_ORDER] = order
 
     # Provenance.
     ds_hp.attrs["grid_doctor_version"] = _gd.__version__
@@ -576,9 +579,9 @@ def _make_crs_variable(
         np.float64(0.0),
         attrs={
             "grid_mapping_name": "healpix",
-            "healpix_nside": nside,
-            "healpix_level": level,
-            "healpix_order": order,
+            HEALPIX_NSIDE: nside,
+            HEALPIX_LEVEL: level,
+            HEALPIX_ORDER: order,
         } | dict(healpix_grid_mapping_attrs(order, level))
     )
 

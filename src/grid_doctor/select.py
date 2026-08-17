@@ -42,7 +42,7 @@ import xarray as xr
 from .cf import HealpixNested
 from .remap import _make_crs_variable
 from .remap_backend import _canonical_lon, _require_healpix_geo_module
-from .types import Int64Array
+from .types import HEALPIX_LEVEL, HEALPIX_NSIDE, HEALPIX_ORDER, Int64Array
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def _dataset_level(ds: xr.Dataset, level: int | None) -> int:
     if level is not None:
         return level
     try:
-        return int(ds.attrs["healpix_level"])
+        return int(ds.attrs[HEALPIX_LEVEL])
     except KeyError:
         raise ValueError(
             "Dataset has no `healpix_level` attribute; pass `level=` explicitly."
@@ -88,7 +88,7 @@ def _dataset_level(ds: xr.Dataset, level: int | None) -> int:
 
 def _require_nested(ds: xr.Dataset) -> None:
     """Range-based selection relies on nested ordering."""
-    order = str(ds.attrs.get("healpix_order", HealpixNested))
+    order = str(ds.attrs.get(HEALPIX_ORDER, HealpixNested))
     if order not in {HealpixNested, "nest"}:
         raise ValueError(f"Region selection requires nested ordering, got {order!r}.")
 
@@ -346,9 +346,9 @@ def attach_cell_coords(
         merged = dict(attrs)
         merged.update(result.attrs)
         result.attrs = merged
-    result.attrs["healpix_level"] = level
-    result.attrs["healpix_nside"] = 2**level
-    result.attrs["healpix_order"] = HealpixNested
+    result.attrs[HEALPIX_LEVEL] = level
+    result.attrs[HEALPIX_NSIDE] = 2**level
+    result.attrs[HEALPIX_ORDER] = HealpixNested
     result.attrs["grid_doctor_sparse"] = 1
     return result
 
