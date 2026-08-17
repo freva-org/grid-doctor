@@ -371,7 +371,6 @@ def coarsen_healpix(
     for name in result.data_vars:
         if "cell" in result[name].dims:
             result[name].attrs["grid_mapping"] = "crs"
-            result[name].attrs.update(cf_attrs)
 
     result.attrs["healpix_nside"] = target_nside
     result.attrs["healpix_level"] = target_level
