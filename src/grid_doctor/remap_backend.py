@@ -34,6 +34,10 @@ from typing import Any, Literal, cast, overload
 import numpy as np
 import xarray as xr
 
+from .cf import (
+    HealpixNested,
+    HealpixRing,
+)
 from .types import (
     FloatArray,
     Int64Array,
@@ -1858,7 +1862,7 @@ def compute_healpix_weights_backend(
     meta: dict[str, str | int | float | bool] = {
         "grid_doctor_method": method,
         "grid_doctor_level": level,
-        "grid_doctor_order": "nested" if nest else "ring",
+        "grid_doctor_order": HealpixNested if nest else HealpixRing,
         "grid_doctor_backend": ("offline-esmf" if use_offline else "esmpy"),
         "grid_doctor_ignore_unmapped": int(bool(eff_ignore)),
         **source_desc.metadata,
@@ -1924,7 +1928,7 @@ def _run_offline_esmf(
         workdir = config.workdir
         workdir.mkdir(parents=True, exist_ok=True)
 
-    order_tag = "nest" if nest else "ring"
+    order_tag = "nest" if nest else HealpixRing
     src_file = write_ugrid_mesh_file(
         source_desc.source_mesh,
         workdir / "source_mesh.nc",

@@ -39,6 +39,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from .cf import HealpixNested
 from .remap import _make_crs_variable
 from .remap_backend import _canonical_lon, _require_healpix_geo_module
 from .types import Int64Array
@@ -87,8 +88,8 @@ def _dataset_level(ds: xr.Dataset, level: int | None) -> int:
 
 def _require_nested(ds: xr.Dataset) -> None:
     """Range-based selection relies on nested ordering."""
-    order = str(ds.attrs.get("healpix_order", "nested"))
-    if order not in {"nested", "nest"}:
+    order = str(ds.attrs.get("healpix_order", HealpixNested))
+    if order not in {HealpixNested, "nest"}:
         raise ValueError(f"Region selection requires nested ordering, got {order!r}.")
 
 
@@ -336,7 +337,7 @@ def attach_cell_coords(
             "cell",
             _canonical_lon(np.asarray(lon_deg, dtype=np.float64)),
         ),
-        crs=_make_crs_variable(level=level, nside=2**level, order="nested"),
+        crs=_make_crs_variable(level=level, nside=2**level, order=HealpixNested),
     )
     for name in result.data_vars:
         if "cell" in result[name].dims:
@@ -347,7 +348,7 @@ def attach_cell_coords(
         result.attrs = merged
     result.attrs["healpix_level"] = level
     result.attrs["healpix_nside"] = 2**level
-    result.attrs["healpix_order"] = "nested"
+    result.attrs["healpix_order"] = HealpixNested
     result.attrs["grid_doctor_sparse"] = 1
     return result
 

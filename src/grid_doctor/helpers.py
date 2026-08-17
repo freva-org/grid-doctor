@@ -22,6 +22,7 @@ import s3fs
 import xarray as xr
 
 from .cf import (
+    HealpixNested,
     healpix_grid_mapping_attrs,
 )
 from .remap import (
@@ -302,7 +303,7 @@ def coarsen_healpix(
     if target_nside >= current_nside:
         raise ValueError("target_level must be lower than the current HEALPix level.")
 
-    is_nested = str(ds.attrs.get("healpix_order", "nested")) in {"nested", "nest"}
+    is_nested = str(ds.attrs.get("healpix_order", HealpixNested)) in {HealpixNested, "nest"}
     if not is_nested:
         raise ValueError(
             "coarsen_healpix only supports nested HEALPix ordering. "
@@ -362,7 +363,7 @@ def coarsen_healpix(
         crs=_make_crs_variable(
             level=target_level,
             nside=target_nside,
-            order="nested",
+            order=HealpixNested,
         ),
     )
 
@@ -374,7 +375,7 @@ def coarsen_healpix(
 
     result.attrs["healpix_nside"] = target_nside
     result.attrs["healpix_level"] = target_level
-    result.attrs["healpix_order"] = "nested"
+    result.attrs["healpix_order"] = HealpixNested
     result.attrs["grid_doctor_coarsened_from_level"] = current_level
     result.attrs.update(cf_attrs)
     return result

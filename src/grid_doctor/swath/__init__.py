@@ -63,6 +63,10 @@ from collections.abc import Mapping
 import numpy as np
 import xarray as xr
 
+from ..cf import (
+    HealpixNested,
+    HealpixRing,
+)
 from ..remap import _attach_healpix_coords
 from ..remap_backend import (
     _canonical_lon,
@@ -313,7 +317,7 @@ def sparse_to_dense(ds: xr.Dataset) -> xr.Dataset:
     if int(ds.attrs.get("grid_doctor_sparse", 0)) != 1:
         raise ValueError("Dataset is not a sparse binned dataset.")
     level = int(ds.attrs["healpix_level"])
-    nest = str(ds.attrs.get("healpix_order", "nested")) in {"nested", "nest"}
+    nest = str(ds.attrs.get("healpix_order", HealpixNested)) in {HealpixNested, "nest"}
     cell_ids = np.asarray(ds["cell"].values, dtype=np.int64)
     stripped = ds.drop_vars(
         [name for name in ("latitude", "longitude", "crs", "cell") if name in ds]
@@ -403,7 +407,7 @@ def _attach_sparse_coords(
         latitude=("cell", np.asarray(lat_deg, dtype=np.float64)),
         longitude=("cell", _canonical_lon(np.asarray(lon_deg, dtype=np.float64))),
         crs=_make_crs_variable(
-            level=level, nside=2**level, order="nested" if nest else "ring"
+            level=level, nside=2**level, order=HealpixNested if nest else HealpixRing
         ),
     )
     for name in result.data_vars:
@@ -414,7 +418,7 @@ def _attach_sparse_coords(
 
     result.attrs["healpix_level"] = level
     result.attrs["healpix_nside"] = 2**level
-    result.attrs["healpix_order"] = "nested" if nest else "ring"
+    result.attrs["healpix_order"] = HealpixNested if nest else HealpixRing
     result.attrs["grid_doctor_version"] = _gd.__version__
     result.attrs["grid_doctor_sparse"] = 1
     return result

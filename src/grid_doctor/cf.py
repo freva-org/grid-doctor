@@ -11,6 +11,7 @@ from dataclasses import (
     field,
 )
 from typing import (
+    Final,
     Iterator,
     Literal,
     Mapping,
@@ -18,14 +19,21 @@ from typing import (
 )
 from typing import get_args as get_type_args
 
+# Types for CF healpix
+HealpixNested: Final = "nested"
+"""Healpix nested CF indexing scheme."""
+
+HealpixRing: Final = "ring"
+"""Healpix ring CF indexing scheme."""
+
 HealpixIndexScheme = Literal["nested", "ring", "zuniq", "nuniq"]
 """Allowed Healpix indexing schemes."""
 
 _ALLOWED_SCHEMES = frozenset(get_type_args(HealpixIndexScheme))
 _LEVEL_NEEDED = frozenset(
     {
-        "nested",
-        "ring",
+        HealpixNested,
+        HealpixRing,
     }
 )
 
@@ -146,4 +154,4 @@ def healpix_grid_mapping_attrs(
     )
 
 
-__all__ = ["HealpixIndexScheme", "healpix_grid_mapping_attrs"]
+__all__ = ["HealpixNested", "HealpixRing", "HealpixIndexScheme", "healpix_grid_mapping_attrs"]

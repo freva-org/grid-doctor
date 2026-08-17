@@ -26,6 +26,8 @@ import xarray as xr
 
 from .cf import (
     HealpixIndexScheme,
+    HealpixNested,
+    HealpixRing,
     healpix_grid_mapping_attrs,
 )
 from .remap_apply import (
@@ -146,7 +148,7 @@ def _read_weight_file(
             values=wds[val_name].values,
         )
         level = int(wds.attrs.get("grid_doctor_level", -1))
-        order = str(wds.attrs.get("grid_doctor_order", "nested"))
+        order = str(wds.attrs.get("grid_doctor_order", HealpixNested))
         method_raw = wds.attrs.get("grid_doctor_method")
         method = str(method_raw) if method_raw is not None else None
         stored_source_dims = _parse_source_dims_attr(
@@ -488,7 +490,7 @@ def apply_weight_file(
         result = _attach_healpix_coords(
             result,
             level=level,
-            nest=(order == "nested"),
+            nest=(order == HealpixNested),
             method=method,
         )
     return result
@@ -520,7 +522,7 @@ def _attach_healpix_coords(
     import grid_doctor as _gd
 
     nside = 2**level
-    order: HealpixIndexScheme = "nested" if nest else "ring"
+    order: HealpixIndexScheme = HealpixNested if nest else HealpixRing
 
     lat_deg, lon_deg = _healpix_centres(level, nest=nest)
     ds_hp = ds_hp.assign_coords(
