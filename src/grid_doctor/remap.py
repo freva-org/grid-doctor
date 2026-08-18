@@ -48,6 +48,7 @@ from .remap_backend import (
     compute_healpix_weights_backend,
 )
 from .types import (
+    HEALPIX_INDEX,
     HEALPIX_LEVEL,
     HEALPIX_NSIDE,
     HEALPIX_ORDER,
@@ -475,7 +476,7 @@ def apply_weight_file(
                 apply_weights_nd,
                 data,
                 input_core_dims=[list(resolved_sd)],
-                output_core_dims=[["cell"]],
+                output_core_dims=[[HEALPIX_INDEX]],
                 exclude_dims=set(resolved_sd),
                 dask="parallelized",
                 kwargs={
@@ -485,7 +486,7 @@ def apply_weight_file(
                     "backend": backend,
                 },
                 output_dtypes=[np.float64],
-                dask_gufunc_kwargs={"output_sizes": {"cell": n_target}},
+                dask_gufunc_kwargs={"output_sizes": {HEALPIX_INDEX: n_target}},
             ),
         )
 
@@ -531,14 +532,14 @@ def _attach_healpix_coords(
     lat_deg, lon_deg = _healpix_centres(level, nest=nest)
     ds_hp = ds_hp.assign_coords(
         cell=np.arange(lat_deg.size, dtype=np.int64),
-        latitude=("cell", lat_deg),
-        longitude=("cell", lon_deg),
+        latitude=(HEALPIX_INDEX, lat_deg),
+        longitude=(HEALPIX_INDEX, lon_deg),
         crs=_make_crs_variable(level=level, nside=nside, order=order),
     )
 
     # Tag every spatially-mapped data variable.
     for name in ds_hp.data_vars:
-        if "cell" in ds_hp[name].dims:
+        if HEALPIX_INDEX in ds_hp[name].dims:
             ds_hp[name].attrs["grid_mapping"] = "crs"
 
     # Global HEALPix metadata.

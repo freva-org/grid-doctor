@@ -73,6 +73,7 @@ from ..remap_backend import (
     _require_healpix_geo_module,
 )
 from ..types import (
+    HEALPIX_INDEX,
     HEALPIX_LEVEL,
     HEALPIX_NSIDE,
     HEALPIX_ORDER,
@@ -276,11 +277,11 @@ def bin_to_healpix(
             key: value for key, value in da.attrs.items() if key not in FILL_ATTR_NAMES
         }
         attrs["grid_doctor_method"] = AGG_TO_METHOD[method]
-        binned[var_name] = xr.DataArray(result, dims=(*batch_dims, "cell"), attrs=attrs)
+        binned[var_name] = xr.DataArray(result, dims=(*batch_dims, HEALPIX_INDEX), attrs=attrs)
         if with_counts and method != "count":
             counts[f"{var_name}_count"] = xr.DataArray(
                 valid_count.astype(np.int32),
-                dims=(*batch_dims, "cell"),
+                dims=(*batch_dims, HEALPIX_INDEX),
                 attrs={"long_name": f"number of valid samples binned into {var_name}"},
             )
 
@@ -325,9 +326,9 @@ def sparse_to_dense(ds: xr.Dataset) -> xr.Dataset:
         raise ValueError("Dataset is not a sparse binned dataset.")
     level = int(ds.attrs[HEALPIX_LEVEL])
     nest = str(ds.attrs.get(HEALPIX_ORDER, HealpixNested)) in {HealpixNested, "nest"}
-    cell_ids = np.asarray(ds["cell"].values, dtype=np.int64)
+    cell_ids = np.asarray(ds[HEALPIX_INDEX].values, dtype=np.int64)
     stripped = ds.drop_vars(
-        [name for name in ("latitude", "longitude", "crs", "cell") if name in ds]
+        [name for name in ("latitude", "longitude", "crs", HEALPIX_INDEX) if name in ds]
     )
     return _scatter_to_dense(stripped, cell_ids, level=level, nest=nest)
 
@@ -367,10 +368,10 @@ def _scatter_to_dense(
     npix = 12 * 4**level
     scattered: dict[str, xr.DataArray] = {}
     for name, da in ds.data_vars.items():
-        if "cell" not in da.dims:
+        if HEALPIX_INDEX not in da.dims:
             scattered[str(name)] = da
             continue
-        arranged = da.transpose(..., "cell")
+        arranged = da.transpose(..., HEALPIX_INDEX)
         if np.issubdtype(arranged.dtype, np.integer):
             full = np.zeros((*arranged.shape[:-1], npix), dtype=arranged.dtype)
         else:
@@ -382,7 +383,7 @@ def _scatter_to_dense(
         {
             str(coord): ds.coords[coord]
             for coord in ds.coords
-            if "cell" not in ds.coords[coord].dims and str(coord) != "cell"
+            if HEALPIX_INDEX not in ds.coords[coord].dims and str(coord) != HEALPIX_INDEX
         }
     )
     dense.attrs.pop("grid_doctor_sparse", None)
@@ -411,14 +412,14 @@ def _attach_sparse_coords(
 
     result = ds.assign_coords(
         cell=cell_ids,
-        latitude=("cell", np.asarray(lat_deg, dtype=np.float64)),
-        longitude=("cell", _canonical_lon(np.asarray(lon_deg, dtype=np.float64))),
+        latitude=(HEALPIX_INDEX, np.asarray(lat_deg, dtype=np.float64)),
+        longitude=(HEALPIX_INDEX, _canonical_lon(np.asarray(lon_deg, dtype=np.float64))),
         crs=_make_crs_variable(
             level=level, nside=2**level, order=HealpixNested if nest else HealpixRing
         ),
     )
     for name in result.data_vars:
-        if "cell" in result[name].dims:
+        if HEALPIX_INDEX in result[name].dims:
             result[name].attrs["grid_mapping"] = "crs"
 
     import grid_doctor as _gd

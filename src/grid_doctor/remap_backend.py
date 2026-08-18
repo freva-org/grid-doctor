@@ -39,6 +39,7 @@ from .cf import (
     HealpixRing,
 )
 from .types import (
+    HEALPIX_INDEX,
     FloatArray,
     Int64Array,
     IntArray,
@@ -54,7 +55,7 @@ logger = logging.getLogger(__name__)
 # Well-known coordinate and dimension names
 # ---------------------------------------------------------------------------
 
-_UNSTRUCTURED_DIMS: frozenset[str] = frozenset({"cell", "ncells", "ncell", "nCells"})
+_UNSTRUCTURED_DIMS: frozenset[str] = frozenset({HEALPIX_INDEX, "cell", "ncells", "ncell", "nCells"})
 """Dimension names that signal an unstructured source grid."""
 
 _LAT_NAMES: tuple[str, ...] = (

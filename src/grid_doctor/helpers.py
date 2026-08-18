@@ -33,6 +33,7 @@ from .remap_backend import (
     _is_unstructured,
 )
 from .types import (
+    HEALPIX_INDEX,
     HEALPIX_LEVEL,
     HEALPIX_NSIDE,
     HEALPIX_ORDER,
@@ -331,11 +332,11 @@ def coarsen_healpix(
     coarsen_func = _coarsen_array_mode if resolved_mode == "mode" else _coarsen_array
 
     factor = 4**delta_level
-    npix_target = ds.sizes["cell"] // factor
+    npix_target = ds.sizes[HEALPIX_INDEX] // factor
 
     coarsened_vars: dict[str, xr.DataArray] = {}
     for name, data in ds.data_vars.items():
-        if "cell" not in data.dims:
+        if HEALPIX_INDEX not in data.dims:
             coarsened_vars[str(name)] = data
             continue
 
@@ -344,16 +345,16 @@ def coarsen_healpix(
             xr.apply_ufunc(
                 coarsen_func,
                 data,
-                input_core_dims=[["cell"]],
-                output_core_dims=[["cell"]],
-                exclude_dims={"cell"},
+                input_core_dims=[[HEALPIX_INDEX]],
+                output_core_dims=[[HEALPIX_INDEX]],
+                exclude_dims={HEALPIX_INDEX},
                 dask="parallelized",
                 kwargs={
                     "factor": factor,
                     "min_valid_fraction": min_valid_fraction,
                 },
                 output_dtypes=[np.float64],
-                dask_gufunc_kwargs={"output_sizes": {"cell": npix_target}},
+                dask_gufunc_kwargs={"output_sizes": {HEALPIX_INDEX: npix_target}},
                 keep_attrs=True,
             ),
         )
@@ -362,8 +363,8 @@ def coarsen_healpix(
     lat_deg, lon_deg = _healpix_coords(target_level, nest=True)
     result = result.assign_coords(
         cell=np.arange(npix_target, dtype=np.int64),
-        latitude=("cell", lat_deg),
-        longitude=("cell", lon_deg),
+        latitude=(HEALPIX_INDEX, lat_deg),
+        longitude=(HEALPIX_INDEX, lon_deg),
         crs=_make_crs_variable(
             level=target_level,
             nside=target_nside,
@@ -373,7 +374,7 @@ def coarsen_healpix(
 
     # Tag every spatially-mapped data variable.
     for name in result.data_vars:
-        if "cell" in result[name].dims:
+        if HEALPIX_INDEX in result[name].dims:
             result[name].attrs["grid_mapping"] = "crs"
 
     result.attrs[HEALPIX_NSIDE] = target_nside
@@ -524,7 +525,7 @@ def save_pyramid(
         )
         if not include_coords:
             dataset = dataset.drop_vars(
-                ["latitude", "longitude", "cell"], errors="ignore"
+                ["latitude", "longitude", HEALPIX_INDEX], errors="ignore"
             )
             dataset.attrs["grid_doctor_implicit_coords"] = 1
         level_path = f"{path}/level_{level}.zarr"

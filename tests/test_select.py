@@ -16,6 +16,7 @@ from grid_doctor import (
 )
 from grid_doctor.helpers import WRITE_COORDS_MAX_LEVEL
 from grid_doctor.select import _contiguous_runs, _parents_to_ranges
+from grid_doctor.types import HEALPIX_INDEX
 
 LEVEL = 8
 DELTA = 4
@@ -35,10 +36,10 @@ def _centres(cells: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 @pytest.fixture
 def dense_ds() -> xr.Dataset:
-    """Dense global dataset whose values encode the cell index."""
+    """Dense global dataset whose values encode the healpix index."""
     data = (np.arange(NPIX) % 97).astype(np.float32)
     return xr.Dataset(
-        {"t2m": ("cell", data)},
+        {"t2m": (HEALPIX_INDEX, data)},
         attrs={
             "healpix_level": LEVEL,
             "healpix_nside": 2**LEVEL,
@@ -67,7 +68,7 @@ class TestSelectCells:
     def test_positional_dense_selection(self, dense_ds: xr.Dataset) -> None:
         cells = np.array([0, 1, 2, 100, 5000], dtype=np.int64)
         result = select_cells(dense_ds, cells)
-        assert (result["cell"].values == cells).all()
+        assert (result[HEALPIX_INDEX].values == cells).all()
         assert np.allclose(result["t2m"].values, cells % 97)
 
     def test_coords_are_reconstructed(self, dense_ds: xr.Dataset) -> None:
@@ -116,8 +117,8 @@ class TestSelectCells:
         ds = dense_ds.copy()
         ds["t2m"] = ds["t2m"].expand_dims(time=[0, 1])
         result = select_cells(ds, np.array([10, 11]))
-        assert result["t2m"].dims == ("time", "cell")
-        assert result.sizes == {"time": 2, "cell": 2}
+        assert result["t2m"].dims == ("time", HEALPIX_INDEX)
+        assert result.sizes == {"time": 2, HEALPIX_INDEX: 2}
 
 
 class TestSelectBbox:

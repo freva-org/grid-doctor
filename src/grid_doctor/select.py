@@ -42,7 +42,13 @@ import xarray as xr
 from .cf import HealpixNested
 from .remap import _make_crs_variable
 from .remap_backend import _canonical_lon, _require_healpix_geo_module
-from .types import HEALPIX_LEVEL, HEALPIX_NSIDE, HEALPIX_ORDER, Int64Array
+from .types import (
+    HEALPIX_INDEX,
+    HEALPIX_LEVEL,
+    HEALPIX_NSIDE,
+    HEALPIX_ORDER,
+    Int64Array,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -146,10 +152,10 @@ def select_cells(
             f"Cell IDs must be within [0, {npix}) for level {resolved_level}."
         )
 
-    if "cell" in ds.coords:
+    if HEALPIX_INDEX in ds.coords:
         # Compact dataset (or legacy dense store with coordinates):
         # positions are found through the coordinate values.
-        coord = np.asarray(ds["cell"].values, dtype=np.int64)
+        coord = np.asarray(ds[HEALPIX_INDEX].values, dtype=np.int64)
         pos = np.searchsorted(coord, wanted)
         pos = np.clip(pos, 0, coord.size - 1)
         present = coord[pos] == wanted
@@ -159,16 +165,16 @@ def select_cells(
                 f"{missing.size} requested cells are not present in the "
                 f"dataset (first missing: {int(missing[0])})."
             )
-        pieces = [ds.isel(cell=slice(a, b)) for a, b in _contiguous_runs(pos)]
+        pieces = [ds.isel({HEALPIX_INDEX: slice(a, b)}) for a, b in _contiguous_runs(pos)]
     else:
         # Dense store without materialised coordinates: positional
         # index *is* the cell ID.
-        pieces = [ds.isel(cell=slice(a, b)) for a, b in _contiguous_runs(wanted)]
+        pieces = [ds.isel({HEALPIX_INDEX: slice(a, b)}) for a, b in _contiguous_runs(wanted)]
 
     subset = (
         pieces[0]
         if len(pieces) == 1
-        else xr.concat(pieces, dim="cell", data_vars="minimal", coords="minimal")
+        else xr.concat(pieces, dim=HEALPIX_INDEX, data_vars="minimal", coords="minimal")
     )
     if load:
         subset = subset.load()
@@ -322,9 +328,9 @@ def attach_cell_coords(
         set.
     """
     cells = np.asarray(cells, dtype=np.int64)
-    if ds.sizes.get("cell") != cells.size:
+    if ds.sizes.get(HEALPIX_INDEX) != cells.size:
         raise ValueError(
-            f"Dataset has {ds.sizes.get('cell')} cells but {cells.size} "
+            f"Dataset has {ds.sizes.get(HEALPIX_INDEX)} cells but {cells.size} "
             "IDs were provided."
         )
     module, kwargs = _require_healpix_geo_module(nest=True)
@@ -332,15 +338,15 @@ def attach_cell_coords(
 
     result = ds.assign_coords(
         cell=cells,
-        latitude=("cell", np.asarray(lat_deg, dtype=np.float64)),
+        latitude=(HEALPIX_INDEX, np.asarray(lat_deg, dtype=np.float64)),
         longitude=(
-            "cell",
+            HEALPIX_INDEX,
             _canonical_lon(np.asarray(lon_deg, dtype=np.float64)),
         ),
         crs=_make_crs_variable(level=level, nside=2**level, order=HealpixNested),
     )
     for name in result.data_vars:
-        if "cell" in result[name].dims:
+        if HEALPIX_INDEX in result[name].dims:
             result[name].attrs["grid_mapping"] = "crs"
     if attrs:
         merged = dict(attrs)
