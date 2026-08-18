@@ -684,9 +684,10 @@ class TestAttachHealpixCoords:
         assert "longitude" in result.coords
         assert result.attrs["healpix_nside"] == 4
         assert result.attrs["healpix_order"] == "ring"
-        assert result.attrs["grid_mapping_name"] == "healpix"
-        assert result.attrs["indexing_scheme"] == "ring"
-        assert result.attrs["refinement_level"] == level
 
         assert "Conventions" in result.attrs
         assert result.attrs["Conventions"] == "CF-1.13"
+
+        assert "grid_mapping_name" not in result.attrs
+        assert "indexing_scheme" not in result.attrs
+        assert "refinement_level" not in result.attrs

@@ -551,7 +551,6 @@ def _attach_healpix_coords(
     if method is not None:
         ds_hp.attrs["grid_doctor_method"] = method
 
-    ds_hp.attrs.update(healpix_grid_mapping_attrs(order, level))
     ds_hp.attrs.update(conventions_attrs())
 
     return ds_hp

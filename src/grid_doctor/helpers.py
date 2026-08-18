@@ -21,7 +21,7 @@ import numpy.typing as npt
 import s3fs
 import xarray as xr
 
-from .cf import HealpixNested, conventions_attrs, healpix_grid_mapping_attrs
+from .cf import HealpixNested, conventions_attrs
 from .remap import (
     _make_crs_variable,
     regrid_to_healpix,
@@ -371,7 +371,6 @@ def coarsen_healpix(
         ),
     )
 
-    cf_attrs = healpix_grid_mapping_attrs(scheme='nested', level=target_level)
     # Tag every spatially-mapped data variable.
     for name in result.data_vars:
         if "cell" in result[name].dims:
@@ -381,7 +380,6 @@ def coarsen_healpix(
     result.attrs[HEALPIX_LEVEL] = target_level
     result.attrs[HEALPIX_ORDER] = HealpixNested
     result.attrs["grid_doctor_coarsened_from_level"] = current_level
-    result.attrs.update(cf_attrs)
     result.attrs.update(conventions_attrs())
     return result
 

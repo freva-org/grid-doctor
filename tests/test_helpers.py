@@ -177,9 +177,10 @@ class TestCoarsenHealpix:
         coarse = coarsen_healpix(healpix_ds, target_level=1)
         assert coarse.sizes["cell"] == 48
         assert coarse.attrs["healpix_level"] == 1
-        assert coarse.attrs["grid_mapping_name"] == "healpix"
-        assert coarse.attrs["refinement_level"] == 1
-        assert coarse.attrs["indexing_scheme"] == "nested"
+
+        assert "grid_mapping_name" not in coarse.attrs
+        assert "refinement_level" not in coarse.attrs
+        assert "indexing_scheme" not in coarse.attrs
 
         assert "Conventions" in coarse.attrs
         assert coarse.attrs["Conventions"] == "CF-1.13"
@@ -302,11 +303,12 @@ class TestCoarsenHealpix:
         assert coarse.coords["crs"].attrs["indexing_scheme"] == "nested"
         assert coarse.coords["crs"].attrs["earth_radius"] == 6371009
 
-        assert coarse.attrs["grid_mapping_name"] == "healpix"
-        assert coarse.attrs["refinement_level"] == 1
-        assert coarse.attrs["indexing_scheme"] == "nested"
         assert 'Conventions' in coarse.attrs
         assert coarse.attrs['Conventions'] == 'CF-1.13'
+
+        assert "grid_mapping_name" not in coarse.attrs
+        assert "refinement_level" not in coarse.attrs
+        assert "indexing_scheme" not in coarse.attrs
 
 
     def test_data_vars_have_grid_mapping(
