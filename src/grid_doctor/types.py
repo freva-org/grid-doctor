@@ -40,14 +40,13 @@ ApplyBackend = Literal["auto", "scipy", "numba", "cupy"]
 
 # Ad-hoc key names used for healpix attrs
 HEALPIX_LEVEL: Final = "healpix_level"
-"""\"Healpix_level\" is equivalent in CF vocabulary to refinement_level."""
+"""\"healpix_level\" is equivalent in CF vocabulary to refinement_level."""
 
 HEALPIX_NSIDE: Final = "healpix_nside"
 """\"healpix_nside\" is the number of pixels per size in, not required by the healpix CF convention."""
 
 HEALPIX_ORDER: Final = "healpix_order"
-"""\"Healpix_order\" is equivalent in CF vocabulary to indexing_scheme."""
-
+"""\"healpix_order\" is equivalent in CF vocabulary to indexing_scheme."""
 
 class ZarrOptions(TypedDict, total=False):
     """Definitions of possible to_zarr arguments."""
