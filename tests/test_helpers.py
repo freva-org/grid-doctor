@@ -283,6 +283,37 @@ class TestCoarsenHealpix:
             "Cells with only 4/16 valid children should be NaN"
         )
 
+    def test_has_cf_attrs(
+        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            helpers,
+            "_healpix_coords",
+            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+        )
+        coarse = coarsen_healpix(healpix_ds, target_level=1)
+        assert "crs" in coarse.coords
+        assert coarse.coords["crs"].attrs["grid_mapping_name"] == "healpix"
+        assert coarse.coords["crs"].attrs["refinement_level"] == 1
+        assert coarse.coords["crs"].attrs["indexing_scheme"] == "nested"
+        assert coarse.coords["crs"].attrs["earth_radius"] == 6371009
+
+        for name in coarse.data_vars:
+            if "cell" in coarse[name].dims:
+                assert coarse[name].attrs["grid_mapping"] == "crs"
+                assert "grid_mapping_name" not in coarse[name].attrs
+                assert "refinement_level" not in coarse[name].attrs
+                assert "indexing_scheme" not in coarse[name].attrs
+
+
+        assert 'Conventions' in coarse.attrs
+        assert coarse.attrs['Conventions'] == 'CF-1.13'
+
+        assert "grid_mapping_name" not in coarse.attrs
+        assert "refinement_level" not in coarse.attrs
+        assert "indexing_scheme" not in coarse.attrs
+
+
     def test_has_crs_variable(
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
     ) -> None:
