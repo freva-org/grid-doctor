@@ -500,7 +500,7 @@ def save_pyramid(
     encoding:
         Per-level encoding dictionaries.
     write_coords:
-        Whether to materialise the ``cell``/``latitude``/``longitude``
+        Whether to materialise the ``healpix_index``/``latitude``/``longitude``
         coordinate arrays in the store.  HEALPix coordinates are a pure
         function of the cell index, and above roughly level 10 the
         arrays dwarf regional payloads (hundreds of GB at level 16 —

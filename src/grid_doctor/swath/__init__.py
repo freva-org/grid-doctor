@@ -175,7 +175,7 @@ def bin_to_healpix(
         [`coarsen_healpix`][grid_doctor.helpers.coarsen_healpix] and
         [`save_pyramid`][grid_doctor.helpers.save_pyramid].  When
         *False*, return a compact dataset containing only the touched
-        cells (the ``cell`` coordinate holds the actual HEALPix
+        cells (the ``healpix_index`` coordinate holds the actual HEALPix
         indices) — useful as a per-granule intermediate at high levels;
         convert with
         [`sparse_to_dense`][grid_doctor.swath.sparse_to_dense] before

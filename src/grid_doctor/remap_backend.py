@@ -1641,7 +1641,7 @@ def describe_source(
             useful for spectral inputs that need an external transform.
         grid: Optional grid dataset that supplies geometry when the
             data file itself only contains values on dimensions such
-            as ``cell``.
+            as ``healpix_index``.
         source_kind: Explicit source representation.  Use ``"auto"``
             to infer it from the available coordinates.
         source_units: Angular unit convention of the source

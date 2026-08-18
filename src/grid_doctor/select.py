@@ -19,7 +19,7 @@ merged into contiguous runs, and read as a handful of contiguous slices
 power of four.
 
 The returned subset is the compact ("sparse") representation also
-produced by ``bin_to_healpix(..., dense=False)``: the ``cell``
+produced by ``bin_to_healpix(..., dense=False)``: the ``healpix_index``
 coordinate holds the actual global HEALPix indices, cell-centre
 ``latitude``/``longitude`` are computed on the fly for exactly the
 selected cells, and ``grid_doctor_sparse = 1`` is set.
@@ -114,7 +114,7 @@ def select_cells(
     """Extract the given HEALPix cells from a dataset.
 
     Works on dense datasets (positional index equals cell ID, with or
-    without materialised coordinates) and on compact subsets (``cell``
+    without materialised coordinates) and on compact subsets (``healpix_index``
     coordinate holds actual IDs).  Contiguous ID runs are read as
     contiguous slices, so a spatially compact selection touches only
     the chunks it needs.
@@ -137,7 +137,7 @@ def select_cells(
     Returns
     -------
     xarray.Dataset
-        Compact subset: ``cell`` coordinate holds the requested IDs,
+        Compact subset: ``healpix_index`` coordinate holds the requested IDs,
         cell-centre ``latitude``/``longitude`` are attached, and
         ``grid_doctor_sparse = 1`` is set.
     """
@@ -311,9 +311,9 @@ def attach_cell_coords(
     Parameters
     ----------
     ds:
-        Subset whose ``cell`` dimension corresponds to *cells*.
+        Subset whose ``healpix_index`` dimension corresponds to *cells*.
     cells:
-        Global HEALPix cell IDs, one per position along ``cell``.
+        Global HEALPix cell IDs, one per position along ``healpix_index``.
     level:
         HEALPix level of the IDs.
     attrs:
@@ -323,7 +323,7 @@ def attach_cell_coords(
     Returns
     -------
     xarray.Dataset
-        Subset with ``cell``, ``latitude``, ``longitude``, and ``crs``
+        Subset with ``healpix_index``, ``latitude``, ``longitude``, and ``crs``
         coordinates, ``grid_mapping`` tags, and ``grid_doctor_sparse``
         set.
     """

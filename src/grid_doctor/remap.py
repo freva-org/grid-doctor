@@ -439,7 +439,7 @@ def apply_weight_file(
     Returns
     -------
     xarray.Dataset
-        Dataset on the HEALPix target grid with a ``cell`` dimension.
+        Dataset on the HEALPix target grid with a ``healpix_index`` dimension.
 
     Examples
     --------
@@ -517,7 +517,7 @@ def _attach_healpix_coords(
 
     Adds:
 
-    - ``cell``, ``latitude``, ``longitude`` coordinates.
+    - ``healpix_index``, ``latitude``, ``longitude`` coordinates.
     - A scalar ``crs`` coordinate variable whose attributes describe the
       HEALPix grid (``grid_mapping_name``, ``indexing_scheme``, …).
     - ``grid_mapping = "crs"`` on every data variable so that CF-aware
