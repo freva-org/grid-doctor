@@ -266,8 +266,8 @@ def coarsen_healpix(
     Parameters
     ----------
     ds:
-        HEALPix dataset containing a ``cell`` dimension and the
-        attributes ``healpix_nside`` and ``healpix_order``.
+        HEALPix dataset containing the ``healpix_index`` dimension and the
+        `crs` with attributes CF attributes ``indexing_scheme`` and ``refinement_level``.
     target_level:
         Target HEALPix level (must be lower than the current level).
     coarsen_mode:

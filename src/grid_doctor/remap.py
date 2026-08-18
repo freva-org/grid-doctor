@@ -519,7 +519,7 @@ def _attach_healpix_coords(
 
     - ``cell``, ``latitude``, ``longitude`` coordinates.
     - A scalar ``crs`` coordinate variable whose attributes describe the
-      HEALPix grid (``grid_mapping_name``, ``healpix_nside``, …).
+      HEALPix grid (``grid_mapping_name``, ``indexing_scheme``, …).
     - ``grid_mapping = "crs"`` on every data variable so that CF-aware
       tools can discover the projection automatically.
     - Global provenance attributes (``healpix_*``, ``grid_doctor_*``).
