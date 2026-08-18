@@ -88,6 +88,10 @@ class TestCFHealpixGridAttrs:
         assert attrs.earth_radius is not None
         assert attrs.earth_radius == 6371009
 
+    def test_bad_earth_radius(self):
+        with pytest.raises(ValueError, match=f"Invalid `earth_radius`: '1'; Must be integer, in meters!"):
+            CFHealpixGridAttrs(indexing_scheme='nuniq', earth_radius='1')
+
     def test_immutability(self):
         with pytest.raises(FrozenInstanceError, match = r"cannot assign to field 'scheme'"):
             attrs = CFHealpixGridAttrs(indexing_scheme='zuniq')
