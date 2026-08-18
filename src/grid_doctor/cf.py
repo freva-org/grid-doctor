@@ -154,4 +154,9 @@ def healpix_grid_mapping_attrs(
     )
 
 
-__all__ = ["HealpixNested", "HealpixRing", "HealpixIndexScheme", "healpix_grid_mapping_attrs"]
+def conventions_attrs() -> dict[str, str]:
+    r"""Return a dictionary with global CF attributes - e.g. ``{"Conventions": "CF-1.13"}``."""
+    return CFConventions().to_dict()
+
+
+__all__ = ["HealpixNested", "HealpixRing", "HealpixIndexScheme", "conventions_attrs", "healpix_grid_mapping_attrs"]

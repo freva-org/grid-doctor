@@ -181,6 +181,10 @@ class TestCoarsenHealpix:
         assert coarse.attrs["refinement_level"] == 1
         assert coarse.attrs["indexing_scheme"] == "nested"
 
+        assert "Conventions" in coarse.attrs
+        assert coarse.attrs["Conventions"] == "CF-1.13"
+
+
     def test_rejects_ring_order(self, healpix_ds: xr.Dataset) -> None:
         ds = healpix_ds.copy()
         ds.attrs["healpix_order"] = "ring"
@@ -301,6 +305,8 @@ class TestCoarsenHealpix:
         assert coarse.attrs["grid_mapping_name"] == "healpix"
         assert coarse.attrs["refinement_level"] == 1
         assert coarse.attrs["indexing_scheme"] == "nested"
+        assert 'Conventions' in coarse.attrs
+        assert coarse.attrs['Conventions'] == 'CF-1.13'
 
 
     def test_data_vars_have_grid_mapping(
