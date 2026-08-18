@@ -48,7 +48,7 @@ HEALPIX_NSIDE: Final = "healpix_nside"
 HEALPIX_ORDER: Final = "healpix_order"
 """\"healpix_order\" is equivalent in CF vocabulary to indexing_scheme."""
 
-HEALPIX_INDEX: Final = "cell"
+HEALPIX_INDEX: Final = "healpix_index"
 """The default NON-STANDARD name for the healpix index coordinate."""
 
 

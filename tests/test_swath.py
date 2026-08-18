@@ -17,6 +17,7 @@ from grid_doctor.swath.utils import (
     masked_float64,
     resolve_point_coords,
 )
+from grid_doctor.types import HEALPIX_INDEX
 
 LEVEL = 4
 NPIX = 12 * 4**LEVEL
@@ -215,7 +216,7 @@ class TestBinToHealpixDense:
         self, swath_ds: xr.Dataset, target_cells: np.ndarray
     ) -> None:
         result = bin_to_healpix(swath_ds, LEVEL)
-        assert result.sizes["cell"] == NPIX
+        assert result.sizes[HEALPIX_INDEX] == NPIX
         assert np.allclose(
             result["field"].values[target_cells], np.arange(len(target_cells))
         )
@@ -240,7 +241,7 @@ class TestBinToHealpixDense:
         stacked.loc[{"time": 1}] = stacked.sel(time=1) + 10.0
         ds = ds.assign(field=stacked)
         result = bin_to_healpix(ds, LEVEL)
-        assert result["field"].dims == ("time", "cell")
+        assert result["field"].dims == ("time", HEALPIX_INDEX)
         assert np.allclose(
             result["field"].values[1, target_cells]
             - result["field"].values[0, target_cells],
@@ -355,8 +356,8 @@ class TestBinToHealpixSparse:
         self, swath_ds: xr.Dataset, target_cells: np.ndarray
     ) -> None:
         result = bin_to_healpix(swath_ds, LEVEL, dense=False)
-        assert result.sizes["cell"] == len(target_cells)
-        assert (np.sort(result["cell"].values) == np.sort(target_cells)).all()
+        assert result.sizes[HEALPIX_INDEX] == len(target_cells)
+        assert (np.sort(result[HEALPIX_INDEX].values) == np.sort(target_cells)).all()
         assert int(result.attrs["grid_doctor_sparse"]) == 1
         assert "crs" in result.coords
 

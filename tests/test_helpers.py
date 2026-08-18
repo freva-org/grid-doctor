@@ -23,6 +23,7 @@ from grid_doctor.helpers import (
     resolution_to_healpix_level,
     save_pyramid,
 )
+from grid_doctor.types import HEALPIX_INDEX
 
 
 class TestGridDetection:
@@ -175,7 +176,7 @@ class TestCoarsenHealpix:
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
-        assert coarse.sizes["cell"] == 48
+        assert coarse.sizes[HEALPIX_INDEX] == 48
         assert coarse.attrs["healpix_level"] == 1
 
         assert "grid_mapping_name" not in coarse.attrs

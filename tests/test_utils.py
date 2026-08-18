@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from grid_doctor.types import HEALPIX_INDEX
 from grid_doctor.utils import (
     cache_dir,
     cached_open_dataset,
@@ -31,7 +32,7 @@ class TestChunkSizeEstimator:
         target_uncompressed_bytes = int(target_stored_bytes * 2.0)
         expected_time = max(1, target_uncompressed_bytes // (itemsize * ncell))
 
-        assert result == {"time": int(expected_time), "cell": int(ncell)}
+        assert result == {"time": int(expected_time), HEALPIX_INDEX: int(ncell)}
 
     def test_map_respects_max_cell_chunk(self) -> None:
         result = chunk_for_target_store_size(
@@ -44,7 +45,7 @@ class TestChunkSizeEstimator:
         target_uncompressed_bytes = int(target_stored_bytes * 2.0)
         expected_time = max(1, target_uncompressed_bytes // (itemsize * 100_000))
 
-        assert result == {"time": int(expected_time), "cell": 100_000}
+        assert result == {"time": int(expected_time), HEALPIX_INDEX: 100_000}
 
     def test_map_uses_given_dtype(self) -> None:
         result = chunk_for_target_store_size(
@@ -58,7 +59,7 @@ class TestChunkSizeEstimator:
         target_uncompressed_bytes = int(target_stored_bytes * 2.0)
         expected_time = max(1, target_uncompressed_bytes // (itemsize * 50_000))
 
-        assert result == {"time": int(expected_time), "cell": 50_000}
+        assert result == {"time": int(expected_time), HEALPIX_INDEX: 50_000}
 
     def test_time_series_uses_ntime_when_no_max_time_chunk_given(self) -> None:
         result = chunk_for_target_store_size(
@@ -75,7 +76,7 @@ class TestChunkSizeEstimator:
         expected_cell = max(1, target_uncompressed_bytes // (itemsize * 365))
         expected_cell = min(expected_cell, ncell)
 
-        assert result == {"time": 365, "cell": int(expected_cell)}
+        assert result == {"time": 365, HEALPIX_INDEX: int(expected_cell)}
 
     def test_time_series_prefers_max_time_chunk_over_ntime(self) -> None:
         result = chunk_for_target_store_size(
@@ -93,7 +94,7 @@ class TestChunkSizeEstimator:
         expected_cell = max(1, target_uncompressed_bytes // (itemsize * 30))
         expected_cell = min(expected_cell, ncell)
 
-        assert result == {"time": 30, "cell": int(expected_cell)}
+        assert result == {"time": 30, HEALPIX_INDEX: int(expected_cell)}
 
     def test_time_series_caps_max_time_chunk_by_ntime(self) -> None:
         result = chunk_for_target_store_size(
@@ -111,7 +112,7 @@ class TestChunkSizeEstimator:
         expected_cell = max(1, target_uncompressed_bytes // (itemsize * 10))
         expected_cell = min(expected_cell, ncell)
 
-        assert result == {"time": 10, "cell": int(expected_cell)}
+        assert result == {"time": 10, HEALPIX_INDEX: int(expected_cell)}
 
     def test_time_series_respects_max_cell_chunk(self) -> None:
         result = chunk_for_target_store_size(
@@ -122,7 +123,7 @@ class TestChunkSizeEstimator:
         )
 
         assert result["time"] == 365
-        assert result["cell"] == 20_000
+        assert result[HEALPIX_INDEX] == 20_000
 
     def test_time_series_requires_ntime_or_max_time_chunk(self) -> None:
         with pytest.raises(
@@ -143,7 +144,7 @@ class TestChunkSizeEstimator:
         )
 
         assert result["time"] == 1
-        assert result["cell"] == 12 * (2**15) * (2**15)
+        assert result[HEALPIX_INDEX] == 12 * (2**15) * (2**15)
 
     def test_time_series_cell_chunk_is_at_least_one(self) -> None:
         result = chunk_for_target_store_size(
@@ -155,7 +156,7 @@ class TestChunkSizeEstimator:
         )
 
         assert result["time"] == 10_000_000
-        assert result["cell"] == 1
+        assert result[HEALPIX_INDEX] == 1
 
 
 class TestGetS3Options:

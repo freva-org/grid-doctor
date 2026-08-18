@@ -101,11 +101,11 @@ class TestSelectCells:
             select_cells(dense_ds, np.array([], dtype=np.int64))
 
     def test_missing_level_attribute_raises(self) -> None:
-        ds = xr.Dataset({"t2m": ("cell", np.zeros(12))})
+        ds = xr.Dataset({"t2m": (HEALPIX_INDEX, np.zeros(12))})
         with pytest.raises(ValueError, match="healpix_level"):
             select_cells(ds, np.array([0]))
         result = select_cells(ds, np.array([0]), level=0)
-        assert result.sizes["cell"] == 1
+        assert result.sizes[HEALPIX_INDEX] == 1
 
     def test_ring_ordering_rejected(self, dense_ds: xr.Dataset) -> None:
         ds = dense_ds.copy()
@@ -134,8 +134,8 @@ class TestSelectBbox:
             & (lat > BBOX_LAT[0])
             & (lat < BBOX_LAT[1])
         )
-        assert np.isin(np.nonzero(inside)[0], result["cell"].values).all()
-        assert np.allclose(result["t2m"].values, result["cell"].values % 97)
+        assert np.isin(np.nonzero(inside)[0], result[HEALPIX_INDEX].values).all()
+        assert np.allclose(result["t2m"].values, result[HEALPIX_INDEX].values % 97)
 
     def test_selection_is_local(self, dense_ds: xr.Dataset) -> None:
         """The covering superset stays within one parent cell of the box."""
@@ -146,16 +146,16 @@ class TestSelectBbox:
         lat = result["latitude"].values
         assert lat.min() > BBOX_LAT[0] - 2 * parent_spacing
         assert lat.max() < BBOX_LAT[1] + 2 * parent_spacing
-        assert result.sizes["cell"] < NPIX // 100
+        assert result.sizes[HEALPIX_INDEX] < NPIX // 100
 
     def test_query_delta_alignment(self, dense_ds: xr.Dataset) -> None:
         """Selected cells arrive in whole parent blocks of 4**delta."""
         result = select_bbox(
             dense_ds, lon=BBOX_LON, lat=BBOX_LAT, query_delta=DELTA
         )
-        assert result.sizes["cell"] % 4**DELTA == 0
-        parents = np.unique(result["cell"].values >> (2 * DELTA))
-        assert result.sizes["cell"] == parents.size * 4**DELTA
+        assert result.sizes[HEALPIX_INDEX] % 4**DELTA == 0
+        parents = np.unique(result[HEALPIX_INDEX].values >> (2 * DELTA))
+        assert result.sizes[HEALPIX_INDEX] == parents.size * 4**DELTA
 
 
 class TestSelectCone:
@@ -168,8 +168,8 @@ class TestSelectCone:
         result = select_cone(
             dense_ds, lon=13.4, lat=52.5, radius=0.5, query_delta=DELTA
         )
-        assert int(centre) in result["cell"].values
-        assert np.allclose(result["t2m"].values, result["cell"].values % 97)
+        assert int(centre) in result[HEALPIX_INDEX].values
+        assert np.allclose(result["t2m"].values, result[HEALPIX_INDEX].values % 97)
 
 
 class TestWriteCoords:
@@ -189,7 +189,7 @@ class TestWriteCoords:
         )
         opened = xr.open_zarr(tmp_path / f"level_{LEVEL}.zarr", chunks=None)
         assert "latitude" not in opened and "longitude" not in opened
-        assert "cell" not in opened.coords
+        assert HEALPIX_INDEX not in opened.coords
         assert "crs" in opened.coords
         assert int(opened.attrs["grid_doctor_implicit_coords"]) == 1
         assert opened.attrs["healpix_level"] == LEVEL
@@ -203,7 +203,7 @@ class TestWriteCoords:
             write_coords=True,
         )
         opened = xr.open_zarr(tmp_path / f"level_{LEVEL}.zarr", chunks=None)
-        assert {"latitude", "longitude", "cell"} <= set(opened.coords)
+        assert {"latitude", "longitude", HEALPIX_INDEX} <= set(opened.coords)
         assert "grid_doctor_implicit_coords" not in opened.attrs
 
     def test_auto_uses_level_threshold(
@@ -232,5 +232,5 @@ class TestWriteCoords:
         region = select_bbox(
             opened, lon=BBOX_LON, lat=BBOX_LAT, query_delta=DELTA
         )
-        assert np.allclose(region["t2m"].values, region["cell"].values % 97)
+        assert np.allclose(region["t2m"].values, region[HEALPIX_INDEX].values % 97)
         assert int(region.attrs["grid_doctor_sparse"]) == 1
