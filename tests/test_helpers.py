@@ -193,6 +193,13 @@ class TestCoarsenHealpix:
         with pytest.raises(ValueError, match="only supports nested"):
             coarsen_healpix(ds, target_level=1)
 
+    def test_rejects_higher_level(self, healpix_ds: xr.Dataset) -> None:
+        ds = healpix_ds.copy()
+        ds.attrs["healpix_level"] = 0
+        ds.attrs["healpix_nside"] = 2**0
+        with pytest.raises(ValueError, match="lower than the current HEALPix level."):
+            coarsen_healpix(ds, target_level=1)
+
     def test_preserves_non_cell_variable(
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
     ) -> None:
