@@ -400,8 +400,8 @@ def _attach_sparse_coords(
 ) -> xr.Dataset:
     """Attach coordinates and metadata to a compact binned dataset.
 
-    The ``cell`` coordinate holds the *actual* HEALPix indices of the
-    touched cells (unlike the dense representation, where ``cell`` is a
+    The ``healpix_index`` coordinate holds the *actual* HEALPix indices of the
+    touched cells (unlike the dense representation, where ``healpix_index`` is a
     positional ``arange``).  The dataset is marked with
     ``grid_doctor_sparse = 1``.
     """
@@ -410,14 +410,14 @@ def _attach_sparse_coords(
 
     from ..remap import _make_crs_variable
 
-    result = ds.assign_coords(
-        cell=cell_ids,
-        latitude=(HEALPIX_INDEX, np.asarray(lat_deg, dtype=np.float64)),
-        longitude=(HEALPIX_INDEX, _canonical_lon(np.asarray(lon_deg, dtype=np.float64))),
-        crs=_make_crs_variable(
+    result = ds.assign_coords({
+        HEALPIX_INDEX: cell_ids,
+        "latitude": (HEALPIX_INDEX, np.asarray(lat_deg, dtype=np.float64)),
+        "longitude": (HEALPIX_INDEX, _canonical_lon(np.asarray(lon_deg, dtype=np.float64))),
+        "crs": _make_crs_variable(
             level=level, nside=2**level, order=HealpixNested if nest else HealpixRing
         ),
-    )
+    })
     for name in result.data_vars:
         if HEALPIX_INDEX in result[name].dims:
             result[name].attrs["grid_mapping"] = "crs"

@@ -125,7 +125,7 @@ def select_cells(
         HEALPix dataset, typically opened with
         ``xr.open_zarr(store, chunks=None)``.
     cells:
-        Global HEALPix cell IDs to extract (any order; duplicates are
+        Global HEALPix index IDs to extract (any order; duplicates are
         dropped).
     level:
         HEALPix level override when the ``healpix_level`` attribute is
@@ -337,13 +337,15 @@ def attach_cell_coords(
     lon_deg, lat_deg = module.healpix_to_lonlat(cells, level, **kwargs)
 
     result = ds.assign_coords(
-        cell=cells,
-        latitude=(HEALPIX_INDEX, np.asarray(lat_deg, dtype=np.float64)),
-        longitude=(
-            HEALPIX_INDEX,
-            _canonical_lon(np.asarray(lon_deg, dtype=np.float64)),
-        ),
-        crs=_make_crs_variable(level=level, nside=2**level, order=HealpixNested),
+        {
+            HEALPIX_INDEX: cells,
+            "latitude": (HEALPIX_INDEX, np.asarray(lat_deg, dtype=np.float64)),
+            "longitude": (
+                HEALPIX_INDEX,
+                _canonical_lon(np.asarray(lon_deg, dtype=np.float64)),
+            ),
+            "crs": _make_crs_variable(level=level, nside=2**level, order=HealpixNested),
+        }
     )
     for name in result.data_vars:
         if HEALPIX_INDEX in result[name].dims:

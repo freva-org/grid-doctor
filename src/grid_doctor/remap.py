@@ -530,12 +530,12 @@ def _attach_healpix_coords(
     order: HealpixIndexScheme = HealpixNested if nest else HealpixRing
 
     lat_deg, lon_deg = _healpix_centres(level, nest=nest)
-    ds_hp = ds_hp.assign_coords(
-        cell=np.arange(lat_deg.size, dtype=np.int64),
-        latitude=(HEALPIX_INDEX, lat_deg),
-        longitude=(HEALPIX_INDEX, lon_deg),
-        crs=_make_crs_variable(level=level, nside=nside, order=order),
-    )
+    ds_hp = ds_hp.assign_coords({
+        HEALPIX_INDEX: np.arange(lat_deg.size, dtype=np.int64),
+        "latitude": (HEALPIX_INDEX, lat_deg),
+        "longitude": (HEALPIX_INDEX, lon_deg),
+        "crs": _make_crs_variable(level=level, nside=nside, order=order),
+    })
 
     # Tag every spatially-mapped data variable.
     for name in ds_hp.data_vars:

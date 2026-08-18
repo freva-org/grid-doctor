@@ -361,16 +361,16 @@ def coarsen_healpix(
 
     result = xr.Dataset(coarsened_vars, attrs=ds.attrs.copy())
     lat_deg, lon_deg = _healpix_coords(target_level, nest=True)
-    result = result.assign_coords(
-        cell=np.arange(npix_target, dtype=np.int64),
-        latitude=(HEALPIX_INDEX, lat_deg),
-        longitude=(HEALPIX_INDEX, lon_deg),
-        crs=_make_crs_variable(
+    result = result.assign_coords({
+        HEALPIX_INDEX: np.arange(npix_target, dtype=np.int64),
+        "latitude": (HEALPIX_INDEX, lat_deg),
+        "longitude": (HEALPIX_INDEX, lon_deg),
+        "crs": _make_crs_variable(
             level=target_level,
             nside=target_nside,
             order=HealpixNested,
         ),
-    )
+    })
 
     # Tag every spatially-mapped data variable.
     for name in result.data_vars:
