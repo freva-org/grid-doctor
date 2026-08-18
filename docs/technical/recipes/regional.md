@@ -137,7 +137,7 @@ NaN-aware mean** — no latitude weighting, no domain mask file:
 ```python
 import xarray as xr
 
-ds9 = xr.open_zarr("s3://.../cordex-eur11-tas.zarr/level_9.zarr", chunks=None)
+ds9 = xr.open_zarr("s3://.../cordex-eur11-tas.zarr/level_9.zarr", chunks=None).rename({"cell":"healpix_index"})
 domain_mean = ds9["tas"].mean("cell", skipna=True)   # area-weighted by construction
 ```
 
