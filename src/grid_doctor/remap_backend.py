@@ -1929,7 +1929,7 @@ def _run_offline_esmf(
         workdir = config.workdir
         workdir.mkdir(parents=True, exist_ok=True)
 
-    order_tag = "nest" if nest else HealpixRing
+    order_tag = HealpixNested if nest else HealpixRing
     src_file = write_ugrid_mesh_file(
         source_desc.source_mesh,
         workdir / "source_mesh.nc",
