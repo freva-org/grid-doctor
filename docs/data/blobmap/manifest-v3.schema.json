@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://waterpark.dkrz.de/blobmap/manifest-v3.schema.json",
+  "title": "blobmap manifest",
+  "description": "Blob definitions for one scope. Pure definition: this changes only when the set of blobs changes, never on reads, writes, tiering or restores.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "scope",
+    "epoch",
+    "hot_always",
+    "blobs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "description": "Format version. Consumers must reject a version they do not know rather than guess.",
+      "type": "integer",
+      "const": 3
+    },
+    "scope": {
+      "description": "Prefix these definitions apply to, relative to the data store.",
+      "type": "string"
+    },
+    "epoch": {
+      "description": "Bumped whenever the definitions change, so a resolver can detect staleness without diffing.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "generated_at": {
+      "description": "ISO 8601 UTC timestamp of the producing run.",
+      "type": "string"
+    },
+    "generated_by": {
+      "description": "Package and version that produced this.",
+      "type": "string"
+    },
+    "policy": {
+      "description": "Thresholds used to produce this cut, recorded so a later run can tell whether they changed.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "hot_always": {
+      "description": "Glob patterns that are never archivable, whatever the blobs say. Metadata objects and dimension coordinates.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pinned": {
+      "description": "Prefixes deliberately kept hot. Unlike hot_always, which is derived from the store's structure and recomputed on every partition, these are preserved across repartitions and can only be removed deliberately.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "prefix",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "prefix": {
+            "description": "What to keep hot, relative to the scope. Empty pins the whole scope.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why. Required: a pin nobody can explain is one nobody removes.",
+            "type": "string",
+            "minLength": 1
+          },
+          "by": {
+            "description": "Who set it.",
+            "type": "string"
+          },
+          "at": {
+            "description": "ISO 8601 UTC when it was set.",
+            "type": "string"
+          },
+          "until": {
+            "description": "ISO 8601 UTC after which it should be reviewed. Null for open-ended. Expiry is reported, never enforced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "blobs": {
+      "description": "Blob definitions. A list of rules, so its length tracks cut decisions rather than object count.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "prefixes",
+          "bucket"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Join key against tier state, and through it against tape addresses.",
+            "type": "string",
+            "pattern": "^[a-z0-9_]+$"
+          },
+          "prefixes": {
+            "description": "Key prefixes this blob claims, relative to the scope. More than one when small arrays were coalesced.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "bucket": {
+            "description": "Arithmetic for cutting inside an array. Null means one bucket, so the resolved id is always id_0.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "required": [
+              "index",
+              "width",
+              "key_encoding"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "index": {
+                "description": "Which segment after the prefix holds the chunk index.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "width": {
+                "description": "Objects per blob along that dimension.",
+                "type": "integer",
+                "minimum": 1
+              },
+              "key_encoding": {
+                "description": "How to parse the index out of a key.",
+                "enum": [
+                  "v3_slash",
+                  "v2_slash",
+                  "v2_flat"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "provenance": {
+      "description": "Measured numbers, for debugging only. These go stale while the manifest is untouched, so a resolver must never read them.",
+      "type": "object"
+    }
+  }
+}
