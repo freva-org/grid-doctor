@@ -29,7 +29,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, overload
+from typing import Any, Literal, cast, overload
 
 import numpy as np
 import xarray as xr
@@ -439,7 +439,7 @@ def _xyz_to_lonlat(
         ValueError: When any vector has zero length.
     """
     if batch:
-        norm = np.linalg.norm(xyz, axis=-1, keepdims=True)
+        norm = cast(float, np.linalg.norm(xyz, axis=-1, keepdims=True))
         if np.any(norm == 0.0):
             raise ValueError("Cannot convert zero-length vector to lon/lat.")
         unit = xyz / norm
@@ -450,7 +450,7 @@ def _xyz_to_lonlat(
             lat.astype(np.float64, copy=False),
         )
 
-    norm = np.linalg.norm(xyz)
+    norm = cast(float, np.linalg.norm(xyz))
     if norm == 0.0:
         raise ValueError("Cannot convert zero-length vector to lon/lat.")
     unit = xyz / norm
