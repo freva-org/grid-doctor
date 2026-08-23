@@ -765,6 +765,126 @@ def scan_staging(
 
 
 # ---------------------------------------------------------------------------
+# Node budget: memory and wall-clock
+# ---------------------------------------------------------------------------
+def _log(msg: str) -> None:
+    """Print with an explicit flush and a timestamp.
+
+    Slurm block-buffers a redirected stdout, so an un-flushed print is lost
+    entirely when the step is SIGKILLed at the wall — which is how a job
+    that ran for eight hours came back with a single line of output and no
+    indication of where it had got to.
+    """
+    import sys
+    import time as _time
+
+    print(f"[{_time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    sys.stderr.flush()
+
+
+def _mem_used_bytes() -> int:
+    """Current cgroup memory usage, or 0 when unreadable."""
+    for path in (
+        "/sys/fs/cgroup/memory.current",
+        "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+    ):
+        try:
+            return int(Path(path).read_text().strip())
+        except (OSError, ValueError):
+            continue
+    return 0
+
+
+def _node_mem_bytes() -> int:
+    """Memory this step may actually use, from the cgroup Slurm put us in.
+
+    ``mem=0`` asks for the whole node, so the cgroup limit is the node's
+    RAM; reading it rather than hard-coding 256 GB keeps the sizing honest
+    on a partition with different hardware.
+    """
+    for path in (
+        "/sys/fs/cgroup/memory.max",  # cgroup v2
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes",  # cgroup v1
+    ):
+        try:
+            raw = Path(path).read_text().strip()
+        except OSError:
+            continue
+        if raw and raw != "max":
+            value = int(raw)
+            # v1 reports a sentinel near 2**63 when unlimited.
+            if 0 < value < (1 << 62):
+                return value
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    return 256 * 1024**3
+
+
+def _peak_bytes_per_item(max_level: int, time_chunk: int) -> int:
+    """Rough peak RSS of one concurrent ``_regrid_one``.
+
+    The regrid returns float64 over ``12 * 4**level`` cells for
+    ``time_chunk`` steps; the per-variable float32 cast transiently holds
+    source and destination, so the data term is ~1.5x the float64 array.
+    On top of that each worker holds its *own* copy of the sparse
+    conservative operator — batches share a weight *file*, but not the
+    in-memory matrix — which is the term that made 8 workers OOM.
+    """
+    cells = 12 * (4**int(max_level))
+    data = cells * int(time_chunk) * 8  # float64 regrid output
+    data = int(data * 1.5)  # + float32 copy during the cast
+    weights = max(2 * 1024**3, cells * 40)  # sparse operator, per process
+    return data + weights
+
+
+def _auto_workers(
+    batch: list[RegridItem], time_chunk: int, requested: int, reserve_bytes: int
+) -> int:
+    """Clamp ``requested`` to what the node's memory actually allows.
+
+    Sizing is done against the *deepest* level in the batch: one OOM kill
+    breaks the whole ``ProcessPoolExecutor``, so the safe worker count is
+    set by the worst item, not the average.
+    """
+    max_level = max(int(i["max_level"]) for i in batch)
+    per_item = _peak_bytes_per_item(max_level, time_chunk)
+    budget = max(0, _node_mem_bytes() - reserve_bytes)
+    fits = max(1, budget // per_item)
+    chosen = max(1, min(int(requested), int(fits)))
+    _log(
+        f"memory budget: {budget / 1024**3:.0f} GiB usable, "
+        f"~{per_item / 1024**3:.1f} GiB/item at level {max_level} "
+        f"(time_chunk={time_chunk}) -> {fits} fit, "
+        f"{requested} requested, using {chosen}"
+    )
+    return chosen
+
+
+def _deadline(safety_seconds: float) -> float:
+    """Epoch time after which no new item may be started.
+
+    Slurm exports ``SLURM_JOB_END_TIME`` (epoch seconds); without it fall
+    back to the step's own start plus a conservative 8 h.  Starting an item
+    that cannot finish wastes an hour of node time and leaves debris the
+    next run has to purge, so the scheduler stops feeding the pool once the
+    remaining time is under one item's worth.
+    """
+    import os
+    import time
+
+    raw = os.environ.get("SLURM_JOB_END_TIME", "")
+    try:
+        end = float(raw)
+    except ValueError:
+        end = time.time() + 8 * 3600.0
+    return end - safety_seconds
+
+
+# ---------------------------------------------------------------------------
 # Step 4: Regrid one file → mask at finest level → coarsen → per-level NetCDF
 # ---------------------------------------------------------------------------
 @wf.array_job(
@@ -773,7 +893,7 @@ def scan_staging(
     mem="0",
     partition="compute",
     array_parallelism=0,
-    version="4",
+    version="5",
 )
 def regrid_batch(
     batch: Annotated[list[RegridItem], Result(step="scan_staging")],
@@ -786,22 +906,41 @@ def regrid_batch(
         Param(help="Time steps per staging part; FROZEN per staging directory"),
     ] = DEFAULT_TIME_CHUNK,
     workers: Annotated[
-        int, Param(help="Items regridded concurrently on this node")
+        int, Param(help="Max concurrent items; clamped by node memory")
     ] = DEFAULT_WORKERS,
+    reserve_gb: Annotated[
+        float, Param(help="Node memory held back from the worker budget")
+    ] = 48.0,
+    item_minutes: Annotated[
+        int, Param(help="Assumed per-item runtime for the deadline guard")
+    ] = 90,
+    recycle_after: Annotated[
+        int, Param(help="Fork fresh workers after this many rounds")
+    ] = 1,
 ) -> list[RegridResult]:
-    """Regrid a batch of source files, ``workers`` at a time, on one node.
+    """Regrid a batch of source files, N at a time, on one node.
 
     One array task is a batch rather than a single file: the cluster grants
     only a handful of concurrent tasks, so throughput is work-per-task times
-    tasks-in-flight and the first factor is the one under our control.  With
-    ~1 h per item, 8 h of wall-time and ``workers`` processes on a node, one
-    task retires ``workers * 7`` items instead of one.
+    tasks-in-flight and the first factor is the one under our control.
 
-    Failures are per item: a poison file must not cost the other 55.  Items
-    already staged are skipped, so a re-dispatch after ``scancel`` is cheap
-    even for batches that were half-finished.
+    Three failure modes are handled explicitly, all of them observed:
+
+    - **OOM.** ``workers`` is clamped to what the cgroup can hold, sized
+      against the deepest level in the batch. A single OOM kill breaks the
+      whole executor, so the count must be safe for the worst item.
+    - **A broken pool.** If a worker dies anyway, ``BrokenProcessPool``
+      fails every in-flight *and* every queued future at once. Rather than
+      logging 50 spurious failures, the remaining items are requeued on a
+      fresh, smaller pool.
+    - **The wall.** No item is started that cannot finish before
+      ``SLURM_JOB_END_TIME``; the leftovers are simply not attempted and
+      the next run's scan picks them up. Work already staged always
+      survives, because staging writes are atomic and marked.
     """
-    from concurrent.futures import ProcessPoolExecutor, as_completed
+    import time
+    from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+    from concurrent.futures.process import BrokenProcessPool
 
     done: list[RegridResult] = []
     pending: list[RegridItem] = []
@@ -817,38 +956,185 @@ def regrid_batch(
         else:
             pending.append(item)
     if done:
-        print(f"Skipping {len(done)} already-staged items in this batch")
+        _log(f"Skipping {len(done)} already-staged items in this batch")
+    if not pending:
+        _log(f"batch complete: {len(done)} staged, 0 failed, 0 deferred")
+        return done
 
+    n_workers = _auto_workers(
+        pending, time_chunk, workers, int(reserve_gb * 1024**3)
+    )
+    # deadline: stop *starting* items that cannot finish.
+    # hard_stop: stop *waiting* and exit cleanly, so the step returns its
+    # results instead of being SIGKILLed at the wall with an unflushed
+    # buffer and no record of what completed.
+    deadline = _deadline(safety_seconds=item_minutes * 60.0)
+    hard_stop = _deadline(safety_seconds=300.0)
     failures: list[str] = []
+    abandoned = False
+    _log(
+        f"{len(pending)} item(s) to run, {n_workers} worker(s), "
+        f"{(deadline - time.time()) / 3600:.1f} h of submit budget, "
+        f"hard stop in {(hard_stop - time.time()) / 3600:.1f} h"
+    )
+
+    while pending and time.time() < deadline and not abandoned:
+        queue = list(pending)
+        pending = []
+        broken = False
+        recycling = False
+        retired_here = 0
+        try:
+            pool = _pool(n_workers)
+            try:
+                futures: dict[object, RegridItem] = {}
+                while queue or futures:
+                    while queue and len(futures) < n_workers and not recycling:
+                        if time.time() >= deadline:
+                            break
+                        item = queue.pop(0)
+                        fut = pool.submit(
+                            _regrid_one,
+                            item,
+                            coverage_threshold,
+                            time_chunk,
+                            max(1, 128 // n_workers),
+                        )
+                        futures[fut] = item
+                    if not futures:
+                        break
+                    finished, _ = wait(
+                        list(futures), timeout=60, return_when=FIRST_COMPLETED
+                    )
+                    if not finished:
+                        # Nothing completed in the last minute: report where
+                        # we are, so a stalled batch is visible in the log
+                        # rather than being inferred from silence.
+                        _log(
+                            f"waiting on {len(futures)} item(s); "
+                            f"cgroup at {_mem_used_bytes() / 1024**3:.0f} GiB; "
+                            f"{(deadline - time.time()) / 60:.0f} min of "
+                            "budget left"
+                        )
+                    if time.time() >= hard_stop:
+                        # The wall is close. Abandon in-flight work rather
+                        # than letting Slurm SIGKILL the step: staged files
+                        # are atomic and marked, so whatever finished is
+                        # kept and the next scan resumes from there.
+                        _log(
+                            f"hard stop: abandoning {len(futures)} in-flight "
+                            f"and {len(queue)} queued item(s)"
+                        )
+                        queue.extend(futures.values())
+                        futures.clear()
+                        abandoned = True
+                        break
+                    for fut in finished:
+                        item = futures.pop(fut)
+                        try:
+                            done.append(fut.result())
+                            retired_here += 1
+                        except BrokenProcessPool:
+                            # The pool is gone; nothing queued behind this
+                            # will run either. Salvage and restart smaller.
+                            queue.append(item)
+                            broken = True
+                        except Exception as exc:
+                            failures.append(item["source_file"])
+                            _log(f"FAILED {item['source_file']}: {exc!r}")
+                            retired_here += 1
+                    if broken:
+                        queue.extend(futures.values())
+                        futures.clear()
+                        break
+                    # Stop feeding this pool once it has done a full sweep;
+                    # let it drain, then the outer loop forks fresh workers.
+                    if queue and retired_here >= recycle_after * n_workers:
+                        recycling = True
+            finally:
+                _shutdown(pool, graceful=not abandoned)
+        except BrokenProcessPool:
+            broken = True
+
+        if abandoned:
+            # The `with` block already called shutdown(wait=True), which is
+            # what we want: workers get to finish the NetCDF they are on,
+            # and the atomic rename either lands or leaves a .tmp.
+            pending = queue
+            break
+
+        pending = queue
+        if not broken:
+            if not pending:
+                break
+            _log(f"Recycling workers; {len(pending)} items left in this batch")
+            continue
+        if n_workers == 1:
+            _log("Pool broke at 1 worker — memory model is wrong; deferring rest")
+            break
+        n_workers = max(1, n_workers // 2)
+        _log(
+            f"Worker died (OOM?); {len(pending)} items requeued on a pool of "
+            f"{n_workers}. Lower --workers or raise --reserve-gb for the rerun."
+        )
+
     if pending:
-        # grid_doctor is imported at module scope, so OpenMP is already
-        # initialised by now and setting OMP_NUM_THREADS here would be a
-        # no-op; threadpoolctl retargets the live pools instead. Without it
-        # every worker grabs all 128 cores and they thrash.
-        from threadpoolctl import threadpool_limits
-
-        per_worker = max(1, 128 // max(1, workers))
-        with threadpool_limits(limits=per_worker):
-            with ProcessPoolExecutor(max_workers=workers) as pool:
-                futures = {
-                    pool.submit(
-                        _regrid_one, item, coverage_threshold, time_chunk
-                    ): item
-                    for item in pending
-                }
-                for fut in as_completed(futures):
-                    item = futures[fut]
-                    try:
-                        done.append(fut.result())
-                    except Exception as exc:
-                        failures.append(item["source_file"])
-                        print(f"FAILED {item['source_file']}: {exc!r}")
-
-    print(
-        f"batch complete: {len(done)} staged, {len(failures)} failed"
-        + (f" ({failures})" if failures else "")
+        _log(
+            f"Deferring {len(pending)} items: not enough wall-time left to "
+            "start another. The next run's scan will pick them up."
+        )
+    _log(
+        f"batch complete: {len(done)} staged, {len(failures)} failed, "
+        f"{len(pending)} deferred"
+        + (f" (failures: {failures})" if failures else "")
     )
     return done
+
+
+def _shutdown(pool, graceful: bool, grace_seconds: float = 120.0) -> None:
+    """Tear down a pool without ever blocking indefinitely.
+
+    ``ProcessPoolExecutor.__exit__`` calls ``shutdown(wait=True)``, which
+    waits forever on a worker that is stuck — so a batch that correctly
+    detected the wall approaching would still be SIGKILLed while waiting to
+    tidy up. Here workers get ``grace_seconds`` to land their current
+    atomic rename, then are terminated.
+    """
+    import time
+
+    # shutdown() sets _processes to None, so snapshot the children first.
+    children = list((getattr(pool, "_processes", None) or {}).values())
+    pool.shutdown(wait=False, cancel_futures=True)
+    if graceful:
+        end = time.time() + grace_seconds
+        while time.time() < end and any(p.is_alive() for p in children):
+            time.sleep(1.0)
+    for proc in children:
+        if proc.is_alive():
+            proc.terminate()
+    for proc in children:
+        proc.join(timeout=10.0)
+        if proc.is_alive():
+            proc.kill()
+
+
+def _pool(n_workers: int):
+    """A plain fork-context pool.
+
+    ``max_tasks_per_child=1`` would be the obvious way to hand each item's
+    peak RSS back to the OS, but CPython rejects it with the *fork* start
+    method, and the alternatives (spawn, forkserver) both re-import
+    ``__main__`` — which here is a reflow-dispatched workflow script, so
+    importing it re-enters the CLI. The scheduler recycles the pool itself
+    instead; see ``recycle_after``.
+    """
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    return ProcessPoolExecutor(
+        max_workers=n_workers,
+        mp_context=multiprocessing.get_context("fork"),
+    )
 
 
 def _already_staged(item: RegridItem, time_chunk: int) -> bool:
@@ -868,6 +1154,7 @@ def _regrid_one(
     item: RegridItem,
     coverage_threshold: float,
     time_chunk: int,
+    threads: int = 0,
 ) -> RegridResult:
     """Regrid one source file, mask boundary cells, write pyramid levels.
 
@@ -895,6 +1182,18 @@ def _regrid_one(
     """
     import numpy as np
     import xarray as xr
+
+    # Set in the child, not the parent: grid_doctor is imported at module
+    # scope so OpenMP is already initialised, and every worker would
+    # otherwise grab all 128 cores and thrash. threadpoolctl retargets the
+    # live pools; OMP_NUM_THREADS at this point would be a no-op.
+    if threads > 0:
+        try:
+            from threadpoolctl import threadpool_limits
+
+            threadpool_limits(limits=threads)
+        except ImportError:
+            pass
 
     src = item["source_file"]
     max_level = item["max_level"]
