@@ -20,18 +20,25 @@ from helpers.file_fetcher import (
     batched_source_record_files,
     load_json,
     load_variable_requests,
+    overlaps_interval,
     parse_interval,
     resolve_records,
     selected_variables,
     split_csv_list,
     unresolved_records,
+    file_interval,
 )
-from helpers.formatter import dataset_output_root, normalise_frequencies
-from helpers.zarr_publisher import merge_zarr_stores
+from helpers.formatter import (
+    dataset_output_root,
+    existing_destinations_for_frequency,
+    normalise_frequencies,
+)
+from helpers.zarr_publisher import merge_zarr_stores, sync_named_variable_attrs
+from helpers.metadata import LAST_PERMANENT_UPDATE_ATTR
 
 VERSION_SERIES = "2026.07"
-VERSION_MAJOR = 6
-VERSION_MINOR = 6
+VERSION_MAJOR = 7
+VERSION_MINOR = 0
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -40,6 +47,7 @@ DEFAULT_VAR_TABLE = SCRIPT_DIR / "assets" / "default_variables.csv"
 DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / "assets" / "source_mapper.json"
 DEFAULT_CMOR_TABLES = SCRIPT_DIR / "tables" / "era5-cmor-tables" / "Tables"
 DEFAULT_CHUNK_SIZE: int = 16
+PERMANENT_DATA_LAG_MONTHS = 3
 FREQUENCIES = ("1hr", "day", "mon", "fx")
 UNRESOLVED_REASON = (
     "not found in CMOR table, unsupported stream/frequency, "
@@ -66,6 +74,11 @@ STAGE_COLORS = {
     "frequency_done": "\033[1;32m",
     "frequency_skip_empty": "\033[90m",
     "attrs_only": "\033[32m",
+    "update_skip": "\033[90m",
+    "update_permanent": "\033[1;38;5;208m",
+    "update_forward": "\033[1;38;5;208m",
+    "update_batch": "\033[1;33m",
+    "update_frequency": "\033[1;94m",
 }
 _ACTIVE_BATCH_STATE_PATH: Optional[Path] = None
 _BATCH_FILES_CHILD_INDEX_ENV = "ERA5_BATCH_FILES_CHILD_INDEX"
@@ -274,6 +287,122 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Exit non-zero if any resolved source has no matching files.",
+    )
+
+    update_cmd = subparsers.add_parser(
+        "update",
+        help="Append newly available data and refresh the three-month permanent batch.",
+        formatter_class=RichDefaultsHelpFormatter,
+    )
+    update_cmd.add_argument(
+        "--dataset",
+        choices=("era5land", "era5"),
+        default="era5land",
+        help="Dataset to process.",
+    )
+    update_cmd.add_argument(
+        "--var",
+        dest="variables",
+        default=None,
+        help="Comma-separated variables. Defaults to all variables.",
+    )
+    update_cmd.add_argument(
+        "--freq",
+        default="all",
+        help="Comma-separated frequencies: 1hr,day,mon,fx.",
+    )
+    update_cmd.add_argument(
+        "--root",
+        default=None,
+        help="Override /pool/data/ERA5 for tests or alternate mounts.",
+    )
+    update_cmd.add_argument(
+        "--output-path",
+        default=None,
+        help=(
+            "Override the published HEALPix output root directory. "
+            "Useful for test runs that should write outside the default location."
+        ),
+    )
+    update_cmd.add_argument(
+        "--zarr-format",
+        type=int,
+        choices=(2, 3),
+        default=2,
+        help="Zarr format version for the output pyramid.",
+    )
+    update_cmd.add_argument(
+        "--chunk-size",
+        type=int,
+        default=DEFAULT_CHUNK_SIZE,
+        metavar="MB",
+        help=(
+            "Approximate Zarr chunk-size target in megabytes for newly written "
+            "or fully rewritten stores."
+        ),
+    )
+    update_cmd.add_argument(
+        "--batch-files",
+        type=int,
+        default=None,
+        metavar="FILES",
+        help=(
+            "Process permanent and forward update data in isolated file batches "
+            "of this size. When omitted, process each update directly."
+        ),
+    )
+    update_cmd.add_argument(
+        "--batch-months",
+        type=int,
+        default=None,
+        metavar="MONTHS",
+        help=(
+            "Process update data in sequential calendar-month batches instead of "
+            "file batches. When supplied, this takes precedence over --batch-files."
+        ),
+    )
+    update_cmd.add_argument(
+        "--preview",
+        action="store_true",
+        help="Resolve and summarize the update without changing the output stores.",
+    )
+    update_cmd.add_argument(
+        "--no-cache",
+        "--no-inventory-cache",
+        action="store_false",
+        dest="use_inventory_cache",
+        default=True,
+        help="Disable cached GRIB inventories.",
+    )
+    update_cmd.add_argument(
+        "--cache-input-datasets",
+        action="store_true",
+        dest="use_input_cache",
+        default=False,
+        help="Enable cached multi-file input dataset pickles.",
+    )
+    update_cmd.add_argument(
+        "-fdt",
+        "--fail-on-duplicate-times",
+        action="store_true",
+        dest="fail_on_duplicate_times",
+        default=False,
+        help=(
+            "Raise an error when exact duplicate GRIB time rows are found during "
+            "time normalization instead of dropping them. This finishes the run."
+        ),
+    )
+    update_cmd.add_argument(
+        "--weights-dir",
+        default=str(source_mapper["weights_path"]),
+        help="Directory where HEALPix weight files are stored and reused.",
+    )
+    update_cmd.add_argument(
+        "-hlo",
+        "--highest-level-only",
+        action="store_true",
+        default=False,
+        help="Only update and write the finest HEALPix zoom level for each frequency.",
     )
 
     remap_cmd = subparsers.add_parser(
@@ -1001,6 +1130,8 @@ def validate_remap_args(args: argparse.Namespace) -> None:
         raise ValueError("--rechunk-only cannot be combined with --attrs-only.")
     if args.chunk_size <= 0:
         raise ValueError("--chunk-size must be a positive integer.")
+    if args.batch_files is not None and args.batch_files <= 0:
+        raise ValueError("--batch-files must be a positive integer.")
     if args.batch_months is not None and args.batch_files is not None:
         raise ValueError("--batch-months and --batch-files are mutually exclusive.")
     if args.batch_files is not None and args.batch_files <= 0:
@@ -1408,6 +1539,577 @@ def run_remap(args: argparse.Namespace) -> int:
     return 0
 
 
+def _existing_variable_last_date(
+    dataset: str,
+    frequency: str,
+    variable: str,
+    *,
+    zarr_format: int,
+    output_path: str | Path | None,
+) -> tuple[date | None, date | None]:
+    """Return consistent coverage and watermark metadata across all levels.
+
+    A preview must not be distorted by a stale attribute on one HEALPix level.
+    If the permanent watermark is missing or differs between levels, it is
+    treated as missing so the caller uses the safe inferred refresh interval.
+    """
+
+    import xarray as xr
+
+    destinations = existing_destinations_for_frequency(
+        dataset,
+        frequency,
+        output_path=output_path,
+    )
+    data_dates: list[date] = []
+    permanent_dates: list[date] = []
+    variable_destinations = 0
+    for destination in destinations:
+        opened = xr.open_zarr(destination, consolidated=(zarr_format == 2))
+        try:
+            if variable not in opened or "time" not in opened[variable].dims:
+                continue
+            variable_destinations += 1
+            data_date = date.fromisoformat(str(opened[variable]["time"].values[-1])[:10])
+            data_dates.append(data_date)
+            permanent_attr = opened[variable].attrs.get(LAST_PERMANENT_UPDATE_ATTR)
+            if permanent_attr:
+                permanent_dates.append(date.fromisoformat(str(permanent_attr)[:10]))
+        finally:
+            opened.close()
+
+    if not data_dates:
+        return None, None
+
+    permanent_date = None
+    if (
+        variable_destinations > 0
+        and len(permanent_dates) == variable_destinations
+        and len(set(permanent_dates)) == 1
+    ):
+        permanent_date = permanent_dates[0]
+
+    return max(data_dates), permanent_date
+
+
+def _is_final_source_file(
+    source_file: str,
+    *,
+    dataset: str,
+    frequency: str,
+) -> bool:
+    """Return whether a source file is eligible for the permanent pass.
+
+    ERA5's ET files are explicitly provisional, so only E5/E1 files qualify.
+    ERA5-Land is supplied as the merged EL collection; there the filesystem
+    modification date is used as the replacement marker. A file qualifies
+    only when it was modified at least one calendar month after the date in
+    its filename.
+    """
+
+    name = Path(source_file).name
+    if dataset == "era5":
+        return not name.startswith("ET")
+
+    coverage = file_interval(source_file, frequency)
+    if coverage is None:
+        return False
+
+    file_start, _ = coverage
+    modified_date = date.fromtimestamp(Path(source_file).stat().st_mtime)
+    return modified_date >= add_months(file_start, 1)
+
+
+def _map_update_records(
+    records: Sequence[Any],
+    *,
+    args: argparse.Namespace,
+    remap_args: argparse.Namespace,
+    interval: Tuple[Optional[date], Optional[date]],
+    frequency: str,
+    variable: str,
+    logger: logging.Logger,
+    phase: str,
+    batch_months: Optional[int],
+    batch_files: Optional[int],
+) -> None:
+    """Map update records directly or in bounded file/month batches.
+
+    Batches are processed sequentially so the mapper never has to load a long
+    update interval for a vertical variable at once. The existing mapper
+    cleanup runs after each batch; callers can additionally use a small batch
+    size when node memory is constrained.
+    """
+
+    if batch_months is not None:
+        intervals = batched_intervals(interval, batch_months=batch_months)
+        batches = []
+        for current_interval in intervals:
+            for record in records:
+                current_files = tuple(
+                    source_file
+                    for source_file in record.files
+                    if (
+                        file_interval(source_file, frequency) is not None
+                        and overlaps_interval(
+                            source_file,
+                            frequency,
+                            current_interval[0],
+                            current_interval[1],
+                        )
+                    )
+                )
+                if current_files:
+                    batches.append(
+                        (
+                            record._replace(files=current_files),
+                            current_interval,
+                        )
+                    )
+    elif batch_files is not None:
+        batches = []
+        for record in records:
+            batches.extend(
+                batched_source_record_files(
+                    record,
+                    batch_files=batch_files,
+                    fallback_interval=interval,
+                )
+            )
+    else:
+        map_records(
+            records,
+            args=remap_args,
+            frequencies=(frequency,),
+            requested_variables=(variable,),
+            interval=interval,
+            clean=False,
+        )
+        return
+
+    logger.info(
+        "stage=update_batch 📦 %s %s %s batches=%s",
+        phase,
+        frequency,
+        variable,
+        len(batches),
+    )
+    for batch_index, (batch_record, batch_interval) in enumerate(batches, start=1):
+        logger.info(
+            "stage=update_batch 📦 %s batch=%s/%s dates=%s..%s files=%s",
+            phase,
+            batch_index,
+            len(batches),
+            batch_interval[0],
+            batch_interval[1],
+            len(batch_record.files),
+        )
+        map_records(
+            [batch_record],
+            args=remap_args,
+            frequencies=(frequency,),
+            requested_variables=(variable,),
+            interval=batch_interval,
+            clean=False,
+        )
+
+
+class UpdateSelection(NamedTuple):
+    """Describe source records selected for one update phase."""
+
+    records: list[Any]
+    interval: tuple[date, date] | None
+    file_count: int
+
+
+class UpdatePreviewRow(NamedTuple):
+    """Summarize the planned permanent and forward updates for one variable."""
+
+    frequency: str
+    variable: str
+    stored_end: date
+    permanent: str
+    permanent_files: int
+    forward: str
+    forward_files: int
+
+
+def _update_remap_args(args: argparse.Namespace) -> argparse.Namespace:
+    """Build the remapping arguments used by an incremental update."""
+
+    return argparse.Namespace(
+        dataset=args.dataset,
+        zarr_format=args.zarr_format,
+        use_inventory_cache=args.use_inventory_cache,
+        use_input_cache=args.use_input_cache,
+        fail_on_duplicate_times=args.fail_on_duplicate_times,
+        weights_dir=args.weights_dir,
+        chunk_size=args.chunk_size,
+        highest_level_only=args.highest_level_only,
+        output_path=args.output_path,
+    )
+
+
+def _resolve_update_records(
+    *,
+    args: argparse.Namespace,
+    variable: str,
+    frequency: str,
+    interval: tuple[date, date],
+) -> list[Any]:
+    """Resolve source records for one variable, frequency, and date interval."""
+
+    return resolve_records(
+        var_table=DEFAULT_VAR_TABLE,
+        cmor_tables_dir=DEFAULT_CMOR_TABLES,
+        dataset=args.dataset,
+        variables=(variable,),
+        frequencies=(frequency,),
+        interval=interval,
+        root=args.root,
+        glob_files=True,
+    )
+
+
+def _select_permanent_records(
+    records: Sequence[Any],
+    *,
+    dataset: str,
+    frequency: str,
+    latest_date: date,
+    permanent_watermark: date | None,
+) -> UpdateSelection:
+    """Keep source files eligible for the permanent refresh.
+
+    When no permanent watermark exists, the file modification date is used as
+    a bootstrap boundary: files must have arrived or changed on or after the
+    latest date already stored in the output. Finality is then checked using
+    the dataset-specific source-file policy.
+    """
+
+    selected_files: set[str] = set()
+    selected_intervals: list[tuple[date, date]] = []
+    for record in records:
+        for source_file in record.files:
+            coverage = file_interval(source_file, frequency)
+            if coverage is None:
+                continue
+            file_start, _ = coverage
+            if permanent_watermark and file_start < permanent_watermark:
+                continue
+            modified_date = date.fromtimestamp(Path(source_file).stat().st_mtime)
+            if permanent_watermark is None and modified_date < latest_date:
+                continue
+            if not _is_final_source_file(
+                source_file,
+                dataset=dataset,
+                frequency=frequency,
+            ):
+                continue
+            selected_files.add(source_file)
+            selected_intervals.append(coverage)
+
+    if not selected_intervals:
+        return UpdateSelection([], None, 0)
+
+    selected_records = [
+        record._replace(
+            files=tuple(source_file for source_file in record.files if source_file in selected_files)
+        )
+        for record in records
+    ]
+    selected_records = [record for record in selected_records if record.files]
+    interval = (
+        min(start for start, _ in selected_intervals),
+        max(end for _, end in selected_intervals),
+    )
+    return UpdateSelection(selected_records, interval, len(selected_files))
+
+
+def _apply_permanent_update(
+    selection: UpdateSelection,
+    *,
+    args: argparse.Namespace,
+    remap_args: argparse.Namespace,
+    frequency: str,
+    variable: str,
+    logger: logging.Logger,
+) -> None:
+    """Map final records and persist the resulting permanent watermark."""
+
+    if selection.interval is None:
+        return
+
+    logger.info(
+        "stage=update_permanent 🔁 Refreshing %s permanent source file(s) "
+        "for %s %s: dates=%s..%s",
+        selection.file_count,
+        frequency,
+        variable,
+        selection.interval[0],
+        selection.interval[1],
+    )
+    _map_update_records(
+        selection.records,
+        args=args,
+        remap_args=remap_args,
+        interval=selection.interval,
+        frequency=frequency,
+        variable=variable,
+        logger=logger,
+        phase="permanent",
+        batch_months=args.batch_months,
+        batch_files=args.batch_files,
+    )
+
+    permanent_starts = []
+    for record in selection.records:
+        for source_file in record.files:
+            coverage = file_interval(source_file, frequency)
+            if coverage is not None:
+                permanent_starts.append(coverage[0])
+    permanent_watermark = max(permanent_starts)
+    watermark_attrs = {
+        variable: {
+            LAST_PERMANENT_UPDATE_ATTR: permanent_watermark.isoformat()
+        }
+    }
+    for destination in existing_destinations_for_frequency(
+        args.dataset,
+        frequency,
+        output_path=args.output_path,
+    ):
+        sync_named_variable_attrs(watermark_attrs, destination)
+
+
+def _apply_forward_update(
+    records: Sequence[Any],
+    *,
+    args: argparse.Namespace,
+    remap_args: argparse.Namespace,
+    interval: tuple[date, date],
+    frequency: str,
+    variable: str,
+    latest_date: date,
+    logger: logging.Logger,
+) -> int:
+    """Map forward records and return the number of source files processed."""
+
+    file_count = sum(len(record.files) for record in records)
+    if file_count == 0:
+        return 0
+
+    logger.info(
+        "stage=update_forward ➕ Updating forward data for %s %s: dates=%s..%s",
+        frequency,
+        variable,
+        latest_date,
+        interval[1],
+    )
+    _map_update_records(
+        records,
+        args=args,
+        remap_args=remap_args,
+        interval=interval,
+        frequency=frequency,
+        variable=variable,
+        logger=logger,
+        phase="forward",
+        batch_months=args.batch_months,
+        batch_files=args.batch_files,
+    )
+    return file_count
+
+
+def _preview_update_row(
+    *,
+    frequency: str,
+    variable: str,
+    latest_date: date,
+    permanent: UpdateSelection,
+    forward_files: int,
+    today: date,
+) -> UpdatePreviewRow:
+    """Build one row for the update preview report."""
+
+    permanent_range = (
+        f"{permanent.interval[0]}..{permanent.interval[1]}"
+        if permanent.interval is not None
+        else "-"
+    )
+    forward_range = f"{latest_date}..{today}" if forward_files else "-"
+    return UpdatePreviewRow(
+        frequency,
+        variable,
+        latest_date,
+        permanent_range,
+        permanent.file_count,
+        forward_range,
+        forward_files,
+    )
+
+
+def _log_update_preview(
+    rows: Sequence[UpdatePreviewRow],
+    *,
+    batch_mode: str,
+    logger: logging.Logger,
+) -> None:
+    """Log the planned update operations in tabular form."""
+
+    logger.info("stage=update_preview 📋 Update preview (batch_mode=%s)", batch_mode)
+    logger.info(
+        "stage=update_preview %-10s %-18s %-12s %-25s %s %-25s %s",
+        "frequency",
+        "variable",
+        "stored_end",
+        "permanent dates",
+        "perm_files",
+        "forward dates",
+        "fwd_files",
+    )
+    for row in rows:
+        logger.info(
+            "stage=update_preview %-10s %-18s %-12s %-25s %10s %-25s %s",
+            row.frequency,
+            row.variable,
+            row.stored_end,
+            row.permanent,
+            row.permanent_files,
+            row.forward,
+            row.forward_files,
+        )
+
+
+def run_update(args: argparse.Namespace) -> int:
+    """Update each existing variable/frequency with permanent and new source data.
+
+    The permanent pass selects final source files from the permanent watermark
+    through the command date. For ERA5-Land, finality is inferred from the
+    source file's modification date being more than one calendar month after
+    the date encoded in its filename. The forward pass starts at the latest
+    stored date, allowing the publisher to replace provisional data and append
+    newer timestamps. Each variable is resolved separately so unrelated
+    variables are not remapped.
+    """
+
+    variables = parse_cli_args(args.variables)
+    frequencies = parse_cli_freqs(args.freq)
+    _, requests = selected_requests(dataset=args.dataset, variables=variables)
+    requested_variables = tuple(request.name for request in requests)
+    today = date.today()
+    logger = logging.getLogger(__name__)
+
+    if args.chunk_size <= 0:
+        raise ValueError("--chunk-size must be a positive integer.")
+    if args.batch_files is not None and args.batch_files <= 0:
+        raise ValueError("--batch-files must be a positive integer.")
+    if args.batch_months is not None and args.batch_months <= 0:
+        raise ValueError("--batch-months must be a positive integer.")
+
+    preview_rows: list[UpdatePreviewRow] = []
+    for frequency in frequencies:
+        if frequency == "fx":
+            continue
+        logger.info(
+            "stage=update_frequency ─────────────── frequency=%s ───────────────",
+            frequency,
+        )
+        for variable in requested_variables:
+            latest_date, permanent_watermark = _existing_variable_last_date(
+                args.dataset,
+                frequency,
+                variable,
+                zarr_format=args.zarr_format,
+                output_path=args.output_path,
+            )
+            if latest_date is None:
+                logger.info(
+                    "stage=update_skip ⏭️  Skipping %s %s: no existing time series found",
+                    frequency,
+                    variable,
+                )
+                continue
+
+            remap_args = _update_remap_args(args)
+
+            permanent_date = today
+            # A store without a permanent watermark may have been published
+            # long enough ago for a multi-month permanent refresh to be due.
+            # Infer the missing watermark from the final stored coordinate.
+            permanent_start = permanent_watermark or add_months(
+                latest_date,
+                -PERMANENT_DATA_LAG_MONTHS,
+            )
+            permanent_records: list[Any] = []
+            if permanent_start <= permanent_date:
+                permanent_records = _resolve_update_records(
+                    args=args,
+                    variable=variable,
+                    frequency=frequency,
+                    interval=(permanent_start, permanent_date),
+                )
+            permanent = _select_permanent_records(
+                permanent_records,
+                dataset=args.dataset,
+                frequency=frequency,
+                latest_date=latest_date,
+                permanent_watermark=permanent_watermark,
+            )
+            if permanent.interval is not None and not args.preview:
+                _apply_permanent_update(
+                    permanent,
+                    args=args,
+                    remap_args=remap_args,
+                    frequency=frequency,
+                    variable=variable,
+                    logger=logger,
+                )
+
+            forward_interval = (latest_date, today)
+            forward_records: list[Any] = []
+            if latest_date <= today:
+                forward_records = _resolve_update_records(
+                    args=args,
+                    variable=variable,
+                    frequency=frequency,
+                    interval=forward_interval,
+                )
+            forward_file_count = sum(len(record.files) for record in forward_records)
+            if args.preview:
+                preview_rows.append(_preview_update_row(
+                    frequency=frequency,
+                    variable=variable,
+                    latest_date=latest_date,
+                    permanent=permanent,
+                    forward_files=forward_file_count,
+                    today=today,
+                ))
+                continue
+            if forward_file_count:
+                _apply_forward_update(
+                    forward_records,
+                    args=args,
+                    remap_args=remap_args,
+                    interval=forward_interval,
+                    frequency=frequency,
+                    variable=variable,
+                    latest_date=latest_date,
+                    logger=logger,
+                )
+
+    if args.preview:
+        if args.batch_months is not None:
+            batch_mode = f"months={args.batch_months}"
+        elif args.batch_files is not None:
+            batch_mode = f"files={args.batch_files}"
+        else:
+            batch_mode = "direct"
+        _log_update_preview(preview_rows, batch_mode=batch_mode, logger=logger)
+
+    return 0
+
+
 def run_clean(args: argparse.Namespace) -> int:
     """Clean existing HEALPix outputs at variable, level, frequency, or root scope."""
 
@@ -1570,6 +2272,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "remap":
         return run_remap(args)
+
+    if args.command == "update":
+        return run_update(args)
 
     if args.command == "clean":
         return run_clean(args)

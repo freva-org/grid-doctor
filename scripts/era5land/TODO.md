@@ -1,5 +1,16 @@
 # TODO
 
+
+- [ ] solve bug in merge, currently 
+```
+python converter.py merge \
+  --source /work/ks1387/era5_from_grib_reflow/merged \
+  --dataset era5 \
+  --freq 1hr \
+  --output-path /work/ks1387/era5_from_grib
+```
+does not work, it needs to be `--source /work/ks1387/era5_from_grib_reflow/merged/era5`
+
 - [x] there must be a mode where I can fan out things in the following fashion:
     - batches: either months or files, tbd
     - vertical-levels: for vertical variables
@@ -17,7 +28,7 @@
 - [x] areacella calculation
 - [] add level_tpye, tier info into the csv file: var,dataset,level_type,tier so at 
 some point it can be processed also by --level_type (surface,pressure) or --tier 1,2,3...
-- [] update to the latest dates with quirugicall record replacement
+- [x] update to the latest dates with quirugicall record replacement
 - [] the batchfolders in era5
 - [x] reflow to be able to send multiple jobs and then collect them.
 - [] cf checking?
@@ -116,10 +127,10 @@ we will need to check how the whole grib timestamping goes
 
 ## create update logic for the zarr pyramid
 
-both in era5 and era5land there is an update of the data from the last ~ 4 months,
-that is every day, the data of the time-4 months will be replaced to incorporate new assimilation data, bias etc. this needs to be replaced in-place, 
+both in era5 and era5land there is an update of the data from the last ~ 3 months,
+that is every day, the data of the time-3 months will be replaced to incorporate new assimilation data, bias etc. this needs to be replaced in-place, 
 
-the better way would be to chirurgically locate the updated files and replace them in the zarr pyramid instead of rerunning the mapping in bulk for the last 4 months etc.
+the better way would be to chirurgically locate the updated files and replace them in the zarr pyramid instead of rerunning the mapping in bulk for the last 3 months etc.
 we should maybe also add a global metadata attribute that tells last permanent file to use it as indicattive that any data after that timestamp is "temporary".
 
 the rough idea is that we have a flag that says --update or so, this:
@@ -128,4 +139,4 @@ the rough idea is that we have a flag that says --update or so, this:
 2. we select all the files whose timestamps range between latest zarr datetime and execution time:
     - we check that we have the complete datetime range to extend to the "present" (this will be a combo between likely temp and stable data)
     - we will need to replace data in the zarr pyramid of already remapped values to update temporary batch with the stable values
-3. we will need to update the global attribute of "stable batch" until latest datetime - 4 months (the latest timestamped file with the earliest data) 
+3. we will need to update the global attribute of "stable batch" until latest datetime - 3 months (the latest timestamped file with the earliest data) 

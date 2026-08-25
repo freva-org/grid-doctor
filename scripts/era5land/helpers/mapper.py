@@ -53,6 +53,21 @@ PROTECTED_GRID_ATTRS = {
 }
 
 
+def _time_log_fields(dataset: xr.Dataset) -> dict[str, object]:
+    """Return explicit calendar-date fields for a merged dataset log entry."""
+
+    if "time" not in dataset.coords or dataset.sizes.get("time", 0) == 0:
+        return {}
+
+    values = dataset["time"].values
+    dates = sorted({str(value)[:10] for value in values})
+    return {
+        "time_start": dates[0],
+        "time_end": dates[-1],
+        "time_dates": ",".join(dates),
+    }
+
+
 def _close_dataset_quietly(dataset: xr.Dataset | None) -> None:
     """Best-effort dataset cleanup for long-running batch conversions."""
 
@@ -659,6 +674,7 @@ def map_grib_to_healpix(
                     frequency=frequency,
                     variables=variable_names,
                     dims=dict(ds.sizes),
+                    **_time_log_fields(ds),
                 )
                 ds = normalise_reduced_gaussian_dataset(
                     ds,

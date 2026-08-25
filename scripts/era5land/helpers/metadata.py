@@ -6,6 +6,12 @@ from typing import Any
 from .file_fetcher import SOURCE_MAPPER, SourceRecord, load_json
 
 OUTPUT_ATTR_KEYS = tuple(SOURCE_MAPPER.get("var_attrs", []))
+LAST_DATA_UPDATE_ATTR = "last_data_update"
+LAST_PERMANENT_UPDATE_ATTR = "last_permanent_update"
+NOMINAL_RESOLUTION_INDEX_BY_SOURCE_ID = {
+    "ERA-5": 1,
+    "ERA-5-Land": 0,
+}
 SCRIPT_DIR = Path(__file__).resolve().parent
 CMOR_TABLES_ROOT = SCRIPT_DIR.parent / "tables" / "era5-cmor-tables"
 CMOR_TABLES_DIR = CMOR_TABLES_ROOT / "Tables"
@@ -14,11 +20,15 @@ CMOR_TABLES_DIR = CMOR_TABLES_ROOT / "Tables"
 def clean_output_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
     """Keep only the curated output attrs for published variables."""
 
-    return {
+    cleaned = {
         key: value
         for key, value in attrs.items()
         if key in OUTPUT_ATTR_KEYS and value not in ("", None)
     }
+    for key in (LAST_DATA_UPDATE_ATTR, LAST_PERMANENT_UPDATE_ATTR):
+        if attrs.get(key) not in ("", None):
+            cleaned[key] = attrs[key]
+    return cleaned
 
 
 def attrs_for_record(record: SourceRecord) -> dict[str, Any]:
@@ -47,6 +57,17 @@ def _source_id_from_table_id(table_id: str) -> str:
     """Infer the source identifier from a CMOR table identifier."""
 
     return "ERA-5-Land" if "ERA5Land" in table_id else "ERA-5"
+
+
+def _nominal_resolution_for_source(source_id: str, cv: dict[str, Any]) -> str:
+    """Return the nominal resolution for one ERA5 source identifier."""
+
+    values = cv.get("nominal_resolution")
+    if isinstance(values, list):
+        index = NOMINAL_RESOLUTION_INDEX_BY_SOURCE_ID.get(source_id)
+        if index is not None and 0 <= index < len(values):
+            return str(values[index])
+    return _pick_cv_value(values)
 
 
 def global_attrs_for_dataset_frequency(dataset: str, frequency: str) -> dict[str, str]:
@@ -78,7 +99,7 @@ def global_attrs_for_dataset_frequency(dataset: str, frequency: str) -> dict[str
             "institution_id": institution_id,
             "institution": _pick_cv_value(cv.get("institution_id", {}).get(institution_id)),
             "license": _pick_cv_value(cv.get("license")),
-            "nominal_resolution": _pick_cv_value(cv.get("nominal_resolution")),
+            "nominal_resolution": _nominal_resolution_for_source(source_id, cv),
             "product": _pick_cv_value(cv.get("product"), attrs.get("product", "")),
             "source_id": source_id,
             "source": _pick_cv_value(source_info.get("source")),

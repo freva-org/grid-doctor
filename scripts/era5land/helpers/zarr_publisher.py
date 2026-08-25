@@ -2,6 +2,7 @@
 
 import gc
 import logging
+from datetime import datetime
 from pathlib import Path
 import re
 import shutil
@@ -14,11 +15,26 @@ import zarr
 
 from .datasets import normalise_published_dataset
 from .file_fetcher import SOURCE_MAPPER
-from .metadata import clean_output_attrs
+from .metadata import (
+    LAST_DATA_UPDATE_ATTR,
+    LAST_PERMANENT_UPDATE_ATTR,
+    clean_output_attrs,
+)
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_TARGET_CHUNK_MB = 100
 LEVEL_RE = re.compile(r"level_(?P<level>\d+)\.zarr$")
+
+
+def _stamp_data_update_attrs(dataset: xr.Dataset) -> None:
+    """Set a fresh data-update timestamp on every published data variable."""
+
+    if not dataset.data_vars:
+        return
+
+    update_timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    for data in dataset.data_vars.values():
+        data.attrs[LAST_DATA_UPDATE_ATTR] = update_timestamp
 
 
 def _resolve_target_chunks(
@@ -265,6 +281,21 @@ def _replace_public_attrs(zarr_array, attrs: dict[str, Any]) -> bool:
         if key in zarr_array.attrs:
             keep[key] = zarr_array.attrs[key]
 
+    attrs = dict(attrs)
+    previous_data_update = zarr_array.attrs.get(LAST_DATA_UPDATE_ATTR)
+    if previous_data_update and not attrs.get(LAST_DATA_UPDATE_ATTR):
+        attrs[LAST_DATA_UPDATE_ATTR] = previous_data_update
+
+    previous_permanent_update = zarr_array.attrs.get(LAST_PERMANENT_UPDATE_ATTR)
+    requested_permanent_update = attrs.get(LAST_PERMANENT_UPDATE_ATTR)
+    if previous_permanent_update and requested_permanent_update:
+        attrs[LAST_PERMANENT_UPDATE_ATTR] = max(
+            str(previous_permanent_update),
+            str(requested_permanent_update),
+        )
+    elif previous_permanent_update and not requested_permanent_update:
+        attrs[LAST_PERMANENT_UPDATE_ATTR] = previous_permanent_update
+
     new_attrs = {**keep, **attrs}
     old_attrs = dict(zarr_array.attrs)
 
@@ -337,6 +368,25 @@ def sync_named_variable_attrs(
         zarr.consolidate_metadata(destination)
 
 
+def _preserve_update_attrs(
+    existing: xr.Dataset,
+    candidate: xr.Dataset,
+    merged: xr.Dataset,
+) -> xr.Dataset:
+    """Preserve monotonic update watermarks when rebuilding a store."""
+
+    for name in merged.data_vars:
+        sources = [source[name] for source in (existing, candidate) if name in source]
+        values = [
+            source.attrs[LAST_PERMANENT_UPDATE_ATTR]
+            for source in sources
+            if LAST_PERMANENT_UPDATE_ATTR in source.attrs
+        ]
+        if values:
+            merged[name].attrs[LAST_PERMANENT_UPDATE_ATTR] = max(map(str, values))
+    return merged
+
+
 def _merge_time_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Dataset:
     """Merge disjoint time slices, preferring candidate values for rewritten times.
 
@@ -359,7 +409,7 @@ def _merge_time_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Datas
     )
     if "time" in merged.coords:
         merged = merged.sortby("time")
-    return merged
+    return _preserve_update_attrs(existing, candidate, merged)
 
 
 def _requires_vertical_rewrite(existing: xr.Dataset, candidate: xr.Dataset) -> bool:
@@ -458,7 +508,8 @@ def _write_missing_variables(
 def _merge_static_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Dataset:
     """Merge non-time variables, preferring values from *candidate*."""
 
-    return candidate.combine_first(existing)
+    merged = candidate.combine_first(existing)
+    return _preserve_update_attrs(existing, candidate, merged)
 
 
 def _align_to_existing_chunks(
@@ -488,7 +539,7 @@ def _append_new_times(
     destination: str,
     *,
     zarr_format: int,
-) -> None:
+) -> bool:
     """Append strictly newer time slices to an existing store."""
 
     existing_time_strings = set(map(str, existing["time"].values))
@@ -496,7 +547,7 @@ def _append_new_times(
         value for value in candidate["time"].values if str(value) not in existing_time_strings
     ]
     if not new_time_values:
-        return
+        return False
 
     append_ds = _pad_missing_existing_vars_for_append(
         candidate.sel(time=new_time_values),
@@ -510,6 +561,7 @@ def _append_new_times(
         append_dim="time",
         zarr_format=zarr_format,
     )
+    return True
 
 
 def _rewrite_overlapping_times(
@@ -518,12 +570,12 @@ def _rewrite_overlapping_times(
     destination: str,
     *,
     zarr_format: int,
-) -> None:
+) -> bool:
     """Rewrite only the overlapping time regions in an existing store."""
 
     overlap = candidate.indexes["time"].intersection(existing.indexes["time"])
     if len(overlap) == 0:
-        return
+        return False
 
     time_positions = existing.indexes["time"].get_indexer(overlap)
     time_slices = _contiguous_slices(np.asarray(time_positions, dtype=np.int64))
@@ -546,6 +598,7 @@ def _rewrite_overlapping_times(
             consolidated=(zarr_format == 2),
             align_chunks=True,
         )
+    return True
 
 
 def update_zarr_store(
@@ -562,6 +615,7 @@ def update_zarr_store(
     dataset = normalise_published_dataset(dataset)
     path = Path(destination)
     if clean or not path.exists():
+        _stamp_data_update_attrs(dataset)
         _write_dataset(
             dataset,
             destination,
@@ -584,9 +638,11 @@ def update_zarr_store(
     existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
     try:
         if _requires_vertical_rewrite(existing, dataset):
+            _stamp_data_update_attrs(dataset)
             merged = dataset.combine_first(existing)
             if "time" in merged.coords:
                 merged = merged.sortby("time")
+            merged = _preserve_update_attrs(existing, dataset, merged)
             _rewrite_dataset_via_temp(
                 merged,
                 destination,
@@ -599,6 +655,8 @@ def update_zarr_store(
         if "time" not in dataset.dims or "time" not in existing.dims:
             missing = [name for name in dataset.data_vars if name not in existing.data_vars]
             overlapping = [name for name in dataset.data_vars if name in existing.data_vars]
+            if overlapping or missing:
+                _stamp_data_update_attrs(dataset)
             if overlapping:
                 merged = _merge_static_updates(existing, dataset)
                 _rewrite_dataset_via_temp(
@@ -618,6 +676,8 @@ def update_zarr_store(
             _sync_dataset_metadata(dataset, destination)
             return
 
+        missing_names = [name for name in dataset.data_vars if name not in existing.data_vars]
+        overlap_rewritten = False
         existing = _write_missing_variables(
             existing,
             dataset,
@@ -626,7 +686,7 @@ def update_zarr_store(
             target_chunk_mb=target_chunk_mb,
         )
 
-        _rewrite_overlapping_times(
+        overlap_rewritten = _rewrite_overlapping_times(
             existing,
             dataset,
             destination,
@@ -637,11 +697,14 @@ def update_zarr_store(
         existing_times = existing.indexes["time"]
         new_times = candidate_times.difference(existing_times)
         if len(new_times) == 0:
+            if missing_names or overlap_rewritten:
+                _stamp_data_update_attrs(dataset)
             _sync_dataset_metadata(dataset, destination)
             return
 
         appendable_candidate = dataset.sel(time=new_times.values)
         if _can_append_new_times(existing, appendable_candidate):
+            _stamp_data_update_attrs(dataset)
             _append_new_times(
                 existing,
                 appendable_candidate,
@@ -651,6 +714,7 @@ def update_zarr_store(
             _sync_dataset_metadata(dataset, destination)
             return
 
+        _stamp_data_update_attrs(dataset)
         merged = _merge_time_updates(existing, dataset)
         _rewrite_dataset_via_temp(
             merged,

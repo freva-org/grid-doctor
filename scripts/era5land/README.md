@@ -9,6 +9,12 @@ ERA5-Land in this repository is a script-driven workflow that:
 
 The main entry point is `scripts/era5land/converter.py`.
 
+The current converter version is `2026.07.6.6b2` and is shown by:
+
+```console
+python3 scripts/era5land/converter.py --version
+```
+
 ## Installation
 
 The workflow uses the normal `grid_doctor` package plus a small ERA5-Land-specific
@@ -490,7 +496,7 @@ the run starts. For `--dataset era5land`, that means the entire
 `.../healpix/era5land` subtree across all frequencies and levels.
 
 **NOTE:**
-special variables such as `areacella` (that DO not depend on GRIB files) are
+special variables such as `areacella` (that do not depend on GRIB files) are
 published through the `fx` output path while still being requestable via `--var`
 
 
@@ -574,6 +580,55 @@ python3 converter.py clean \
 
 `--truncate-after` removes timestamps strictly after the cutoff across all
 existing levels. It cannot be combined with `--var`, `--levels`, or `--dry-run`.
+
+
+## Updating Published Data
+
+Use `update` to refresh an existing publication with newly available data. The
+command processes only variables and frequencies that already have a published
+time series:
+
+```console
+python3 converter.py update \
+  --dataset era5 \
+  --freq 1hr,day \
+  --output-path /work/ks1387/era5
+```
+
+An update has two phases:
+
+- The permanent phase refreshes [source files that have become final](https://docs.dkrz.de/doc/dataservices/finding_and_accessing_data/era_data/index.html#era5-data-via-pool-data-era5).
+  Final files lag between 2-3 months behind real time. If a
+  variable has a `last_permanent_update` attribute, that watermark determines
+  the permanent search boundary. If it does not, the converter bootstraps from
+  approximately three months before the latest stored timestamp and uses source
+  file modification times to avoid reprocessing older files.
+- The forward phase searches from the latest stored timestamp through today,
+  replacing provisional values and appending newer timestamps.
+
+Use `--preview` to resolve and count both phases without modifying Zarr data or
+metadata:
+
+```console
+python3 converter.py update \
+  --dataset era5 \
+  --freq 1hr,day \
+  --output-path /work/ks1387/era5 \
+  --preview
+```
+
+Update processing is direct by default. Optional batching is available when
+the interval or variables are large:
+
+- `--batch-months N`: process each phase in sequential calendar-month batches
+- `--batch-files N`: process each phase in groups of `N` source files
+
+The two batching options are mutually exclusive. If neither is supplied, the
+resolved records are processed in one direct mapping operation. Successful
+data writes update `last_data_update`; successful permanent refreshes update
+`last_permanent_update` on the published variables.
+
+
 
 ### Cache And Parallelism
 
@@ -725,7 +780,7 @@ python3 converter.py remap \
   --var tas \
   --freq 1hr,day,mon \
   --interval 1950,1962 \
-  --batches 2 \
+    --batch-months 2 \
   --highest-level-only \
   --from-scratch
 ```
