@@ -19,9 +19,11 @@ import shlex
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
+
+from rich_argparse import RichHelpFormatter
 
 
 TERMINAL_STATES = frozenset(("SUCCESS", "FAILED", "CANCELLED"))
@@ -42,14 +44,16 @@ def utc_timestamp():
     return datetime.now().astimezone().isoformat()
 
 
-def parse_args():
+def parse_args(argv=None, *, prog=None):
     """Parse command-line arguments for the queue controller."""
 
     parser = argparse.ArgumentParser(
+        prog=prog,
         description=(
-            "Submit interval-scoped Reflow runs in a controlled sequence so "
+            "Submit time-interval scoped Reflow runs in a controlled sequence so "
             "the scheduler never sees more than a small number of active runs."
-        )
+        ),
+        formatter_class=RichHelpFormatter,
     )
     parser.add_argument(
         "--plan",
@@ -149,7 +153,7 @@ def parse_args():
             "Defaults to <run-dir-root>/controller-%%j.out."
         ),
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def load_plan(path):
@@ -499,16 +503,16 @@ def render_sbatch_script(args, script_path):
     return "\n".join(lines)
 
 
-def main():
+def main(argv=None, *, prog=None):
     """Run the queue controller until all intervals finish or one fails."""
 
-    args = parse_args()
+    args = parse_args(argv, prog=prog)
     if args.poll_seconds <= 0:
         raise ValueError("--poll-seconds must be a positive integer.")
     if args.max_active_runs <= 0:
         raise ValueError("--max-active-runs must be a positive integer.")
 
-    workdir = Path(__file__).resolve().parent
+    workdir = Path(__file__).resolve().parents[2]
     converter_path = workdir / "converter.py"
     intervals = load_plan(args.plan)
     run_dir_root = Path(args.run_dir_root).expanduser().resolve()

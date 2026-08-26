@@ -36,11 +36,10 @@ from helpers.formatter import (
 from helpers.zarr_publisher import merge_zarr_stores, sync_named_variable_attrs
 from helpers.metadata import LAST_PERMANENT_UPDATE_ATTR
 
-VERSION_SERIES = "2026.07"
-VERSION_MAJOR = 9
-VERSION_MINOR = 1
-BETA_REVISION = 1
-__version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
+VERSION_SERIES = "2026.08"
+VERSION_MAJOR = 0
+VERSION_MINOR = 0
+__version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_VAR_TABLE = SCRIPT_DIR / "assets" / "default_variables.csv"
@@ -584,23 +583,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    reflow_cmd = subparsers.add_parser(
+    subparsers.add_parser(
         "remap-reflow",
         help="Run the scheduler-backed Reflow remap workflow.",
         formatter_class=RichDefaultsHelpFormatter,
-        description=(
-            "Forward commands to the ERA5/ERA5-Land Reflow workflow. "
-            "Examples: `remap-reflow submit ...`, `remap-reflow runs`, "
-            "`remap-reflow status <run-id>`."
-        ),
     )
-    reflow_cmd.add_argument(
-        "reflow_args",
-        nargs=argparse.REMAINDER,
-        help=(
-            "Arguments forwarded to scripts/era5land/helpers/reflow_workflow.py. "
-            "For example: `submit --run-dir /scratch/$USER/era5land ...`."
-        ),
+    subparsers.add_parser(
+        "reflow-queue",
+        help="Orchestrate and submit reflow runs in a controlled sequence of time intervals.",
+        formatter_class=RichDefaultsHelpFormatter,
     )
 
     clean_cmd = subparsers.add_parser(
@@ -2269,19 +2260,29 @@ def run_merge(args: argparse.Namespace) -> int:
 def run_reflow(reflow_args: Sequence[str]) -> int:
     """Forward one Reflow workflow command through the main ERA5-Land CLI."""
 
-    workflow_script = SCRIPT_DIR / "helpers" / "reflow_workflow.py"
-    command = [sys.executable, str(workflow_script), *reflow_args]
-    completed = subprocess.run(command, check=False)
-    return int(completed.returncode)
+    from cli.reflow_workflow import main as reflow_main
+
+    return int(reflow_main(reflow_args))
+
+
+def run_reflow_queue(queue_args: Sequence[str]) -> int:
+    """Run the Reflow campaign queue through the unified CLI."""
+
+    from cli.reflow_queue import main as queue_main
+
+    return int(queue_main(queue_args, prog="converter.py reflow-queue"))
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     """Run the ERA5/ERA5-Land remapper."""
 
-    configure_logging()
-    raw_argv = list(argv) if argv is not None else sys.argv[1:]
-    if raw_argv and raw_argv[0] == "remap-reflow":
-        return run_reflow(raw_argv[1:])
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    delegated_handlers = {
+        "remap-reflow": run_reflow,
+        "reflow-queue": run_reflow_queue,
+    }
+    if raw_argv and raw_argv[0] in delegated_handlers:
+        return delegated_handlers[raw_argv[0]](raw_argv[1:])
 
     parser = build_parser()
     args = parser.parse_args(raw_argv)
@@ -2290,26 +2291,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.print_help()
         return 2
 
-    if args.command == "fetch":
-        return run_fetch(args)
-
-    if args.command == "remap":
-        return run_remap(args)
-
-    if args.command == "update":
-        return run_update(args)
-
-    if args.command == "clean":
-        return run_clean(args)
-
-    if args.command == "merge":
-        return run_merge(args)
-
-    if args.command == "remap-reflow":
-        return run_reflow(args.reflow_args)
-
-    parser.error(f"Unsupported command {args.command!r}")
-    return 2
+    configure_logging()
+    handlers = {
+        "fetch": run_fetch,
+        "remap": run_remap,
+        "update": run_update,
+        "clean": run_clean,
+        "merge": run_merge,
+    }
+    return int(handlers[args.command](args))
 
 
 if __name__ == "__main__":

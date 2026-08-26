@@ -306,7 +306,7 @@ These commands all read or update the same SQLite manifest, so using the same
 
 When a queue-controlled campaign is restarted after manual recovery, the
 controller state file `reflow-queue-state.json` must also reflect reality.
-`reflow_queue.py` stores campaign progress separately from the Reflow manifest.
+The queue controller stores campaign progress separately from the Reflow manifest.
 As of this repository version, the controller refreshes submitted entries
 against the actual Reflow run state on startup, so a restarted controller can
 reconcile stale `FAILED` entries after a successful manual retry.
@@ -318,14 +318,14 @@ specialized maintenance modes such as `--coarsen-only`, `--attrs-only`, and
 `--rechunk-only` still live in `converter.py`.
 
 Internally, `converter.py remap-reflow ...` forwards the command to
-`scripts/era5land/helpers/reflow_workflow.py`, so there is now one public CLI
+`scripts/era5land/cli/reflow_workflow.py`, so there is now one public CLI
 for both direct and scheduler-backed operation while the Reflow implementation
 stays private.
 
 ### Queueing Long Reflow Campaigns
 
-`reflow_queue.py` is a lightweight controller for campaigns that must be split
-into several interval-scoped Reflow runs. It submits one interval, polls the
+`converter.py reflow-queue` is a lightweight controller for campaigns that must be split
+into several time-interval scoped Reflow runs. It submits one interval, polls the
 run until its worker and `finalize_outputs` tasks finish, and then submits the
 next interval. This keeps only one interval run active while allowing a long
 campaign to continue without manual resubmission. The controller stores its
@@ -359,7 +359,7 @@ sbatch \
   --cpus-per-task=1 \
   --mem=2G \
   --output=/shared/era5_from_grib_reflow/controller-%j.out \
-  --wrap 'cd /path/to/grid-doctor/scripts/era5land && /path/to/python reflow_queue.py --plan /shared/era5_from_grib_reflow/zg_1hr_intervals.txt --run-dir-root /shared/era5_from_grib_reflow/queue_runs --poll-seconds 300 --max-active-runs 1 --command-template "/path/to/python converter.py remap-reflow submit --dataset era5 --freq 1hr --var zg --interval {interval} --batch-files 8 --run-dir {run_dir} --output-path /shared/era5_from_grib_reflow/merged"'
+  --wrap 'cd /path/to/grid-doctor/scripts/era5land && /path/to/python converter.py reflow-queue --plan /shared/era5_from_grib_reflow/zg_1hr_intervals.txt --run-dir-root /shared/era5_from_grib_reflow/queue_runs --poll-seconds 300 --max-active-runs 1 --command-template "/path/to/python converter.py remap-reflow submit --dataset era5 --freq 1hr --var zg --interval {interval} --batch-files 8 --run-dir {run_dir} --output-path /shared/era5_from_grib_reflow/merged"'
 ```
 
 The `{interval}` and `{run_dir}` values in `--command-template` are
@@ -372,7 +372,7 @@ If you prefer a reusable file over a long `sbatch --wrap ...` command, generate
 an sbatch wrapper script directly from the controller configuration:
 
 ```console
-/path/to/python reflow_queue.py \
+/path/to/python converter.py reflow-queue \
   --plan /shared/era5_from_grib_reflow/zg_1hr_intervals.txt \
   --run-dir-root /shared/era5_from_grib_reflow/queue_runs \
   --poll-seconds 300 \

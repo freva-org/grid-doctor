@@ -23,7 +23,7 @@ import sys
 import uuid
 from collections import defaultdict
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Sequence
 
 from reflow import Param, Result, RunDir, Workflow
 
@@ -57,7 +57,7 @@ from helpers.formatter import (
 )
 from helpers.zarr_publisher import merge_zarr_stores
 
-wf = Workflow("era5land_healpix")
+wf = Workflow("era5_healpix")
 
 LEVEL_RE = re.compile(r"level_(?P<level>\d+)\.zarr$")
 SOURCE_MAPPER = load_json(DEFAULT_SOURCE_MAPPER)
@@ -638,5 +638,20 @@ def finalize_outputs(
     return sorted(set(merged_destinations))
 
 
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the Reflow workflow CLI with optional argument isolation."""
+
+    original_argv = sys.argv
+    if argv is not None:
+        sys.argv = [str(Path(__file__)), *argv]
+    try:
+        result = wf.cli()
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    finally:
+        sys.argv = original_argv
+    return int(result or 0)
+
+
 if __name__ == "__main__":
-    raise SystemExit(wf.cli())
+    raise SystemExit(main())
