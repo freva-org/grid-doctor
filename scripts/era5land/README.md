@@ -451,12 +451,12 @@ source directories into the target directory in the order they are listed.
 values. Quote a glob so the command receives it as a single pattern, for
 example `--source '/scratch/$USER/worker-output/*-1hr-zg/era5/PT1H'`.
 
-For Reflow worker output, the nested dataset and frequency paths can be
-derived from the worker directory names:
+For output organized below a shared root, the nested dataset and frequency
+paths can be discovered with `--dataset` and `--freq`:
 
 ```console
 python3 converter.py merge \
-  --source /scratch/$USER/era5land-reflow/worker-output \
+  --source /scratch/$USER/era5land-reflow/merged \
   --dataset era5 \
   --freq 1hr \
   --var zg \
@@ -465,7 +465,38 @@ python3 converter.py merge \
 
 `--dataset` can be used alone to merge all discovered frequencies and
 variables. Add `--freq` to restrict frequencies, and optionally add `--var` to
-restrict variables. The output path is a dataset root in selector mode.
+restrict variables. The output path is a dataset root in selector mode. The
+source may be either the dataset directory itself (for example,
+`.../merged/era5`) or its parent root (for example, `.../merged`).
+
+Use `--levels` to merge only selected HEALPix levels. It accepts comma-separated
+levels and descending ranges such as `7`, `7,5,3`, or `6-0`:
+
+```console
+python3 converter.py merge \
+  --source /scratch/$USER/era5land-reflow/merged \
+  --dataset era5 \
+  --freq 1hr \
+  --levels 6-0 \
+  --output-path /scratch/$USER/era5land-final/era5
+```
+
+Use `--interval START,END` to restrict time-dependent data to an inclusive
+date interval. Dates may be specified as `YYYY`, `YYYYMM`, or `YYYYMMDD`;
+static `fx` stores are unaffected:
+
+```console
+python3 converter.py merge \
+  --source /scratch/$USER/era5land-reflow/merged \
+  --dataset era5 \
+  --freq 1hr \
+  --interval 200001,202012 \
+  --output-path /scratch/$USER/era5land-final/era5
+```
+
+`--levels` and `--interval` can be combined. With `--clean`, only the selected
+levels and interval are written to the touched stores; without `--clean`, the
+interval is merged incrementally while data outside it is retained.
 
 For example, merge two frequencies and all variables:
 

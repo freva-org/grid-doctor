@@ -2,7 +2,7 @@
 
 import gc
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 import re
 import shutil
@@ -35,6 +35,29 @@ def _is_selected_level_store(
     match = LEVEL_RE.search(store.name)
     return match is not None and (
         levels is None or int(match.group("level")) in levels
+    )
+
+
+def _select_merge_interval(
+    dataset: xr.Dataset,
+    interval: tuple[date | None, date | None] | None,
+) -> xr.Dataset:
+    """Select the requested inclusive date interval from a source dataset.
+
+    Static datasets are returned unchanged. Xarray treats an ISO date string
+    as the complete calendar day, so the end date remains inclusive for
+    sub-daily data.
+    """
+
+    if interval is None or "time" not in dataset.dims:
+        return dataset
+
+    start, end = interval
+    return dataset.sel(
+        time=slice(
+            start.isoformat() if start is not None else None,
+            end.isoformat() if end is not None else None,
+        )
     )
 
 
@@ -746,6 +769,7 @@ def _merge_source_stores(
     clean: bool,
     zarr_format: int,
     target_chunk_mb: int,
+    interval: tuple[date | None, date | None] | None,
 ) -> list[str]:
     """Merge source stores into destinations, cleaning each destination once."""
 
@@ -765,6 +789,10 @@ def _merge_source_stores(
             consolidated=(zarr_format == 2),
         )
         try:
+            source_dataset = _select_merge_interval(source_dataset, interval)
+            if "time" in source_dataset.dims and source_dataset.sizes["time"] == 0:
+                LOGGER.info("Skipping %s: no data in requested interval", source_store)
+                continue
             update_zarr_store(
                 source_dataset,
                 destination,
@@ -905,13 +933,15 @@ def merge_zarr_stores(
     frequency: str | Iterable[str] | None = None,
     variable: str | Iterable[str] | None = None,
     levels: tuple[int, ...] | None = None,
+    interval: tuple[date | None, date | None] | None = None,
 ) -> list[str]:
     """Merge direct stores or selected Reflow worker roots into one target.
 
     When ``dataset`` is provided, ``sources`` are treated as output
     roots and nested dataset/frequency stores are resolved automatically.
-    ``frequency``, ``variable``, and ``levels`` optionally filter those worker
-    directories and stores. ``levels=None`` selects all available levels.
+    ``frequency``, ``variable``, ``levels``, and ``interval`` optionally filter
+    those worker directories and stores. ``levels=None`` selects all available
+    levels. The interval is inclusive and applies to time-dependent stores.
     Without ``dataset``, sources must directly contain ``level_*.zarr`` stores.
     """
 
@@ -952,4 +982,5 @@ def merge_zarr_stores(
         clean=clean,
         zarr_format=zarr_format,
         target_chunk_mb=target_chunk_mb,
+        interval=interval,
     )

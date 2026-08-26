@@ -37,8 +37,8 @@ from helpers.zarr_publisher import merge_zarr_stores, sync_named_variable_attrs
 from helpers.metadata import LAST_PERMANENT_UPDATE_ATTR
 
 VERSION_SERIES = "2026.07"
-VERSION_MAJOR = 8
-VERSION_MINOR = 1
+VERSION_MAJOR = 9
+VERSION_MINOR = 0
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -658,7 +658,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     merge_cmd = subparsers.add_parser(
         "merge",
-        help="Merge one or more frequency directories into a target frequency directory.",
+        help="Merge one or more (frequency) directories into a target (frequency) directory.",
         formatter_class=RichDefaultsHelpFormatter,
     )
     merge_cmd.add_argument(
@@ -675,7 +675,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--dataset",
         choices=("era5land", "era5"),
         default=None,
-        help="Dataset encoded in worker-output directories.",
+        help="Dataset to process.",
     )
     merge_cmd.add_argument(
         "--freq",
@@ -683,10 +683,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional comma-separated frequencies encoded in worker-output directories.",
     )
     merge_cmd.add_argument(
-        "--var",
-        dest="merge_variable",
+        "--interval",
         default=None,
-        help="Variable encoded in worker-output directory names.",
+        help=(
+            "Optional date interval (START,END) for time-dependent data. "
+            "Dates may be YYYY, YYYYMM, or YYYYMMDD."
+        ),
+    )
+    merge_cmd.add_argument(
+        "--var",
+        dest="variables",
+        default=None,
+        help="Comma-separated variables.",
     )
     merge_cmd.add_argument(
         "--levels",
@@ -701,7 +709,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-path",
         required=True,
         help=(
-            "Target directory that directly contains the merged `level_*.zarr` stores."
+            "Target directory that (if --dataset, --freq are omitted) "
+            "directly contains the merged `level_*.zarr` stores."
         ),
     )
     merge_cmd.add_argument(
@@ -2228,6 +2237,7 @@ def run_merge(args: argparse.Namespace) -> int:
         raise ValueError("--chunk-size must be a positive integer.")
 
     levels = parse_level_selection(args.levels)
+    interval = parse_interval(args.interval)
 
     target_dir = Path(args.output_path)
     if args.from_scratch and target_dir.exists():
@@ -2241,6 +2251,7 @@ def run_merge(args: argparse.Namespace) -> int:
         frequency=args.freq,
         variable=args.merge_variable,
         levels=levels,
+        interval=interval,
         clean=args.clean,
         zarr_format=args.zarr_format,
         target_chunk_mb=args.chunk_size,
