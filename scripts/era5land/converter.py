@@ -38,7 +38,7 @@ from helpers.metadata import LAST_PERMANENT_UPDATE_ATTR
 
 VERSION_SERIES = "2026.07"
 VERSION_MAJOR = 9
-VERSION_MINOR = 0
+VERSION_MINOR = 1
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -2225,7 +2225,7 @@ def run_merge(args: argparse.Namespace) -> int:
     """Merge one or more frequency directories into a target frequency directory."""
 
     logger = logging.getLogger(__name__)
-    selectors = (args.dataset, args.freq, args.merge_variable)
+    selectors = (args.dataset, args.freq, args.variables)
     if args.dataset is None and any(value is not None for value in selectors[1:]):
         raise ValueError("--dataset is required when --freq or --var is provided.")
 
@@ -2249,7 +2249,7 @@ def run_merge(args: argparse.Namespace) -> int:
         target_dir=target_dir,
         dataset=args.dataset,
         frequency=args.freq,
-        variable=args.merge_variable,
+        variable=args.variables,
         levels=levels,
         interval=interval,
         clean=args.clean,
