@@ -6,10 +6,6 @@ dependencies:
   # GRIB reading
   - cfgrib
   - eccodes
-  # Auxiliary workflow / data-access helpers
-  - kerchunk
-  - pyarrow
-  - python-dotenv
   # Regridding stack used by grid_doctor
   - "esmf=*=mpi_openmpi_*"
   - esmpy
