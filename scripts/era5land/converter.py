@@ -28,6 +28,16 @@ from helpers.file_fetcher import (
     unresolved_records,
     file_interval,
 )
+from cli.arguments import (
+    add_cache_arguments,
+    add_clean_options,
+    add_dataset_argument,
+    add_frequency_argument,
+    add_interval_argument,
+    add_publication_arguments,
+    add_root_argument,
+    add_variable_argument,
+)
 from helpers.formatter import (
     dataset_output_root,
     existing_destinations_for_frequency,
@@ -37,7 +47,7 @@ from helpers.zarr_publisher import merge_zarr_stores, sync_named_variable_attrs
 from helpers.metadata import LAST_PERMANENT_UPDATE_ATTR
 
 VERSION_SERIES = "2026.08"
-VERSION_MAJOR = 0
+VERSION_MAJOR = 1
 VERSION_MINOR = 0
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}"
 
@@ -45,7 +55,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_VAR_TABLE = SCRIPT_DIR / "assets" / "default_variables.csv"
 DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / "assets" / "source_mapper.json"
 DEFAULT_CMOR_TABLES = SCRIPT_DIR / "tables" / "era5-cmor-tables" / "Tables"
-DEFAULT_CHUNK_SIZE: int = 16
 PERMANENT_DATA_LAG_MONTHS = 3
 FREQUENCIES = ("1hr", "day", "mon", "fx")
 UNRESOLVED_REASON = (
@@ -239,36 +248,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Resolve source GRIB files from the CMOR tables.",
         formatter_class=RichDefaultsHelpFormatter,
     )
-    fetch_cmd.add_argument(
-        "--dataset",
-        choices=("era5land", "era5"),
-        default="era5land",
-        help="Dataset to process.",
-    )
-    fetch_cmd.add_argument(
-        "--var",
-        dest="variables",
-        default=None,
-        help="Comma-separated variables.",
-    )
-    fetch_cmd.add_argument(
-        "--freq",
-        default="all",
-        help="Comma-separated frequencies: 1hr,day,mon,fx.",
-    )
-    fetch_cmd.add_argument(
-        "--interval",
-        default=None,
-        help=(
-            "Date interval (START,END) where each date may be YYYY, YYYYMM, YYYYMMDD "
-            "(hyphens optional). Empty END means today."
-        ),
-    )
-    fetch_cmd.add_argument(
-        "--root",
-        default=None,
-        help="Override /pool/data/ERA5 for tests or alternate mounts.",
-    )
+    add_dataset_argument(fetch_cmd)
+    add_frequency_argument(fetch_cmd)
+    add_variable_argument(fetch_cmd)
+    add_interval_argument(fetch_cmd)
+    add_root_argument(fetch_cmd)
     fetch_cmd.add_argument(
         "--json",
         action="store_true",
@@ -293,51 +277,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Append newly available data and refresh the three-month permanent batch.",
         formatter_class=RichDefaultsHelpFormatter,
     )
+    add_dataset_argument(update_cmd)
+    add_frequency_argument(update_cmd)
+    add_variable_argument(update_cmd)
+    add_root_argument(update_cmd)
+    add_publication_arguments(update_cmd)
     update_cmd.add_argument(
-        "--dataset",
-        choices=("era5land", "era5"),
-        default="era5land",
-        help="Dataset to process.",
-    )
-    update_cmd.add_argument(
-        "--var",
-        dest="variables",
-        default=None,
-        help="Comma-separated variables. Defaults to all variables.",
-    )
-    update_cmd.add_argument(
-        "--freq",
-        default="all",
-        help="Comma-separated frequencies: 1hr,day,mon,fx.",
-    )
-    update_cmd.add_argument(
-        "--root",
-        default=None,
-        help="Override /pool/data/ERA5 for tests or alternate mounts.",
-    )
-    update_cmd.add_argument(
-        "--output-path",
-        default=None,
-        help=(
-            "Override the published HEALPix output root directory. "
-            "Useful for test runs that should write outside the default location."
-        ),
-    )
-    update_cmd.add_argument(
-        "--zarr-format",
+        "--batch-months",
         type=int,
-        choices=(2, 3),
-        default=2,
-        help="Zarr format version for the output pyramid.",
-    )
-    update_cmd.add_argument(
-        "--chunk-size",
-        type=int,
-        default=DEFAULT_CHUNK_SIZE,
-        metavar="MB",
+        default=None,
+        metavar="MONTHS",
         help=(
-            "Approximate Zarr chunk-size target in megabytes for newly written "
-            "or fully rewritten stores."
+            "Process update data in sequential calendar-month batches instead of "
+            "file batches. When supplied, this takes precedence over --batch-files."
         ),
     )
     update_cmd.add_argument(
@@ -351,57 +303,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     update_cmd.add_argument(
-        "--batch-months",
-        type=int,
-        default=None,
-        metavar="MONTHS",
-        help=(
-            "Process update data in sequential calendar-month batches instead of "
-            "file batches. When supplied, this takes precedence over --batch-files."
-        ),
-    )
-    update_cmd.add_argument(
         "--preview",
         action="store_true",
         help="Resolve and summarize the update without changing the output stores.",
     )
-    update_cmd.add_argument(
-        "--no-cache",
-        "--no-inventory-cache",
-        action="store_false",
-        dest="use_inventory_cache",
-        default=True,
-        help="Disable cached GRIB inventories.",
-    )
-    update_cmd.add_argument(
-        "--cache-input-datasets",
-        action="store_true",
-        dest="use_input_cache",
-        default=False,
-        help="Enable cached multi-file input dataset pickles.",
-    )
-    update_cmd.add_argument(
-        "-fdt",
-        "--fail-on-duplicate-times",
-        action="store_true",
-        dest="fail_on_duplicate_times",
-        default=False,
-        help=(
-            "Raise an error when exact duplicate GRIB time rows are found during "
-            "time normalization instead of dropping them. This finishes the run."
-        ),
-    )
-    update_cmd.add_argument(
-        "--weights-dir",
-        default=str(source_mapper["weights_path"]),
-        help="Directory where HEALPix weight files are stored and reused.",
-    )
-    update_cmd.add_argument(
-        "-hlo",
-        "--highest-level-only",
-        action="store_true",
-        default=False,
-        help="Only update and write the finest HEALPix zoom level for each frequency.",
+    add_cache_arguments(
+        update_cmd,
+        weights_dir=str(source_mapper["weights_path"]),
+        highest_level_help="Only update and write the finest HEALPix zoom level for each frequency.",
     )
 
     remap_cmd = subparsers.add_parser(
@@ -409,31 +318,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Resolve GRIB files and remap them to HEALPix Zarr pyramids.",
         formatter_class=RichDefaultsHelpFormatter,
     )
-    remap_cmd.add_argument(
-        "--dataset",
-        choices=("era5land", "era5"),
-        default="era5land",
-        help="Dataset to process.",
-    )
-    remap_cmd.add_argument(
-        "--var",
-        dest="variables",
-        default=None,
-        help="Comma-separated variables.",
-    )
-    remap_cmd.add_argument(
-        "--freq",
-        default="all",
-        help="Comma-separated frequencies: 1hr,day,mon,fx.",
-    )
-    remap_cmd.add_argument(
-        "--interval",
-        default=None,
-        help=(
-            "Date interval (START,END) where each date may be YYYY, YYYYMM, YYYYMMDD "
-            "(hyphens optional). Empty END means today."
-        ),
-    )
+    add_dataset_argument(remap_cmd)
+    add_frequency_argument(remap_cmd)
+    add_variable_argument(remap_cmd)
+    add_interval_argument(remap_cmd)
     remap_cmd.add_argument(
         "--batch-months",
         dest="batch_months",
@@ -456,81 +344,15 @@ def build_parser() -> argparse.ArgumentParser:
             "calendar-month batching for remap execution."
         ),
     )
-    remap_cmd.add_argument(
-        "--root",
-        default=None,
-        help="Override /pool/data/ERA5 for tests or alternate mounts.",
+    add_root_argument(remap_cmd)
+    add_publication_arguments(remap_cmd)
+    add_cache_arguments(
+        remap_cmd,
+        weights_dir=str(source_mapper["weights_path"]),
+        highest_level_help="Only remap and write the finest HEALPix zoom level for each frequency.",
+        include_highest_level=False,
     )
-    remap_cmd.add_argument(
-        "--output-path",
-        default=None,
-        help=(
-            "Override the published HEALPix output root directory. "
-            "Useful for test runs that should write outside the default location."
-        ),
-    )
-    remap_cmd.add_argument(
-        "--zarr-format",
-        type=int,
-        choices=(2, 3),
-        default=2,
-        help="Zarr format version for the output pyramid.",
-    )
-    remap_cmd.add_argument(
-        "--chunk-size",
-        type=int,
-        default=DEFAULT_CHUNK_SIZE,
-        metavar="MB",
-        help=(
-            "Approximate Zarr chunk-size target in megabytes for newly written "
-            "or fully rewritten stores."
-        ),
-    )
-    remap_cmd.add_argument(
-        "--no-cache",
-        "--no-inventory-cache",
-        action="store_false",
-        dest="use_inventory_cache",
-        default=True,
-        help="Disable cached GRIB inventories.",
-    )
-    remap_cmd.add_argument(
-        "--cache-input-datasets",
-        action="store_true",
-        dest="use_input_cache",
-        default=False,
-        help="Enable cached multi-file input dataset pickles.",
-    )
-    remap_cmd.add_argument(
-        "-fdt","--fail-on-duplicate-times",
-        action="store_true",
-        dest="fail_on_duplicate_times",
-        default=False,
-        help=(
-            "Raise an error when exact duplicate GRIB time rows are found during "
-            "time normalization instead of dropping them. This finishes the run."
-        ),
-    )
-    remap_cmd.add_argument(
-        "--weights-dir",
-        default=str(source_mapper["weights_path"]),
-        help="Directory where HEALPix weight files are stored and reused.",
-    )
-    remap_cmd.add_argument(
-        "--clean",
-        action="store_true",
-        default=False,
-        help=(
-            "Overwrite existing Zarr stores with new outputs instead of updating "
-            "them incrementally. It wipes the store before starting."
-              ),
-    )
-    remap_cmd.add_argument(
-        "--from-scratch",
-        action="store_true",
-        default=False,
-        help="Delete the whole dataset output root before writing any new stores.",
-    )
+    add_clean_options(remap_cmd)
     remap_cmd.add_argument(
         "--truncate-after",
         default=None,
@@ -599,23 +421,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Remove variables, levels, frequencies, or the whole HEALPix output root.",
         formatter_class=RichDefaultsHelpFormatter,
     )
-    clean_cmd.add_argument(
-        "--dataset",
-        choices=("era5land", "era5"),
-        default="era5land",
-        help="Dataset to clean.",
-    )
-    clean_cmd.add_argument(
-        "--var",
-        dest="variables",
-        default=None,
-        help="Comma-separated variables to remove from matching stores.",
-    )
-    clean_cmd.add_argument(
-        "--freq",
-        default=None,
-        help="Comma-separated frequencies to target: 1hr,day,mon,fx.",
-    )
+    add_dataset_argument(clean_cmd, help_text="Dataset to clean.")
+    add_frequency_argument(clean_cmd)
+    add_variable_argument(clean_cmd)
     clean_cmd.add_argument(
         "--levels",
         default=None,
@@ -662,31 +470,14 @@ def build_parser() -> argparse.ArgumentParser:
             "may be comma-separated or repeated."
         ),
     )
-    merge_cmd.add_argument(
-        "--dataset",
-        choices=("era5land", "era5"),
+    add_dataset_argument(merge_cmd)
+    add_frequency_argument(
+        merge_cmd,
         default=None,
-        help="Dataset to process.",
+        help_text="Optional comma-separated frequencies (1hr,day,mon,fx).",
     )
-    merge_cmd.add_argument(
-        "--freq",
-        default=None,
-        help="Optional comma-separated frequencies encoded in worker-output directories.",
-    )
-    merge_cmd.add_argument(
-        "--interval",
-        default=None,
-        help=(
-            "Optional date interval (START,END) for time-dependent data. "
-            "Dates may be YYYY, YYYYMM, or YYYYMMDD."
-        ),
-    )
-    merge_cmd.add_argument(
-        "--var",
-        dest="variables",
-        default=None,
-        help="Comma-separated variables.",
-    )
+    add_variable_argument(merge_cmd, default=None)
+    add_interval_argument(merge_cmd)
     merge_cmd.add_argument(
         "--levels",
         default=None,
@@ -696,50 +487,19 @@ def build_parser() -> argparse.ArgumentParser:
             "merge, such as 7 or 6-0. When omitted, all levels are merged."
         ),
     )
-    merge_cmd.add_argument(
-        "--output-path",
-        required=True,
-        help=(
+    add_publication_arguments(
+        merge_cmd,
+        output_help=(
             "Target directory that (if --dataset, --freq are omitted) "
             "directly contains the merged `level_*.zarr` stores."
         ),
+        output_required=True,
     )
-    merge_cmd.add_argument(
-        "--zarr-format",
-        type=int,
-        choices=(2, 3),
-        default=2,
-        help="Zarr format version for the destination stores.",
-    )
-    merge_cmd.add_argument(
-        "--chunk-size",
-        type=int,
-        default=DEFAULT_CHUNK_SIZE,
-        metavar="MB",
-        help=(
-            "Approximate Zarr chunk-size target in megabytes for rewritten "
-            "destination stores."
-        ),
-    )
-    merge_cmd.add_argument(
-        "--clean",
-        action="store_true",
-        default=False,
-        help=(
-            "Recreate each touched destination store on the first merge instead "
-            "of updating it incrementally."
-        ),
-    )
-    merge_cmd.add_argument(
-        "--from-scratch",
-        action="store_true",
-        default=False,
-        help=(
-            "Delete the complete target directory before merging. This is "
-            "broader than --clean."
-        ),
-    )
+    add_clean_options(merge_cmd)
 
+    subparsers._name_parser_map = dict(sorted(subparsers._name_parser_map.items()))
+    subparsers.metavar = "{" + ",".join(subparsers._name_parser_map) + "}"
+    subparsers._choices_actions.sort(key=lambda action: action.dest)
     return parser
 
 
@@ -1104,7 +864,7 @@ def selected_requests(
 def parse_cli_args(value: Optional[str]) -> Optional[Tuple[str, ...]]:
     """Parse a comma-separated CLI option."""
 
-    if value is None:
+    if value in (None, "all"):
         return None
     return split_csv_list(value)
 
@@ -1139,8 +899,6 @@ def validate_remap_args(args: argparse.Namespace) -> None:
         raise ValueError("--rechunk-only cannot be combined with --attrs-only.")
     if args.chunk_size <= 0:
         raise ValueError("--chunk-size must be a positive integer.")
-    if args.batch_files is not None and args.batch_files <= 0:
-        raise ValueError("--batch-files must be a positive integer.")
     if args.batch_months is not None and args.batch_files is not None:
         raise ValueError("--batch-months and --batch-files are mutually exclusive.")
     if args.batch_files is not None and args.batch_files <= 0:
@@ -2133,7 +1891,7 @@ def run_clean(args: argparse.Namespace) -> int:
     logger = logging.getLogger(__name__)
     variables = parse_cli_args(args.variables)
     levels = parse_level_selection(args.levels)
-    frequencies = parse_cli_freqs(args.freq or "all")
+    frequencies = parse_cli_freqs(args.freq)
 
     if args.truncate_after is not None:
         if variables is not None or levels is not None:
@@ -2216,7 +1974,8 @@ def run_merge(args: argparse.Namespace) -> int:
     """Merge one or more frequency directories into a target frequency directory."""
 
     logger = logging.getLogger(__name__)
-    selectors = (args.dataset, args.freq, args.variables)
+    variables = parse_cli_args(args.variables)
+    selectors = (args.dataset, args.freq, variables)
     if args.dataset is None and any(value is not None for value in selectors[1:]):
         raise ValueError("--dataset is required when --freq or --var is provided.")
 
@@ -2240,7 +1999,7 @@ def run_merge(args: argparse.Namespace) -> int:
         target_dir=target_dir,
         dataset=args.dataset,
         frequency=args.freq,
-        variable=args.variables,
+        variable=variables,
         levels=levels,
         interval=interval,
         clean=args.clean,
