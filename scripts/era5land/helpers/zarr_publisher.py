@@ -26,6 +26,18 @@ DEFAULT_TARGET_CHUNK_MB = 100
 LEVEL_RE = re.compile(r"level_(?P<level>\d+)\.zarr$")
 
 
+def _is_selected_level_store(
+    store: Path,
+    levels: tuple[int, ...] | None,
+) -> bool:
+    """Return whether a level store is included by an optional selection."""
+
+    match = LEVEL_RE.search(store.name)
+    return match is not None and (
+        levels is None or int(match.group("level")) in levels
+    )
+
+
 def _stamp_data_update_attrs(dataset: xr.Dataset) -> None:
     """Set a fresh data-update timestamp on every published data variable."""
 
@@ -740,6 +752,14 @@ def _merge_source_stores(
     cleaned_destinations: set[str] = set()
     merged_destinations: list[str] = []
     for source_store, destination in source_destinations:
+        match = LEVEL_RE.search(source_store.name)
+        level = match.group("level") if match is not None else "unknown"
+        LOGGER.info(
+            "stage=merge_start level=%s source=%s destination=%s",
+            level,
+            source_store,
+            destination,
+        )
         source_dataset = xr.open_zarr(
             str(source_store),
             consolidated=(zarr_format == 2),
@@ -757,6 +777,11 @@ def _merge_source_stores(
 
         cleaned_destinations.add(destination)
         merged_destinations.append(destination)
+        LOGGER.info(
+            "stage=merge_done level=%s destination=%s",
+            level,
+            destination,
+        )
 
     return sorted(set(merged_destinations))
 
@@ -779,11 +804,16 @@ def _worker_output_roots(
         candidates = sorted(path.glob("*")) if path.name == "worker-output" else [path]
         for candidate in candidates:
             name = candidate.name
-            if frequencies and not any(f"-{frequency}-" in name for frequency in frequencies):
-                continue
-            if variables and not any(name.endswith(f"-{variable}") for variable in variables):
-                continue
             if candidate.is_dir():
+                has_nested_dataset = (candidate / dataset).is_dir()
+                if not has_nested_dataset and frequencies and not any(
+                    f"-{frequency}-" in name for frequency in frequencies
+                ):
+                    continue
+                if not has_nested_dataset and variables and not any(
+                    name.endswith(f"-{variable}") for variable in variables
+                ):
+                    continue
                 roots.append(str(candidate))
     return tuple(dict.fromkeys(roots))
 
@@ -828,6 +858,7 @@ def _dataset_root_destinations(
     *,
     dataset: str,
     frequencies: tuple[str, ...] | None,
+    levels: tuple[int, ...] | None,
     target_root: Union[str, Path],
 ) -> Iterable[tuple[Path, str]]:
     """Yield store pairs from worker roots organized by dataset/frequency."""
@@ -859,7 +890,7 @@ def _dataset_root_destinations(
                 continue
             target_frequency = Path(target_root) / source_frequency.name
             for source_store in sorted(source_frequency.glob("level_*.zarr")):
-                if LEVEL_RE.search(source_store.name) is not None:
+                if _is_selected_level_store(source_store, levels):
                     yield source_store, str(target_frequency / source_store.name)
 
 
@@ -873,12 +904,14 @@ def merge_zarr_stores(
     dataset: str | None = None,
     frequency: str | Iterable[str] | None = None,
     variable: str | Iterable[str] | None = None,
+    levels: tuple[int, ...] | None = None,
 ) -> list[str]:
     """Merge direct stores or selected Reflow worker roots into one target.
 
-    When ``dataset`` is provided, ``sources`` are treated as Reflow worker-output
+    When ``dataset`` is provided, ``sources`` are treated as output
     roots and nested dataset/frequency stores are resolved automatically.
-    ``frequency`` and ``variable`` optionally filter those worker directories.
+    ``frequency``, ``variable``, and ``levels`` optionally filter those worker
+    directories and stores. ``levels=None`` selects all available levels.
     Without ``dataset``, sources must directly contain ``level_*.zarr`` stores.
     """
 
@@ -895,6 +928,7 @@ def merge_zarr_stores(
             worker_roots,
             dataset=dataset,
             frequencies=selected_frequencies,
+            levels=levels,
             target_root=(
                 Path(target_dir).parent
                 if selected_frequencies
@@ -910,7 +944,7 @@ def merge_zarr_stores(
             (source_store, str(target_path / source_store.name))
             for source in sources
             for source_store in sorted(Path(source).glob("level_*.zarr"))
-            if LEVEL_RE.search(source_store.name) is not None
+            if _is_selected_level_store(source_store, levels)
         )
 
     return _merge_source_stores(

@@ -54,7 +54,7 @@ PROTECTED_GRID_ATTRS = {
 
 
 def _time_log_fields(dataset: xr.Dataset) -> dict[str, object]:
-    """Return explicit calendar-date fields for a merged dataset log entry."""
+    """Return compact calendar coverage fields for a merged dataset log entry."""
 
     if "time" not in dataset.coords or dataset.sizes.get("time", 0) == 0:
         return {}
@@ -64,7 +64,6 @@ def _time_log_fields(dataset: xr.Dataset) -> dict[str, object]:
     return {
         "time_start": dates[0],
         "time_end": dates[-1],
-        "time_dates": ",".join(dates),
     }
 
 

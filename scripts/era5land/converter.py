@@ -37,8 +37,8 @@ from helpers.zarr_publisher import merge_zarr_stores, sync_named_variable_attrs
 from helpers.metadata import LAST_PERMANENT_UPDATE_ATTR
 
 VERSION_SERIES = "2026.07"
-VERSION_MAJOR = 7
-VERSION_MINOR = 0
+VERSION_MAJOR = 8
+VERSION_MINOR = 1
 BETA_REVISION = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}b{BETA_REVISION}"
 
@@ -687,6 +687,15 @@ def build_parser() -> argparse.ArgumentParser:
         dest="merge_variable",
         default=None,
         help="Variable encoded in worker-output directory names.",
+    )
+    merge_cmd.add_argument(
+        "--levels",
+        default=None,
+        metavar="LEVELS",
+        help=(
+            "Optional comma-separated or descending-range HEALPix levels to "
+            "merge, such as 7 or 6-0. When omitted, all levels are merged."
+        ),
     )
     merge_cmd.add_argument(
         "--output-path",
@@ -2218,6 +2227,8 @@ def run_merge(args: argparse.Namespace) -> int:
     if args.chunk_size <= 0:
         raise ValueError("--chunk-size must be a positive integer.")
 
+    levels = parse_level_selection(args.levels)
+
     target_dir = Path(args.output_path)
     if args.from_scratch and target_dir.exists():
         logger.warning("Deleting merge target directory %s", target_dir)
@@ -2229,6 +2240,7 @@ def run_merge(args: argparse.Namespace) -> int:
         dataset=args.dataset,
         frequency=args.freq,
         variable=args.merge_variable,
+        levels=levels,
         clean=args.clean,
         zarr_format=args.zarr_format,
         target_chunk_mb=args.chunk_size,
