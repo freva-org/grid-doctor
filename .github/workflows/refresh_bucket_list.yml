@@ -42,7 +42,7 @@ jobs:
             from refresh_buckets_add_announce import render_announcement; \
             render_announcement(os.environ['WATERPARK_ANNOUNCEMENT'].strip())"
 
-      - name: Open a PR if the banner changed
+      - name: Open a PR if the banner added/changed or removed
         uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ steps.freva-bot-token.outputs.token }}
@@ -58,7 +58,7 @@ jobs:
           body: |
             Renders the `WATERPARK_ANNOUNCEMENT` repository variable into
             `docs/data/overrides/main.html`. An empty variable clears the
-            banner.å
+            banner.
           labels: |
             automated
             waterpark
