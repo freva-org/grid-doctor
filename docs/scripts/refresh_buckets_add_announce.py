@@ -10,8 +10,6 @@ import os
 import sys
 from pathlib import Path
 
-import s3fs
-
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUT = HERE.parent.parent / "docs" / "assets" / "waterpark-datasets.json"
 
@@ -49,6 +47,8 @@ def render_announcement(text: str, target: Path = OVERRIDE_FILE) -> None:
 
 
 def list_buckets(endpoint: str, key: str, secret: str) -> list[str]:
+    import s3fs
+
     fs = s3fs.S3FileSystem(
         key=key, secret=secret, client_kwargs={"endpoint_url": endpoint}
     )
