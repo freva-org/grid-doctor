@@ -10,13 +10,11 @@
       
       
       
-        <link rel="canonical" href="https://waterpark.dkrz.de/stac-browser/">
+        <link rel="canonical" href="https://waterpark.dkrz.de/tools/">
       
       
-        <link rel="prev" href="../databrowser/">
+        <link rel="prev" href="../appendix-remapping-benchmark/">
       
-      
-        <link rel="next" href="../storage_concepts/">
       
       
         
@@ -27,7 +25,7 @@
     
     
       
-        <title>STAC Browser - Waterpark</title>
+        <title>Tools - Waterpark</title>
       
     
     
@@ -81,17 +79,17 @@
     
   
 <meta property="og:type" content="website" />
-<meta property="og:title" content="STAC Browser - Waterpark" />
+<meta property="og:title" content="Tools - Waterpark" />
 <meta property="og:description" content="The HEALPix Data Hub on s3" />
-<meta property="og:image" content="https://waterpark.dkrz.de/assets/images/social/stac-browser.png" />
+<meta property="og:image" content="https://waterpark.dkrz.de/assets/images/social/tools.png" />
 <meta property="og:image:type" content="image/png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
-<meta property="og:url" content="https://waterpark.dkrz.de/stac-browser/" />
+<meta property="og:url" content="https://waterpark.dkrz.de/tools/" />
 <meta property="twitter:card" content="summary_large_image" />
-<meta property="twitter:title" content="STAC Browser - Waterpark" />
+<meta property="twitter:title" content="Tools - Waterpark" />
 <meta property="twitter:description" content="The HEALPix Data Hub on s3" />
-<meta property="twitter:image" content="https://waterpark.dkrz.de/assets/images/social/stac-browser.png" />
+<meta property="twitter:image" content="https://waterpark.dkrz.de/assets/images/social/tools.png" />
 </head>
   
   
@@ -109,6 +107,11 @@
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
+      
+        
+        <a href="#tools" class="md-skip">
+          Skip to content
+        </a>
       
     </div>
     <div data-md-component="announce">
@@ -141,7 +144,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              STAC Browser
+              Tools
             
           </span>
         </div>
@@ -272,11 +275,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../stac-browser/" class="md-tabs__link">
         
   
   
@@ -352,9 +353,11 @@
   
   
   
+    
   
-    <li class="md-tabs__item">
-      <a href="../tools/" class="md-tabs__link">
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
         
   
   
@@ -384,9 +387,7 @@
           
             
               
-                
-              
-              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" hidden>
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
                 <div class="md-sidebar__scrollwrap">
                   <div class="md-sidebar__inner">
                     
@@ -467,17 +468,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../stac-browser/" class="md-nav__link">
         
   
   
@@ -493,7 +487,6 @@
   
 
       </a>
-      
     </li>
   
 
@@ -787,10 +780,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../tools/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -806,6 +826,48 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tiering-and-what-you-will-notice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tiering, and what you will notice
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-things-are" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where things are
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -824,21 +886,68 @@
               <article class="md-content__inner md-typeset">
                 
                   
-  
 
 
 
-
-  <h1>STAC Browser</h1>
-
-<!-- AUTO-GENERATED by docs/scripts/build_stac_browser_docs.py. Do not edit;
-     settings live in docs/assets/stac-browser.config.js. -->
-
-<div class="waterpark-stac-wrapper">
-  <div id="stac-browser-mount"
-       data-stac-entry="/stac-browser/assets/index-qKBqcdDf.js"
-       data-stac-css="[&quot;/stac-browser/assets/index-_5KLt79H.css&quot;]"></div>
+<h1 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h1>
+<p>The hub is built from a few small services. Each has its own documentation;
+this page is the index.</p>
+<div class="grid cards">
+<ul>
+<li>
+<p><span class="twemoji lg middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 13c-2.17 0-4.07 1.16-5.12 2.89-.6.07-1.23.11-1.88.11-4.42 0-8-1.79-8-4V9c0 2.21 3.58 4 8 4s8-1.79 8-4v3c0 .36-.1.71-.28 1.05C19.5 13 19.24 13 19 13m-7-2c4.42 0 8-1.79 8-4s-3.58-4-8-4-8 1.79-8 4 3.58 4 8 4m1.1 6.96c-.36.04-.73.04-1.1.04-4.42 0-8-1.79-8-4v3c0 2.21 3.58 4 8 4 .46 0 .9 0 1.33-.06A6 6 0 0 1 13 19c0-.36.04-.7.1-1.04M20 20v-4h-2v4h-2l3 3 3-3z"/></svg></span> <strong>blobmap</strong></p>
+<hr />
+<p>Decides which zarr objects move to tape together, and reads that decision
+back. A store is millions of objects, which is too many to track
+individually and too few to treat as one unit: blobs are what sits in
+between and makes tiering tractable.</p>
+<p><a class="md-button" href="/tech/blobmap/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.74 3.74 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574M8.755 4.75l-.004 7.322a3.75 3.75 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25"/></svg></span> Documentation</a>
+<a href="/blobmap/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M4 1.75C4 .784 4.784 0 5.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v8.586A1.75 1.75 0 0 1 14.25 15h-9a.75.75 0 0 1 0-1.5h9a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 10 4.25V1.5H5.75a.25.25 0 0 0-.25.25v2.5a.75.75 0 0 1-1.5 0Zm1.72 4.97a.75.75 0 0 1 1.06 0l2 2a.75.75 0 0 1 0 1.06l-2 2a.749.749 0 0 1-1.275-.326.75.75 0 0 1 .215-.734l1.47-1.47-1.47-1.47a.75.75 0 0 1 0-1.06M3.28 7.78 1.81 9.25l1.47 1.47a.75.75 0 0 1-.018 1.042.75.75 0 0 1-1.042.018l-2-2a.75.75 0 0 1 0-1.06l2-2a.75.75 0 0 1 1.042.018.75.75 0 0 1 .018 1.042m8.22-6.218V4.25c0 .138.112.25.25.25h2.688l-.011-.013-2.914-2.914z"/></svg></span> Manifest format</a></p>
+</li>
+</ul>
 </div>
+<h2 id="tiering-and-what-you-will-notice">Tiering, and what you will notice<a class="headerlink" href="#tiering-and-what-you-will-notice" title="Permanent link">&para;</a></h2>
+<p>Data on the hub is tiered. Everything stays <strong>browsable</strong> at all times, so
+opening a dataset, listing its variables and reading its metadata works
+whether or not the data itself is on disk.</p>
+<p>What changes is the first read. Data nobody has touched for a long time is
+moved to tape, and reading it again triggers a recall:</p>
+<ul>
+<li>the <strong>first</strong> read of an archived dataset takes minutes rather than seconds</li>
+<li>everything after it is at normal speed, until the data goes cold again</li>
+<li>nothing is ever deleted, and nothing needs restoring by hand</li>
+</ul>
+<p>If you are working with a dataset intensively and would rather it stayed on
+disk throughout, ask us to pin it. That is a deliberate decision with a name
+and a reason attached, rather than something to work around.</p>
+<p><a class="md-button" href="mailto:waterpark@support.dkrz.de">Contact support</a></p>
+<h2 id="where-things-are">Where things are<a class="headerlink" href="#where-things-are" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="../databrowser/">Data Browser</a></td>
+<td>search the catalogue</td>
+</tr>
+<tr>
+<td><a href="../stac-browser/">STAC Browser</a></td>
+<td>the same holdings, as STAC</td>
+</tr>
+<tr>
+<td><a href="../storage_concepts/">Storage Concepts</a></td>
+<td>why the data is laid out this way</td>
+</tr>
+<tr>
+<td><a href="/tech/blobmap/">blobmap</a></td>
+<td>how the tiering decision is made</td>
+</tr>
+</tbody>
+</table>
 
 
 
@@ -846,13 +955,8 @@
 
 
 
-  
-  
 
 
-
-
-  
 
 
 
@@ -870,12 +974,10 @@
   
     
       
-        
-      
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../databrowser/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Data Browser">
+          <a href="../appendix-remapping-benchmark/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Remapping and benchmark">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L77.3 256l137.3-137.4c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg>
@@ -885,27 +987,11 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Data Browser
+                Remapping and benchmark
               </div>
             </div>
           </a>
         
-        
-          
-          <a href="../storage_concepts/" class="md-footer__link md-footer__link--next" aria-label="Next: HEALPix in Zarr on S3">
-            <div class="md-footer__title">
-              <span class="md-footer__direction">
-                Next
-              </span>
-              <div class="md-ellipsis">
-                HEALPix in Zarr on S3
-              </div>
-            </div>
-            <div class="md-footer__button md-icon">
-              
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M247.1 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L179.2 256 41.9 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg>
-            </div>
-          </a>
         
       </nav>
     
