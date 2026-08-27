@@ -1,4 +1,4 @@
-name: Refresh Waterpark bucket list
+name: Sync Waterpark site content
 
 on:
   schedule:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: refresh-buckets
+  group: waterpark-sync
   cancel-in-progress: true
 
 jobs:
