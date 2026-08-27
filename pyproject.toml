@@ -160,7 +160,7 @@ deps = -e .
        codespell
        bandit[toml]
 commands =
-    python3 -m isort --check --profile black -t py312 -l 79 src
+    isort --check --profile black --py 312 -l 79 src
     python3 -m flake8 src --count --max-complexity=10 --ignore=F405,F403,E704,W503,C901 --max-line-length=120 --statistics --show-source
     codespell {posargs: --quiet-level=2} src/
     python3 -m pydocstyle src/grid_doctor
