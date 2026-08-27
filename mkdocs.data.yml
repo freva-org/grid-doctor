@@ -30,6 +30,7 @@ nav:
   - Operations :
       - Working with data data: high-level-access.md
       - Remapping and benchmark: appendix-remapping-benchmark.md
+  - Tools: tools.md
 exclude_docs: |
   technical/**
   overrides/**
