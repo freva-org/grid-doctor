@@ -15,7 +15,7 @@ this page is the index.
     between and makes tiering tractable.
 
     [:octicons-book-16: Documentation](/tech/blobmap/){ .md-button }
-    [:octicons-file-code-16: Manifest format](/blobmap/)
+    [:octicons-file-code-16: Manifest format](tech/blobmap/schema)
 
 </div>
 
