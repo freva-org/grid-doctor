@@ -34,7 +34,12 @@ from typing import Any, Literal, cast, overload
 import numpy as np
 import xarray as xr
 
+from .cf import (
+    HealpixNested,
+    HealpixRing,
+)
 from .types import (
+    HEALPIX_INDEX,
     FloatArray,
     Int64Array,
     IntArray,
@@ -50,7 +55,7 @@ logger = logging.getLogger(__name__)
 # Well-known coordinate and dimension names
 # ---------------------------------------------------------------------------
 
-_UNSTRUCTURED_DIMS: frozenset[str] = frozenset({"cell", "ncells", "ncell", "nCells"})
+_UNSTRUCTURED_DIMS: frozenset[str] = frozenset({HEALPIX_INDEX, "cell", "ncells", "ncell", "nCells"})
 """Dimension names that signal an unstructured source grid."""
 
 _LAT_NAMES: tuple[str, ...] = (
@@ -1686,7 +1691,7 @@ def describe_source(
             useful for spectral inputs that need an external transform.
         grid: Optional grid dataset that supplies geometry when the
             data file itself only contains values on dimensions such
-            as ``cell``.
+            as ``healpix_index``.
         source_kind: Explicit source representation.  Use ``"auto"``
             to infer it from the available coordinates.
         source_units: Angular unit convention of the source
@@ -1927,7 +1932,7 @@ def compute_healpix_weights_backend(
     meta: dict[str, str | int | float | bool] = {
         "grid_doctor_method": method,
         "grid_doctor_level": level,
-        "grid_doctor_order": "nested" if nest else "ring",
+        "grid_doctor_order": HealpixNested if nest else HealpixRing,
         "grid_doctor_backend": ("offline-esmf" if use_offline else "esmpy"),
         "grid_doctor_ignore_unmapped": int(bool(eff_ignore)),
         **source_desc.metadata,
@@ -1993,7 +1998,7 @@ def _run_offline_esmf(
         workdir = config.workdir
         workdir.mkdir(parents=True, exist_ok=True)
 
-    order_tag = "nest" if nest else "ring"
+    order_tag = HealpixNested if nest else HealpixRing
     src_file = write_ugrid_mesh_file(
         source_desc.source_mesh,
         workdir / "source_mesh.nc",

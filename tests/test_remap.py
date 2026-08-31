@@ -31,6 +31,7 @@ from grid_doctor.remap_backend import (
     _normalise_angle_units,
     _regular_grid_mesh,
 )
+from grid_doctor.types import HEALPIX_INDEX
 from .helpers import _FakeHealpixModule
 
 
@@ -434,8 +435,15 @@ class TestApplyWeightFile:
 
         result = apply_weight_file(ds, path, missing_policy="renormalize")
 
-        assert "cell" in result.dims
-        assert result.sizes["cell"] == 2
+        if "cell" != HEALPIX_INDEX:
+            # cell should disappear or be overwritten
+            assert "cell" not in result.dims
+            assert "cell" not in result
+            assert "cell" not in result.coords
+            assert "cell" not in result.indexes
+            assert "cell" not in result.data_vars
+        assert HEALPIX_INDEX in result.dims
+        assert result.sizes[HEALPIX_INDEX] == 2
         out = result["temperature"].isel(time=0, level=0).values
         np.testing.assert_allclose(out, [1.0, 3.0])
         np.testing.assert_allclose(result["static"].values, ds["static"].values)
@@ -483,7 +491,15 @@ class TestApplyWeightFile:
             path,
             source_dims=("cell",),
         )
-        assert result.sizes["cell"] == 2
+        if "cell" != HEALPIX_INDEX:
+            # cell should disappear or be overwritten
+            assert "cell" not in result.dims
+            assert "cell" not in result
+            assert "cell" not in result.coords
+            assert "cell" not in result.indexes
+            assert "cell" not in result.data_vars
+        assert HEALPIX_INDEX in result.dims
+        assert result.sizes[HEALPIX_INDEX] == 2
         out = result["temperature"].isel(time=0).values
         np.testing.assert_allclose(out, [1.0, 3.0])
 
@@ -678,8 +694,16 @@ class TestAttachHealpixCoords:
             ),
         )
         ds = xr.Dataset({"t": ("cell", np.array([1.0, 2.0]))})
-        result = _attach_healpix_coords(ds, level=2, nest=False)
+        level = 2
+        result = _attach_healpix_coords(ds, level=level, nest=False)
         assert "latitude" in result.coords
         assert "longitude" in result.coords
         assert result.attrs["healpix_nside"] == 4
         assert result.attrs["healpix_order"] == "ring"
+
+        assert "Conventions" in result.attrs
+        assert result.attrs["Conventions"] == "CF-1.13"
+
+        assert "grid_mapping_name" not in result.attrs
+        assert "indexing_scheme" not in result.attrs
+        assert "refinement_level" not in result.attrs

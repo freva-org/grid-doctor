@@ -1,6 +1,6 @@
 """Special type definitions."""
 
-from typing import Any, Callable, Dict, Literal, TypedDict
+from typing import Any, Callable, Dict, Final, Literal, TypedDict
 
 import numpy as np
 import numpy.typing as npt
@@ -37,6 +37,19 @@ MissingPolicy = Literal["renormalize", "propagate"]
 
 ApplyBackend = Literal["auto", "scipy", "numba", "cupy"]
 """Which application backend to use."""
+
+# Ad-hoc key names used for healpix attrs
+HEALPIX_LEVEL: Final = "healpix_level"
+"""\"healpix_level\" is equivalent in CF vocabulary to refinement_level."""
+
+HEALPIX_NSIDE: Final = "healpix_nside"
+"""\"healpix_nside\" is the number of pixels per size in, not required by the healpix CF convention."""
+
+HEALPIX_ORDER: Final = "healpix_order"
+"""\"healpix_order\" is equivalent in CF vocabulary to indexing_scheme."""
+
+HEALPIX_INDEX: Final = "healpix_index"
+"""The default NON-STANDARD name for the healpix index coordinate."""
 
 
 class ZarrOptions(TypedDict, total=False):

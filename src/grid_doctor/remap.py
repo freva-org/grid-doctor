@@ -24,6 +24,13 @@ from typing import Any, cast
 import numpy as np
 import xarray as xr
 
+from .cf import (
+    HealpixIndexScheme,
+    HealpixNested,
+    HealpixRing,
+    conventions_attrs,
+    healpix_grid_mapping_attrs,
+)
 from .remap_apply import (
     apply_weights_nd,
     extract_sparse_weights,
@@ -41,6 +48,10 @@ from .remap_backend import (
     compute_healpix_weights_backend,
 )
 from .types import (
+    HEALPIX_INDEX,
+    HEALPIX_LEVEL,
+    HEALPIX_NSIDE,
+    HEALPIX_ORDER,
     ApplyBackend,
     FloatArray,
     MissingPolicy,
@@ -142,7 +153,7 @@ def _read_weight_file(
             values=wds[val_name].values,
         )
         level = int(wds.attrs.get("grid_doctor_level", -1))
-        order = str(wds.attrs.get("grid_doctor_order", "nested"))
+        order = str(wds.attrs.get("grid_doctor_order", HealpixNested))
         method_raw = wds.attrs.get("grid_doctor_method")
         method = str(method_raw) if method_raw is not None else None
         stored_source_dims = _parse_source_dims_attr(
@@ -428,7 +439,7 @@ def apply_weight_file(
     Returns
     -------
     xarray.Dataset
-        Dataset on the HEALPix target grid with a ``cell`` dimension.
+        Dataset on the HEALPix target grid with a ``healpix_index`` dimension.
 
     Examples
     --------
@@ -465,7 +476,7 @@ def apply_weight_file(
                 apply_weights_nd,
                 data,
                 input_core_dims=[list(resolved_sd)],
-                output_core_dims=[["cell"]],
+                output_core_dims=[[HEALPIX_INDEX]],
                 exclude_dims=set(resolved_sd),
                 dask="parallelized",
                 kwargs={
@@ -475,7 +486,7 @@ def apply_weight_file(
                     "backend": backend,
                 },
                 output_dtypes=[np.float64],
-                dask_gufunc_kwargs={"output_sizes": {"cell": n_target}},
+                dask_gufunc_kwargs={"output_sizes": {HEALPIX_INDEX: n_target}},
             ),
         )
 
@@ -484,7 +495,7 @@ def apply_weight_file(
         result = _attach_healpix_coords(
             result,
             level=level,
-            nest=(order == "nested"),
+            nest=(order == HealpixNested),
             method=method,
         )
     return result
@@ -506,9 +517,9 @@ def _attach_healpix_coords(
 
     Adds:
 
-    - ``cell``, ``latitude``, ``longitude`` coordinates.
+    - ``healpix_index``, ``latitude``, ``longitude`` coordinates.
     - A scalar ``crs`` coordinate variable whose attributes describe the
-      HEALPix grid (``grid_mapping_name``, ``healpix_nside``, …).
+      HEALPix grid (``grid_mapping_name``, ``indexing_scheme``, …).
     - ``grid_mapping = "crs"`` on every data variable so that CF-aware
       tools can discover the projection automatically.
     - Global provenance attributes (``healpix_*``, ``grid_doctor_*``).
@@ -516,30 +527,32 @@ def _attach_healpix_coords(
     import grid_doctor as _gd
 
     nside = 2**level
-    order = "nested" if nest else "ring"
+    order: HealpixIndexScheme = HealpixNested if nest else HealpixRing
 
     lat_deg, lon_deg = _healpix_centres(level, nest=nest)
-    ds_hp = ds_hp.assign_coords(
-        cell=np.arange(lat_deg.size, dtype=np.int64),
-        latitude=("cell", lat_deg),
-        longitude=("cell", lon_deg),
-        crs=_make_crs_variable(level=level, nside=nside, order=order),
-    )
+    ds_hp = ds_hp.assign_coords({
+        HEALPIX_INDEX: np.arange(lat_deg.size, dtype=np.int64),
+        "latitude": (HEALPIX_INDEX, lat_deg),
+        "longitude": (HEALPIX_INDEX, lon_deg),
+        "crs": _make_crs_variable(level=level, nside=nside, order=order),
+    })
 
     # Tag every spatially-mapped data variable.
     for name in ds_hp.data_vars:
-        if "cell" in ds_hp[name].dims:
+        if HEALPIX_INDEX in ds_hp[name].dims:
             ds_hp[name].attrs["grid_mapping"] = "crs"
 
     # Global HEALPix metadata.
-    ds_hp.attrs["healpix_level"] = level
-    ds_hp.attrs["healpix_nside"] = nside
-    ds_hp.attrs["healpix_order"] = order
+    ds_hp.attrs[HEALPIX_LEVEL] = level
+    ds_hp.attrs[HEALPIX_NSIDE] = nside
+    ds_hp.attrs[HEALPIX_ORDER] = order
 
     # Provenance.
     ds_hp.attrs["grid_doctor_version"] = _gd.__version__
     if method is not None:
         ds_hp.attrs["grid_doctor_method"] = method
+
+    ds_hp.attrs.update(conventions_attrs())
 
     return ds_hp
 
@@ -548,7 +561,7 @@ def _make_crs_variable(
     *,
     level: int,
     nside: int,
-    order: str,
+    order: HealpixIndexScheme,
 ) -> xr.DataArray:
     """Create a scalar CRS coordinate variable for HEALPix.
 
@@ -568,10 +581,10 @@ def _make_crs_variable(
         np.float64(0.0),
         attrs={
             "grid_mapping_name": "healpix",
-            "healpix_nside": nside,
-            "healpix_level": level,
-            "healpix_order": order,
-        },
+            HEALPIX_NSIDE: nside,
+            HEALPIX_LEVEL: level,
+            HEALPIX_ORDER: order,
+        } | dict(healpix_grid_mapping_attrs(order, level))
     )
 
 

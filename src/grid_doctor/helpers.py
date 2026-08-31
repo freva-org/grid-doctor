@@ -21,6 +21,7 @@ import numpy.typing as npt
 import s3fs
 import xarray as xr
 
+from .cf import HealpixNested, conventions_attrs
 from .remap import (
     _make_crs_variable,
     regrid_to_healpix,
@@ -31,7 +32,15 @@ from .remap_backend import (
     _get_unstructured_dim,
     _is_unstructured,
 )
-from .types import CoarsenMode, FloatArray, ZarrOptions
+from .types import (
+    HEALPIX_INDEX,
+    HEALPIX_LEVEL,
+    HEALPIX_NSIDE,
+    HEALPIX_ORDER,
+    CoarsenMode,
+    FloatArray,
+    ZarrOptions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -257,8 +266,8 @@ def coarsen_healpix(
     Parameters
     ----------
     ds:
-        HEALPix dataset containing a ``cell`` dimension and the
-        attributes ``healpix_nside`` and ``healpix_order``.
+        HEALPix dataset containing the ``healpix_index`` dimension and the
+        `crs` with attributes CF attributes ``indexing_scheme`` and ``refinement_level``.
     target_level:
         Target HEALPix level (must be lower than the current level).
     coarsen_mode:
@@ -294,12 +303,12 @@ def coarsen_healpix(
         When the ordering is not nested, or *target_level* is not
         lower than the current level.
     """
-    current_nside = int(ds.attrs["healpix_nside"])
+    current_nside = int(ds.attrs[HEALPIX_NSIDE])
     target_nside = 2**target_level
     if target_nside >= current_nside:
         raise ValueError("target_level must be lower than the current HEALPix level.")
 
-    is_nested = str(ds.attrs.get("healpix_order", "nested")) in {"nested", "nest"}
+    is_nested = str(ds.attrs.get(HEALPIX_ORDER, HealpixNested)) in {HealpixNested, "nest"}
     if not is_nested:
         raise ValueError(
             "coarsen_healpix only supports nested HEALPix ordering. "
@@ -307,7 +316,7 @@ def coarsen_healpix(
             "regenerate ring levels directly."
         )
 
-    current_level = int(ds.attrs.get("healpix_level", int(np.log2(current_nside))))
+    current_level = int(ds.attrs.get(HEALPIX_LEVEL, int(np.log2(current_nside))))
     delta_level = current_level - target_level
     if delta_level <= 0:
         raise ValueError("target_level must be lower than the current HEALPix level.")
@@ -323,11 +332,11 @@ def coarsen_healpix(
     coarsen_func = _coarsen_array_mode if resolved_mode == "mode" else _coarsen_array
 
     factor = 4**delta_level
-    npix_target = ds.sizes["cell"] // factor
+    npix_target = ds.sizes[HEALPIX_INDEX] // factor
 
     coarsened_vars: dict[str, xr.DataArray] = {}
     for name, data in ds.data_vars.items():
-        if "cell" not in data.dims:
+        if HEALPIX_INDEX not in data.dims:
             coarsened_vars[str(name)] = data
             continue
 
@@ -336,42 +345,43 @@ def coarsen_healpix(
             xr.apply_ufunc(
                 coarsen_func,
                 data,
-                input_core_dims=[["cell"]],
-                output_core_dims=[["cell"]],
-                exclude_dims={"cell"},
+                input_core_dims=[[HEALPIX_INDEX]],
+                output_core_dims=[[HEALPIX_INDEX]],
+                exclude_dims={HEALPIX_INDEX},
                 dask="parallelized",
                 kwargs={
                     "factor": factor,
                     "min_valid_fraction": min_valid_fraction,
                 },
                 output_dtypes=[np.float64],
-                dask_gufunc_kwargs={"output_sizes": {"cell": npix_target}},
+                dask_gufunc_kwargs={"output_sizes": {HEALPIX_INDEX: npix_target}},
                 keep_attrs=True,
             ),
         )
 
     result = xr.Dataset(coarsened_vars, attrs=ds.attrs.copy())
     lat_deg, lon_deg = _healpix_coords(target_level, nest=True)
-    result = result.assign_coords(
-        cell=np.arange(npix_target, dtype=np.int64),
-        latitude=("cell", lat_deg),
-        longitude=("cell", lon_deg),
-        crs=_make_crs_variable(
+    result = result.assign_coords({
+        HEALPIX_INDEX: np.arange(npix_target, dtype=np.int64),
+        "latitude": (HEALPIX_INDEX, lat_deg),
+        "longitude": (HEALPIX_INDEX, lon_deg),
+        "crs": _make_crs_variable(
             level=target_level,
             nside=target_nside,
-            order="nested",
+            order=HealpixNested,
         ),
-    )
+    })
 
     # Tag every spatially-mapped data variable.
     for name in result.data_vars:
-        if "cell" in result[name].dims:
+        if HEALPIX_INDEX in result[name].dims:
             result[name].attrs["grid_mapping"] = "crs"
 
-    result.attrs["healpix_nside"] = target_nside
-    result.attrs["healpix_level"] = target_level
-    result.attrs["healpix_order"] = "nested"
+    result.attrs[HEALPIX_NSIDE] = target_nside
+    result.attrs[HEALPIX_LEVEL] = target_level
+    result.attrs[HEALPIX_ORDER] = HealpixNested
     result.attrs["grid_doctor_coarsened_from_level"] = current_level
+    result.attrs.update(conventions_attrs())
     return result
 
 
@@ -490,7 +500,7 @@ def save_pyramid(
     encoding:
         Per-level encoding dictionaries.
     write_coords:
-        Whether to materialise the ``cell``/``latitude``/``longitude``
+        Whether to materialise the ``healpix_index``/``latitude``/``longitude``
         coordinate arrays in the store.  HEALPix coordinates are a pure
         function of the cell index, and above roughly level 10 the
         arrays dwarf regional payloads (hundreds of GB at level 16 —
@@ -515,7 +525,7 @@ def save_pyramid(
         )
         if not include_coords:
             dataset = dataset.drop_vars(
-                ["latitude", "longitude", "cell"], errors="ignore"
+                ["latitude", "longitude", HEALPIX_INDEX], errors="ignore"
             )
             dataset.attrs["grid_doctor_implicit_coords"] = 1
         level_path = f"{path}/level_{level}.zarr"
