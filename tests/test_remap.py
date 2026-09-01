@@ -24,12 +24,14 @@ from grid_doctor.remap import (
 )
 from grid_doctor.remap_backend import (
     _canonical_lon,
+    _get_unstructured_vertices,
     _get_spatial_dims,
     _infer_bounds_1d,
     _infer_curvilinear_corners,
     _looks_global,
     _normalise_angle_units,
     _regular_grid_mesh,
+    _source_mesh,
 )
 from .helpers import _FakeHealpixModule
 
@@ -75,6 +77,43 @@ class TestPrimitiveHelpers:
     ) -> None:
         with pytest.raises(ValueError, match="Could not determine"):
             _get_spatial_dims(unstructured_ds)
+
+    def test_unstructured_vertices_follow_cf_bounds_references(
+        self, unstructured_ds: xr.Dataset
+    ) -> None:
+        ds = unstructured_ds.rename(
+            {
+                "clon": "lon",
+                "clat": "lat",
+                "clon_vertices": "cell_longitude_bounds",
+                "clat_vertices": "cell_latitude_bounds",
+            }
+        )
+        ds["lon"].attrs["bounds"] = "cell_longitude_bounds"
+        ds["lat"].attrs["bounds"] = "cell_latitude_bounds"
+
+        assert _get_unstructured_vertices(ds) == (
+            "cell_longitude_bounds",
+            "cell_latitude_bounds",
+        )
+
+        mesh, source_dims = _source_mesh(ds, source_units="deg")
+
+        assert source_dims == ("cell",)
+        assert mesh.face_nodes.shape == (4, 3)
+
+    def test_unstructured_vertices_prefer_known_names(
+        self, unstructured_ds: xr.Dataset
+    ) -> None:
+        assert _get_unstructured_vertices(unstructured_ds) == (
+            "clon_vertices",
+            "clat_vertices",
+        )
+
+    def test_unstructured_vertices_return_none_without_bounds(self) -> None:
+        ds = xr.Dataset({"temperature": ("cell", np.zeros(2))})
+
+        assert _get_unstructured_vertices(ds) == (None, None)
 
 
 # ===================================================================
