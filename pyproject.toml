@@ -70,6 +70,11 @@ tests = [
     "pytest-mock",
     "pytest-cov",
     "healpy",
+    "pandas>=2.2",
+    "bottleneck",
+    "cftime",
+    "netCDF4",
+    "numexpr",
 ]
 docs = [
     "mkdocs>=1.6,<2",
@@ -169,6 +174,9 @@ commands =
 setenv =
     VIRTUALENV_SYSTEM_SITE_PACKAGES=true
 description = "Run the unit tests."
+# Keep system packages available for external libraries, but install declared
+# dependencies locally so they take precedence over inherited packages.
+install_command = python -I -m pip install --ignore-installed {opts} {packages}
 deps = -e .[tests]
 commands =
     python3 -m pytest -vv --cov=grid_doctor --cov-report=html:coverage_report --junitxml report.xml --cov-report xml tests/

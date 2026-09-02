@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from types import ModuleType, SimpleNamespace
 
 import numpy as np
 import pytest
 import xarray as xr
 
 from grid_doctor import remap
+from grid_doctor import remap_backend as remap_backend_module
 from grid_doctor.remap import (
     _attach_healpix_coords,
     _flattened_size,
@@ -24,12 +26,39 @@ from grid_doctor.remap import (
 )
 from grid_doctor.remap_backend import (
     _canonical_lon,
+    _classify_source_kind,
+    _collapse_repeated_corners,
+    _corner_mesh_from_arrays,
+    _default_offline_enabled,
+    _ensure_ccw,
+    _get_unstructured_vertices,
+    _get_unstructured_dim,
     _get_spatial_dims,
     _infer_bounds_1d,
     _infer_curvilinear_corners,
+    _lat_coverage_from_centres,
     _looks_global,
+    _lon_coverage_from_centres,
+    _materialise_spectral_source,
+    _median_positive_step,
+    _mesh_to_polygons,
     _normalise_angle_units,
+    _polygons_to_corner_arrays,
     _regular_grid_mesh,
+    _require_esmpy,
+    _require_healpix_geo_module,
+    _run_offline_esmf,
+    _run_subprocess,
+    _source_mesh,
+    _spherical_centroid,
+    _vectorized_polygon_centres,
+    _xyz_to_lonlat,
+    OfflineWeightConfig,
+    SpectralTransformError,
+    compute_healpix_weights_backend,
+    describe_source,
+    run_esmf_regrid_weightgen,
+    write_ugrid_mesh_file,
 )
 from .helpers import _FakeHealpixModule
 
@@ -75,6 +104,490 @@ class TestPrimitiveHelpers:
     ) -> None:
         with pytest.raises(ValueError, match="Could not determine"):
             _get_spatial_dims(unstructured_ds)
+
+    def test_unstructured_vertices_resolution(self, unstructured_ds: xr.Dataset) -> None:
+        assert _get_unstructured_vertices(unstructured_ds) == (
+            "clon_vertices",
+            "clat_vertices",
+        )
+
+        ds = unstructured_ds.rename(
+            {
+                "clon": "lon",
+                "clat": "lat",
+                "clon_vertices": "cell_longitude_bounds",
+                "clat_vertices": "cell_latitude_bounds",
+            }
+        )
+        ds["lon"].attrs["bounds"] = "cell_longitude_bounds"
+        ds["lat"].attrs["bounds"] = "cell_latitude_bounds"
+
+        assert _get_unstructured_vertices(ds) == (
+            "cell_longitude_bounds",
+            "cell_latitude_bounds",
+        )
+
+        ds = xr.Dataset({"temperature": ("cell", np.zeros(2))})
+
+        assert _get_unstructured_vertices(ds) == (None, None)
+
+    def test_source_mesh_geometry_dispatch(
+        self, unstructured_ds: xr.Dataset, curvilinear_ds: xr.Dataset
+    ) -> None:
+        with pytest.raises(ValueError, match="require per-cell vertex coordinates"):
+            _source_mesh(
+                unstructured_ds.drop_vars(["clon_vertices", "clat_vertices"]),
+                source_units="deg",
+            )
+
+        mesh, source_dims = _source_mesh(unstructured_ds, source_units="deg")
+
+        assert source_dims == ("cell",)
+        assert mesh.face_nodes.shape == (4, 3)
+
+        mesh, source_dims = _source_mesh(curvilinear_ds, source_units="deg")
+
+        assert source_dims == ("y", "x")
+        assert mesh.face_nodes.shape == (12 * 24, 4)
+
+        invalid_ds = xr.Dataset(
+            coords={
+                "lat": (("y", "x", "z"), np.zeros((2, 2, 2))),
+                "lon": (("y", "x", "z"), np.zeros((2, 2, 2))),
+            }
+        )
+
+        with pytest.raises(ValueError, match="must be 1-D or 2-D"):
+            _source_mesh(invalid_ds, source_units="deg")
+
+
+# ===================================================================
+# Backend coordinate and configuration helpers
+# ===================================================================
+
+
+class TestBackendCoordinateGuards:
+    def test_offline_config_selects_slurm_launcher(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SLURM_JOB_ID", "123")
+        assert OfflineWeightConfig().mpirun == "srun"
+        monkeypatch.delenv("SLURM_JOB_ID")
+        assert OfflineWeightConfig().mpirun == "mpirun"
+
+    def test_polygon_mesh_max_face_nodes(self) -> None:
+        mesh = _corner_mesh_from_arrays(
+            np.array([[0.0, 1.0, 0.0]]), np.array([[0.0, 0.0, 1.0]])
+        )
+        assert mesh.max_face_nodes == 3
+
+    def test_optional_module_imports(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        esmpy = ModuleType("esmpy")
+        monkeypatch.setitem(__import__("sys").modules, "esmpy", esmpy)
+        assert _require_esmpy() is esmpy
+
+        healpix = ModuleType("healpix_geo")
+        ring = ModuleType("healpix_geo.ring")
+        healpix.ring = ring  # type: ignore[attr-defined]
+        monkeypatch.setitem(__import__("sys").modules, "healpix_geo", healpix)
+        monkeypatch.setitem(__import__("sys").modules, "healpix_geo.ring", ring)
+        module, kwargs = _require_healpix_geo_module(nest=False)
+        assert module is ring
+        assert kwargs == {"ellipsoid": "sphere"}
+
+    def test_xyz_to_lonlat_and_spherical_helpers(self) -> None:
+        with pytest.raises(ValueError, match="zero-length"):
+            _xyz_to_lonlat(np.zeros(3))
+        with pytest.raises(ValueError, match="zero-length"):
+            _xyz_to_lonlat(np.zeros((1, 3)), batch=True)
+
+        lon, lat = _xyz_to_lonlat(np.array([0.0, 1.0, 0.0]))
+        assert lon == 90.0
+        assert lat == 0.0
+        centroid_lon, centroid_lat = _spherical_centroid(
+            np.array([0.0, 2.0]), np.array([0.0, 0.0])
+        )
+        np.testing.assert_allclose((centroid_lon, centroid_lat), (1.0, 0.0))
+
+        lon, lat = _ensure_ccw(
+            np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])
+        )
+        np.testing.assert_array_equal(lon, np.array([1.0, 0.0, 0.0]))
+        np.testing.assert_array_equal(lat, np.array([0.0, 1.0, 0.0]))
+        lon, lat = _ensure_ccw(
+            np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0])
+        )
+        np.testing.assert_array_equal(lon, np.array([0.0, 1.0, 0.0]))
+        np.testing.assert_array_equal(lat, np.array([0.0, 0.0, 1.0]))
+
+
+# ===================================================================
+# Backend source classification and coverage helpers
+# ===================================================================
+
+
+class TestBackendClassificationAndCoverage:
+    def test_dimension_and_coordinate_failures(self) -> None:
+        unstructured_without_cell_dim = xr.Dataset(
+            {
+                "data": (("a", "b"), np.zeros((2, 2)), {"CDI_grid_type": "unstructured"}),
+            },
+            coords={
+                "lat": (("a", "b"), np.zeros((2, 2))),
+                "lon": (("a", "b"), np.zeros((2, 2))),
+            },
+        )
+        with pytest.raises(ValueError, match="source cell dimension"):
+            _get_unstructured_dim(unstructured_without_cell_dim)
+
+        curvilinear = xr.Dataset(
+            coords={
+                "lat": (("row", "column"), np.zeros((2, 3))),
+                "lon": (("row", "column"), np.zeros((2, 3))),
+            }
+        )
+        assert _get_spatial_dims(curvilinear) == ("row", "column")
+
+        with pytest.raises(ValueError, match="one-dimensional"):
+            _infer_bounds_1d(np.zeros((2, 2)))
+        with pytest.raises(ValueError, match="At least two"):
+            _infer_bounds_1d(np.array([0.0]))
+        with pytest.raises(ValueError, match="expects 2-D"):
+            _infer_curvilinear_corners(np.zeros(2), np.zeros(2))
+
+    def test_coverage_helpers_handle_empty_and_singleton_values(self) -> None:
+        assert _median_positive_step(np.array([1.0])) == 0.0
+        assert _median_positive_step(np.array([1.0, 1.0])) == 0.0
+        assert _lon_coverage_from_centres(np.array([np.nan])) == 0.0
+        assert _lon_coverage_from_centres(np.array([0.0])) == 0.0
+        assert _lat_coverage_from_centres(np.array([np.nan])) == 0.0
+        assert _lat_coverage_from_centres(np.array([0.0])) == 0.0
+
+    def test_classify_source_kind_all_paths(
+        self, regular_ds: xr.Dataset, curvilinear_ds: xr.Dataset, unstructured_ds: xr.Dataset
+    ) -> None:
+        assert _classify_source_kind(regular_ds, explicit_kind="regular") == "regular"
+        assert _classify_source_kind(unstructured_ds, explicit_kind="auto") == "unstructured"
+        assert _classify_source_kind(regular_ds, explicit_kind="auto") == "regular"
+        assert _classify_source_kind(curvilinear_ds, explicit_kind="auto") == "curvilinear"
+        invalid = xr.Dataset(coords={"lat": ("z", np.zeros(2)), "lon": ("z", np.zeros(2))})
+        invalid["lat"] = (("a", "b", "c"), np.zeros((1, 1, 1)))
+        invalid["lon"] = (("a", "b", "c"), np.zeros((1, 1, 1)))
+        with pytest.raises(ValueError, match="Could not classify"):
+            _classify_source_kind(invalid, explicit_kind="auto")
+
+
+# ===================================================================
+# Backend polygon mesh helpers
+# ===================================================================
+
+
+class TestBackendPolygonMeshes:
+    def test_polygon_centres_reject_invalid_faces(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with pytest.raises(ValueError, match="at least one valid corner"):
+            _vectorized_polygon_centres(
+                np.array([[np.nan]]), np.array([[np.nan]])
+            )
+        monkeypatch.setattr(
+            remap_backend_module.np, "sqrt", lambda values: np.zeros_like(values)
+        )
+        with pytest.raises(ValueError, match="zero-length"):
+            _vectorized_polygon_centres(
+                np.array([[0.0, 180.0]]), np.array([[0.0, 0.0]])
+            )
+
+    def test_corner_mesh_validates_and_collapses_repeated_nodes(self) -> None:
+        with pytest.raises(ValueError, match="shape"):
+            _corner_mesh_from_arrays(np.zeros(3), np.zeros(3))
+        with pytest.raises(ValueError, match="Source cell 0"):
+            _corner_mesh_from_arrays(
+                np.array([[0.0, 1.0, np.nan]]), np.array([[0.0, 0.0, np.nan]])
+            )
+        with pytest.raises(ValueError, match="fewer than three distinct"):
+            _corner_mesh_from_arrays(
+                np.array([[0.0, 1.0, 0.0, 0.0]]),
+                np.array([[0.0, 0.0, 0.0, 0.0]]),
+            )
+
+        collapsed = _collapse_repeated_corners(
+            np.array([[-1, -1, -1], [1, 2, 1]], dtype=np.int32)
+        )
+        np.testing.assert_array_equal(collapsed, np.array([[-1, -1, -1], [1, 2, -1]]))
+
+    def test_polygon_corner_array_round_trip(self) -> None:
+        polygons = [
+            (np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
+            (np.array([1.0, 2.0, 2.0, 1.0]), np.array([0.0, 0.0, 1.0, 1.0])),
+        ]
+        cell_lon, cell_lat = _polygons_to_corner_arrays(polygons)
+        assert cell_lon.shape == (2, 4)
+        assert np.isnan(cell_lon[0, -1])
+        mesh = _corner_mesh_from_arrays(cell_lon, cell_lat)
+        round_tripped = _mesh_to_polygons(mesh)
+        assert [len(lon) for lon, _ in round_tripped] == [3, 4]
+
+
+# ===================================================================
+# Backend external workflow helpers
+# ===================================================================
+
+
+class TestBackendExternalWorkflows:
+    def test_write_ugrid_mesh_file(self, tmp_path: Path) -> None:
+        path = write_ugrid_mesh_file(
+            [(np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]))],
+            tmp_path / "nested" / "mesh.nc",
+            mesh_name="source_mesh",
+        )
+        with xr.open_dataset(path) as ds:
+            assert ds.attrs["Conventions"] == "UGRID-1.0"
+            assert ds["source_mesh"].attrs["cf_role"] == "mesh_topology"
+            assert ds["source_mesh_face_nodes"].attrs["start_index"] == 0
+
+        mesh = _corner_mesh_from_arrays(
+            np.array([[0.0, 1.0, 0.0]]), np.array([[0.0, 0.0, 1.0]])
+        )
+        assert write_ugrid_mesh_file(
+            mesh, tmp_path / "mesh-object.nc", mesh_name="mesh"
+        ).exists()
+
+    def test_subprocess_and_weightgen_command(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(
+            remap_backend_module.subprocess,
+            "run",
+            lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="out", stderr="err"),
+        )
+        with pytest.raises(RuntimeError, match="STDOUT"):
+            _run_subprocess(["bad-command"])
+
+        captured: list[str] = []
+        monkeypatch.setattr(
+            remap_backend_module, "_run_subprocess", lambda cmd: captured.extend(cmd)
+        )
+        config = OfflineWeightConfig(
+            nproc=2, weight_only=True, netcdf4=True
+        )
+        result = run_esmf_regrid_weightgen(
+            src_mesh="source.nc",
+            dst_mesh="target.nc",
+            weights_path=tmp_path / "weights.nc",
+            method="nearest",
+            config=config,
+            ignore_unmapped=True,
+            src_regional=True,
+            dst_regional=True,
+        )
+        assert result == tmp_path / "weights.nc"
+        assert captured[:4] == ["mpirun", "-np", "2", "ESMF_RegridWeightGen"]
+        assert {"--weight_only", "--netcdf4", "--ignore_unmapped", "--src_regional", "--dst_regional"} <= set(captured)
+
+    def test_offline_and_spectral_helpers(
+        self, monkeypatch: pytest.MonkeyPatch, regular_ds: xr.Dataset, tmp_path: Path
+    ) -> None:
+        assert _default_offline_enabled(
+            method="nearest",
+            source_cell_count=1,
+            target_cell_count=1,
+            config=OfflineWeightConfig(enabled=True),
+        )
+        with pytest.raises(ValueError, match="requires an external transform"):
+            _materialise_spectral_source(
+                regular_ds, transform_command=None, workdir=tmp_path
+            )
+
+        def write_transformed(cmd: list[str]) -> None:
+            xr.Dataset(coords={"lat": ("y", [0.0, 1.0]), "lon": ("x", [0.0, 1.0])}).to_netcdf(cmd[-1])
+
+        monkeypatch.setattr(remap_backend_module, "_run_subprocess", write_transformed)
+        transformed = _materialise_spectral_source(
+            regular_ds,
+            transform_command=["transform", "{input}", "{output}"],
+            workdir=tmp_path,
+        )
+        assert set(transformed.coords) == {"lat", "lon"}
+
+        source_path = tmp_path / "spectral-input.nc"
+        regular_ds.to_netcdf(source_path)
+        transformed_from_path = _materialise_spectral_source(
+            source_path,
+            transform_command=["transform", "{input}", "{output}"],
+            workdir=tmp_path,
+        )
+        assert set(transformed_from_path.coords) == {"lat", "lon"}
+
+        monkeypatch.setattr(
+            remap_backend_module,
+            "_run_subprocess",
+            lambda cmd: (_ for _ in ()).throw(RuntimeError("bad transform")),
+        )
+        with pytest.raises(SpectralTransformError, match="bad transform"):
+            _materialise_spectral_source(
+                regular_ds, transform_command=["transform"], workdir=tmp_path
+            )
+
+    def test_describe_source_from_path_and_spectral(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        regular_ds: xr.Dataset,
+        tmp_path: Path,
+    ) -> None:
+        source_path = tmp_path / "source.nc"
+        regular_ds.to_netcdf(source_path)
+        description = describe_source(source_path, workdir=tmp_path)
+        assert description.kind == "regular"
+        assert description.dataset.identical(regular_ds)
+
+        monkeypatch.setattr(
+            remap_backend_module,
+            "_materialise_spectral_source",
+            lambda source, **kwargs: regular_ds,
+        )
+        spectral = describe_source(
+            source_path,
+            source_kind="spectral",
+            spectral_transform_command=["transform"],
+            workdir=tmp_path,
+        )
+        assert spectral.kind == "regular"
+
+    def test_compute_backend_rejects_invalid_method(
+        self, regular_ds: xr.Dataset
+    ) -> None:
+        with pytest.raises(ValueError, match="Only 'nearest'"):
+            compute_healpix_weights_backend(
+                regular_ds,
+                1,
+                method="invalid",  # type: ignore[arg-type]
+                nest=False,
+                source_units="deg",
+                weights_path=None,
+            )
+
+    def test_compute_backend_uses_offline_path(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        regular_ds: xr.Dataset,
+        tmp_path: Path,
+    ) -> None:
+        description = describe_source(regular_ds, workdir=tmp_path)
+        target_mesh = _regular_grid_mesh(
+            np.array([0.0, 1.0]), np.array([0.0, 1.0])
+        )
+        monkeypatch.setattr(
+            remap_backend_module, "describe_source", lambda *args, **kwargs: description
+        )
+        monkeypatch.setattr(
+            remap_backend_module,
+            "_target_healpix_mesh",
+            lambda level, nest: (np.array([0], dtype=np.int64), target_mesh),
+        )
+
+        def offline(**kwargs: Any) -> Path:
+            output = kwargs["target_path"]
+            xr.Dataset({"S": ("n_s", np.array([1.0]))}).to_netcdf(output)
+            return output
+
+        monkeypatch.setattr(remap_backend_module, "_run_offline_esmf", offline)
+        output = tmp_path / "weights.nc"
+        result = compute_healpix_weights_backend(
+            regular_ds,
+            1,
+            method="nearest",
+            nest=False,
+            source_units="deg",
+            weights_path=output,
+            offline=OfflineWeightConfig(enabled=True),
+        )
+        assert result == output
+        with xr.open_dataset(result) as weights:
+            assert weights.attrs["grid_doctor_backend"] == "offline-esmf"
+
+    def test_run_offline_esmf_validates_and_orchestrates(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        regular_ds: xr.Dataset,
+        tmp_path: Path,
+    ) -> None:
+        description = describe_source(regular_ds, workdir=tmp_path)
+        target_mesh = _regular_grid_mesh(
+            np.array([0.0, 1.0]), np.array([0.0, 1.0])
+        )
+        config = OfflineWeightConfig(
+            esmf_regrid_weightgen="missing-esmf"
+        )
+        monkeypatch.setattr(remap_backend_module.shutil, "which", lambda executable: None)
+        with pytest.raises(FileNotFoundError, match="missing-esmf"):
+            _run_offline_esmf(
+                source_desc=description,
+                target_mesh=target_mesh,
+                target_path=tmp_path / "weights.nc",
+                level=1,
+                nest=False,
+                method="nearest",
+                config=config,
+                ignore_unmapped=True,
+            )
+
+        config = OfflineWeightConfig(nproc=2)
+        def executable(name: str) -> str | None:
+            return "/bin/esmf" if name == config.esmf_regrid_weightgen else None
+
+        monkeypatch.setattr(remap_backend_module.shutil, "which", executable)
+        with pytest.raises(FileNotFoundError, match="MPI launcher"):
+            _run_offline_esmf(
+                source_desc=description,
+                target_mesh=target_mesh,
+                target_path=tmp_path / "weights.nc",
+                level=1,
+                nest=False,
+                method="nearest",
+                config=config,
+                ignore_unmapped=True,
+            )
+
+        written: list[Path] = []
+        monkeypatch.setattr(remap_backend_module.shutil, "which", lambda executable: "/bin/tool")
+        monkeypatch.setattr(
+            remap_backend_module,
+            "write_ugrid_mesh_file",
+            lambda mesh, path, **kwargs: written.append(Path(path)) or Path(path),
+        )
+        monkeypatch.setattr(
+            remap_backend_module,
+            "run_esmf_regrid_weightgen",
+            lambda **kwargs: kwargs["weights_path"],
+        )
+        output = tmp_path / "offline.nc"
+        result = _run_offline_esmf(
+            source_desc=description,
+            target_mesh=target_mesh,
+            target_path=output,
+            level=2,
+            nest=True,
+            method="conservative",
+            config=OfflineWeightConfig(),
+            ignore_unmapped=False,
+        )
+        assert result == output
+        assert [path.name for path in written] == ["source_mesh.nc", "healpix_level_2_nest.nc"]
+        assert not written[0].parent.exists()
+
+        configured_workdir = tmp_path / "configured-workdir"
+        _run_offline_esmf(
+            source_desc=description,
+            target_mesh=target_mesh,
+            target_path=output,
+            level=1,
+            nest=False,
+            method="nearest",
+            config=OfflineWeightConfig(workdir=configured_workdir),
+            ignore_unmapped=True,
+        )
+        assert configured_workdir.exists()
 
 
 # ===================================================================
