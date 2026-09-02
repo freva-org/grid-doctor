@@ -78,9 +78,12 @@ class TestPrimitiveHelpers:
         with pytest.raises(ValueError, match="Could not determine"):
             _get_spatial_dims(unstructured_ds)
 
-    def test_unstructured_vertices_follow_cf_bounds_references(
-        self, unstructured_ds: xr.Dataset
-    ) -> None:
+    def test_unstructured_vertices_resolution(self, unstructured_ds: xr.Dataset) -> None:
+        assert _get_unstructured_vertices(unstructured_ds) == (
+            "clon_vertices",
+            "clat_vertices",
+        )
+
         ds = unstructured_ds.rename(
             {
                 "clon": "lon",
@@ -102,15 +105,6 @@ class TestPrimitiveHelpers:
         assert source_dims == ("cell",)
         assert mesh.face_nodes.shape == (4, 3)
 
-    def test_unstructured_vertices_prefer_known_names(
-        self, unstructured_ds: xr.Dataset
-    ) -> None:
-        assert _get_unstructured_vertices(unstructured_ds) == (
-            "clon_vertices",
-            "clat_vertices",
-        )
-
-    def test_unstructured_vertices_return_none_without_bounds(self) -> None:
         ds = xr.Dataset({"temperature": ("cell", np.zeros(2))})
 
         assert _get_unstructured_vertices(ds) == (None, None)
