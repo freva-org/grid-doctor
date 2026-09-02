@@ -41,6 +41,7 @@ from cli.arguments import (
 from helpers.formatter import (
     dataset_output_root,
     existing_destinations_for_frequency,
+    merge_dataset_root,
     normalise_frequencies,
 )
 from helpers.zarr_publisher import merge_zarr_stores, sync_named_variable_attrs
@@ -48,7 +49,7 @@ from helpers.metadata import LAST_PERMANENT_UPDATE_ATTR
 
 VERSION_SERIES = "2026.08"
 VERSION_MAJOR = 1
-VERSION_MINOR = 0
+VERSION_MINOR = 1
 __version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -1990,6 +1991,12 @@ def run_merge(args: argparse.Namespace) -> int:
     interval = parse_interval(args.interval)
 
     target_dir = Path(args.output_path)
+    if args.dataset is not None:
+        target_dir = merge_dataset_root(
+            args.dataset,
+            output_path=target_dir,
+            frequencies=args.freq,
+        )
     if args.from_scratch and target_dir.exists():
         logger.warning("Deleting merge target directory %s", target_dir)
         shutil.rmtree(target_dir)

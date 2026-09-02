@@ -60,6 +60,38 @@ def dataset_output_root(
     return sample_path.parent.parent
 
 
+def merge_dataset_root(
+    dataset: str,
+    *,
+    output_path: str | Path,
+    frequencies: Iterable[str] | str | None = None,
+) -> Path:
+    """Return the dataset root used by selector-based merge operations.
+
+    ``output_path`` may already name the dataset root, or may name a single
+    frequency directory for compatibility with the direct-store merge form.
+    Otherwise it is treated as a shared publication root and ``dataset`` is
+    appended to it.
+    """
+
+    root_path = Path(output_path)
+    if root_path.name == str(dataset):
+        return root_path
+
+    if isinstance(frequencies, str):
+        selected = tuple(item.strip() for item in frequencies.split(",") if item.strip())
+    else:
+        selected = tuple(frequencies or ())
+    if (
+        len(selected) == 1
+        and selected[0] in SOURCE_MAPPER["output_frequency"]
+        and root_path.name == SOURCE_MAPPER["output_frequency"][selected[0]]
+    ):
+        return root_path.parent
+
+    return root_path / str(dataset)
+
+
 def existing_destinations_for_frequency(
     dataset: str,
     frequency: str,

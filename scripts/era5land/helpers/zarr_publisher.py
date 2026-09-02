@@ -15,6 +15,7 @@ import zarr
 
 from .datasets import normalise_published_dataset
 from .file_fetcher import SOURCE_MAPPER
+from .formatter import merge_dataset_root
 from .metadata import (
     LAST_DATA_UPDATE_ATTR,
     LAST_PERMANENT_UPDATE_ATTR,
@@ -948,6 +949,11 @@ def merge_zarr_stores(
     selected_frequencies = _frequency_names(frequency)
     selected_variables = _variable_names(variable)
     if dataset is not None:
+        target_dir = merge_dataset_root(
+            dataset,
+            output_path=target_dir,
+            frequencies=selected_frequencies,
+        )
         worker_roots = _worker_output_roots(
             sources,
             dataset=dataset,
@@ -959,14 +965,7 @@ def merge_zarr_stores(
             dataset=dataset,
             frequencies=selected_frequencies,
             levels=levels,
-            target_root=(
-                Path(target_dir).parent
-                if selected_frequencies
-                and len(selected_frequencies) == 1
-                and Path(target_dir).name
-                == SOURCE_MAPPER["output_frequency"][selected_frequencies[0]]
-                else target_dir
-            ),
+            target_root=target_dir,
         )
     else:
         target_path = Path(target_dir)
