@@ -100,14 +100,38 @@ class TestPrimitiveHelpers:
             "cell_latitude_bounds",
         )
 
-        mesh, source_dims = _source_mesh(ds, source_units="deg")
+        ds = xr.Dataset({"temperature": ("cell", np.zeros(2))})
+
+        assert _get_unstructured_vertices(ds) == (None, None)
+
+    def test_source_mesh_geometry_dispatch(
+        self, unstructured_ds: xr.Dataset, curvilinear_ds: xr.Dataset
+    ) -> None:
+        with pytest.raises(ValueError, match="require per-cell vertex coordinates"):
+            _source_mesh(
+                unstructured_ds.drop_vars(["clon_vertices", "clat_vertices"]),
+                source_units="deg",
+            )
+
+        mesh, source_dims = _source_mesh(unstructured_ds, source_units="deg")
 
         assert source_dims == ("cell",)
         assert mesh.face_nodes.shape == (4, 3)
 
-        ds = xr.Dataset({"temperature": ("cell", np.zeros(2))})
+        mesh, source_dims = _source_mesh(curvilinear_ds, source_units="deg")
 
-        assert _get_unstructured_vertices(ds) == (None, None)
+        assert source_dims == ("y", "x")
+        assert mesh.face_nodes.shape == (12 * 24, 4)
+
+        invalid_ds = xr.Dataset(
+            coords={
+                "lat": (("y", "x", "z"), np.zeros((2, 2, 2))),
+                "lon": (("y", "x", "z"), np.zeros((2, 2, 2))),
+            }
+        )
+
+        with pytest.raises(ValueError, match="must be 1-D or 2-D"):
+            _source_mesh(invalid_ds, source_units="deg")
 
 
 # ===================================================================
