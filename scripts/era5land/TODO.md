@@ -1,5 +1,8 @@
 # TODO
 
+- [] pressure level selection for remapper, cleanup, merge. For update it should be whaever is already there.
+
+
 
 - [ ] solve bug in merge, currently 
 ```

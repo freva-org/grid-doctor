@@ -8,8 +8,10 @@ ERA5-Land in this repository is a script-driven workflow that:
 - writes one Zarr store per frequency and zoom level
 
 The main entry point is `scripts/era5land/converter.py`.
+For the command and helper relationships, see the
+[function call graph](FUNCTION_CALL_GRAPH.md).
 
-The current converter version is `2026.07.6.6b2` and is shown by:
+The current converter version is `2026.08.1.1` and is shown by:
 
 ```console
 python3 scripts/era5land/converter.py --version
@@ -442,11 +444,10 @@ destination store should recreate that store instead of updating it in place.
 Use `--from-scratch` to delete the complete target directory before merging;
 this is broader than `--clean`.
 
-**NOTE:**
-for `merge`, the source directories and target directory should point directly
-at one output-frequency directory, for example `.../era5land/1H` or
-`.../era5/day`. The command merges matching `level_<n>.zarr` stores from the
-source directories into the target directory in the order they are listed.
+**Direct-store mode:** when neither `--dataset` nor `--freq` is supplied, each
+source directory must directly contain `level_<n>.zarr` stores. Each matching
+store is merged into `<output-path>/level_<n>.zarr`; no dataset or frequency
+directory is appended. `--from-scratch` deletes exactly `<output-path>`.
 `--source` accepts glob patterns, multiple source values, and comma-separated
 values. Quote a glob so the command receives it as a single pattern, for
 example `--source '/scratch/$USER/worker-output/*-1hr-zg/era5/PT1H'`.
