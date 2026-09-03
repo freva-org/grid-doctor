@@ -41,6 +41,9 @@
     "mon": "P1M",
     "fx": "fx"
   },
+  "remap_defaults": {
+    "pressure_levels_hpa": [1000, 850, 700, 500, 300, 200, 50, 20, 10, 5]
+  },
   "output_path": "/work/ks1387/gw/data/reanalysis/healpix/{dataset}/{output_frequency}/level_{zoom_number}.zarr",
   "weights_path": "/work/ks1387/healpix-weights",
   "var_attrs": [

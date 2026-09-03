@@ -10,8 +10,8 @@ from heal_era5 import main
 from heal_era5.helpers.file_fetcher import SourceRecord, UnresolvedRecord
 
 
-def _request(name: str = "tas") -> tuple[tuple[object, ...], list[SimpleNamespace]]:
-    return (), [SimpleNamespace(name=name)]
+def _request(name: str = "tas") -> tuple[dict[str, object], list[SimpleNamespace]]:
+    return {"remap_defaults": {"pressure_levels_hpa": [1000, 850]}}, [SimpleNamespace(name=name)]
 
 
 def _record(*, files: tuple[str, ...] = ("/tmp/tas.grb",)) -> SourceRecord:
@@ -39,6 +39,7 @@ def _remap_args(**overrides: object) -> Namespace:
         "interval": "20240101,20240101",
         "truncate_after": None,
         "coarsen_only": None,
+        "pressure_levels": None,
         "dataset": "era5land",
         "root": None,
         "output_path": None,
@@ -167,6 +168,17 @@ def test_remap_maps_resolved_records(monkeypatch):
     assert calls[0]["frequencies"] == ("1hr",)
     assert calls[0]["requested_variables"] == ("tas",)
     assert calls[0]["clean"] is True
+
+
+def test_remap_uses_pressure_level_override(monkeypatch):
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(main, "selected_requests", lambda **_: _request())
+    monkeypatch.setattr(main, "resolve_records", lambda **_: [_record()])
+    monkeypatch.setattr(main, "map_records", lambda records, **kwargs: calls.append({"records": records, **kwargs}))
+
+    args = _remap_args(pressure_levels="1000,850,500")
+    assert main.run_remap(args) == 0
+    assert args.pressure_levels == (1000, 850, 500)
 
 
 # =============================================================================

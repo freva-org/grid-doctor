@@ -322,6 +322,17 @@ def build_parser() -> argparse.ArgumentParser:
     add_variable_argument(remap_cmd)
     add_interval_argument(remap_cmd)
     remap_cmd.add_argument(
+        "-pl",
+        "--pressure-levels",
+        default=argparse.SUPPRESS,
+        metavar="HPA",
+        help=(
+            "Comma-separated pressure levels in hPa to remap for pressure-level variables. "
+            "Use 'all' to retain every available level; when omitted, use the configured selection "
+            f"({','.join(str(level) for level in source_mapper['remap_defaults']['pressure_levels_hpa'])} hPa)."
+        ),
+    )
+    remap_cmd.add_argument(
         "--batch-months",
         dest="batch_months",
         type=int,
@@ -846,6 +857,27 @@ def parse_cli_args(value: str | None) -> tuple[str, ...] | None:
     return split_csv_list(value)
 
 
+def parse_pressure_levels(
+    value: str | None,
+    *,
+    source_mapper: dict[str, Any],
+) -> tuple[int, ...] | None:
+    """Resolve a pressure-level selection in hPa, with ``all`` disabling filtering."""
+
+    if value == "all":
+        return None
+    if value is None:
+        value = ",".join(str(level) for level in source_mapper["remap_defaults"]["pressure_levels_hpa"])
+
+    try:
+        levels = tuple(int(token) for token in split_csv_list(value))
+    except ValueError as exc:
+        raise ValueError("--pressure-levels must be comma-separated integer values in hPa, or 'all'.") from exc
+    if not levels or any(level <= 0 for level in levels):
+        raise ValueError("--pressure-levels must contain one or more positive integer values in hPa.")
+    return tuple(dict.fromkeys(levels))
+
+
 def expand_source_dirs(values: Sequence[str]) -> tuple[str, ...]:
     """Expand comma-separated source paths and glob patterns for ``merge``."""
 
@@ -939,6 +971,7 @@ def map_records(
         drop_duplicate_time_rows=(
             not args.fail_on_duplicate_times if drop_duplicate_time_rows is None else drop_duplicate_time_rows
         ),
+        pressure_levels=args.pressure_levels,
         weights_dir=args.weights_dir,
         clean=clean,
         target_chunk_mb=args.chunk_size,
@@ -1088,7 +1121,11 @@ def run_remap(args: argparse.Namespace) -> int:
     interval = parse_interval(args.interval)
     truncate_after = parse_truncate_after(args.truncate_after)
     coarsen_levels = parse_coarsen_levels(args.coarsen_only)
-    _, requests = selected_requests(dataset=args.dataset, variables=variables)
+    source_mapper, requests = selected_requests(dataset=args.dataset, variables=variables)
+    args.pressure_levels = parse_pressure_levels(
+        getattr(args, "pressure_levels", None),
+        source_mapper=source_mapper,
+    )
     requested_variable_names = tuple(request.name for request in requests)
     source_variables, special_variables = split_special_variables(requested_variable_names)
     effective_frequencies = extend_frequencies_for_special_variables(

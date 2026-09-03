@@ -152,7 +152,7 @@ Useful variants:
 - `--json`: emit resolved, missing, and unresolved records as JSON
 - `--strict`: exit non-zero if a resolved source pattern matches no files
 
-## Running Conversions
+## Remapping
 
 ```console
 heal-era5 remap --help
@@ -168,6 +168,20 @@ heal-era5 remap \
   --clean
 ```
 
+For pressure-level variables, `remap` retains the configured default selection
+of `1000,850,700,500,300,200,50,20,10,5` hPa. Surface and fixed-level
+variables are unaffected.
+
+Override the selection with `-pl` (or `--pressure-levels`):
+
+```console
+heal-era5 remap --dataset era5 --var ta -pl 1000,850,500
+```
+
+Use `--pressure-levels all` to retain every available pressure level. Values
+are expressed in hPa, so use `1000` rather than the equivalent `100000` Pa
+coordinate value.
+
 Two batching modes are available for larger remaps:
 
 - `--batch-months N`: split a bounded `--interval` into sequential calendar windows
@@ -177,90 +191,56 @@ Two batching modes are available for larger remaps:
 is useful when pressure-level or long-running ERA5 workloads need finer-grained
 subprocess isolation than calendar batching provides.
 
-Submit the same kind of work as independent scheduler jobs with Reflow:
+### Reflow Operations
+
+Use Reflow to submit a remap as independent scheduler jobs:
 
 ```console
 heal-era5 remap-reflow submit \
   --run-dir /scratch/$USER/era5land-reflow \
   --dataset era5land \
-  --variables tas pr \
+  --var tas,pr \
   --freq 1hr,day,mon \
   --interval 202603,202603 \
   --output-path /scratch/$USER/era5land-final \
-  --clean
+  --clean true
 ```
 
-This workflow follows the standard Reflow pattern described in the
-[Reflow user guide](https://reflow-docs.org/latest/guide/):
+Reflow coordinates the following stages:
 
-- `dispatch`: Reflow's own coordinator process. It reads the workflow
-  manifest, submits ready jobs, tracks dependencies, and triggers downstream
-  tasks. It is not one of the ERA5-Land remap tasks below.
-- `gather_plan`: resolves the requested variable and frequency work once and
-  returns self-contained array payloads
-- `remap_variable_frequency`: runs one array job per item and writes into an
-  isolated temporary output root below `--run-dir`
-- `finalize_outputs`: merges the temporary Zarr stores into the final
-  publication root and consolidates metadata through the existing publisher
-
-ASCII DAG for quick lookup:
-
-```text
-dispatch (Reflow coordinator)
-    |
-    +--> gather_plan
-                    |
-                    +--> remap_variable_frequency[*]
-                               |
-            +------------------+
-                               |
-                               +--> finalize_outputs
+```mermaid
+flowchart LR
+    dispatch[Reflow dispatch] --> plan[gather_plan]
+    plan --> workers[remap_variable_frequency*]
+    workers --> finalize[finalize_outputs]
 ```
 
-Where:
+- `gather_plan` resolves source files, pressure-level groups, and batches once.
+- `remap_variable_frequency` runs one `variable x frequency x interval-batch`
+  worker item and writes below `<run-dir>/worker-output/`.
+- `finalize_outputs` merges temporary stores, publishes special variables, and
+  removes the temporary worker directory.
 
-- `gather_plan` resolves source records, discovers pressure-level groups,
-  computes batching choices, writes the resolved records once to the shared
-  run directory, and returns one payload per work item. Each payload contains
-  a record key and shared run settings.
-- `remap_variable_frequency[*]` is the parallel worker stage. Each array item
-  handles one `variable x frequency x interval-batch` unit, optionally slices
-  pressure levels for pressure-level variables, and writes temporary Zarr output
-  below `<run-dir>/worker-output/`.
-- `finalize_outputs` gathers all temporary worker outputs, merges them into the
-  final publication tree, publishes special variables such as `areacella` if
-  needed, and removes the temporary worker directory.
+Put `--run-dir` and the weight cache on a filesystem visible to every worker
+node. `dispatch` is Reflow's coordinator rather than a remapping task.
 
-The shared `--run-dir` should point to a filesystem visible from every worker
-node, for example scratch. Temporary worker outputs are written below
-`<run-dir>/worker-output/`.
-
-Check the submitted workflow with the generated Reflow CLI:
+For status, retry, and recovery, use the same SQLite manifest (`--store-path`)
+that was used for submission. `--run-dir` contains per-run logs and temporary
+outputs; `--store-path` tracks workflow state across commands:
 
 ```console
-heal-era5 remap-reflow runs
-heal-era5 remap-reflow status <run-id>
-```
+heal-era5 remap-reflow runs \
+  --store-path $HOME/.cache/reflow/manifest.db
 
-### Reflow Operations
-
-For operational work on an existing run, it is usually best to pass both the
-interval run directory and the shared manifest database explicitly. The run
-directory holds the per-run files and logs, while the SQLite manifest store
-tracks run and task state across commands:
-
-```console
 heal-era5 remap-reflow status \
   era5land_healpix-20260731-c66e \
-  --run-dir /shared/era5_from_grib_reflow/queue_runs/002-1953_1962 \
   --store-path $HOME/.cache/reflow/manifest.db
 ```
 
-Typical status output shows the top-level run state plus one line per task:
+Typical status output summarizes workflow state, then each task and any failed
+array item:
 
 ```text
-Run      era5land_healpix-20260731-c66e
-Workflow era5land_healpix
 Status   RUNNING
 
   gather_plan               SUCCESS=1
@@ -268,127 +248,29 @@ Status   RUNNING
     [167]   FAILED       job=26577980
 ```
 
-Read this as:
-
-- `Status` is the overall workflow state.
-- `gather_plan`, `remap_variable_frequency`, and `finalize_outputs` are the
-  workflow tasks.
-- Array tasks show one summary line plus per-shard lines for failed items.
-- `job=<slurm-id>` is the Slurm job that handled that task instance.
-
-Useful variants:
-
-- `--task remap_variable_frequency`: only show one task
-- `--json`: emit machine-readable state for scripting
-- `--errors`: include captured traceback text for failed instances
-
-Retry only the failed or cancelled instances of a task with:
+Use `--task remap_variable_frequency` for one task, `--json` for scripts, and
+`--errors` for captured tracebacks. If a retry unexpectedly marks no work,
+first confirm that `--store-path` names the manifest used for submission.
 
 ```console
 heal-era5 remap-reflow retry \
   era5land_healpix-20260731-c66e \
   --task remap_variable_frequency \
-  --run-dir /shared/era5_from_grib_reflow/queue_runs/002-1953_1962 \
-  --store-path $HOME/.cache/reflow/manifest.db
-```
-
-If only shard `167` failed, the retry command should mark only that failed
-instance. It does not resubmit every successful shard of the same array task.
-For example, after:
-
-```text
-  remap_variable_frequency  FAILED=1, SUCCESS=456
-    [167]   FAILED       job=26577980
-```
-
-the retry command should report one task instance marked for retry, and the
-workflow should later advance to `finalize_outputs`.
-
-Cancelling a run or one active task uses the same run lookup arguments:
-
-```console
-heal-era5 remap-reflow cancel \
-  era5land_healpix-20260731-c66e \
-  --task finalize_outputs \
-  --run-dir /shared/era5_from_grib_reflow/queue_runs/002-1953_1962 \
-  --store-path $HOME/.cache/reflow/manifest.db
-```
-
-This is intended for active work. If a task is already terminal, `cancel`
-should not change its final state.
-
-The Reflow manifest store is important during debugging and recovery:
-
-- `--run-dir` points to the per-run working directory where task logs, worker
-  outputs, and other run-local files live.
-- `--store-path` points to the shared SQLite manifest database. This is where
-  Reflow remembers runs, task states, retries, and cancellations.
-- If commands unexpectedly report `Marked 0 task instance(s) for retry`, first
-  confirm that `--store-path` matches the manifest that was used when the run
-  was submitted.
-
-Basic manifest-oriented commands for day-to-day operations:
-
-```console
-# List recent runs known to the manifest DB.
-heal-era5 remap-reflow runs \
   --store-path $HOME/.cache/reflow/manifest.db
 
-# Show one run from the manifest DB, without relying on the current directory.
-heal-era5 remap-reflow status \
-  era5land_healpix-20260731-c66e \
-  --store-path $HOME/.cache/reflow/manifest.db
-
-# Show one task only, which is useful for large array jobs.
-heal-era5 remap-reflow status \
-  era5land_healpix-20260731-c66e \
-  --task remap_variable_frequency \
-  --store-path $HOME/.cache/reflow/manifest.db
-
-# Show the same status as JSON for scripting or jq.
-heal-era5 remap-reflow status \
-  era5land_healpix-20260731-c66e \
-  --json \
-  --store-path $HOME/.cache/reflow/manifest.db
-
-# Include captured Python tracebacks for failed task instances.
-heal-era5 remap-reflow status \
-  era5land_healpix-20260731-c66e \
-  --errors \
-  --store-path $HOME/.cache/reflow/manifest.db
-
-# Retry failed or cancelled instances recorded in the manifest DB.
-heal-era5 remap-reflow retry \
-  era5land_healpix-20260731-c66e \
-  --task remap_variable_frequency \
-  --store-path $HOME/.cache/reflow/manifest.db
-
-# Cancel active work for one run recorded in the manifest DB.
 heal-era5 remap-reflow cancel \
   era5land_healpix-20260731-c66e \
   --store-path $HOME/.cache/reflow/manifest.db
 ```
 
-These commands all read or update the same SQLite manifest, so using the same
-`--store-path` consistently matters more than the shell you run them from.
+`retry` marks only failed or cancelled task instances; it does not resubmit
+successful shards. Use `cancel` only for active work; it does not change a
+terminal task's final state.
 
-When a queue-controlled campaign is restarted after manual recovery, the
-controller state file `reflow-queue-state.json` must also reflect reality.
-The queue controller stores campaign progress separately from the Reflow manifest.
-As of this repository version, the controller refreshes submitted entries
-against the actual Reflow run state on startup, so a restarted controller can
-reconcile stale `FAILED` entries after a successful manual retry.
-
-At the moment the Reflow workflow is intentionally focused on the main remap
-path. It supports the fan-out/gather publication flow plus `--clean`,
-`--from-scratch`, `--highest-level-only`, and the input-cache flags. More
-specialized maintenance modes such as `--coarsen-only`, `--attrs-only`, and
-`--rechunk-only` still live in the `heal_era5` package.
-
-Internally, `heal-era5 remap-reflow ...` forwards the command to
-`src/heal_era5/cli/reflow_workflow.py`, so there is now one public CLI
-for both direct and scheduler-backed operation while the Reflow implementation
-stays private.
+Reflow supports the main remap path, including `--clean`, `--from-scratch`,
+`--highest-level-only`, and input-cache options. Use direct `heal-era5 remap`
+for specialized maintenance modes such as `--coarsen-only`, `--attrs-only`,
+and `--rechunk-only`.
 
 ### Queueing Long Reflow Campaigns
 

@@ -108,6 +108,9 @@ def test_main_parser_orders_commands_and_accepts_remap_modes():
     args = parser.parse_args(["remap", "-hlo"])
     assert args.highest_level_only is True
 
+    pressure_args = parser.parse_args(["remap", "-pl", "1000,850,500"])
+    assert pressure_args.pressure_levels == "1000,850,500"
+
     merge_args = parser.parse_args(["merge", "--source", "/tmp/source", "--output-path", "/tmp/output"])
     assert merge_args.dataset is None
     assert merge_args.freq is None
@@ -116,6 +119,20 @@ def test_main_parser_orders_commands_and_accepts_remap_modes():
     help_text = parser.format_help()
     expected = "{clean,fetch,merge,reflow-queue,remap,remap-reflow,update}"
     assert expected in help_text
+
+
+def test_parse_pressure_levels_uses_configured_default_and_supports_all():
+    """Pressure-level selections should use hPa and permit an explicit all-level mode."""
+
+    main = load_main_module()
+    source_mapper = {"remap_defaults": {"pressure_levels_hpa": [1000, 850, 500]}}
+
+    assert main.parse_pressure_levels(None, source_mapper=source_mapper) == (1000, 850, 500)
+    assert main.parse_pressure_levels("850,500,850", source_mapper=source_mapper) == (850, 500)
+    assert main.parse_pressure_levels("all", source_mapper=source_mapper) is None
+
+    with pytest.raises(ValueError, match="positive integer"):
+        main.parse_pressure_levels("0", source_mapper=source_mapper)
 
 
 def test_main_dispatches_normal_commands(monkeypatch):
