@@ -2,14 +2,12 @@
 
 import argparse
 
-
 DATASET_CHOICES = ("era5land", "era5")
 DATASET_HELP = "Dataset to process: era5land or era5."
 VARIABLE_HELP = "Comma-separated variables."
 FREQUENCY_HELP = "Comma-separated frequencies: 1hr,day,mon,fx."
 INTERVAL_HELP = (
-    "Date interval (START,END) where each date may be YYYY, YYYYMM, YYYYMMDD "
-    "(hyphens optional). Empty END means today."
+    "Date interval (START,END) where each date may be YYYY, YYYYMM, YYYYMMDD (hyphens optional). Empty END means today."
 )
 OUTPUT_PUBLICATION_HELP = (
     "Override the published HEALPix output root directory. "
@@ -97,8 +95,7 @@ def add_publication_arguments(
         type=int,
         default=DEFAULT_CHUNK_SIZE,
         metavar="MB",
-        help=("Approximate Zarr chunk-size target in megabytes "
-              "for rewritten destination stores."),
+        help=("Approximate Zarr chunk-size target in megabytes for rewritten destination stores."),
     )
 
 
@@ -160,8 +157,7 @@ def add_clean_options(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         default=False,
         help=(
-            "Overwrite existing Zarr stores instead of updating them incrementally. "
-            "It wipes the store before starting."
+            "Overwrite existing Zarr stores instead of updating them incrementally. It wipes the store before starting."
         ),
     )
     parser.add_argument(

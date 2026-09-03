@@ -4,25 +4,24 @@
 import ast
 import csv
 import json
-import operator
 import re
+from collections.abc import Callable, Iterable
 from datetime import date, datetime
 from glob import glob
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, NamedTuple
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / ".." / "assets" / "source_mapper.json"
+from ..resources import ASSETS_DIR
+
+DEFAULT_SOURCE_MAPPER = ASSETS_DIR / "source_mapper.json"
 
 DAY_RE = re.compile(r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})")
 MONTH_RE = re.compile(r"(?P<year>\d{4})-(?P<month>\d{2})(?!-\d{2})")
 YEAR_RE = re.compile(r"(?P<year>\d{4})(?!\d)")
-DATE_VALUE_RE = re.compile(
-    r"^(?P<year>\d{4})(?:-?(?P<month>\d{2})(?:-?(?P<day>\d{2}))?)?$"
-)
+DATE_VALUE_RE = re.compile(r"^(?P<year>\d{4})(?:-?(?P<month>\d{2})(?:-?(?P<day>\d{2}))?)?$")
 
 
-def load_json(path: Union[str, Path]) -> Dict[str, Any]:
+def load_json(path: str | Path) -> dict[str, Any]:
     """Load a JSON object from disk."""
 
     with Path(path).open(encoding="utf-8") as handle:
@@ -39,7 +38,7 @@ class VariableRequest(NamedTuple):
     """One requested CMOR variable and the reanalysis sources allowed for it."""
 
     name: str
-    reanalysis: Tuple[str, ...]
+    reanalysis: tuple[str, ...]
     commentary: str | None = None
 
 
@@ -56,9 +55,9 @@ class SourceRecord(NamedTuple):
     parameter: str
     level_type: str
     pattern: str
-    files: Tuple[str, ...]
+    files: tuple[str, ...]
     conversion_factor: float
-    output_attrs: Dict[str, str]
+    output_attrs: dict[str, str]
 
 
 class UnresolvedRecord(NamedTuple):
@@ -72,13 +71,15 @@ class UnresolvedRecord(NamedTuple):
 def _safe_eval_numeric_expression(expression: str) -> float:
     """Evaluate a simple numeric expression containing only literals and */+-."""
 
-    operators = {
-        ast.Add: operator.add,
-        ast.Sub: operator.sub,
-        ast.Mult: operator.mul,
-        ast.Div: operator.truediv,
-        ast.USub: operator.neg,
-        ast.UAdd: operator.pos,
+    binary_operators: dict[type[ast.operator], Callable[[float, float], float]] = {
+        ast.Add: lambda left, right: left + right,
+        ast.Sub: lambda left, right: left - right,
+        ast.Mult: lambda left, right: left * right,
+        ast.Div: lambda left, right: left / right,
+    }
+    unary_operators: dict[type[ast.unaryop], Callable[[float], float]] = {
+        ast.USub: lambda value: -value,
+        ast.UAdd: lambda value: value,
     }
 
     def _eval(node: ast.AST) -> float:
@@ -86,11 +87,11 @@ def _safe_eval_numeric_expression(expression: str) -> float:
             return _eval(node.body)
         if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
             return float(node.value)
-        if isinstance(node, ast.UnaryOp) and type(node.op) in operators:
-            return float(operators[type(node.op)](_eval(node.operand)))
-        if isinstance(node, ast.BinOp) and type(node.op) in operators:
+        if isinstance(node, ast.UnaryOp) and type(node.op) in unary_operators:
+            return unary_operators[type(node.op)](_eval(node.operand))
+        if isinstance(node, ast.BinOp) and type(node.op) in binary_operators:
             return float(
-                operators[type(node.op)](
+                binary_operators[type(node.op)](
                     _eval(node.left),
                     _eval(node.right),
                 )
@@ -100,7 +101,7 @@ def _safe_eval_numeric_expression(expression: str) -> float:
     return _eval(ast.parse(expression, mode="eval"))
 
 
-def parse_conversion_factor(entry: Dict[str, Any]) -> float:
+def parse_conversion_factor(entry: dict[str, Any]) -> float:
     """Return the numeric multiplicative conversion factor for one CMOR entry."""
 
     raw = str(entry.get("conversion", "")).strip()
@@ -109,11 +110,11 @@ def parse_conversion_factor(entry: Dict[str, Any]) -> float:
     return _safe_eval_numeric_expression(raw)
 
 
-def extract_output_attrs(entry: Dict[str, Any]) -> Dict[str, str]:
+def extract_output_attrs(entry: dict[str, Any]) -> dict[str, str]:
     """Extract relevant output metadata from one CMOR entry."""
 
     keys = tuple(SOURCE_MAPPER.get("var_attrs", []))
-    attrs: Dict[str, str] = {}
+    attrs: dict[str, str] = {}
     for key in keys:
         value = str(entry.get(key, "")).strip()
         if value:
@@ -121,13 +122,13 @@ def extract_output_attrs(entry: Dict[str, Any]) -> Dict[str, str]:
     return attrs
 
 
-def split_csv_list(value: str) -> Tuple[str, ...]:
+def split_csv_list(value: str) -> tuple[str, ...]:
     """Split a comma-separated table value, trimming whitespace."""
 
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
-def load_variable_requests(path: Union[str, Path]) -> List[VariableRequest]:
+def load_variable_requests(path: str | Path) -> list[VariableRequest]:
     """Read the variable selection CSV.
 
     The table must provide ``varname`` and ``reanalysis`` columns. Any
@@ -140,9 +141,7 @@ def load_variable_requests(path: Union[str, Path]) -> List[VariableRequest]:
             VariableRequest(
                 name=str(row["varname"]).strip(),
                 reanalysis=split_csv_list(str(row["reanalysis"])),
-                commentary=(
-                    str(row.get("commentary", "")).strip() or None
-                ),
+                commentary=(str(row.get("commentary", "")).strip() or None),
             )
             for row in reader
         ]
@@ -162,11 +161,11 @@ def dataset_code_allowed(
 
 
 def selected_variables(
-    requests: List[VariableRequest],
+    requests: list[VariableRequest],
     *,
     allowed_codes: Iterable[str],
-    variables: Optional[Tuple[str, ...]],
-) -> List[VariableRequest]:
+    variables: tuple[str, ...] | None,
+) -> list[VariableRequest]:
     """Filter CSV requests by allowed source codes and optional variable names."""
 
     requested_filter = variables is not None
@@ -177,25 +176,18 @@ def selected_variables(
         if dataset_code_allowed(allowed_codes, request.reanalysis)
         and (not requested_filter or request.name in requested)
     ]
-    missing = (
-        sorted(requested - {request.name for request in selected})
-        if requested_filter
-        else []
-    )
+    missing = sorted(requested - {request.name for request in selected}) if requested_filter else []
     if missing:
-        raise KeyError(
-            "Requested variables are not available for the selected source: "
-            + ", ".join(missing)
-        )
+        raise KeyError("Requested variables are not available for the selected source: " + ", ".join(missing))
     return selected
 
 
 def load_cmor_variable_entries(
-    cmor_tables_dir: Union[str, Path],
+    cmor_tables_dir: str | Path,
     *,
     table_prefix: str,
     frequency: str,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """Load variable entries for one CMOR table frequency."""
 
     table_path = Path(cmor_tables_dir) / f"{table_prefix}_{frequency}.json"
@@ -203,17 +195,13 @@ def load_cmor_variable_entries(
     entries = table.get("variable_entry")
     if not isinstance(entries, dict):
         raise TypeError(f"Missing JSON object 'variable_entry' in {table_path}")
-    return {
-        str(name): entry
-        for name, entry in entries.items()
-        if isinstance(entry, dict)
-    }
+    return {str(name): entry for name, entry in entries.items() if isinstance(entry, dict)}
 
 
 def find_variable_entry(
-    entries: Dict[str, Dict[str, Any]],
+    entries: dict[str, dict[str, Any]],
     variable: str,
-) -> Optional[Tuple[str, Dict[str, Any]]]:
+) -> tuple[str, dict[str, Any]] | None:
     """Find a CMOR table entry by entry name or by ``out_name``."""
 
     direct = entries.get(variable)
@@ -225,7 +213,7 @@ def find_variable_entry(
     return None
 
 
-def parse_interval(value: Optional[str]) -> Tuple[Optional[date], Optional[date]]:
+def parse_interval(value: str | None) -> tuple[date | None, date | None]:
     """Parse ``start,end`` where each value can be YYYY, YYYYMM, or YYYYMMDD."""
 
     if value in (None, ""):
@@ -233,7 +221,7 @@ def parse_interval(value: Optional[str]) -> Tuple[Optional[date], Optional[date]
     parts = value.split(",", maxsplit=1)
     start = parse_date_value(parts[0], bound="start") if parts[0].strip() else None
     if len(parts) == 1 or not parts[1].strip():
-        end = date.today()
+        end = datetime.now().astimezone().date()
     else:
         end = parse_date_value(parts[1], bound="end")
     if start is not None and end is not None and start > end:
@@ -245,8 +233,9 @@ def parse_date(value: str) -> date:
     """Parse a compact or dashed date."""
 
     value = value.strip()
-    fmt = "%Y-%m-%d" if "-" in value else "%Y%m%d"
-    return datetime.strptime(value, fmt).date()
+    if "-" in value:
+        return date.fromisoformat(value)
+    return date(int(value[:4]), int(value[4:6]), int(value[6:]))
 
 
 def parse_date_value(value: str, *, bound: str) -> date:
@@ -255,10 +244,7 @@ def parse_date_value(value: str, *, bound: str) -> date:
     text = value.strip()
     match = DATE_VALUE_RE.match(text)
     if match is None:
-        raise ValueError(
-            "Unsupported date value {!r}; use YYYY, YYYYMM, YYYYMMDD, "
-            "YYYY-MM, or YYYY-MM-DD.".format(value)
-        )
+        raise ValueError(f"Unsupported date value {value!r}; use YYYY, YYYYMM, YYYYMMDD, YYYY-MM, or YYYY-MM-DD.")
 
     year = int(match.group("year"))
     month_text = match.group("month")
@@ -281,7 +267,7 @@ def parse_date_value(value: str, *, bound: str) -> date:
     return date(year, month, int(day_text))
 
 
-def file_interval(path: str, frequency: str) -> Optional[Tuple[date, date]]:
+def file_interval(path: str, frequency: str) -> tuple[date, date] | None:
     """Extract the covered date interval from an ERA5/ERA5-Land file name."""
 
     name = Path(path).name
@@ -325,10 +311,10 @@ def files_interval(
     files: Iterable[str | Path],
     *,
     frequency: str,
-) -> Optional[Tuple[date, date]]:
+) -> tuple[date, date] | None:
     """Return the inclusive interval covered by one ordered file collection."""
 
-    intervals: list[Tuple[date, date]] = []
+    intervals: list[tuple[date, date]] = []
     for file in files:
         current_interval = file_interval(str(file), frequency)
         if current_interval is None:
@@ -346,9 +332,9 @@ def files_interval(
 def batched_source_record_files(
     record: SourceRecord,
     *,
-    batch_files: Optional[int],
-    fallback_interval: Tuple[Optional[date], Optional[date]],
-) -> Tuple[Tuple[SourceRecord, Tuple[Optional[date], Optional[date]]], ...]:
+    batch_files: int | None,
+    fallback_interval: tuple[date | None, date | None],
+) -> tuple[tuple[SourceRecord, tuple[date | None, date | None]], ...]:
     """Split one resolved source record into file-count batches."""
 
     if batch_files is None or not record.files:
@@ -356,9 +342,9 @@ def batched_source_record_files(
     if batch_files <= 0:
         raise ValueError("--batch-files must be a positive integer.")
 
-    batches: list[Tuple[SourceRecord, Tuple[Optional[date], Optional[date]]]] = []
+    batches: list[tuple[SourceRecord, tuple[date | None, date | None]]] = []
     for index in range(0, len(record.files), batch_files):
-        current_files = tuple(record.files[index:index + batch_files])
+        current_files = tuple(record.files[index : index + batch_files])
         current_interval = files_interval(current_files, frequency=record.frequency)
         batches.append(
             (
@@ -372,8 +358,8 @@ def batched_source_record_files(
 def overlaps_interval(
     path: str,
     frequency: str,
-    start: Optional[date],
-    end: Optional[date],
+    start: date | None,
+    end: date | None,
 ) -> bool:
     """Return whether a file's covered date range overlaps the requested interval."""
 
@@ -384,22 +370,18 @@ def overlaps_interval(
     file_start, file_end = current
     if start is not None and file_end < start:
         return False
-    if end is not None and file_start > end:
-        return False
-    return True
+    return not (end is not None and file_start > end)
 
 
 def parse_level_type(
     level_type: str,
-    mapper: Dict[str, Any],
-) -> Dict[str, str]:
+    mapper: dict[str, Any],
+) -> dict[str, str]:
     """Convert a CMOR ``level_type`` value into source path fields."""
 
     parts = level_type.split("_")
     if len(parts) < 2:
-        raise ValueError(
-            f"Expected level_type like 'sfc_fc_land', got {level_type!r}"
-        )
+        raise ValueError(f"Expected level_type like 'sfc_fc_land', got {level_type!r}")
 
     level_mapping = mapper.get("level_type", {})
     stream_map = level_mapping.get("stream", {})
@@ -411,9 +393,9 @@ def parse_level_type(
 
 
 def source_pattern_template(
-    mapper: Dict[str, Any],
+    mapper: dict[str, Any],
     *,
-    root: Optional[str],
+    root: str | None,
 ) -> str:
     """Return the configured source template, optionally rooted elsewhere.
 
@@ -428,10 +410,7 @@ def source_pattern_template(
 
     prefix, marker, suffix = template.partition("{dataset}")
     if not marker:
-        raise ValueError(
-            "The configured source_path must contain a {dataset} placeholder "
-            "when --root is used."
-        )
+        raise ValueError("The configured source_path must contain a {dataset} placeholder when --root is used.")
 
     del prefix
     return f"{root.rstrip('/')}/{{dataset}}{suffix}"
@@ -439,15 +418,15 @@ def source_pattern_template(
 
 def resolve_priority_files(
     *,
-    mapper: Dict[str, Any],
-    dataset_priority: Tuple[str, ...],
-    fields: Dict[str, str],
+    mapper: dict[str, Any],
+    dataset_priority: tuple[str, ...],
+    fields: dict[str, str],
     frequency: str,
-    start: Optional[date],
-    end: Optional[date],
-    root: Optional[str],
+    start: date | None,
+    end: date | None,
+    root: str | None,
     glob_files: bool,
-) -> Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """Resolve files by priority for each covered period.
 
     Earlier dataset codes have higher priority. Lower-priority collections fill
@@ -455,7 +434,7 @@ def resolve_priority_files(
     """
 
     template = source_pattern_template(mapper, root=root)
-    patterns: List[str] = []
+    patterns: list[str] = []
 
     if not glob_files:
         for dataset_code in dataset_priority:
@@ -464,9 +443,9 @@ def resolve_priority_files(
             patterns.append(template.format(**path_fields))
         return (), (), tuple(patterns)
 
-    selected_by_interval: Dict[Tuple[date, date], str] = {}
-    selected_codes: List[str] = []
-    undated_files: Optional[Tuple[str, ...]] = None
+    selected_by_interval: dict[tuple[date, date], str] = {}
+    selected_codes: list[str] = []
+    undated_files: tuple[str, ...] | None = None
 
     for dataset_code in dataset_priority:
         path_fields = dict(fields)
@@ -474,16 +453,12 @@ def resolve_priority_files(
         pattern = template.format(**path_fields)
         patterns.append(pattern)
 
-        candidates = tuple(
-            path
-            for path in sorted(glob(pattern))
-            if overlaps_interval(path, frequency, start, end)
-        )
+        candidates = tuple(path for path in sorted(glob(pattern)) if overlaps_interval(path, frequency, start, end))
         if not candidates:
             continue
 
-        dated_candidates: List[Tuple[Tuple[date, date], str]] = []
-        current_undated: List[str] = []
+        dated_candidates: list[tuple[tuple[date, date], str]] = []
+        current_undated: list[str] = []
 
         for path in candidates:
             coverage = file_interval(path, frequency)
@@ -524,26 +499,24 @@ def resolve_priority_files(
 
 def resolve_records(
     *,
-    var_table: Union[str, Path],
-    cmor_tables_dir: Union[str, Path],
+    var_table: str | Path,
+    cmor_tables_dir: str | Path,
     dataset: str,
-    variables: Optional[Tuple[str, ...]],
-    frequencies: Tuple[str, ...],
-    interval: Tuple[Optional[date], Optional[date]],
-    root: Optional[str],
+    variables: tuple[str, ...] | None,
+    frequencies: tuple[str, ...],
+    interval: tuple[date | None, date | None],
+    root: str | None,
     glob_files: bool,
-) -> List[SourceRecord]:
+) -> list[SourceRecord]:
     """Resolve source records and matching files."""
 
     mapper = SOURCE_MAPPER
     dataset_cfg = mapper["datasets"][dataset]
     table_prefix = str(dataset_cfg["table_prefix"])
     dataset_priority = tuple(str(item) for item in dataset_cfg["priority"])
-    allowed_streams = set(
-        str(item) for item in dataset_cfg.get("allowed_streams", ())
-    )
+    allowed_streams = {str(item) for item in dataset_cfg.get("allowed_streams", ())}
     frequencies_by_stream = {
-        str(stream): set(str(freq) for freq in frequencies)
+        str(stream): {str(freq) for freq in frequencies}
         for stream, frequencies in dataset_cfg.get(
             "frequencies_by_stream",
             {},
@@ -551,9 +524,7 @@ def resolve_records(
     }
 
     if dataset == "era5":
-        dataset_priority = tuple(
-            code for code in dataset_priority if code != "EL"
-        )
+        dataset_priority = tuple(code for code in dataset_priority if code != "EL")
 
     requests = selected_variables(
         load_variable_requests(var_table),
@@ -561,8 +532,8 @@ def resolve_records(
         variables=variables,
     )
     start, end = interval
-    records: List[SourceRecord] = []
-    entry_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    records: list[SourceRecord] = []
+    entry_cache: dict[str, dict[str, dict[str, Any]]] = {}
 
     for frequency in frequencies:
         entry_cache[frequency] = load_cmor_variable_entries(
@@ -581,11 +552,7 @@ def resolve_records(
                 continue
 
             table_variable, entry = match
-            parameter = str(
-                entry.get("DKRZ_ID")
-                or entry.get("grib_paramID")
-                or ""
-            )
+            parameter = str(entry.get("DKRZ_ID") or entry.get("grib_paramID") or "")
             if not parameter:
                 continue
             parameter = parameter.zfill(3)
@@ -597,10 +564,7 @@ def resolve_records(
                 continue
 
             allowed_frequencies = frequencies_by_stream.get(fields["stream"])
-            if (
-                allowed_frequencies is not None
-                and frequency not in allowed_frequencies
-            ):
+            if allowed_frequencies is not None and frequency not in allowed_frequencies:
                 continue
 
             fields["time_freq"] = str(mapper["frequency"][frequency])
@@ -646,18 +610,14 @@ def resolve_records(
 
 
 def unresolved_records(
-    requests: List[VariableRequest],
-    frequencies: Tuple[str, ...],
-    records: List[SourceRecord],
+    requests: list[VariableRequest],
+    frequencies: tuple[str, ...],
+    records: list[SourceRecord],
     reason: str,
-) -> List[UnresolvedRecord]:
+) -> list[UnresolvedRecord]:
     """Return requested variable/frequency pairs with no source record."""
 
-    resolved_keys = {
-        (record.variable, record.frequency)
-        for record in records
-        if record.files
-    }
+    resolved_keys = {(record.variable, record.frequency) for record in records if record.files}
     return [
         UnresolvedRecord(
             variable=request.name,

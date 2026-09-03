@@ -1,71 +1,139 @@
-# ERA5 & ERA5-Land
+# heal_era5
 
-ERA5-Land in this repository is a script-driven workflow that:
+This repository is a script-driven workflow that:
 
 - resolves local ERA5 or ERA5-Land GRIB source files from the CMOR tables
 - normalises the reduced-Gaussian source layout where needed
 - remaps the selected variables to HEALPix with `grid_doctor`
 - writes one Zarr store per frequency and zoom level
 
-The main entry point is `scripts/era5land/converter.py`.
+The main entry point is the installed `heal-era5` command.
 For the command and helper relationships, see the
 [function call graph](FUNCTION_CALL_GRAPH.md).
 
-The current converter version is `2026.08.1.1` and is shown by:
+The installed remapper version is shown by:
 
 ```console
-python3 scripts/era5land/converter.py --version
+heal-era5 --version
 ```
 
 ## Installation
 
-The workflow uses the normal `grid_doctor` package plus a small ERA5-Land-specific
-dependency overlay and a local checkout of the ERA5 CMOR tables.
+The workflow uses the normal `grid_doctor` package, a small native Conda
+dependency overlay, and a local checkout of the ERA5 CMOR tables.
 
-Create and activate a conda or mamba environment:
+1. Create and activate a conda or mamba environment:
+
+   ```console
+   mamba create -n grid_doctor -c conda-forge python=3.11 pip
+   mamba activate grid_doctor
+   ```
+
+2. From the repository root, install `grid_doctor` itself into that environment:
+
+   ```console
+   python3 -m pip install -e .
+   ```
+
+3. Install the native GRIB and regridding libraries:
+
+   ```console
+   mamba env update -p "$CONDA_PREFIX" -f scripts/era5land/environment.yml
+   ```
+
+4. Install the normal remapper workflow in editable mode from the repository root.
+   This installs Python dependencies including `cfgrib` and `rich-argparse`; it
+   uses the editable local `grid_doctor` package installed in the previous step:
+
+   ```console
+   python3 -m pip install -e scripts/era5land
+   ```
+
+   This provides the `heal-era5` command.
+
+5. Download or refresh the external ERA5 CMOR tables:
+
+   ```console
+   make -C scripts/era5land download
+   ```
+
+   This stores tables in `scripts/era5land/tables/era5-cmor-tables`, outside
+   the Python package. For an installed wheel or a differently located table
+   checkout, set `HEAL_ERA5_TABLES_DIR` to the `era5-cmor-tables` directory:
+
+   ```console
+   export HEAL_ERA5_TABLES_DIR=/path/to/era5-cmor-tables
+   ```
+
+### Reflow
+
+Reflow is optional because direct `fetch`, `remap`, `update`, `clean`, and
+`merge` commands do not use it. Install it when using `remap-reflow` or
+`reflow-queue`:
 
 ```console
-mamba create -n grid_doctor -c conda-forge python=3.11 pip
-mamba activate grid_doctor
+python3 -m pip install -e "scripts/era5land[reflow]"
 ```
 
-From the repository root, install `grid_doctor` itself into that environment:
+### Development
+
+Install development tools and run the package-local checks:
 
 ```console
-python3 -m pip install -e .
+python3 -m pip install -e "scripts/era5land[dev]"
 ```
 
-Then layer the extra ERA5-Land dependencies from `scripts/era5land/requirements.yml`:
+From `scripts/era5land`, run all checks with `tox`, or select one check with
+`tox -e lint`, `tox -e types`, or `tox -e test`.
+
+Ruff also sorts imports using its isort-compatible rules. To apply safe lint
+and import fixes, format the code, then verify linting and types:
 
 ```console
-mamba env update -p "$CONDA_PREFIX" -f scripts/era5land/requirements.yml
+cd scripts/era5land
+python3 -m ruff check --fix src tests
+python3 -m ruff format src tests
+tox -e lint
+tox -e types
 ```
 
-Download or refresh the local ERA5 CMOR tables:
+`tox -e types` only reports type issues; fix those annotations manually before
+rerunning it.
 
-```console
-make -C scripts/era5land download
+
+## Layout
+
+```text
+scripts/era5land/
+├── pyproject.toml
+├── src/heal_era5/
+│   ├── main.py
+│   ├── cli/
+│   ├── helpers/
+│   └── assets/
+├── tables/era5-cmor-tables/  # downloaded separately; not packaged
+└── tests/
 ```
 
-Sanity-check the script entry point:
+
+Sanity-check the installed command:
 
 ```console
-python3 scripts/era5land/converter.py --help
-python3 scripts/era5land/converter.py --version
+heal-era5 --help
+heal-era5 --version
 ```
 
 ## Environment Notes
 
-The extra environment file is intentionally local to `scripts/era5land/`. It
-only adds packages that the generic `grid_doctor` install does not cover for
-this workflow:
+`environment.yml` intentionally contains only native Conda packages. Python
+dependencies belong in `pyproject.toml` and are installed by `pip`:
 
-- `cfgrib` and `eccodes` for GRIB access
-- `esmf` and `esmpy` for regridding support
-- `kerchunk` and `pyarrow` for supporting data-access utilities
-- `python-dotenv` and `reflow-hpc` for local workflow tooling
+- `eccodes` supplies the GRIB runtime library required by `cfgrib`.
+- `esmf` and `esmpy` supply the regridding stack used by `grid_doctor`.
+- `cfgrib` and `rich-argparse` are normal `heal-era5` Python dependencies.
+- `reflow-hpc` is installed with `heal-era5[reflow]` only.
 
-If `python3 scripts/era5land/converter.py ...` fails with
+If `heal-era5 ...` fails with
 `ModuleNotFoundError: No module named 'grid_doctor'`, the editable install step
 above has not been applied in the active environment yet.
 
@@ -74,8 +142,7 @@ above has not been applied in the active environment yet.
 Before converting, you can inspect which GRIB files the CMOR mapping resolves:
 
 ```console
-cd scripts/era5land
-python3 converter.py fetch --var tas,pr --freq 1hr,day --interval 202603,202603
+heal-era5 fetch --var tas,pr --freq 1hr,day --interval 202603,202603
 ```
 
 Useful variants:
@@ -86,16 +153,14 @@ Useful variants:
 
 ## Running Conversions
 
-From the `scripts/era5land` directory:
-
 ```console
-python3 converter.py remap --help
+heal-era5 remap --help
 ```
 
 Typical full conversion:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq 1hr,day,mon \
   --interval 202603,202603 \
@@ -114,7 +179,7 @@ subprocess isolation than calendar batching provides.
 Submit the same kind of work as independent scheduler jobs with Reflow:
 
 ```console
-python3 converter.py remap-reflow submit \
+heal-era5 remap-reflow submit \
   --run-dir /scratch/$USER/era5land-reflow \
   --dataset era5land \
   --variables tas pr \
@@ -172,8 +237,8 @@ node, for example scratch. Temporary worker outputs are written below
 Check the submitted workflow with the generated Reflow CLI:
 
 ```console
-python3 converter.py remap-reflow runs
-python3 converter.py remap-reflow status <run-id>
+heal-era5 remap-reflow runs
+heal-era5 remap-reflow status <run-id>
 ```
 
 ### Reflow Operations
@@ -184,7 +249,7 @@ directory holds the per-run files and logs, while the SQLite manifest store
 tracks run and task state across commands:
 
 ```console
-python3 converter.py remap-reflow status \
+heal-era5 remap-reflow status \
   era5land_healpix-20260731-c66e \
   --run-dir /shared/era5_from_grib_reflow/queue_runs/002-1953_1962 \
   --store-path $HOME/.cache/reflow/manifest.db
@@ -219,7 +284,7 @@ Useful variants:
 Retry only the failed or cancelled instances of a task with:
 
 ```console
-python3 converter.py remap-reflow retry \
+heal-era5 remap-reflow retry \
   era5land_healpix-20260731-c66e \
   --task remap_variable_frequency \
   --run-dir /shared/era5_from_grib_reflow/queue_runs/002-1953_1962 \
@@ -241,7 +306,7 @@ workflow should later advance to `finalize_outputs`.
 Cancelling a run or one active task uses the same run lookup arguments:
 
 ```console
-python3 converter.py remap-reflow cancel \
+heal-era5 remap-reflow cancel \
   era5land_healpix-20260731-c66e \
   --task finalize_outputs \
   --run-dir /shared/era5_from_grib_reflow/queue_runs/002-1953_1962 \
@@ -265,40 +330,40 @@ Basic manifest-oriented commands for day-to-day operations:
 
 ```console
 # List recent runs known to the manifest DB.
-python3 converter.py remap-reflow runs \
+heal-era5 remap-reflow runs \
   --store-path $HOME/.cache/reflow/manifest.db
 
 # Show one run from the manifest DB, without relying on the current directory.
-python3 converter.py remap-reflow status \
+heal-era5 remap-reflow status \
   era5land_healpix-20260731-c66e \
   --store-path $HOME/.cache/reflow/manifest.db
 
 # Show one task only, which is useful for large array jobs.
-python3 converter.py remap-reflow status \
+heal-era5 remap-reflow status \
   era5land_healpix-20260731-c66e \
   --task remap_variable_frequency \
   --store-path $HOME/.cache/reflow/manifest.db
 
 # Show the same status as JSON for scripting or jq.
-python3 converter.py remap-reflow status \
+heal-era5 remap-reflow status \
   era5land_healpix-20260731-c66e \
   --json \
   --store-path $HOME/.cache/reflow/manifest.db
 
 # Include captured Python tracebacks for failed task instances.
-python3 converter.py remap-reflow status \
+heal-era5 remap-reflow status \
   era5land_healpix-20260731-c66e \
   --errors \
   --store-path $HOME/.cache/reflow/manifest.db
 
 # Retry failed or cancelled instances recorded in the manifest DB.
-python3 converter.py remap-reflow retry \
+heal-era5 remap-reflow retry \
   era5land_healpix-20260731-c66e \
   --task remap_variable_frequency \
   --store-path $HOME/.cache/reflow/manifest.db
 
 # Cancel active work for one run recorded in the manifest DB.
-python3 converter.py remap-reflow cancel \
+heal-era5 remap-reflow cancel \
   era5land_healpix-20260731-c66e \
   --store-path $HOME/.cache/reflow/manifest.db
 ```
@@ -317,16 +382,16 @@ At the moment the Reflow workflow is intentionally focused on the main remap
 path. It supports the fan-out/gather publication flow plus `--clean`,
 `--from-scratch`, `--highest-level-only`, and the input-cache flags. More
 specialized maintenance modes such as `--coarsen-only`, `--attrs-only`, and
-`--rechunk-only` still live in `converter.py`.
+`--rechunk-only` still live in the `heal_era5` package.
 
-Internally, `converter.py remap-reflow ...` forwards the command to
-`scripts/era5land/cli/reflow_workflow.py`, so there is now one public CLI
+Internally, `heal-era5 remap-reflow ...` forwards the command to
+`src/heal_era5/cli/reflow_workflow.py`, so there is now one public CLI
 for both direct and scheduler-backed operation while the Reflow implementation
 stays private.
 
 ### Queueing Long Reflow Campaigns
 
-`converter.py reflow-queue` is a lightweight controller for campaigns that must be split
+`heal-era5 reflow-queue` is a lightweight controller for campaigns that must be split
 into several time-interval scoped Reflow runs. It submits one interval, polls the
 run until its worker and `finalize_outputs` tasks finish, and then submits the
 next interval. This keeps only one interval run active while allowing a long
@@ -361,7 +426,7 @@ sbatch \
   --cpus-per-task=1 \
   --mem=2G \
   --output=/shared/era5_from_grib_reflow/controller-%j.out \
-  --wrap 'cd /path/to/grid-doctor/scripts/era5land && /path/to/python converter.py reflow-queue --plan /shared/era5_from_grib_reflow/zg_1hr_intervals.txt --run-dir-root /shared/era5_from_grib_reflow/queue_runs --poll-seconds 300 --max-active-runs 1 --command-template "/path/to/python converter.py remap-reflow submit --dataset era5 --freq 1hr --var zg --interval {interval} --batch-files 8 --run-dir {run_dir} --output-path /shared/era5_from_grib_reflow/merged"'
+  --wrap '/home/etor/miniconda3/envs/grid_doctor/bin/heal-era5 reflow-queue --plan /shared/era5_from_grib_reflow/zg_1hr_intervals.txt --run-dir-root /shared/era5_from_grib_reflow/queue_runs --poll-seconds 300 --max-active-runs 1 --command-template "/home/etor/miniconda3/envs/grid_doctor/bin/heal-era5 remap-reflow submit --dataset era5 --freq 1hr --var zg --interval {interval} --batch-files 8 --run-dir {run_dir} --output-path /shared/era5_from_grib_reflow/merged"'
 ```
 
 The `{interval}` and `{run_dir}` values in `--command-template` are
@@ -374,13 +439,13 @@ If you prefer a reusable file over a long `sbatch --wrap ...` command, generate
 an sbatch wrapper script directly from the controller configuration:
 
 ```console
-/path/to/python converter.py reflow-queue \
+/home/etor/miniconda3/envs/grid_doctor/bin/heal-era5 reflow-queue \
   --plan /shared/era5_from_grib_reflow/zg_1hr_intervals.txt \
   --run-dir-root /shared/era5_from_grib_reflow/queue_runs \
   --poll-seconds 300 \
   --max-active-runs 1 \
   --store-path $HOME/.cache/reflow/manifest.db \
-  --command-template "/path/to/python converter.py remap-reflow submit --dataset era5 --freq 1hr --var zg --interval {interval} --batch-files 8 --run-dir {run_dir} --output-path /shared/era5_from_grib_reflow/merged" \
+  --command-template "/home/etor/miniconda3/envs/grid_doctor/bin/heal-era5 remap-reflow submit --dataset era5 --freq 1hr --var zg --interval {interval} --batch-files 8 --run-dir {run_dir} --output-path /shared/era5_from_grib_reflow/merged" \
   --write-sbatch /shared/era5_from_grib_reflow/run_reflow_queue.sh \
   --sbatch-account ch1187 \
   --sbatch-partition shared \
@@ -433,7 +498,7 @@ and want to publish or combine them into a final target tree without running a
 new remap:
 
 ```console
-python3 converter.py merge \
+heal-era5 merge \
   --source '/scratch/$USER/worker-*/era5land/1H' \
   --output-path /scratch/$USER/era5land-final/era5land/1H
 ```
@@ -456,7 +521,7 @@ For output organized below a shared root, the nested dataset and frequency
 paths can be discovered with `--dataset` and `--freq`:
 
 ```console
-python3 converter.py merge \
+heal-era5 merge \
   --source /scratch/$USER/era5land-reflow/merged \
   --dataset era5 \
   --freq 1hr \
@@ -474,7 +539,7 @@ Use `--levels` to merge only selected HEALPix levels. It accepts comma-separated
 levels and descending ranges such as `7`, `7,5,3`, or `6-0`:
 
 ```console
-python3 converter.py merge \
+heal-era5 merge \
   --source /scratch/$USER/era5land-reflow/merged \
   --dataset era5 \
   --freq 1hr \
@@ -487,7 +552,7 @@ date interval. Dates may be specified as `YYYY`, `YYYYMM`, or `YYYYMMDD`;
 static `fx` stores are unaffected:
 
 ```console
-python3 converter.py merge \
+heal-era5 merge \
   --source /scratch/$USER/era5land-reflow/merged \
   --dataset era5 \
   --freq 1hr \
@@ -502,7 +567,7 @@ interval is merged incrementally while data outside it is retained.
 For example, merge two frequencies and all variables:
 
 ```console
-python3 converter.py merge \
+heal-era5 merge \
   --source /scratch/$USER/era5land-reflow/worker-output \
   --dataset era5 \
   --freq day,mon \
@@ -512,7 +577,7 @@ python3 converter.py merge \
 Write test output to a different publication root:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq mon \
   --interval 202603,202603 \
@@ -535,7 +600,7 @@ published through the `fx` output path while still being requestable via `--var`
 Example:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq mon \
   --interval 202603,202603 \
@@ -556,7 +621,7 @@ pass:
 Preview a cleanup without changing anything:
 
 ```console
-python3 converter.py clean \
+heal-era5 clean \
   --freq mon \
   --var tas,pr \
   --dry-run
@@ -565,7 +630,7 @@ python3 converter.py clean \
 Remove variables from all existing levels of one frequency:
 
 ```console
-python3 converter.py clean \
+heal-era5 clean \
   --freq mon \
   --var tas,pr
 ```
@@ -573,7 +638,7 @@ python3 converter.py clean \
 Remove variables only from selected levels:
 
 ```console
-python3 converter.py clean \
+heal-era5 clean \
   --freq 1hr \
   --var tas \
   --levels 8-6
@@ -582,7 +647,7 @@ python3 converter.py clean \
 Delete whole level stores:
 
 ```console
-python3 converter.py clean \
+heal-era5 clean \
   --freq 1hr,day \
   --levels 3,2,1
 ```
@@ -590,21 +655,21 @@ python3 converter.py clean \
 Delete whole output-frequency directories:
 
 ```console
-python3 converter.py clean \
+heal-era5 clean \
   --freq fx,mon
 ```
 
 Delete the whole dataset publication root:
 
 ```console
-python3 converter.py clean \
+heal-era5 clean \
   --dataset era5
 ```
 
 Truncate existing time-based stores without deleting or remapping anything:
 
 ```console
-python3 converter.py clean \
+heal-era5 clean \
   --dataset era5 \
   --freq 1hr,day,mon \
   --truncate-after 1942
@@ -621,7 +686,7 @@ command processes only variables and frequencies that already have a published
 time series:
 
 ```console
-python3 converter.py update \
+heal-era5 update \
   --dataset era5 \
   --freq 1hr,day \
   --output-path /work/ks1387/era5
@@ -632,7 +697,7 @@ An update has two phases:
 - The permanent phase refreshes [source files that have become final](https://docs.dkrz.de/doc/dataservices/finding_and_accessing_data/era_data/index.html#era5-data-via-pool-data-era5).
   Final files lag between 2-3 months behind real time. If a
   variable has a `last_permanent_update` attribute, that watermark determines
-  the permanent search boundary. If it does not, the converter bootstraps from
+  the permanent search boundary. If it does not, the remapper bootstraps from
   approximately three months before the latest stored timestamp and uses source
   file modification times to avoid reprocessing older files.
 - The forward phase searches from the latest stored timestamp through today,
@@ -642,7 +707,7 @@ Use `--preview` to resolve and count both phases without modifying Zarr data or
 metadata:
 
 ```console
-python3 converter.py update \
+heal-era5 update \
   --dataset era5 \
   --freq 1hr,day \
   --output-path /work/ks1387/era5 \
@@ -664,7 +729,7 @@ data writes update `last_data_update`; successful permanent refreshes update
 
 ### Cache And Parallelism
 
-The converter separates the two input-side caches:
+The remapper separates the two input-side caches:
 
 - GRIB inventory cache: enabled by default
 - reduced-Gaussian geometry cache in `grid_doctor.utils.cache_dir()`: enabled by default
@@ -672,12 +737,12 @@ The converter separates the two input-side caches:
 
 The geometry cache stores the expensive reduced-Gaussian cell-vertex arrays so
 later runs can load them instead of rebuilding them. If the cache file
-disappears or becomes unreadable, the converter regenerates it automatically.
+disappears or becomes unreadable, the remapper regenerates it automatically.
 
 Disable the inventory cache:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq 1hr \
   --interval 202603,202603 \
@@ -690,7 +755,7 @@ also disables the reduced-Gaussian geometry cache for the run.
 Enable the pickled multi-file input-dataset cache explicitly:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq 1hr \
   --interval 202603,202603 \
@@ -703,7 +768,7 @@ By default, new or fully rewritten Zarr stores target about `16` MB per chunk.
 You can override that budget explicitly:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq 1hr \
   --interval 202603,202603 \
@@ -717,7 +782,7 @@ To rechunk already existing matching Zarr stores and then exit without
 continuing into remapping, add `--rechunk-only`:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq 1hr \
   --interval 202603,202603 \
@@ -733,7 +798,7 @@ each selected frequency is rechunked in that standalone pass.
 Write only the finest HEALPix level for each selected frequency:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq 1hr \
   --interval 202603,202603 \
@@ -747,14 +812,14 @@ coarsening pass for lower zoom levels.
 Build lower zoom levels from an already existing highest-level Zarr store:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq 1hr \
   --coarsen-only \
   --clean
 ```
 
-In `--coarsen-only` mode, the converter:
+In `--coarsen-only` mode, the remapper:
 
 - opens the highest existing `level_*.zarr` store for each selected frequency
 - derives lower levels by `coarsen_healpix`
@@ -766,7 +831,7 @@ source store is read, not replaced.
 Restrict coarsening to one time interval in an already existing Zarr store:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq 1hr \
   --coarsen-only \
@@ -777,7 +842,7 @@ python3 converter.py remap \
 Target only specific zoom levels instead of rebuilding every lower level:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq 1hr \
   --coarsen-only 8,0 \
@@ -788,7 +853,7 @@ python3 converter.py remap \
 You can also use descending ranges:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq 1hr \
   --coarsen-only 8-0 \
@@ -800,7 +865,7 @@ When you pass explicit target levels, each requested level assumes its
 immediate parent level already exists. For example, `--coarsen-only 8,0`
 requires both `level_9.zarr` and `level_1.zarr` to already be present.
 
-The converter always remaps the highest level first, materialises it, then
+The remapper always remaps the highest level first, materialises it, then
 coarsens level by level when lower zoom levels are requested.
 
 ### Batched Execution
@@ -808,7 +873,7 @@ coarsens level by level when lower zoom levels are requested.
 Split a long interval into sequential month-sized batches:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas \
   --freq 1hr,day,mon \
   --interval 1950,1962 \
@@ -821,7 +886,7 @@ Batched runs use isolated child processes. This keeps all batches inside the
 same job allocation, node, and
 environment, but releases the batch-local memory floor when each child exits.
 
-While a batched subprocess run is active, the converter writes the current batch
+While a batched subprocess run is active, the remapper writes the current batch
 process state to `.current_batch_pid.json` in the launch directory when
 possible, or falls back to `scripts/era5land/.current_batch_pid.json`.
 
@@ -851,7 +916,7 @@ In practice, `kill <batch_pid>` stops the current child batch, while
 Refresh metadata on already-published Zarr stores without remapping data:
 
 ```console
-python3 converter.py remap \
+heal-era5 remap \
   --var tas,pr \
   --freq 1hr,day,mon \
   --attrs-only
@@ -861,7 +926,7 @@ This updates global and variable attrs in existing stores only.
 
 ## Logging
 
-The converter prints structured progress logs to the terminal. The output is
+The remapper prints structured progress logs to the terminal. The output is
 deliberately milestone-based rather than per-file noisy. Typical stages include:
 
 - `convert_start`

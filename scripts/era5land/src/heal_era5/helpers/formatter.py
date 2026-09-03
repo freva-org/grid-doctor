@@ -1,13 +1,14 @@
 """Output formatting helpers for ERA5/ERA5-Land HEALPix Zarr products."""
 
 from collections import defaultdict
+from collections.abc import Iterable
 from glob import glob
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
 
-from .file_fetcher import SourceRecord, SOURCE_MAPPER
+from .file_fetcher import SOURCE_MAPPER, SourceRecord
 
-def normalise_frequencies(frequencies: Iterable[str]) -> Tuple[str, ...]:
+
+def normalise_frequencies(frequencies: Iterable[str]) -> tuple[str, ...]:
     """Return a stable tuple of requested output frequencies."""
 
     return tuple(dict.fromkeys(str(frequency) for frequency in frequencies))
@@ -15,14 +16,15 @@ def normalise_frequencies(frequencies: Iterable[str]) -> Tuple[str, ...]:
 
 def group_records_by_frequency(
     records: Iterable[SourceRecord],
-) -> Dict[str, List[SourceRecord]]:
+) -> dict[str, list[SourceRecord]]:
     """Group only resolved records by source frequency."""
 
-    grouped: Dict[str, List[SourceRecord]] = defaultdict(list)
+    grouped: dict[str, list[SourceRecord]] = defaultdict(list)
     for record in records:
         if record.files:
             grouped[record.frequency].append(record)
     return dict(grouped)
+
 
 def destination_for_level(
     dataset: str,
@@ -36,10 +38,7 @@ def destination_for_level(
     if output_path is not None:
         root_path = Path(output_path)
         return str(
-            root_path
-            / str(dataset)
-            / str(SOURCE_MAPPER["output_frequency"][frequency])
-            / f"level_{zoom_number}.zarr"
+            root_path / str(dataset) / str(SOURCE_MAPPER["output_frequency"][frequency]) / f"level_{zoom_number}.zarr"
         )
 
     return SOURCE_MAPPER["output_path"].format(
@@ -97,7 +96,7 @@ def existing_destinations_for_frequency(
     frequency: str,
     *,
     output_path: str | Path | None = None,
-) -> Tuple[str, ...]:
+) -> tuple[str, ...]:
     """Return existing Zarr stores for one output frequency."""
 
     output_frequency = SOURCE_MAPPER["output_frequency"][frequency]

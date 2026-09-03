@@ -1,0 +1,93 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "heal-era5"
+dynamic = ["version"]
+description = "ERA5 and ERA5-Land GRIB to HEALPix conversion workflow"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "cfgrib",
+    "grid-doctor",
+    "rich-argparse",
+]
+
+[project.optional-dependencies]
+reflow = ["reflow-hpc"]
+dev = ["mypy>=1.11", "pytest>=7", "ruff>=0.1", "tox>=4"]
+
+[project.scripts]
+heal-era5 = "heal_era5.main:main"
+heal-era5-reflow-queue = "heal_era5.cli.reflow_queue:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "heal_era5.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+heal_era5 = ["assets/*.csv", "assets/*.json"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["__pycache__/*", "*.py[cod]"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.mypy]
+files = ["src/heal_era5"]
+python_version = "3.12"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+
+[tool.tox]
+legacy_tox_ini = """
+[tox]
+min_version = 4.0
+env_list = lint, types, test
+
+[testenv]
+package = editable
+
+[testenv:lint]
+description = Check package formatting and lint rules.
+deps =
+    -e {toxinidir}/../..
+    ruff>=0.1
+commands =
+    python -m ruff check src tests
+    python -m ruff format --check src tests
+
+[testenv:test]
+description = Run the ERA5-Land package tests.
+deps =
+    -e {toxinidir}/../..
+    pytest>=7
+commands =
+    python -m pytest {posargs:tests}
+
+[testenv:types]
+description = Run static type checks.
+deps =
+    -e {toxinidir}/../..
+    mypy>=1.11
+commands =
+    python -m mypy src/heal_era5
+"""

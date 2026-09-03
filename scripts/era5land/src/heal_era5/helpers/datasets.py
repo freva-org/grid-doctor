@@ -1,33 +1,33 @@
 """Dataset opening and reshaping helpers for ERA5/ERA5-Land."""
 
-from datetime import UTC, date, datetime, timedelta
 import hashlib
 import logging
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from zipfile import BadZipFile
 
-from grid_doctor.utils import cache_dir
 import numpy as np
 import pandas as pd
 import xarray as xr
+from grid_doctor.utils import cache_dir
 
 from .file_fetcher import SourceRecord
 from .grib import get_vars, open_dataset
 from .metadata import clean_output_attrs
 
 LOGGER = logging.getLogger(__name__)
-TIME_ALIGNMENT_MISMATCH_LOG = (
-    Path(__file__).resolve().parent.parent / "time_alignment_mismatches.log"
-)
+TIME_ALIGNMENT_MISMATCH_LOG = Path.cwd() / "time_alignment_mismatches.log"
 LAT_COORD_NAMES = ("latitude", "lat", "Latitude", "LATITUDE", "y", "Y")
 LON_COORD_NAMES = ("longitude", "lon", "Longitude", "LONGITUDE", "x", "X")
 STATIC_COORD_NAMES = ("cell", "time", "crs", "surface")
 _REDUCED_GAUSSIAN_GEOMETRY_CACHE: dict[str, dict[str, np.ndarray]] = {}
 
+
 class EmptySourceDataError(ValueError):
     """Raised when a resolved source contains no usable payload data."""
 
-def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> Optional[str]:
+
+def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> str | None:
     """Return the first matching coordinate name from *candidates*."""
 
     for name in candidates:
@@ -39,12 +39,8 @@ def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> Optional[st
 def normalise_published_dataset(ds: xr.Dataset) -> xr.Dataset:
     """Keep published coord/data-variable classification stable across writes."""
 
-    coord_names = set(ds.coords)
-    coord_names.update(
-        name
-        for name in (*STATIC_COORD_NAMES, *LAT_COORD_NAMES, *LON_COORD_NAMES)
-        if name in ds
-    )
+    coord_names: set[str] = {str(name) for name in ds.coords}
+    coord_names.update(name for name in (*STATIC_COORD_NAMES, *LAT_COORD_NAMES, *LON_COORD_NAMES) if name in ds)
     if not coord_names:
         return ds
     return ds.set_coords(sorted(coord_names))
@@ -65,11 +61,7 @@ def _record_time_alignment_mismatch(
 ) -> None:
     """Log non-shared per-variable timestamps for trimming diagnostics."""
 
-    timed_records = [
-        (record, ds)
-        for record, ds in zip(records, datasets)
-        if "time" in ds.indexes
-    ]
+    timed_records = [(record, ds) for record, ds in zip(records, datasets) if "time" in ds.indexes]
     if len(timed_records) < 2:
         return
 
@@ -156,9 +148,7 @@ def _ring_slices(latitudes: np.ndarray) -> list[slice]:
     start = 0
     latitudes = np.asarray(latitudes, dtype=np.float64)
     for index in range(1, latitudes.size + 1):
-        if index == latitudes.size or not np.isclose(
-            latitudes[index], latitudes[start], atol=1e-10, rtol=0.0
-        ):
+        if index == latitudes.size or not np.isclose(latitudes[index], latitudes[start], atol=1e-10, rtol=0.0):
             rings.append(slice(start, index))
             start = index
     return rings
@@ -199,8 +189,8 @@ def _compute_reduced_gaussian_geometry(
     ring_edges[-1] = -90.0
 
     n_cells = latitudes.size
-    lon_vertices = np.empty((n_cells, 4), dtype=np.float64)
-    lat_vertices = np.empty((n_cells, 4), dtype=np.float64)
+    lon_vertices: np.ndarray = np.empty((n_cells, 4), dtype=np.float64)
+    lat_vertices: np.ndarray = np.empty((n_cells, 4), dtype=np.float64)
 
     for ring_index, ring in enumerate(rings):
         west, east = _circular_lon_bounds(longitudes[ring])
@@ -227,7 +217,7 @@ def _compute_reduced_gaussian_geometry(
 
 def _load_cached_reduced_gaussian_geometry(
     cache_key: str,
-) -> Optional[dict[str, np.ndarray]]:
+) -> dict[str, np.ndarray] | None:
     """Load cached reduced-Gaussian geometry from memory or shared disk cache."""
 
     geometry = _REDUCED_GAUSSIAN_GEOMETRY_CACHE.get(cache_key)
@@ -244,7 +234,7 @@ def _load_cached_reduced_gaussian_geometry(
                 "lat_vertices": payload["lat_vertices"],
                 "lon_vertices": payload["lon_vertices"],
             }
-    except Exception as exc:
+    except (BadZipFile, EOFError, KeyError, OSError, ValueError) as exc:
         LOGGER.warning(
             "Could not read cached reduced-Gaussian geometry %s: %s",
             cache_path,
@@ -274,7 +264,7 @@ def _store_reduced_gaussian_geometry(
                 lon_vertices=geometry["lon_vertices"],
             )
         temp_path.replace(cache_path)
-    except Exception as exc:
+    except OSError as exc:
         LOGGER.warning(
             "Could not write reduced-Gaussian geometry cache %s: %s",
             cache_path,
@@ -395,19 +385,11 @@ def normalise_time_for_frequency(
         return ds
 
     if frequency == "day":
-        return ds.assign_coords(
-            time=ds["time"].dt.floor("D") + np.timedelta64(12, "h")
-        )
+        return ds.assign_coords(time=ds["time"].dt.floor("D") + np.timedelta64(12, "h"))
 
     if frequency == "mon":
-        month_start = (
-            ds["time"]
-            .astype("datetime64[M]")
-            .astype("datetime64[ns]")
-        )
-        return ds.assign_coords(
-            time=month_start + np.timedelta64(12, "h")
-        )
+        month_start = ds["time"].astype("datetime64[M]").astype("datetime64[ns]")
+        return ds.assign_coords(time=month_start + np.timedelta64(12, "h"))
 
     return ds
 
@@ -415,7 +397,7 @@ def normalise_time_for_frequency(
 def open_record_dataset(
     record: SourceRecord,
     *,
-    interval: tuple[Optional[date], Optional[date]] = (None, None),
+    interval: tuple[date | None, date | None] = (None, None),
     use_inventory_cache: bool = True,
     use_input_cache: bool = False,
     drop_duplicate_time_rows: bool = True,
@@ -465,7 +447,7 @@ def open_record_dataset(
         ds_var = ds[[record.variable]]
     else:
         data_vars = get_vars(ds)
-        
+
         if not data_vars:
             raise EmptySourceDataError(
                 f"No GRIB payload data found for {record.variable!r} "
@@ -473,10 +455,7 @@ def open_record_dataset(
             )
 
         if len(data_vars) != 1:
-            raise ValueError(
-                f"Expected exactly one GRIB payload variable for {record.variable!r}, "
-                f"found {data_vars!r}"
-            )
+            raise ValueError(f"Expected exactly one GRIB payload variable for {record.variable!r}, found {data_vars!r}")
         ds_var = ds.rename({data_vars[0]: record.variable})[[record.variable]]
 
     data = ds_var[record.variable]
@@ -512,11 +491,7 @@ def _align_datasets_on_shared_time(
     ValueError
         If the datasets do not share any timestamps after alignment.
     """
-    time_indexes: list[pd.Index] = [
-        ds.indexes["time"]
-        for ds in datasets
-        if "time" in ds.indexes
-    ]
+    time_indexes: list[pd.Index] = [ds.indexes["time"] for ds in datasets if "time" in ds.indexes]
     if len(time_indexes) < 2:
         return datasets
 
@@ -527,8 +502,7 @@ def _align_datasets_on_shared_time(
     if common_time.empty:
         variable_names = ",".join(record.variable for record in records)
         raise ValueError(
-            "Resolved variables do not share any timestamps after GRIB time "
-            f"normalization: {variable_names}."
+            f"Resolved variables do not share any timestamps after GRIB time normalization: {variable_names}."
         )
 
     _record_time_alignment_mismatch(records, datasets)
@@ -547,8 +521,7 @@ def _align_datasets_on_shared_time(
         dropped_count = len(time_index.difference(common_time))
         dropped_dates = _format_timestamp_dates(time_index.difference(common_time))
         LOGGER.warning(
-            "Trimming %s timestamp(s) from %s %s data so variables share a "
-            "common time axis; affected date(s): %s.",
+            "Trimming %s timestamp(s) from %s %s data so variables share a common time axis; affected date(s): %s.",
             dropped_count,
             record.frequency,
             record.variable,
@@ -565,7 +538,7 @@ def merge_frequency_dataset(
     use_inventory_cache: bool = True,
     use_input_cache: bool = False,
     drop_duplicate_time_rows: bool = True,
-    interval: tuple[Optional[date], Optional[date]] = (None, None),
+    interval: tuple[date | None, date | None] = (None, None),
     pressure_levels: tuple[int, ...] | None = None,
 ) -> xr.Dataset:
     """Open and merge all resolved variables for one output frequency.
@@ -613,10 +586,7 @@ def merge_frequency_dataset(
         if "time" not in ds.indexes:
             continue
         if ds.indexes["time"].has_duplicates:
-            raise ValueError(
-                f"{record.variable!r} contains duplicate timestamps "
-                "after frequency normalization."
-            )
+            raise ValueError(f"{record.variable!r} contains duplicate timestamps after frequency normalization.")
 
     datasets = _align_datasets_on_shared_time(resolved_records, datasets)
 
@@ -630,7 +600,7 @@ def merge_frequency_dataset(
 
 def select_time_interval(
     ds: xr.Dataset,
-    interval: tuple[Optional[date], Optional[date]],
+    interval: tuple[date | None, date | None],
 ) -> xr.Dataset:
     """Restrict a dataset to the requested inclusive date interval."""
 

@@ -2,10 +2,11 @@
 
 import gc
 import logging
-from pathlib import Path
 import re
 import shutil
-from typing import Iterable
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any, cast
 
 import xarray as xr
 import zarr
@@ -83,7 +84,7 @@ def _shrink_time_arrays_in_place(destination: str, keep_size: int) -> bool:
     changed = False
 
     for name in root.array_keys():
-        zarr_array = root[name]
+        zarr_array = cast(zarr.Array[Any], root[name])
         time_axis = _time_axis_info(zarr_array)
         if time_axis is None:
             continue
@@ -195,6 +196,7 @@ def drop_variables_from_zarr_store(
 
         if len(removable) == len(existing.data_vars):
             existing.close()
+            existing = None
             shutil.rmtree(path)
             return True, removable, True
 
@@ -205,10 +207,8 @@ def drop_variables_from_zarr_store(
         zarr.consolidate_metadata(destination)
         return True, removable, False
     finally:
-        try:
+        if existing is not None:
             existing.close()
-        except Exception:
-            pass
         gc.collect()
 
 
@@ -240,9 +240,7 @@ def remove_variables_from_frequency_stores(
         output_path=output_path,
     ):
         if dry_run:
-            actions.append(
-                f"would remove variables {','.join(variable_names)} from {destination} (level {level})"
-            )
+            actions.append(f"would remove variables {','.join(variable_names)} from {destination} (level {level})")
             continue
 
         changed, removed, deleted_store = drop_variables_from_zarr_store(
@@ -254,13 +252,9 @@ def remove_variables_from_frequency_stores(
         if not changed:
             continue
         if deleted_store:
-            actions.append(
-                f"❌ deleted {destination} after removing all variables: {','.join(removed)}"
-            )
+            actions.append(f"❌ deleted {destination} after removing all variables: {','.join(removed)}")
         else:
-            actions.append(
-                f"removed variables {','.join(removed)} from {destination} (level {level})"
-            )
+            actions.append(f"removed variables {','.join(removed)} from {destination} (level {level})")
     return actions
 
 

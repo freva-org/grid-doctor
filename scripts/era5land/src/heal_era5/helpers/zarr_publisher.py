@@ -2,12 +2,13 @@
 
 import gc
 import logging
-from datetime import date, datetime
-from pathlib import Path
 import re
 import shutil
 import uuid
-from typing import Any, Iterable, Optional, Union
+from collections.abc import Hashable, Iterable
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -27,6 +28,14 @@ DEFAULT_TARGET_CHUNK_MB = 100
 LEVEL_RE = re.compile(r"level_(?P<level>\d+)\.zarr$")
 
 
+def _string_name(name: Hashable) -> str:
+    """Return a supported xarray variable or dimension name."""
+
+    if not isinstance(name, str):
+        raise TypeError(f"Expected a string name, got {name!r}")
+    return name
+
+
 def _is_selected_level_store(
     store: Path,
     levels: tuple[int, ...] | None,
@@ -34,9 +43,7 @@ def _is_selected_level_store(
     """Return whether a level store is included by an optional selection."""
 
     match = LEVEL_RE.search(store.name)
-    return match is not None and (
-        levels is None or int(match.group("level")) in levels
-    )
+    return match is not None and (levels is None or int(match.group("level")) in levels)
 
 
 def _select_merge_interval(
@@ -100,15 +107,10 @@ def _resolve_target_chunks(
     if non_time_extent <= 0:
         non_time_extent = 1
 
-    resolved_time_chunk = None
-    if "time" in da.dims:
-        resolved_time_chunk = max(1, target_bytes // (cell_size * non_time_extent))
-        resolved_time_chunk = int(resolved_time_chunk)
-
     chunks: list[int] = []
     for dim in da.dims:
         if dim == "time":
-            chunks.append(resolved_time_chunk)
+            chunks.append(int(max(1, target_bytes // (cell_size * non_time_extent))))
         elif dim == "plev":
             chunks.append(1)
         elif dim == "cell":
@@ -154,13 +156,15 @@ def _pad_missing_existing_vars_for_append(
 
     padded = candidate.copy()
     time_size = padded.sizes.get("time", 0)
-    for name, data in existing.data_vars.items():
+    for raw_name, data in existing.data_vars.items():
+        name = _string_name(raw_name)
         if name not in padded.data_vars:
             padded[name] = _make_fill_variable(data, name, time_size)
 
     ordered = [name for name in existing.data_vars if name in padded.data_vars]
     ordered.extend(name for name in padded.data_vars if name not in ordered)
     return padded[ordered]
+
 
 def _encoding_for_target_chunks(
     dataset: xr.Dataset,
@@ -172,7 +176,8 @@ def _encoding_for_target_chunks(
     target_bytes = target_mb * 1024**2
     encoding: dict[str, dict[str, tuple[int, ...]]] = {}
 
-    for name, da in dataset.data_vars.items():
+    for raw_name, da in dataset.data_vars.items():
+        name = _string_name(raw_name)
         if "cell" not in da.dims:
             continue
 
@@ -186,13 +191,14 @@ def _encoding_for_target_chunks(
 
     return encoding
 
+
 def _write_dataset(
     dataset: xr.Dataset,
     destination: str,
     *,
     mode: str,
     zarr_format: int,
-    append_dim: Optional[str] = None,
+    append_dim: str | None = None,
     target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
 ) -> None:
     """Write one dataset to a Zarr store with consistent options."""
@@ -216,13 +222,14 @@ def _write_dataset(
     # Ensure Dask chunks match the explicit Zarr chunks.
     # Otherwise xarray may reject writes because one Zarr chunk overlaps
     # multiple Dask chunks.
-    chunk_map: dict[str, tuple[int, ...]] = {}
+    chunk_map: dict[str, int] = {}
     for name, enc in encoding.items():
         if name in dataset:
             dims = dataset[name].dims
             chunks = enc.get("chunks")
             if chunks is not None:
-                chunk_map.update(dict(zip(dims, chunks)))
+                for dim, chunk in zip(dims, chunks, strict=True):
+                    chunk_map[_string_name(dim)] = chunk
 
     if chunk_map:
         dataset = dataset.chunk(chunk_map)
@@ -245,9 +252,7 @@ def _rewrite_dataset_via_temp(
 
     dataset = normalise_published_dataset(dataset)
     destination_path = Path(destination)
-    temp_path = destination_path.parent / (
-        f".{destination_path.name}.tmp-{uuid.uuid4().hex}"
-    )
+    temp_path = destination_path.parent / (f".{destination_path.name}.tmp-{uuid.uuid4().hex}")
 
     try:
         _write_dataset(
@@ -263,6 +268,7 @@ def _rewrite_dataset_via_temp(
     finally:
         if temp_path.exists():
             shutil.rmtree(temp_path, ignore_errors=True)
+
 
 def rechunk_zarr_store(
     destination: str,
@@ -369,7 +375,8 @@ def _sync_variable_attrs(dataset: xr.Dataset, destination: str) -> None:
     root = zarr.open_group(destination, mode="a")
     changed = False
 
-    for name, data in dataset.data_vars.items():
+    for raw_name, data in dataset.data_vars.items():
+        name = _string_name(raw_name)
         if name not in root:
             continue
         attrs = clean_output_attrs(dict(data.attrs))
@@ -414,9 +421,7 @@ def _preserve_update_attrs(
     for name in merged.data_vars:
         sources = [source[name] for source in (existing, candidate) if name in source]
         values = [
-            source.attrs[LAST_PERMANENT_UPDATE_ATTR]
-            for source in sources
-            if LAST_PERMANENT_UPDATE_ATTR in source.attrs
+            source.attrs[LAST_PERMANENT_UPDATE_ATTR] for source in sources if LAST_PERMANENT_UPDATE_ATTR in source.attrs
         ]
         if values:
             merged[name].attrs[LAST_PERMANENT_UPDATE_ATTR] = max(map(str, values))
@@ -505,7 +510,11 @@ def _write_missing_variables(
 ) -> xr.Dataset:
     """Add variables missing from an existing store across the current time axis."""
 
-    missing = [name for name in candidate.data_vars if name not in existing.data_vars]
+    missing = [
+        _string_name(name)
+        for name in candidate.data_vars
+        if name not in existing.data_vars
+    ]
     if not missing:
         return existing
 
@@ -517,11 +526,8 @@ def _write_missing_variables(
 
     for name in missing:
         data = candidate[name]
-        shape = tuple(
-            int(existing.sizes.get(dim, data.sizes[dim]))
-            for dim in data.dims
-        )
-        array = root.create_dataset(
+        shape = tuple(int(existing.sizes.get(dim, data.sizes[dim])) for dim in data.dims)
+        array = root.create_dataset(  # type: ignore[attr-defined]
             name,
             shape=shape,
             chunks=encoding.get(name, {}).get("chunks", shape),
@@ -556,13 +562,15 @@ def _align_to_existing_chunks(
 
     aligned = dataset.copy(deep=False)
     chunk_map: dict[str, int] = {}
-    for name, data in aligned.data_vars.items():
+    for raw_name, data in aligned.data_vars.items():
+        name = _string_name(raw_name)
         if name not in existing:
             continue
         chunks = existing[name].encoding.get("chunks")
         if chunks is None:
             continue
-        chunk_map.update(dict(zip(data.dims, (int(size) for size in chunks))))
+        for dim, chunk in zip(data.dims, chunks, strict=True):
+            chunk_map[_string_name(dim)] = int(chunk)
         aligned[name].encoding = dict(aligned[name].encoding)
         aligned[name].encoding["chunks"] = tuple(int(size) for size in chunks)
 
@@ -579,9 +587,7 @@ def _append_new_times(
     """Append strictly newer time slices to an existing store."""
 
     existing_time_strings = set(map(str, existing["time"].values))
-    new_time_values = [
-        value for value in candidate["time"].values if str(value) not in existing_time_strings
-    ]
+    new_time_values = [value for value in candidate["time"].values if str(value) not in existing_time_strings]
     if not new_time_values:
         return False
 
@@ -618,11 +624,7 @@ def _rewrite_overlapping_times(
     for time_slice in time_slices:
         region_times = existing["time"].values[time_slice]
         region_ds = normalise_published_dataset(candidate.sel(time=region_times))
-        to_drop = {
-            name
-            for name, var in region_ds.variables.items()
-            if "time" not in var.dims
-        }
+        to_drop = {name for name, var in region_ds.variables.items() if "time" not in var.dims}
         region_ds = region_ds.drop_vars(to_drop, errors="ignore")
         region_ds = _align_to_existing_chunks(region_ds, existing)
         region = {"time": time_slice}
@@ -816,7 +818,7 @@ def _merge_source_stores(
 
 
 def _worker_output_roots(
-    sources: Iterable[Union[str, Path]],
+    sources: Iterable[str | Path],
     *,
     dataset: str,
     frequencies: tuple[str, ...] | None,
@@ -835,12 +837,16 @@ def _worker_output_roots(
             name = candidate.name
             if candidate.is_dir():
                 has_nested_dataset = (candidate / dataset).is_dir()
-                if not has_nested_dataset and frequencies and not any(
-                    f"-{frequency}-" in name for frequency in frequencies
+                if (
+                    not has_nested_dataset
+                    and frequencies
+                    and not any(f"-{frequency}-" in name for frequency in frequencies)
                 ):
                     continue
-                if not has_nested_dataset and variables and not any(
-                    name.endswith(f"-{variable}") for variable in variables
+                if (
+                    not has_nested_dataset
+                    and variables
+                    and not any(name.endswith(f"-{variable}") for variable in variables)
                 ):
                     continue
                 roots.append(str(candidate))
@@ -853,12 +859,7 @@ def _frequency_names(value: str | Iterable[str] | None) -> tuple[str, ...] | Non
     if value is None:
         return None
     values = (value,) if isinstance(value, str) else tuple(value)
-    selected = tuple(
-        item.strip()
-        for value_item in values
-        for item in str(value_item).split(",")
-        if item.strip()
-    )
+    selected = tuple(item.strip() for value_item in values for item in str(value_item).split(",") if item.strip())
     if selected == ("all",):
         return tuple(SOURCE_MAPPER["output_frequency"])
     unknown = sorted(set(selected) - set(SOURCE_MAPPER["output_frequency"]))
@@ -873,12 +874,7 @@ def _variable_names(value: str | Iterable[str] | None) -> tuple[str, ...] | None
     if value is None:
         return None
     values = (value,) if isinstance(value, str) else tuple(value)
-    selected = tuple(
-        item.strip()
-        for value_item in values
-        for item in str(value_item).split(",")
-        if item.strip()
-    )
+    selected = tuple(item.strip() for value_item in values for item in str(value_item).split(",") if item.strip())
     return tuple(dict.fromkeys(selected))
 
 
@@ -888,15 +884,12 @@ def _dataset_root_destinations(
     dataset: str,
     frequencies: tuple[str, ...] | None,
     levels: tuple[int, ...] | None,
-    target_root: Union[str, Path],
+    target_root: str | Path,
 ) -> Iterable[tuple[Path, str]]:
     """Yield store pairs from worker roots organized by dataset/frequency."""
 
     output_frequency = SOURCE_MAPPER["output_frequency"]
-    selected_output_frequencies = {
-        output_frequency[frequency]
-        for frequency in frequencies
-    } if frequencies else None
+    selected_output_frequencies = {output_frequency[frequency] for frequency in frequencies} if frequencies else None
 
     for source_root in source_roots:
         source_path = Path(source_root)
@@ -908,11 +901,7 @@ def _dataset_root_destinations(
             if selected_output_frequencies and source_frequency.name not in selected_output_frequencies:
                 continue
             frequency = next(
-                (
-                    name
-                    for name, output_name in output_frequency.items()
-                    if output_name == source_frequency.name
-                ),
+                (name for name, output_name in output_frequency.items() if output_name == source_frequency.name),
                 None,
             )
             if frequency is None:
@@ -925,8 +914,8 @@ def _dataset_root_destinations(
 
 def merge_zarr_stores(
     *,
-    sources: Iterable[Union[str, Path]],
-    target_dir: Union[str, Path],
+    sources: Iterable[str | Path],
+    target_dir: str | Path,
     clean: bool,
     zarr_format: int,
     target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,

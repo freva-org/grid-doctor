@@ -6,7 +6,7 @@
 
 - [ ] solve bug in merge, currently 
 ```
-python converter.py merge \
+heal-era5 merge \
   --source /work/ks1387/era5_from_grib_reflow/merged \
   --dataset era5 \
   --freq 1hr \

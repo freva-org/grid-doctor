@@ -2,33 +2,24 @@
 """Unified entry point for the ERA5/ERA5-Land conversion workflow."""
 
 import argparse
-from glob import glob, has_magic
 import hashlib
 import json
 import logging
 import os
-from rich_argparse import RichHelpFormatter
 import shutil
 import signal
 import subprocess
 import sys
-from datetime import date, timedelta
+from collections.abc import Callable, Sequence
+from datetime import UTC, date, datetime, timedelta
+from glob import glob, has_magic
 from pathlib import Path
-from typing import Any, Callable, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, NamedTuple
 
-from helpers.file_fetcher import (
-    batched_source_record_files,
-    load_json,
-    load_variable_requests,
-    overlaps_interval,
-    parse_interval,
-    resolve_records,
-    selected_variables,
-    split_csv_list,
-    unresolved_records,
-    file_interval,
-)
-from cli.arguments import (
+from rich_argparse import RichHelpFormatter
+
+from . import __version__
+from .cli.arguments import (
     add_cache_arguments,
     add_clean_options,
     add_dataset_argument,
@@ -38,30 +29,36 @@ from cli.arguments import (
     add_root_argument,
     add_variable_argument,
 )
-from helpers.formatter import (
+from .helpers.file_fetcher import (
+    batched_source_record_files,
+    file_interval,
+    load_json,
+    load_variable_requests,
+    overlaps_interval,
+    parse_interval,
+    resolve_records,
+    selected_variables,
+    split_csv_list,
+    unresolved_records,
+)
+from .helpers.formatter import (
     dataset_output_root,
     existing_destinations_for_frequency,
     merge_dataset_root,
     normalise_frequencies,
 )
-from helpers.zarr_publisher import merge_zarr_stores, sync_named_variable_attrs
-from helpers.metadata import LAST_PERMANENT_UPDATE_ATTR
+from .helpers.metadata import LAST_PERMANENT_UPDATE_ATTR
+from .helpers.zarr_publisher import merge_zarr_stores, sync_named_variable_attrs
+from .resources import ASSETS_DIR, CMOR_TABLES_DIR, PACKAGE_DIR
 
-VERSION_SERIES = "2026.08"
-VERSION_MAJOR = 1
-VERSION_MINOR = 1
-__version__ = f"{VERSION_SERIES}.{VERSION_MAJOR}.{VERSION_MINOR}"
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_VAR_TABLE = SCRIPT_DIR / "assets" / "default_variables.csv"
-DEFAULT_SOURCE_MAPPER = SCRIPT_DIR / "assets" / "source_mapper.json"
-DEFAULT_CMOR_TABLES = SCRIPT_DIR / "tables" / "era5-cmor-tables" / "Tables"
+# Keep runtime state next to the legacy launcher rather than in site-packages.
+SCRIPT_DIR = PACKAGE_DIR.parents[1]
+DEFAULT_VAR_TABLE = ASSETS_DIR / "default_variables.csv"
+DEFAULT_SOURCE_MAPPER = ASSETS_DIR / "source_mapper.json"
+DEFAULT_CMOR_TABLES = CMOR_TABLES_DIR
 PERMANENT_DATA_LAG_MONTHS = 3
 FREQUENCIES = ("1hr", "day", "mon", "fx")
-UNRESOLVED_REASON = (
-    "not found in CMOR table, unsupported stream/frequency, "
-    "or has no DKRZ_ID/grib_paramID"
-)
+UNRESOLVED_REASON = "not found in CMOR table, unsupported stream/frequency, or has no DKRZ_ID/grib_paramID"
 LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
 RESET_COLOR = "\033[0m"
 LEVEL_COLORS = {
@@ -72,11 +69,10 @@ LEVEL_COLORS = {
     logging.CRITICAL: "\033[1;31m",
 }
 STAGE_COLORS = {
-    "remap_start": "\033[1;36m",
+    "remap_start": "\033[1;95m",
     "frequency_start": "\033[1;94m",
     "grib_merge_done": "\033[36m",
     "weight_calculation": "\033[93m",
-    "remap_start": "\033[1;95m",
     "remap_materialize_done": "\033[95m",
     "coarsen_source_open": "\033[36m",
     "zarr_write_start": "\033[32m",
@@ -89,7 +85,7 @@ STAGE_COLORS = {
     "update_batch": "\033[1;33m",
     "update_frequency": "\033[1;94m",
 }
-_ACTIVE_BATCH_STATE_PATH: Optional[Path] = None
+_ACTIVE_BATCH_STATE_PATH: Path | None = None
 _BATCH_FILES_CHILD_INDEX_ENV = "ERA5_BATCH_FILES_CHILD_INDEX"
 _BATCH_FILES_CHILD_COUNT_ENV = "ERA5_BATCH_FILES_CHILD_COUNT"
 _BATCH_FILES_INCLUDE_SPECIAL_ENV = "ERA5_BATCH_FILES_INCLUDE_SPECIAL"
@@ -98,8 +94,8 @@ _BATCH_FILES_INCLUDE_SPECIAL_ENV = "ERA5_BATCH_FILES_INCLUDE_SPECIAL"
 class BatchFileChildState(NamedTuple):
     """Describe the selected file batch when running inside a child process."""
 
-    index: int | None
-    count: int | None
+    batch_index: int | None
+    batch_count: int | None
     include_special: bool
 
 
@@ -127,13 +123,15 @@ class StageColorFormatter(logging.Formatter):
             return message
 
         stage_name = self._stage_name(record)
-        color = STAGE_COLORS.get(stage_name, LEVEL_COLORS.get(record.levelno))
+        color = STAGE_COLORS.get(stage_name or "")
+        if color is None:
+            color = LEVEL_COLORS.get(record.levelno)
         if color is None:
             return message
         return f"{color}{message}{RESET_COLOR}"
 
     @staticmethod
-    def _stage_name(record: logging.LogRecord) -> Optional[str]:
+    def _stage_name(record: logging.LogRecord) -> str | None:
         """Extract the structured stage token from the rendered log message."""
 
         message = record.getMessage()
@@ -160,7 +158,7 @@ def configure_logging() -> None:
     root_logger.addHandler(handler)
 
 
-def parse_coarsen_levels(value: Optional[str]) -> Optional[Tuple[int, ...]]:
+def parse_coarsen_levels(value: str | None) -> tuple[int, ...] | None:
     """Parse optional HEALPix levels for `--coarsen-only`.
 
     Accepts comma-separated integers like ``8,0`` and descending ranges like
@@ -178,15 +176,11 @@ def parse_coarsen_levels(value: Optional[str]) -> Optional[Tuple[int, ...]]:
                 start_level = int(start_text)
                 end_level = int(end_text)
             except ValueError as exc:
-                raise ValueError(
-                    f"Unsupported coarsen level range {token!r}; use values like 8-0."
-                ) from exc
+                raise ValueError(f"Unsupported coarsen level range {token!r}; use values like 8-0.") from exc
             if start_level < 0 or end_level < 0:
                 raise ValueError("Coarsen levels must be non-negative integers.")
             if start_level < end_level:
-                raise ValueError(
-                    f"Unsupported ascending coarsen range {token!r}; use descending ranges like 8-0."
-                )
+                raise ValueError(f"Unsupported ascending coarsen range {token!r}; use descending ranges like 8-0.")
             levels.extend(range(start_level, end_level - 1, -1))
             continue
 
@@ -205,7 +199,7 @@ def parse_coarsen_levels(value: Optional[str]) -> Optional[Tuple[int, ...]]:
     return tuple(sorted(dict.fromkeys(levels), reverse=True))
 
 
-def parse_truncate_after(value: Optional[str]) -> Optional[str]:
+def parse_truncate_after(value: str | None) -> str | None:
     """Parse an optional truncation cutoff date for existing Zarr stores.
 
     The accepted formats mirror ``--interval`` date tokens: ``YYYY``, ``YYYYMM``,
@@ -221,7 +215,7 @@ def parse_truncate_after(value: Optional[str]) -> Optional[str]:
     return start.isoformat()
 
 
-def parse_level_selection(value: Optional[str]) -> Optional[Tuple[int, ...]]:
+def parse_level_selection(value: str | None) -> tuple[int, ...] | None:
     """Parse optional HEALPix level selections from CLI arguments."""
 
     return parse_coarsen_levels(value)
@@ -233,11 +227,12 @@ def build_parser() -> argparse.ArgumentParser:
     source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
 
     parser = argparse.ArgumentParser(
-        description=f"ERA5/ERA5-Land source discovery and conversion tools (v{__version__})",
+        description=f"ERA5/ERA5-Land source discovery and remapping tools (v{__version__})",
         formatter_class=RichDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "-v","--version",
+        "-v",
+        "--version",
         action="version",
         version=f"%(prog)s {__version__}",
         help="Show the remapper version and exit.",
@@ -329,10 +324,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         metavar="MONTHS",
-        help=(
-            "Split the requested interval into sequential batches of N months "
-            "and process each batch in a loop."
-        ),
+        help=("Split the requested interval into sequential batches of N months and process each batch in a loop."),
     )
     remap_cmd.add_argument(
         "--batch-files",
@@ -444,10 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--truncate-after",
         default=None,
         metavar="DATE",
-        help=(
-            "Truncate existing time-based stores, removing timestamps strictly "
-            "after DATE."
-        ),
+        help=("Truncate existing time-based stores, removing timestamps strictly after DATE."),
     )
     clean_cmd.add_argument(
         "--dry-run",
@@ -466,10 +455,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="source_dirs",
         nargs="+",
         required=True,
-        help=(
-            "Source directories, worker-output roots, or glob patterns. Values "
-            "may be comma-separated or repeated."
-        ),
+        help=("Source directories, worker-output roots, or glob patterns. Values may be comma-separated or repeated."),
     )
     add_dataset_argument(merge_cmd)
     add_frequency_argument(
@@ -513,10 +499,10 @@ def add_months(current: date, months: int) -> date:
 
 
 def batched_intervals(
-    interval: Tuple[Optional[date], Optional[date]],
+    interval: tuple[date | None, date | None],
     *,
-    batch_months: Optional[int],
-) -> Tuple[Tuple[Optional[date], Optional[date]], ...]:
+    batch_months: int | None,
+) -> tuple[tuple[date | None, date | None], ...]:
     """Split one inclusive interval into inclusive month-sized batches."""
 
     if batch_months is None:
@@ -526,11 +512,9 @@ def batched_intervals(
 
     start, end = interval
     if start is None or end is None:
-        raise ValueError(
-            "--batch-months requires a bounded --interval with a start and end date."
-        )
+        raise ValueError("--batch-months requires a bounded --interval with a start and end date.")
 
-    intervals: list[Tuple[date, date]] = []
+    intervals: list[tuple[date, date]] = []
     current_start = start
     while current_start <= end:
         next_start = add_months(date(current_start.year, current_start.month, 1), batch_months)
@@ -540,7 +524,7 @@ def batched_intervals(
     return tuple(intervals)
 
 
-def format_interval(interval: Tuple[Optional[date], Optional[date]]) -> str:
+def format_interval(interval: tuple[date | None, date | None]) -> str:
     """Render one interval tuple for logs."""
 
     start, end = interval
@@ -552,19 +536,20 @@ def format_interval(interval: Tuple[Optional[date], Optional[date]]) -> str:
 def build_batch_command(
     args: argparse.Namespace,
     *,
-    interval: Tuple[Optional[date], Optional[date]],
+    interval: tuple[date | None, date | None],
     clean: bool,
 ) -> list[str]:
     """Build one isolated child-process command for a single batch interval.
 
-    The child inherits the current Python interpreter and script path so it
-    runs inside the same job allocation and environment while still releasing
-    all batch-local memory on process exit.
+    The child inherits the current Python interpreter and runs the installed
+    package module, preserving its job allocation and environment while still
+    releasing all batch-local memory on process exit.
     """
 
     command = [
         sys.executable,
-        str(Path(__file__).resolve()),
+        "-m",
+        "heal_era5.main",
         "remap",
         "--dataset",
         args.dataset,
@@ -615,9 +600,7 @@ def _batch_state_path() -> Path:
     if _ACTIVE_BATCH_STATE_PATH is not None:
         return _ACTIVE_BATCH_STATE_PATH
 
-    job_token = hashlib.sha256(
-        f"{os.getpid()}:{Path.cwd()}:{SCRIPT_DIR}".encode("utf-8")
-    ).hexdigest()[:12]
+    job_token = hashlib.sha256(f"{os.getpid()}:{Path.cwd()}:{SCRIPT_DIR}".encode()).hexdigest()[:12]
     filename = f".current_batch_pid.{job_token}.json"
 
     for candidate_dir in (Path.cwd(), SCRIPT_DIR):
@@ -656,7 +639,7 @@ def clear_batch_state() -> None:
 
 def run_batched_months(
     args: argparse.Namespace,
-    intervals: Sequence[Tuple[Optional[date], Optional[date]]],
+    intervals: Sequence[tuple[date | None, date | None]],
 ) -> int:
     """Run each interval batch in a fresh child process on the same node."""
 
@@ -735,15 +718,9 @@ def _run_subprocess(
                 interval=batch_plan["command_interval"],
                 clean=(args.clean and int(batch_plan["batch_index"]) == 1),
             )
-            child_env = (
-                os.environ.copy()
-                if batch_plan.get("env")
-                else None
-            )
+            child_env = os.environ.copy() if batch_plan.get("env") else None
             if child_env is not None:
-                child_env.update(
-                    {str(key): str(value) for key, value in dict(batch_plan["env"]).items()}
-                )
+                child_env.update({str(key): str(value) for key, value in dict(batch_plan["env"]).items()})
             active_process = subprocess.Popen(
                 command,
                 start_new_session=True,
@@ -789,7 +766,7 @@ def _run_subprocess(
 def run_batched_files(
     args: argparse.Namespace,
     *,
-    current_interval: Tuple[Optional[date], Optional[date]],
+    current_interval: tuple[date | None, date | None],
     batch_labels: Sequence[str],
 ) -> int:
     """Run each file-count batch in a fresh child process on the same node."""
@@ -814,14 +791,10 @@ def run_batched_files(
     return _run_subprocess(args, batch_plans)
 
 
-def parse_cli_freqs(value: str) -> Tuple[str, ...]:
+def parse_cli_freqs(value: str) -> tuple[str, ...]:
     """Parse and validate a frequency CLI option."""
 
-    frequencies = (
-        normalise_frequencies(FREQUENCIES)
-        if value == "all"
-        else normalise_frequencies(split_csv_list(value))
-    )
+    frequencies = normalise_frequencies(FREQUENCIES) if value == "all" else normalise_frequencies(split_csv_list(value))
     unknown_freqs = sorted(set(frequencies) - set(FREQUENCIES))
     if unknown_freqs:
         raise ValueError(f"Unsupported frequencies: {', '.join(unknown_freqs)}")
@@ -829,31 +802,29 @@ def parse_cli_freqs(value: str) -> Tuple[str, ...]:
 
 
 def extend_frequencies_for_special_variables(
-    frequencies: Tuple[str, ...],
-    requested_variables: Tuple[str, ...],
-) -> Tuple[str, ...]:
+    frequencies: tuple[str, ...],
+    requested_variables: tuple[str, ...],
+) -> tuple[str, ...]:
     """Add the `fx` publication pass when special variables are requested."""
 
-    from helpers.special import split_special_variables
+    from .helpers.special import split_special_variables
 
     _, special_variables = split_special_variables(requested_variables)
     if not special_variables or "fx" in frequencies:
         return frequencies
-    return tuple((*frequencies, "fx"))
+    return (*frequencies, "fx")
 
 
 def selected_requests(
     *,
     dataset: str,
-    variables: Optional[Tuple[str, ...]],
+    variables: tuple[str, ...] | None,
     var_table: Path = DEFAULT_VAR_TABLE,
 ):
     """Resolve the requested variables for one dataset selection."""
 
     source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
-    dataset_codes = tuple(
-        str(code) for code in source_mapper["datasets"][dataset]["priority"]
-    )
+    dataset_codes = tuple(str(code) for code in source_mapper["datasets"][dataset]["priority"])
     requests = selected_variables(
         load_variable_requests(var_table),
         allowed_codes=dataset_codes,
@@ -862,7 +833,7 @@ def selected_requests(
     return source_mapper, requests
 
 
-def parse_cli_args(value: Optional[str]) -> Optional[Tuple[str, ...]]:
+def parse_cli_args(value: str | None) -> tuple[str, ...] | None:
     """Parse a comma-separated CLI option."""
 
     if value in (None, "all"):
@@ -870,7 +841,7 @@ def parse_cli_args(value: Optional[str]) -> Optional[Tuple[str, ...]]:
     return split_csv_list(value)
 
 
-def expand_source_dirs(values: Sequence[str]) -> Tuple[str, ...]:
+def expand_source_dirs(values: Sequence[str]) -> tuple[str, ...]:
     """Expand comma-separated source paths and glob patterns for ``merge``."""
 
     sources: list[str] = []
@@ -919,16 +890,13 @@ def batch_file_child_state() -> BatchFileChildState:
     count_text = os.environ.get(_BATCH_FILES_CHILD_COUNT_ENV)
     if (index_text is None) != (count_text is None):
         raise ValueError(
-            "Internal file-batch child environment is incomplete; "
-            "expected both child index and child count."
+            "Internal file-batch child environment is incomplete; expected both child index and child count."
         )
 
     return BatchFileChildState(
-        index=int(index_text) if index_text is not None else None,
-        count=int(count_text) if count_text is not None else None,
-        include_special=(
-            os.environ.get(_BATCH_FILES_INCLUDE_SPECIAL_ENV, "0") == "1"
-        ),
+        batch_index=int(index_text) if index_text is not None else None,
+        batch_count=int(count_text) if count_text is not None else None,
+        include_special=(os.environ.get(_BATCH_FILES_INCLUDE_SPECIAL_ENV, "0") == "1"),
     )
 
 
@@ -936,15 +904,15 @@ def map_records(
     records: Sequence[Any],
     *,
     args: argparse.Namespace,
-    frequencies: Tuple[str, ...],
-    requested_variables: Tuple[str, ...],
-    interval: Tuple[Optional[date], Optional[date]],
+    frequencies: tuple[str, ...],
+    requested_variables: tuple[str, ...],
+    interval: tuple[date | None, date | None],
     clean: bool,
     coarsen_only: bool = False,
-    coarsen_levels: Optional[Tuple[int, ...]] = None,
-    use_input_cache: Optional[bool] = None,
-    drop_duplicate_time_rows: Optional[bool] = None,
-    coarsen_interval: Optional[Tuple[Optional[date], Optional[date]]] = None,
+    coarsen_levels: tuple[int, ...] | None = None,
+    use_input_cache: bool | None = None,
+    drop_duplicate_time_rows: bool | None = None,
+    coarsen_interval: tuple[date | None, date | None] | None = None,
 ) -> None:
     """Map records using the common remap settings from the CLI namespace.
 
@@ -952,7 +920,7 @@ def map_records(
     variable selections while inheriting the same output and caching settings.
     """
 
-    from helpers.mapper import map_grib_to_healpix
+    from .helpers.mapper import map_grib_to_healpix
 
     map_grib_to_healpix(
         list(records),
@@ -962,13 +930,9 @@ def map_records(
         interval=interval,
         zarr_format=args.zarr_format,
         use_inventory_cache=args.use_inventory_cache,
-        use_input_cache=(
-            args.use_input_cache if use_input_cache is None else use_input_cache
-        ),
+        use_input_cache=(args.use_input_cache if use_input_cache is None else use_input_cache),
         drop_duplicate_time_rows=(
-            not args.fail_on_duplicate_times
-            if drop_duplicate_time_rows is None
-            else drop_duplicate_time_rows
+            not args.fail_on_duplicate_times if drop_duplicate_time_rows is None else drop_duplicate_time_rows
         ),
         weights_dir=args.weights_dir,
         clean=clean,
@@ -986,11 +950,11 @@ def build_file_batch_plan(
     records: Sequence[Any],
     *,
     batch_files: int,
-    fallback_interval: Tuple[Optional[date], Optional[date]],
-) -> list[tuple[Any, Tuple[Optional[date], Optional[date]], str]]:
+    fallback_interval: tuple[date | None, date | None],
+) -> list[tuple[Any, tuple[date | None, date | None], str]]:
     """Expand resolved records into a stable global file-batch execution plan."""
 
-    plan: list[tuple[Any, Tuple[Optional[date], Optional[date]], str]] = []
+    plan: list[tuple[Any, tuple[date | None, date | None], str]] = []
     for record in records:
         record_batches = batched_source_record_files(
             record,
@@ -1012,7 +976,7 @@ def build_file_batch_plan(
 
 
 def interval_batch_label(
-    interval: Tuple[Optional[date], Optional[date]],
+    interval: tuple[date | None, date | None],
     *,
     batch_index: int,
     batch_count: int,
@@ -1021,22 +985,19 @@ def interval_batch_label(
     """Return one human-readable label for an interval batch."""
 
     month_text = "month" if batch_months == 1 else "months"
-    return (
-        f"interval {batch_index}/{batch_count} "
-        f"{format_interval(interval)} ({batch_months} {month_text})"
-    )
+    return f"interval {batch_index}/{batch_count} {format_interval(interval)} ({batch_months} {month_text})"
 
 
 def run_fetch(args: argparse.Namespace) -> int:
     """Resolve source files and print either JSON records or paths."""
 
-    from helpers.special import split_special_variables
+    from .helpers.special import split_special_variables
 
     variables = parse_cli_args(args.variables)
     frequencies = parse_cli_freqs(args.freq)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
     requested_variable_names = tuple(request.name for request in requests)
-    source_variables, special_variables = split_special_variables(requested_variable_names)
+    source_variables, _ = split_special_variables(requested_variable_names)
     effective_frequencies = extend_frequencies_for_special_variables(
         frequencies,
         requested_variable_names,
@@ -1062,14 +1023,15 @@ def run_fetch(args: argparse.Namespace) -> int:
     )
 
     if args.strict and (missing or unresolved):
-        for record in missing:
+        for missing_record in missing:
             print(
-                f"missing: {record.variable} {record.frequency} {record.pattern}",
+                f"missing: {missing_record.variable} {missing_record.frequency} {missing_record.pattern}",
                 file=sys.stderr,
             )
-        for record in unresolved:
+        for unresolved_record in unresolved:
             print(
-                f"unresolved: {record.variable} {record.frequency}: {record.reason}",
+                "unresolved: "
+                f"{unresolved_record.variable} {unresolved_record.frequency}: {unresolved_record.reason}",
                 file=sys.stderr,
             )
         return 1
@@ -1101,12 +1063,12 @@ def run_fetch(args: argparse.Namespace) -> int:
 def run_remap(args: argparse.Namespace) -> int:
     """Resolve source files, remap them with grid_doctor, and write Zarr output."""
 
-    from helpers.cleanup import truncate_existing_healpix_stores
-    from helpers.mapper import (
+    from .helpers.cleanup import truncate_existing_healpix_stores
+    from .helpers.mapper import (
         rechunk_existing_healpix_stores,
         update_healpix_attrs_only,
     )
-    from helpers.special import split_special_variables
+    from .helpers.special import split_special_variables
 
     logger = logging.getLogger(__name__)
     variables = parse_cli_args(args.variables)
@@ -1165,7 +1127,7 @@ def run_remap(args: argparse.Namespace) -> int:
         return 0
 
     def run_single_interval(
-        current_interval: Tuple[Optional[date], Optional[date]],
+        current_interval: tuple[date | None, date | None],
         *,
         clean: bool,
     ) -> None:
@@ -1211,10 +1173,7 @@ def run_remap(args: argparse.Namespace) -> int:
                 )
                 return
 
-            if (
-                file_child.index is None
-                and file_child.count is None
-            ):
+            if file_child.batch_index is None and file_child.batch_count is None:
                 logger.info(
                     "📦 Processing %s file batches of up to %s file(s) each using isolated subprocesses.",
                     len(batched_records),
@@ -1230,18 +1189,16 @@ def run_remap(args: argparse.Namespace) -> int:
                 return
 
             selected_batches = batched_records
-            if file_child.index is not None:
+            if file_child.batch_index is not None:
                 batch_count = len(batched_records)
-                if file_child.count != batch_count:
+                if file_child.batch_count != batch_count:
                     raise ValueError(
                         "Resolved file-batch count does not match the parent batch plan: "
-                        f"expected {file_child.count}, got {batch_count}."
+                        f"expected {file_child.batch_count}, got {batch_count}."
                     )
-                child_index = file_child.index
+                child_index = file_child.batch_index
                 if child_index < 1 or child_index > batch_count:
-                    raise ValueError(
-                        f"--batch-files-child-index must be between 1 and {batch_count}."
-                    )
+                    raise ValueError(f"--batch-files-child-index must be between 1 and {batch_count}.")
                 selected_batches = [batched_records[child_index - 1]]
 
             clean_remaining = clean
@@ -1261,9 +1218,7 @@ def run_remap(args: argparse.Namespace) -> int:
                 )
                 clean_remaining = False
 
-            if special_variables and (
-                file_child.index is None or file_child.include_special
-            ):
+            if special_variables and (file_child.batch_index is None or file_child.include_special):
                 map_records(
                     [],
                     args=args,
@@ -1290,9 +1245,7 @@ def run_remap(args: argparse.Namespace) -> int:
         )
 
     intervals = (
-        (interval,)
-        if args.batch_files is not None
-        else batched_intervals(interval, batch_months=args.batch_months)
+        (interval,) if args.batch_files is not None else batched_intervals(interval, batch_months=args.batch_months)
     )
 
     if len(intervals) > 1:
@@ -1350,14 +1303,17 @@ def _existing_variable_last_date(
         return None, None
 
     permanent_date = None
-    if (
-        variable_destinations > 0
-        and len(permanent_dates) == variable_destinations
-        and len(set(permanent_dates)) == 1
-    ):
+    if variable_destinations > 0 and len(permanent_dates) == variable_destinations and len(set(permanent_dates)) == 1:
         permanent_date = permanent_dates[0]
 
     return max(data_dates), permanent_date
+
+
+def _local_modification_date(source_file: str) -> date:
+    """Return a source file's modification date in the machine's local timezone."""
+
+    timestamp = Path(source_file).stat().st_mtime
+    return datetime.fromtimestamp(timestamp, UTC).astimezone().date()
 
 
 def _is_final_source_file(
@@ -1384,7 +1340,7 @@ def _is_final_source_file(
         return False
 
     file_start, _ = coverage
-    modified_date = date.fromtimestamp(Path(source_file).stat().st_mtime)
+    modified_date = _local_modification_date(source_file)
     return modified_date >= add_months(file_start, 1)
 
 
@@ -1393,13 +1349,13 @@ def _map_update_records(
     *,
     args: argparse.Namespace,
     remap_args: argparse.Namespace,
-    interval: Tuple[Optional[date], Optional[date]],
+    interval: tuple[date | None, date | None],
     frequency: str,
     variable: str,
     logger: logging.Logger,
     phase: str,
-    batch_months: Optional[int],
-    batch_files: Optional[int],
+    batch_months: int | None,
+    batch_files: int | None,
 ) -> None:
     """Map update records directly or in bounded file/month batches.
 
@@ -1565,7 +1521,7 @@ def _select_permanent_records(
             file_start, _ = coverage
             if permanent_watermark and file_start < permanent_watermark:
                 continue
-            modified_date = date.fromtimestamp(Path(source_file).stat().st_mtime)
+            modified_date = _local_modification_date(source_file)
             if permanent_watermark is None and modified_date < latest_date:
                 continue
             if not _is_final_source_file(
@@ -1581,9 +1537,7 @@ def _select_permanent_records(
         return UpdateSelection([], None, 0)
 
     selected_records = [
-        record._replace(
-            files=tuple(source_file for source_file in record.files if source_file in selected_files)
-        )
+        record._replace(files=tuple(source_file for source_file in record.files if source_file in selected_files))
         for record in records
     ]
     selected_records = [record for record in selected_records if record.files]
@@ -1609,8 +1563,7 @@ def _apply_permanent_update(
         return
 
     logger.info(
-        "stage=update_permanent 🔁 Refreshing %s permanent source file(s) "
-        "for %s %s: dates=%s..%s",
+        "stage=update_permanent 🔁 Refreshing %s permanent source file(s) for %s %s: dates=%s..%s",
         selection.file_count,
         frequency,
         variable,
@@ -1637,11 +1590,7 @@ def _apply_permanent_update(
             if coverage is not None:
                 permanent_starts.append(coverage[0])
     permanent_watermark = max(permanent_starts)
-    watermark_attrs = {
-        variable: {
-            LAST_PERMANENT_UPDATE_ATTR: permanent_watermark.isoformat()
-        }
-    }
+    watermark_attrs = {variable: {LAST_PERMANENT_UPDATE_ATTR: permanent_watermark.isoformat()}}
     for destination in existing_destinations_for_frequency(
         args.dataset,
         frequency,
@@ -1700,11 +1649,7 @@ def _preview_update_row(
 ) -> UpdatePreviewRow:
     """Build one row for the update preview report."""
 
-    permanent_range = (
-        f"{permanent.interval[0]}..{permanent.interval[1]}"
-        if permanent.interval is not None
-        else "-"
-    )
+    permanent_range = f"{permanent.interval[0]}..{permanent.interval[1]}" if permanent.interval is not None else "-"
     forward_range = f"{latest_date}..{today}" if forward_files else "-"
     return UpdatePreviewRow(
         frequency,
@@ -1765,7 +1710,7 @@ def run_update(args: argparse.Namespace) -> int:
     frequencies = parse_cli_freqs(args.freq)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
     requested_variables = tuple(request.name for request in requests)
-    today = date.today()
+    today = datetime.now().astimezone().date()
     logger = logging.getLogger(__name__)
 
     if args.chunk_size <= 0:
@@ -1845,14 +1790,16 @@ def run_update(args: argparse.Namespace) -> int:
                 )
             forward_file_count = sum(len(record.files) for record in forward_records)
             if args.preview:
-                preview_rows.append(_preview_update_row(
-                    frequency=frequency,
-                    variable=variable,
-                    latest_date=latest_date,
-                    permanent=permanent,
-                    forward_files=forward_file_count,
-                    today=today,
-                ))
+                preview_rows.append(
+                    _preview_update_row(
+                        frequency=frequency,
+                        variable=variable,
+                        latest_date=latest_date,
+                        permanent=permanent,
+                        forward_files=forward_file_count,
+                        today=today,
+                    )
+                )
                 continue
             if forward_file_count:
                 _apply_forward_update(
@@ -1881,7 +1828,7 @@ def run_update(args: argparse.Namespace) -> int:
 def run_clean(args: argparse.Namespace) -> int:
     """Clean existing HEALPix outputs at variable, level, frequency, or root scope."""
 
-    from helpers.cleanup import (
+    from .helpers.cleanup import (
         delete_dataset_root,
         delete_frequency_directory,
         delete_frequency_level_stores,
@@ -1896,9 +1843,7 @@ def run_clean(args: argparse.Namespace) -> int:
 
     if args.truncate_after is not None:
         if variables is not None or levels is not None:
-            raise ValueError(
-                "--truncate-after cannot be combined with --var or --levels."
-            )
+            raise ValueError("--truncate-after cannot be combined with --var or --levels.")
         if args.dry_run:
             raise ValueError("--truncate-after does not support --dry-run.")
 
@@ -2026,7 +1971,7 @@ def run_merge(args: argparse.Namespace) -> int:
 def run_reflow(reflow_args: Sequence[str]) -> int:
     """Forward one Reflow workflow command through the main ERA5-Land CLI."""
 
-    from cli.reflow_workflow import main as reflow_main
+    from .cli.reflow_workflow import main as reflow_main
 
     return int(reflow_main(reflow_args))
 
@@ -2034,12 +1979,12 @@ def run_reflow(reflow_args: Sequence[str]) -> int:
 def run_reflow_queue(queue_args: Sequence[str]) -> int:
     """Run the Reflow campaign queue through the unified CLI."""
 
-    from cli.reflow_queue import main as queue_main
+    from .cli.reflow_queue import main as queue_main
 
-    return int(queue_main(queue_args, prog="converter.py reflow-queue"))
+    return int(queue_main(queue_args, prog="heal-era5 reflow-queue"))
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the ERA5/ERA5-Land remapper."""
 
     raw_argv = list(sys.argv[1:] if argv is None else argv)

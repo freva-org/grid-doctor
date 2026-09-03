@@ -1,21 +1,20 @@
 import hashlib
 import json
+import logging
 from collections.abc import Collection
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+import grid_doctor as gd
 import numpy as np
 import pandas as pd
 import xarray as xr
 from eccodes import codes_get, codes_grib_new_from_file, codes_release
-
-import grid_doctor as gd
 from grid_doctor.utils import cache_dir
-import logging
 
 LOGGER = logging.getLogger(__name__)
-DUPLICATE_TIME_ROWS_LOG = Path(__file__).resolve().parent.parent / "duplicate_grib_time_rows.log"
+DUPLICATE_TIME_ROWS_LOG = Path.cwd() / "duplicate_grib_time_rows.log"
 
 GRIB_KEYS = [
     "shortName",
@@ -190,9 +189,7 @@ def _record_duplicate_time_rows(sample_file: str, duplicate_count: int) -> None:
     timestamp = datetime.now(UTC).isoformat(timespec="seconds")
     try:
         with DUPLICATE_TIME_ROWS_LOG.open("a", encoding="utf-8") as handle:
-            handle.write(
-                f"{timestamp}\tduplicates={duplicate_count}\tfile={sample_file}\n"
-            )
+            handle.write(f"{timestamp}\tduplicates={duplicate_count}\tfile={sample_file}\n")
     except OSError as exc:
         LOGGER.warning(
             "Could not append duplicate GRIB time-row log %s: %s",
@@ -250,10 +247,7 @@ def time_normalizer(
         duplicate_count = int(duplicate_time_rows.sum())
         sample_file = str(df.iloc[0]["file"]) if "file" in df.columns and not df.empty else "<unknown>"
         if not drop_duplicate_time_rows:
-            raise ValueError(
-                f"Found {duplicate_count} duplicate GRIB time row(s) while "
-                f"normalizing {sample_file!r}."
-            )
+            raise ValueError(f"Found {duplicate_count} duplicate GRIB time row(s) while normalizing {sample_file!r}.")
         LOGGER.warning(
             "Dropping %s duplicate GRIB time row(s) while normalizing %s",
             duplicate_count,
@@ -343,9 +337,7 @@ def normalise_vertical_coords(ds: xr.Dataset) -> xr.Dataset:
     """
 
     rename_map = {
-        source: target
-        for source, target in VERTICAL_COORD_RENAMES.items()
-        if source in ds.dims or source in ds.coords
+        source: target for source, target in VERTICAL_COORD_RENAMES.items() if source in ds.dims or source in ds.coords
     }
     if not rename_map:
         return ds
@@ -362,9 +354,7 @@ def drop_singleton_auxiliary_coords(ds: xr.Dataset) -> xr.Dataset:
     """
 
     drop_names = [
-        name
-        for name in SINGLETON_AUX_COORDS
-        if name in ds.coords and name not in ds.dims and ds[name].size == 1
+        name for name in SINGLETON_AUX_COORDS if name in ds.coords and name not in ds.dims and ds[name].size == 1
     ]
     if not drop_names:
         return ds
@@ -419,19 +409,19 @@ def open_dataset(
     datasets: list[xr.Dataset] = []
 
     for key, g in inv.groupby(group_cols):
-        short_name, param_id, type_of_level = key
+        short_name, _, type_of_level = key
         if pressure_levels is not None and type_of_level == "isobaricInhPa":
             g = g[g["level"].isin(pressure_levels)]
             if g.empty:
                 continue
 
         files_for_var = [str(file) for file in sorted(g["file"].unique())]
-        time_by_file = {
-            file: rows.drop(columns="_file_key")
-            for file, rows in g.groupby("_file_key", sort=False)
-        }
+        time_by_file = {file: rows.drop(columns="_file_key") for file, rows in g.groupby("_file_key", sort=False)}
 
-        def preprocess(ds: xr.Dataset) -> xr.Dataset:
+        def preprocess(
+            ds: xr.Dataset,
+            time_by_file: dict[str, pd.DataFrame] = time_by_file,
+        ) -> xr.Dataset:
             source = ds.encoding.get("source")
             if source is None:
                 raise ValueError("cfgrib dataset has no source path in ds.encoding")

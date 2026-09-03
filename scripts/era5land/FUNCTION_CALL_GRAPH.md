@@ -1,7 +1,7 @@
-# ERA5-Land converter call graph
+# ERA5-Land remapper call graph
 
-This document maps the commands dispatched by `converter.py` to the local
-functions that do the work.  It deliberately groups standard-library, xarray,
+This document maps the commands dispatched by `src/heal_era5/main.py` to
+the local functions that do the work.  It deliberately groups standard-library, xarray,
 zarr, and `grid_doctor` calls under their local wrapper, so the graph remains
 useful as a code-navigation guide.
 
@@ -14,15 +14,15 @@ at [Fetch](#fetch) and expands every command path.
 
 | Color | Module that owns the function |
 | --- | --- |
-| <span style="display:inline-block;width:4rem;background:#e5e7eb;border:1px solid #4b5563">&nbsp;</span> Gray `#e5e7eb` | `converter.py`: command parsing and orchestration. |
-| <span style="display:inline-block;width:4rem;background:#fef3c7;border:1px solid #d97706">&nbsp;</span> Amber `#fef3c7` | `helpers/file_fetcher.py`: request configuration and source-file resolution. |
-| <span style="display:inline-block;width:4rem;background:#fde68a;border:1px solid #ca8a04">&nbsp;</span> Gold `#fde68a` | `helpers/formatter.py`: frequency, level, and destination formatting. |
-| <span style="display:inline-block;width:4rem;background:#fee2e2;border:1px solid #dc2626">&nbsp;</span> Red `#fee2e2` | `helpers/cleanup.py`: truncation and deletion. |
-| <span style="display:inline-block;width:4rem;background:#dbeafe;border:1px solid #2563eb">&nbsp;</span> Blue `#dbeafe` | `helpers/mapper.py`: remapping, coarsening, and zoom-level writes. |
-| <span style="display:inline-block;width:4rem;background:#ede9fe;border:1px solid #7c3aed">&nbsp;</span> Violet `#ede9fe` | `helpers/datasets.py`: opening, normalising, and merging datasets. |
-| <span style="display:inline-block;width:4rem;background:#ffedd5;border:1px solid #ea580c">&nbsp;</span> Orange `#ffedd5` | `helpers/special.py`: special (`fx`) variables. |
-| <span style="display:inline-block;width:4rem;background:#dcfce7;border:1px solid #16a34a">&nbsp;</span> Green `#dcfce7` | `helpers/zarr_publisher.py`: Zarr publication, metadata sync, and source-store merge. |
-| <span style="display:inline-block;width:4rem;background:#fce7f3;border:1px solid #db2777">&nbsp;</span> Pink `#fce7f3` | `cli/reflow_workflow.py`: parallel reflow planning and workers. |
+| <span style="display:inline-block;width:4rem;background:#e5e7eb;border:1px solid #4b5563">&nbsp;</span> Gray `#e5e7eb` | `src/heal_era5/main.py`: command parsing and orchestration. |
+| <span style="display:inline-block;width:4rem;background:#fef3c7;border:1px solid #d97706">&nbsp;</span> Amber `#fef3c7` | `src/heal_era5/helpers/file_fetcher.py`: request configuration and source-file resolution. |
+| <span style="display:inline-block;width:4rem;background:#fde68a;border:1px solid #ca8a04">&nbsp;</span> Gold `#fde68a` | `src/heal_era5/helpers/formatter.py`: frequency, level, and destination formatting. |
+| <span style="display:inline-block;width:4rem;background:#fee2e2;border:1px solid #dc2626">&nbsp;</span> Red `#fee2e2` | `src/heal_era5/helpers/cleanup.py`: truncation and deletion. |
+| <span style="display:inline-block;width:4rem;background:#dbeafe;border:1px solid #2563eb">&nbsp;</span> Blue `#dbeafe` | `src/heal_era5/helpers/mapper.py`: remapping, coarsening, and zoom-level writes. |
+| <span style="display:inline-block;width:4rem;background:#ede9fe;border:1px solid #7c3aed">&nbsp;</span> Violet `#ede9fe` | `src/heal_era5/helpers/datasets.py`: opening, normalising, and merging datasets. |
+| <span style="display:inline-block;width:4rem;background:#ffedd5;border:1px solid #ea580c">&nbsp;</span> Orange `#ffedd5` | `src/heal_era5/helpers/special.py`: special (`fx`) variables. |
+| <span style="display:inline-block;width:4rem;background:#dcfce7;border:1px solid #16a34a">&nbsp;</span> Green `#dcfce7` | `src/heal_era5/helpers/zarr_publisher.py`: Zarr publication, metadata sync, and source-store merge. |
+| <span style="display:inline-block;width:4rem;background:#fce7f3;border:1px solid #db2777">&nbsp;</span> Pink `#fce7f3` | `src/heal_era5/cli/reflow_workflow.py`: parallel reflow planning and workers. |
 | <span style="display:inline-block;width:4rem;background:#cffafe;border:1px solid #0891b2">&nbsp;</span> Cyan `#cffafe` | External `grid_doctor` calls. |
 | <span style="display:inline-block;width:4rem;background:#cbd5e1;border:1px solid #475569">&nbsp;</span> Slate `#cbd5e1` | `cli.arguments.py`, `helpers.metadata.py`, and `helpers.grib.py`: small supporting modules. |
 
@@ -33,28 +33,28 @@ major workflow?”, without showing their internal helper calls.
 
 ```mermaid
 flowchart LR
-    CLI[converter.py main]:::converter --> FETCH[run_fetch]:::converter
-    CLI --> REMAP[run_remap]:::converter
-    CLI --> UPDATE[run_update]:::converter
-    CLI --> CLEAN[run_clean]:::converter
-    CLI --> MERGE[run_merge]:::converter
-    CLI --> REFLOW[run_reflow]:::converter
+    CLI[main.py main]:::remapper --> FETCH[run_fetch]:::remapper
+    CLI --> REMAP[run_remap]:::remapper
+    CLI --> UPDATE[run_update]:::remapper
+    CLI --> CLEAN[run_clean]:::remapper
+    CLI --> MERGE[run_merge]:::remapper
+    CLI --> REFLOW[run_reflow]:::remapper
 
-    FETCH --> REQUESTS[selected_requests]:::converter
+    FETCH --> REQUESTS[selected_requests]:::remapper
     FETCH --> RESOLVE[resolve_records]:::file_fetcher
 
     REMAP --> REQUESTS
     REMAP --> RESOLVE
-    REMAP --> BATCH[build_file_batch_plan]:::converter
-    REMAP --> MAP[map_records]:::converter
+    REMAP --> BATCH[build_file_batch_plan]:::remapper
+    REMAP --> MAP[map_records]:::remapper
     REMAP --> TRUNCATE[truncate_existing_healpix_stores]:::cleanup
     REMAP --> RECHUNK[rechunk_existing_healpix_stores]:::mapper
 
     UPDATE --> REQUESTS
-    UPDATE --> LAST[_existing_variable_last_date]:::converter
-    UPDATE --> UPDATE_RECORDS[_resolve_update_records]:::converter
-    UPDATE --> PERMANENT[_apply_permanent_update]:::converter
-    UPDATE --> FORWARD[_apply_forward_update]:::converter
+    UPDATE --> LAST[_existing_variable_last_date]:::remapper
+    UPDATE --> UPDATE_RECORDS[_resolve_update_records]:::remapper
+    UPDATE --> PERMANENT[_apply_permanent_update]:::remapper
+    UPDATE --> FORWARD[_apply_forward_update]:::remapper
 
     CLEAN --> TRUNCATE
     CLEAN --> DELETE[delete_dataset_root / delete_frequency_directory]:::cleanup
@@ -63,7 +63,7 @@ flowchart LR
     MERGE --> MERGE_STORES[merge_zarr_stores]:::zarr_publisher
     REFLOW --> WORKFLOW[cli.reflow_workflow.main]:::reflow_cli
 
-    classDef converter fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
+    classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef file_fetcher fill:#fef3c7,stroke:#d97706,color:#000000
     classDef cleanup fill:#fee2e2,stroke:#dc2626,color:#000000
     classDef mapper fill:#dbeafe,stroke:#2563eb,color:#000000
@@ -83,7 +83,7 @@ resolved records.
 
 ```mermaid
 flowchart LR
-    REQUESTS[selected_requests]:::converter --> LOAD_REQ[load_variable_requests]:::file_fetcher
+    REQUESTS[selected_requests]:::remapper --> LOAD_REQ[load_variable_requests]:::file_fetcher
     REQUESTS --> SELECT[selected_variables]:::file_fetcher
     LOAD_REQ --> CSV[split_csv_list]:::file_fetcher
 
@@ -98,12 +98,12 @@ flowchart LR
     RESOLVE --> FACTOR[parse_conversion_factor]:::file_fetcher
     RESOLVE --> ATTRS[extract_output_attrs]:::file_fetcher
 
-    FETCH[run_fetch]:::converter --> RESOLVE
-    REMAP[run_remap]:::converter --> RESOLVE
-    UPDATE_RECORDS[_resolve_update_records]:::converter --> RESOLVE
+    FETCH[run_fetch]:::remapper --> RESOLVE
+    REMAP[run_remap]:::remapper --> RESOLVE
+    UPDATE_RECORDS[_resolve_update_records]:::remapper --> RESOLVE
     GATHER[gather_plan]:::reflow_cli --> RESOLVE
 
-    classDef converter fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
+    classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef file_fetcher fill:#fef3c7,stroke:#d97706,color:#000000
     classDef reflow_cli fill:#fce7f3,stroke:#db2777,color:#000000
 ```
@@ -116,7 +116,7 @@ workers; it does not show update-specific date selection or cleanup.
 
 ```mermaid
 flowchart LR
-    MAP[converter.map_records]:::converter --> HEALPIX[mapper.map_grib_to_healpix]:::mapper
+    MAP[remapper.map_records]:::remapper --> HEALPIX[mapper.map_grib_to_healpix]:::mapper
     HEALPIX --> GROUP[group_records_by_frequency]:::formatter
     HEALPIX --> MERGE_DATA[merge_frequency_dataset]:::datasets
     MERGE_DATA --> OPEN[open_record_dataset]:::datasets
@@ -136,13 +136,13 @@ flowchart LR
     WRITE_SPECIAL --> SPECIAL_DATA[build_special_variable_dataset]:::special
     WRITE_SPECIAL --> PUBLISH
 
-    REMAP[run_remap]:::converter --> MAP
-    PERMANENT[_apply_permanent_update]:::converter --> UPDATE_MAP[_map_update_records]:::converter
-    FORWARD[_apply_forward_update]:::converter --> UPDATE_MAP
+    REMAP[run_remap]:::remapper --> MAP
+    PERMANENT[_apply_permanent_update]:::remapper --> UPDATE_MAP[_map_update_records]:::remapper
+    FORWARD[_apply_forward_update]:::remapper --> UPDATE_MAP
     UPDATE_MAP --> MAP
     WORKER[remap_variable_frequency]:::reflow_cli --> HEALPIX
 
-    classDef converter fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
+    classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000
     classDef datasets fill:#ede9fe,stroke:#7c3aed,color:#000000
     classDef grid_doctor fill:#cffafe,stroke:#0891b2,color:#000000
@@ -172,16 +172,16 @@ short storage-management paths.
 
 ```mermaid
 flowchart LR
-    UPDATE[run_update]:::converter --> LAST[_existing_variable_last_date]:::converter
+    UPDATE[run_update]:::remapper --> LAST[_existing_variable_last_date]:::remapper
     LAST --> EXISTING[existing_destinations_for_frequency]:::formatter
-    UPDATE --> PERM[_select_permanent_records]:::converter
-    UPDATE --> APPLY_PERM[_apply_permanent_update]:::converter
-    UPDATE --> APPLY_FORWARD[_apply_forward_update]:::converter
-    APPLY_PERM --> UPDATE_MAP[_map_update_records]:::converter
+    UPDATE --> PERM[_select_permanent_records]:::remapper
+    UPDATE --> APPLY_PERM[_apply_permanent_update]:::remapper
+    UPDATE --> APPLY_FORWARD[_apply_forward_update]:::remapper
+    APPLY_PERM --> UPDATE_MAP[_map_update_records]:::remapper
     APPLY_FORWARD --> UPDATE_MAP
     APPLY_PERM --> SYNC[sync_named_variable_attrs]:::zarr_publisher
 
-    CLEAN[run_clean]:::converter --> TRUNC[truncate_existing_healpix_stores]:::cleanup
+    CLEAN[run_clean]:::remapper --> TRUNC[truncate_existing_healpix_stores]:::cleanup
     TRUNC --> TRUNC_FREQ[truncate_frequency_destinations]:::cleanup
     TRUNC_FREQ --> SHRINK[truncate_zarr_store_after]:::cleanup
     SHRINK --> SHRINK_ARRAYS[_shrink_time_arrays_in_place]:::cleanup
@@ -190,10 +190,10 @@ flowchart LR
     CLEAN --> DELETE_LEVEL[delete_frequency_level_stores]:::cleanup
     CLEAN --> DELETE_FREQ[delete_frequency_directory]:::cleanup
 
-    MERGE[run_merge]:::converter --> MERGE_STORES[merge_zarr_stores]:::zarr_publisher
+    MERGE[run_merge]:::remapper --> MERGE_STORES[merge_zarr_stores]:::zarr_publisher
     MERGE_STORES --> PUBLISH[update_zarr_store]:::zarr_publisher
 
-    classDef converter fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
+    classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000
     classDef cleanup fill:#fee2e2,stroke:#dc2626,color:#000000
     classDef zarr_publisher fill:#dcfce7,stroke:#16a34a,color:#000000
@@ -207,7 +207,7 @@ and writes special variables during finalisation.
 
 ```mermaid
 flowchart TD
-    REFLOW[run_reflow]:::converter --> MAIN[reflow_workflow.main]:::reflow_cli
+    REFLOW[run_reflow]:::remapper --> MAIN[reflow_workflow.main]:::reflow_cli
     MAIN --> PLAN[gather_plan]:::reflow_cli
     PLAN --> ITEMS[_batched_work_items]:::reflow_cli
     ITEMS --> FILE_BATCHES[batched_source_record_files]:::file_fetcher
@@ -219,7 +219,7 @@ flowchart TD
     FINAL --> MERGE[merge_zarr_stores]:::zarr_publisher
     FINAL --> SPECIAL[map_grib_to_healpix for special variables]:::mapper
 
-    classDef converter fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
+    classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef file_fetcher fill:#fef3c7,stroke:#d97706,color:#000000
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000
     classDef mapper fill:#dbeafe,stroke:#2563eb,color:#000000,stroke-width:2px
@@ -267,12 +267,12 @@ flowchart LR
     resolve_records --> extract_output_attrs
     run_fetch --> unresolved_records
 
-    class fetch,run_fetch,selected_requests,extend_frequencies_for_special_variables,unresolved_records converter
+    class fetch,run_fetch,selected_requests,extend_frequencies_for_special_variables,unresolved_records remapper
     class parse_cli_args,parse_cli_freqs supporting
     class normalise_frequencies formatter
     class split_csv_list,load_json,load_variable_requests,selected_variables,resolve_records,load_cmor_variable_entries,find_variable_entry,parse_level_type,resolve_priority_files,source_pattern_template,overlaps_interval,file_interval,parse_conversion_factor,_safe_eval_numeric_expression,extract_output_attrs file_fetcher
     class split_special_variables special
-    classDef converter fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
+    classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000
     classDef file_fetcher fill:#fef3c7,stroke:#d97706,color:#000000
     classDef special fill:#ffedd5,stroke:#ea580c,color:#000000
@@ -376,7 +376,7 @@ flowchart LR
     _coarsen_existing_frequency --> gd_coarsen_healpix
     _coarsen_existing_frequency --> _write_zoom_level
 
-    class remap,run_remap,selected_requests,extend_frequencies_for_special_variables,validate_remap_args,batch_file_child_state,run_single_interval,build_file_batch_plan,run_batched_files,_run_subprocess,build_batch_command,write_batch_state,clear_batch_state,map_records converter
+    class remap,run_remap,selected_requests,extend_frequencies_for_special_variables,validate_remap_args,batch_file_child_state,run_single_interval,build_file_batch_plan,run_batched_files,_run_subprocess,build_batch_command,write_batch_state,clear_batch_state,map_records remapper
     class parse_cli_args,parse_cli_freqs,parse_interval,parse_truncate_after,parse_coarsen_levels supporting
     class dataset_output_root,existing_level_destinations,existing_destinations_for_frequency,destination_for_level formatter
     class truncate_existing_healpix_stores,truncate_frequency_destinations,truncate_zarr_store_after,_shrink_time_arrays_in_place,_time_axis_info cleanup
@@ -389,7 +389,7 @@ flowchart LR
     class group_records_by_frequency formatter
     class gd_get_latlon_resolution,gd_cached_weights,gd_regrid_to_healpix,gd_coarsen_healpix external
     class open_dataset external
-    classDef converter fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
+    classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000
     classDef cleanup fill:#fee2e2,stroke:#dc2626,color:#000000
     classDef mapper fill:#dbeafe,stroke:#2563eb,color:#000000,stroke-width:2px
@@ -436,14 +436,14 @@ flowchart LR
     run_update --> _preview_update_row
     run_update --> _log_update_preview
 
-    class update,run_update,selected_requests,_existing_variable_last_date,_update_remap_args,add_months,_resolve_update_records,_select_permanent_records,_is_final_source_file,_apply_permanent_update,_map_update_records,_apply_forward_update,_preview_update_row,_log_update_preview,map_records converter
+    class update,run_update,selected_requests,_existing_variable_last_date,_update_remap_args,add_months,_resolve_update_records,_select_permanent_records,_is_final_source_file,_apply_permanent_update,_map_update_records,_apply_forward_update,_preview_update_row,_log_update_preview,map_records remapper
     class parse_cli_args,parse_cli_freqs supporting
     class existing_destinations_for_frequency formatter
     class resolve_records,batched_source_record_files,overlaps_interval,file_interval file_fetcher
     class batched_intervals formatter
     class sync_named_variable_attrs zarr_publisher
     class map_grib_to_healpix mapper
-    classDef converter fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
+    classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000
     classDef file_fetcher fill:#fef3c7,stroke:#d97706,color:#000000
     classDef mapper fill:#dbeafe,stroke:#2563eb,color:#000000,stroke-width:2px
@@ -473,11 +473,11 @@ flowchart LR
     remove_variables_from_frequency_stores --> selected_level_destinations
     remove_variables_from_frequency_stores --> drop_variables_from_zarr_store
 
-    class clean,run_clean,parse_level_selection converter
+    class clean,run_clean,parse_level_selection remapper
     class parse_cli_args,parse_cli_freqs,parse_truncate_after,parse_coarsen_levels supporting
     class truncate_existing_healpix_stores,delete_dataset_root,delete_frequency_directory,delete_frequency_level_stores,selected_level_destinations,remove_variables_from_frequency_stores,drop_variables_from_zarr_store cleanup
     class existing_level_destinations,existing_destinations_for_frequency formatter
-    classDef converter fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
+    classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000
     classDef cleanup fill:#fee2e2,stroke:#dc2626,color:#000000
     classDef supporting fill:#cbd5e1,stroke:#475569,color:#000000
@@ -506,12 +506,12 @@ flowchart LR
     merge_zarr_stores --> _select_merge_interval
     merge_zarr_stores --> update_zarr_store
 
-    class merge,run_merge,expand_source_dirs,parse_level_selection converter
+    class merge,run_merge,expand_source_dirs,parse_level_selection remapper
     class parse_cli_args,parse_coarsen_levels,parse_interval supporting
     class merge_zarr_stores,_frequency_names,_variable_names,_worker_output_roots,_dataset_root_destinations,_is_selected_level_store,_merge_source_stores,_select_merge_interval,update_zarr_store zarr_publisher
     class merge_dataset_root formatter
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000
-    classDef converter fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
+    classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef zarr_publisher fill:#dcfce7,stroke:#16a34a,color:#000000
     classDef supporting fill:#cbd5e1,stroke:#475569,color:#000000
 ```
@@ -552,9 +552,9 @@ flowchart LR
     finalize_outputs --> split_special_variables
     finalize_outputs --> special_fx_map[map_grib_to_healpix for special fx variables]
 
-    class reflow,run_reflow converter
+    class reflow,run_reflow remapper
     class reflow_main,gather_plan,_batched_work_items,_batching_level_type,_batch_settings_for_item,_level_policy,_pressure_level_groups_for_record,_record_pressure_levels,remap_variable_frequency,_load_record_cache,_record_from_payload,_worker_output_root,finalize_outputs reflow_cli
-    class selected_requests,extend_frequencies_for_special_variables converter
+    class selected_requests,extend_frequencies_for_special_variables remapper
     class parse_cli_args,parse_cli_freqs,parse_interval supporting
     class batched_source_record_files,resolve_records file_fetcher
     class batched_intervals,dataset_output_root,destination_for_level formatter
@@ -562,7 +562,7 @@ flowchart LR
     class cached_grib_inventory,_chunk_pressure_levels supporting
     class map_grib_to_healpix,special_fx_map mapper
     class merge_zarr_stores zarr_publisher
-    classDef converter fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
+    classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef reflow_cli fill:#fce7f3,stroke:#db2777,color:#000000,stroke-width:2px
     classDef file_fetcher fill:#fef3c7,stroke:#d97706,color:#000000
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000
@@ -577,9 +577,9 @@ flowchart LR
 | Functions | Assessment | Recommended direction |
 | --- | --- | --- |
 | `cleanup.existing_level_destinations` and `mapper._existing_level_destinations` | Substantively duplicate directory discovery.  Their meaningful difference is return type (`Path` versus `str`). | Keep one shared function, ideally returning `Path`; convert to `str` only at the external API boundary if necessary. |
-| `converter.parse_level_selection` and `parse_coarsen_levels` | A pure naming alias. | Remove the alias or rename callers to `parse_coarsen_levels` if command-specific terminology is not valuable. |
-| `converter._resolve_update_records` and `resolve_records` | A thin update-specific adapter around the general resolver. | Keep only if it makes update defaults explicit; otherwise inline its small argument adaptation. |
-| `converter._update_remap_args` | A thin `argparse.Namespace` adapter for reusing remap logic during update. | Keep as an explicit compatibility boundary; replacing it with an untyped dictionary would be worse. |
+| `remapper.parse_level_selection` and `parse_coarsen_levels` | A pure naming alias. | Remove the alias or rename callers to `parse_coarsen_levels` if command-specific terminology is not valuable. |
+| `remapper._resolve_update_records` and `resolve_records` | A thin update-specific adapter around the general resolver. | Keep only if it makes update defaults explicit; otherwise inline its small argument adaptation. |
+| `remapper._update_remap_args` | A thin `argparse.Namespace` adapter for reusing remap logic during update. | Keep as an explicit compatibility boundary; replacing it with an untyped dictionary would be worse. |
 | `zarr_publisher.sync_global_attrs` and `_sync_global_attrs` | Public wrapper around private implementation, not duplicated behavior. | Keep; it defines the module's supported API. |
 | `_apply_permanent_update` and `_apply_forward_update` | They share `_map_update_records`, but permanent updates also record permanent-update metadata. | Keep separate.  The common mapping helper is already the right extraction. |
 | Cleanup deletion helpers | Similar traversal but distinct scopes: variable, selected level, frequency, or dataset root. | Keep separate; consolidating them would blur destructive-operation scope. |
@@ -589,9 +589,9 @@ flowchart LR
 
 The most useful starting points are:
 
-- [`converter.py`](converter.py): command dispatch and orchestration.
-- [`helpers/mapper.py`](helpers/mapper.py): the main GRIB-to-HEALPix transformation.
-- [`helpers/datasets.py`](helpers/datasets.py): opening, normalising, and merging source datasets.
-- [`helpers/zarr_publisher.py`](helpers/zarr_publisher.py): append/rewrite publication semantics.
-- [`helpers/cleanup.py`](helpers/cleanup.py): truncation and deletion operations.
-- [`cli/reflow_workflow.py`](cli/reflow_workflow.py): parallel plan, worker, and finalisation flow.
+- [`main.py`](src/heal_era5/main.py): command dispatch and orchestration.
+- [`helpers/mapper.py`](src/heal_era5/helpers/mapper.py): the main GRIB-to-HEALPix transformation.
+- [`helpers/datasets.py`](src/heal_era5/helpers/datasets.py): opening, normalising, and merging source datasets.
+- [`helpers/zarr_publisher.py`](src/heal_era5/helpers/zarr_publisher.py): append/rewrite publication semantics.
+- [`helpers/cleanup.py`](src/heal_era5/helpers/cleanup.py): truncation and deletion operations.
+- [`cli/reflow_workflow.py`](src/heal_era5/cli/reflow_workflow.py): parallel plan, worker, and finalisation flow.

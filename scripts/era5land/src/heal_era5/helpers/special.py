@@ -7,7 +7,6 @@ from typing import Any
 import grid_doctor as gd
 import numpy as np
 import xarray as xr
-
 from grid_doctor.remap import _healpix_centres, _make_crs_variable
 
 from .file_fetcher import (
@@ -49,7 +48,7 @@ def _areacella_data_array(
 ) -> xr.DataArray:
     """Build the analytical HEALPix `areacella` field for one zoom level."""
 
-    nside = 2**int(zoom_number)
+    nside = 2 ** int(zoom_number)
     ncell = 12 * nside**2
     cell_area_m2 = (4.0 * np.pi * float(radius_m) ** 2) / float(ncell)
     values = np.full(ncell, cell_area_m2, dtype=np.float64)
@@ -65,7 +64,7 @@ def _areacella_data_array(
 def _attach_healpix_metadata(ds: xr.Dataset, *, zoom_number: int) -> xr.Dataset:
     """Attach the HEALPix coordinates and attrs expected by downstream code."""
 
-    nside = 2**int(zoom_number)
+    nside = 2 ** int(zoom_number)
     order = "nested"
     lat_deg, lon_deg = _healpix_centres(int(zoom_number), nest=True)
     ds = ds.assign_coords(

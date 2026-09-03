@@ -1,21 +1,16 @@
 """Orchestration helpers for ERA5/ERA5-Land HEALPix conversion."""
 
 import gc
-from datetime import date
 import logging
-from pathlib import Path
 import re
-from typing import Iterable, Optional
+from collections.abc import Iterable, Mapping
+from datetime import date
+from pathlib import Path
 
 import grid_doctor as gd
 import xarray as xr
 
-from .special import (
-    special_zoom_numbers,
-    special_variable_attrs_by_name,
-    split_special_variables,
-    write_special_variables,
-)
+from ..resources import ASSETS_DIR, CMOR_TABLES_DIR
 from .datasets import (
     EmptySourceDataError,
     merge_frequency_dataset,
@@ -32,6 +27,12 @@ from .metadata import (
     attrs_for_record,
     global_attrs_for_dataset_frequency,
     global_attrs_for_records,
+)
+from .special import (
+    special_variable_attrs_by_name,
+    special_zoom_numbers,
+    split_special_variables,
+    write_special_variables,
 )
 from .zarr_publisher import (
     rechunk_zarr_store,
@@ -74,8 +75,8 @@ def _close_dataset_quietly(dataset: xr.Dataset | None) -> None:
         return
     try:
         dataset.close()
-    except Exception:
-        pass
+    except OSError as exc:
+        LOGGER.warning("Could not close input dataset: %s", exc)
 
 
 def _ensure_output_directory(destination: str) -> None:
@@ -98,7 +99,7 @@ def _ensure_output_directory(destination: str) -> None:
     else:
         chmod_start = healpix_index
 
-    current = Path(parts[0]) if target_dir.is_absolute() else Path(parts[0])
+    current = Path(parts[0])
     for index, part in enumerate(parts[1:], start=1):
         current /= part
         if index >= chmod_start and current.is_dir():
@@ -137,7 +138,7 @@ def _write_zoom_level(
     frequency: str,
     variables: str,
     zoom_number: int,
-    global_attrs: dict[str, object],
+    global_attrs: Mapping[str, object],
     clean: bool,
     zarr_format: int,
     target_chunk_mb: int,
@@ -251,7 +252,7 @@ def _coarsen_existing_frequency(
     clean: bool,
     target_chunk_mb: int,
     output_path: str | Path | None = None,
-    interval: tuple[Optional[date], Optional[date]] = (None, None),
+    interval: tuple[date | None, date | None] = (None, None),
     target_levels: tuple[int, ...] | None = None,
     truncate_after: str | None = None,
 ) -> tuple[int, ...]:
@@ -263,9 +264,7 @@ def _coarsen_existing_frequency(
         output_path=output_path,
     )
     if not existing:
-        raise ValueError(
-            f"No existing HEALPix Zarr stores found for frequency {frequency!r}."
-        )
+        raise ValueError(f"No existing HEALPix Zarr stores found for frequency {frequency!r}.")
 
     highest_level = existing[0][0]
     start, end = interval
@@ -274,22 +273,13 @@ def _coarsen_existing_frequency(
         requested_levels=target_levels,
         available_levels=tuple(level for level, _ in existing),
     )
-    available_destinations = {
-        level: destination
-        for level, destination in existing
-    }
+    available_destinations = {level: destination for level, destination in existing}
     written_levels: list[int] = []
 
     for zoom_number in selected_levels:
-        higher_levels = [
-            level
-            for level in available_destinations
-            if level > zoom_number
-        ]
+        higher_levels = [level for level in available_destinations if level > zoom_number]
         if not higher_levels:
-            raise ValueError(
-                f"Cannot coarsen level {zoom_number}: no higher HEALPix level exists."
-            )
+            raise ValueError(f"Cannot coarsen level {zoom_number}: no higher HEALPix level exists.")
 
         source_level = min(higher_levels)
         source_destination = available_destinations[source_level]
@@ -302,7 +292,7 @@ def _coarsen_existing_frequency(
             target_zoom=zoom_number,
             source=source_destination,
         )
-        current: xr.Dataset | None = xr.open_zarr(
+        current = xr.open_zarr(
             source_destination,
             consolidated=(zarr_format == 2),
         )
@@ -357,11 +347,7 @@ def _resolve_requested_coarsen_levels(
     if requested_levels is None:
         return tuple(range(highest_level - 1, -1, -1))
 
-    invalid = [
-        level
-        for level in requested_levels
-        if level < 0 or level >= highest_level
-    ]
+    invalid = [level for level in requested_levels if level < 0 or level >= highest_level]
     if invalid:
         invalid_text = ", ".join(str(level) for level in invalid)
         raise ValueError(
@@ -369,7 +355,7 @@ def _resolve_requested_coarsen_levels(
             f"the highest existing level {highest_level}: {invalid_text}"
         )
 
-    available = set(int(level) for level in available_levels)
+    available = {int(level) for level in available_levels}
     if not available:
         raise ValueError("No existing HEALPix levels are available for coarsening.")
 
@@ -504,20 +490,20 @@ def map_grib_to_healpix(
     dataset: str,
     frequencies: tuple[str, ...],
     requested_variables: tuple[str, ...],
-    interval: tuple[Optional[date], Optional[date]] = (None, None),
+    interval: tuple[date | None, date | None] = (None, None),
     zarr_format: int = 2,
     use_inventory_cache: bool = True,
     use_input_cache: bool = False,
     drop_duplicate_time_rows: bool = True,
     pressure_levels: tuple[int, ...] | None = None,
-    weights_dir: Optional[str] = None,
+    weights_dir: str | None = None,
     clean: bool = False,
     target_chunk_mb: int = 100,
     highest_level_only: bool = False,
     coarsen_only: bool = False,
     coarsen_levels: tuple[int, ...] | None = None,
     output_path: str | Path | None = None,
-    coarsen_interval: tuple[Optional[date], Optional[date]] = (None, None),
+    coarsen_interval: tuple[date | None, date | None] = (None, None),
     truncate_after: str | None = None,
 ) -> None:
     """Convert resolved GRIB records to per-frequency HEALPix Zarr pyramids."""
@@ -527,8 +513,7 @@ def map_grib_to_healpix(
     if not grouped_records and not special_requested and not coarsen_only:
         raise ValueError("No matching source files were found for conversion.")
     records_by_frequency = {
-        frequency: [record for record in records if record.frequency == frequency]
-        for frequency in frequencies
+        frequency: [record for record in records if record.frequency == frequency] for frequency in frequencies
     }
 
     log_stage(LOGGER, "convert_start", frequencies=",".join(frequencies), records=len(records))
@@ -551,9 +536,7 @@ def map_grib_to_healpix(
                 output_path=output_path,
             )
             if not highest_existing:
-                raise ValueError(
-                    f"No existing HEALPix Zarr stores found for frequency {frequency!r}."
-                )
+                raise ValueError(f"No existing HEALPix Zarr stores found for frequency {frequency!r}.")
             selected_coarsen_levels = _resolve_requested_coarsen_levels(
                 highest_level=highest_existing[0],
                 requested_levels=coarsen_levels,
@@ -630,7 +613,7 @@ def map_grib_to_healpix(
         try:
             if freq_records:
                 global_attrs = global_attrs_for_records(freq_records)
-                
+
                 try:
                     ds = merge_frequency_dataset(
                         freq_records,
@@ -642,8 +625,7 @@ def map_grib_to_healpix(
                     )
                 except EmptySourceDataError as exc:
                     LOGGER.warning(
-                        "Skipping %s frequency for %s because no source data was "
-                        "found in the requested interval: %s",
+                        "Skipping %s frequency for %s because no source data was found in the requested interval: %s",
                         frequency,
                         dataset,
                         exc,
@@ -783,8 +765,7 @@ def map_grib_to_healpix(
             gc.collect()
 
 
-SOURCE_MAPPER_PATH = Path(__file__).resolve().parent.parent / "assets" / "source_mapper.json"
-CMOR_TABLES_DIR = Path(__file__).resolve().parent.parent / "tables" / "era5-cmor-tables" / "Tables"
+SOURCE_MAPPER_PATH = ASSETS_DIR / "source_mapper.json"
 
 
 def update_healpix_attrs_only(
@@ -799,8 +780,7 @@ def update_healpix_attrs_only(
 
     _, special_requested = split_special_variables(requested_variables)
     records_by_frequency = {
-        frequency: [record for record in records if record.frequency == frequency]
-        for frequency in frequencies
+        frequency: [record for record in records if record.frequency == frequency] for frequency in frequencies
     }
 
     for frequency in frequencies:
@@ -816,10 +796,7 @@ def update_healpix_attrs_only(
             if freq_records
             else global_attrs_for_dataset_frequency(dataset, frequency)
         )
-        attrs_by_name = {
-            record.variable: attrs_for_record(record)
-            for record in freq_records
-        }
+        attrs_by_name = {record.variable: attrs_for_record(record) for record in freq_records}
         attrs_by_name.update(
             special_variable_attrs_by_name(
                 dataset=dataset,

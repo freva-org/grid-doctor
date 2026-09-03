@@ -21,10 +21,8 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
 
 from rich_argparse import RichHelpFormatter
-
 
 TERMINAL_STATES = frozenset(("SUCCESS", "FAILED", "CANCELLED"))
 RUN_ID_RE = re.compile(r"run_id\s*=\s*(\S+)")
@@ -35,7 +33,7 @@ def log(message, *args):
 
     timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     text = message % args if args else message
-    print("[%s] %s" % (timestamp, text), flush=True)
+    print(f"[{timestamp}] {text}", flush=True)
 
 
 def utc_timestamp():
@@ -166,19 +164,13 @@ def load_plan(path):
         if not line or line.startswith("#"):
             continue
         if "," not in line:
-            raise ValueError(
-                "Invalid interval on line %d of %s: %r"
-                % (line_number, plan_path, raw_line)
-            )
+            raise ValueError(f"Invalid interval on line {line_number} of {plan_path}: {raw_line!r}")
         start, end = [token.strip() for token in line.split(",", 1)]
         if not start or not end:
-            raise ValueError(
-                "Invalid interval on line %d of %s: %r"
-                % (line_number, plan_path, raw_line)
-            )
-        entries.append("%s,%s" % (start, end))
+            raise ValueError(f"Invalid interval on line {line_number} of {plan_path}: {raw_line!r}")
+        entries.append(f"{start},{end}")
     if not entries:
-        raise ValueError("Plan file %s does not contain any intervals." % plan_path)
+        raise ValueError(f"Plan file {plan_path} does not contain any intervals.")
     return entries
 
 
@@ -204,7 +196,7 @@ def load_state(state_path, intervals, run_dir_root):
     entries = []
     for index, interval in enumerate(intervals, start=1):
         label = interval_label(interval)
-        run_dir = str((Path(run_dir_root) / ("%03d-%s" % (index, label))).resolve())
+        run_dir = str((Path(run_dir_root) / f"{index:03d}-{label}").resolve())
         entry = existing.get(interval, {})
         entry.setdefault("index", index)
         entry.setdefault("interval", interval)
@@ -252,33 +244,28 @@ def submit_entry(template, entry, workdir):
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        universal_newlines=True,
+        text=True,
     )
     output = completed.stdout or ""
     if output:
         for line in output.rstrip().splitlines():
             log("submit[%s] %s", entry["interval"], line)
     if completed.returncode != 0:
-        raise RuntimeError(
-            "Submission failed for interval %s with exit code %d."
-            % (entry["interval"], completed.returncode)
-        )
+        raise RuntimeError(f"Submission failed for interval {entry['interval']} with exit code {completed.returncode}.")
 
     match = RUN_ID_RE.search(output)
     if not match:
-        raise RuntimeError(
-            "Could not parse run_id from submission output for interval %s."
-            % entry["interval"]
-        )
+        raise RuntimeError("Could not parse run_id from submission output for interval {}.".format(entry["interval"]))
     return match.group(1)
 
 
-def status_command(python_executable, converter_path, entry, store_path):
+def status_command(python_executable, entry, store_path):
     """Build the Reflow status command for one submitted entry."""
 
     command = [
         python_executable,
-        str(converter_path),
+        "-m",
+        "heal_era5",
         "remap-reflow",
         "status",
         str(entry["run_id"]),
@@ -291,12 +278,11 @@ def status_command(python_executable, converter_path, entry, store_path):
     return command
 
 
-def query_status(python_executable, converter_path, entry, store_path, workdir):
+def query_status(python_executable, entry, store_path, workdir):
     """Return the current Reflow run status string for one entry."""
 
     command = status_command(
         python_executable=python_executable,
-        converter_path=converter_path,
         entry=entry,
         store_path=store_path,
     )
@@ -304,17 +290,14 @@ def query_status(python_executable, converter_path, entry, store_path, workdir):
         command,
         cwd=str(workdir),
         check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True,
+        capture_output=True,
+        text=True,
     )
     if completed.returncode != 0:
         stderr = (completed.stderr or "").strip()
         stdout = (completed.stdout or "").strip()
         detail = stderr or stdout or "unknown status failure"
-        raise RuntimeError(
-            "Status check failed for run %s: %s" % (entry["run_id"], detail)
-        )
+        raise RuntimeError("Status check failed for run {}: {}".format(entry["run_id"], detail))
 
     payload = json.loads(completed.stdout)
     run_info = payload.get("run", {})
@@ -349,13 +332,12 @@ def pending_entries(entries):
     return pending
 
 
-def update_active_statuses(args, state, converter_path, workdir):
+def update_active_statuses(args, state, workdir):
     """Poll all active runs and update their persisted statuses."""
 
     for entry in active_entries(state["entries"]):
         status = query_status(
             python_executable=args.python_executable,
-            converter_path=converter_path,
             entry=entry,
             store_path=args.store_path,
             workdir=workdir,
@@ -375,7 +357,7 @@ def update_active_statuses(args, state, converter_path, workdir):
             entry["completed_at"] = utc_timestamp()
 
 
-def refresh_submitted_statuses(args, state, converter_path, workdir):
+def refresh_submitted_statuses(args, state, workdir):
     """Reconcile persisted controller state with current Reflow run statuses."""
 
     for entry in state["entries"]:
@@ -383,7 +365,6 @@ def refresh_submitted_statuses(args, state, converter_path, workdir):
             continue
         status = query_status(
             python_executable=args.python_executable,
-            converter_path=converter_path,
             entry=entry,
             store_path=args.store_path,
             workdir=workdir,
@@ -479,23 +460,21 @@ def build_controller_command(args, script_path):
 def render_sbatch_script(args, script_path):
     """Return a reusable sbatch wrapper script for the queue controller."""
 
-    output_path = args.sbatch_output or str(
-        Path(args.run_dir_root).expanduser().resolve() / "controller-%j.out"
-    )
-    lines = ["#!/bin/bash", "#SBATCH --job-name=%s" % args.sbatch_job_name]
+    output_path = args.sbatch_output or str(Path(args.run_dir_root).expanduser().resolve() / "controller-%j.out")
+    lines = ["#!/bin/bash", f"#SBATCH --job-name={args.sbatch_job_name}"]
     if args.sbatch_account:
-        lines.append("#SBATCH --account=%s" % args.sbatch_account)
+        lines.append(f"#SBATCH --account={args.sbatch_account}")
     if args.sbatch_partition:
-        lines.append("#SBATCH --partition=%s" % args.sbatch_partition)
+        lines.append(f"#SBATCH --partition={args.sbatch_partition}")
     lines.extend(
         [
-            "#SBATCH --time=%s" % args.sbatch_time,
-            "#SBATCH --cpus-per-task=%d" % args.sbatch_cpus_per_task,
-            "#SBATCH --mem=%s" % args.sbatch_mem,
-            "#SBATCH --output=%s" % output_path,
+            f"#SBATCH --time={args.sbatch_time}",
+            f"#SBATCH --cpus-per-task={args.sbatch_cpus_per_task}",
+            f"#SBATCH --mem={args.sbatch_mem}",
+            f"#SBATCH --output={output_path}",
             "",
             "set -euo pipefail",
-            "cd %s" % shlex.quote(str(script_path.parent)),
+            f"cd {shlex.quote(str(script_path.parent))}",
             shell_quote_join(build_controller_command(args, script_path)),
             "",
         ]
@@ -513,13 +492,10 @@ def main(argv=None, *, prog=None):
         raise ValueError("--max-active-runs must be a positive integer.")
 
     workdir = Path(__file__).resolve().parents[2]
-    converter_path = workdir / "converter.py"
     intervals = load_plan(args.plan)
     run_dir_root = Path(args.run_dir_root).expanduser().resolve()
     state_path = (
-        Path(args.state_path).expanduser().resolve()
-        if args.state_path
-        else run_dir_root / "reflow-queue-state.json"
+        Path(args.state_path).expanduser().resolve() if args.state_path else run_dir_root / "reflow-queue-state.json"
     )
 
     state = load_state(
@@ -537,13 +513,13 @@ def main(argv=None, *, prog=None):
         log("\n Wrote sbatch wrapper to %s", sbatch_path)
         return 0
 
-    refresh_submitted_statuses(args, state, converter_path, workdir)
+    refresh_submitted_statuses(args, state, workdir)
     save_state(state_path, state)
     log("Loaded %d intervals from %s", len(intervals), args.plan)
     log("State file: %s", state_path)
 
     while True:
-        update_active_statuses(args, state, converter_path, workdir)
+        update_active_statuses(args, state, workdir)
         save_state(state_path, state)
 
         if has_failed_entries(state["entries"]) and not args.continue_on_failure:

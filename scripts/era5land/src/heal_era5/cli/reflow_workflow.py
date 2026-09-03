@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reflow workflow for ERA5/ERA5-Land HEALPix publication.
 
-This workflow complements ``converter.py`` by turning one requested remap run
+This workflow complements ``heal-era5`` by turning one requested remap run
 into scheduler-managed batch jobs. Each worker handles one independent
 ``variable x frequency`` unit, writes its result into a private temporary output
 root below the shared Reflow run directory, and the final step merges those
@@ -22,20 +22,29 @@ import shutil
 import sys
 import uuid
 from collections import defaultdict
+from collections.abc import Sequence
+from datetime import date
 from pathlib import Path
-from typing import Annotated, Any, Literal, Sequence
+from typing import Annotated, Any, Literal
 
 from reflow import Param, Result, RunDir, Workflow
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-ERA5LAND_DIR = SCRIPT_DIR.parent
-if str(ERA5LAND_DIR) not in sys.path:
-    sys.path.insert(0, str(ERA5LAND_DIR))
-
-from converter import (
+from ..helpers.file_fetcher import (
+    SourceRecord,
+    batched_source_record_files,
+    load_json,
+    resolve_records,
+)
+from ..helpers.formatter import (
+    dataset_output_root,
+    destination_for_level,
+)
+from ..helpers.grib import cached_grib_inventory
+from ..helpers.zarr_publisher import merge_zarr_stores
+from ..main import (
     DEFAULT_CMOR_TABLES,
-    DEFAULT_VAR_TABLE,
     DEFAULT_SOURCE_MAPPER,
+    DEFAULT_VAR_TABLE,
     batched_intervals,
     extend_frequencies_for_special_variables,
     format_interval,
@@ -44,18 +53,6 @@ from converter import (
     parse_interval,
     selected_requests,
 )
-from helpers.file_fetcher import (
-    SourceRecord,
-    batched_source_record_files,
-    load_json,
-    resolve_records,
-)
-from helpers.grib import cached_grib_inventory
-from helpers.formatter import (
-    dataset_output_root,
-    destination_for_level,
-)
-from helpers.zarr_publisher import merge_zarr_stores
 
 wf = Workflow("era5_healpix")
 
@@ -87,9 +84,7 @@ def _array_resources() -> dict[str, Any]:
         for level_policy in dataset_policy.values()
     }
     if len(resources) != 1:
-        raise ValueError(
-            "Reflow array resources must currently be identical for all workloads."
-        )
+        raise ValueError("Reflow array resources must currently be identical for all workloads.")
     return dict(next(iter(resources)))
 
 
@@ -124,11 +119,9 @@ def _worker_output_root(
 
     safe_variable = re.sub(r"[^A-Za-z0-9._-]+", "_", variable).strip("_") or "var"
     safe_frequency = re.sub(r"[^A-Za-z0-9._-]+", "_", frequency).strip("_") or "freq"
-    identity = f"{run_token}:{item_index}:{frequency}:{variable}".encode("utf-8")
+    identity = f"{run_token}:{item_index}:{frequency}:{variable}".encode()
     output_hash = hashlib.sha256(identity).hexdigest()[:12]
-    return run_dir / "worker-output" / (
-        f"{item_index:05d}-{output_hash}-{safe_frequency}-{safe_variable}"
-    )
+    return run_dir / "worker-output" / (f"{item_index:05d}-{output_hash}-{safe_frequency}-{safe_variable}")
 
 
 def _batch_settings_for_item(
@@ -151,7 +144,7 @@ def _batch_settings_for_item(
 def _batched_work_items(
     *,
     records: list[SourceRecord],
-    parsed_interval: tuple[object | None, object | None],
+    parsed_interval: tuple[date | None, date | None],
     dataset: str,
     batch_files: int | None,
     batch_months: int | None,
@@ -201,9 +194,7 @@ def _batched_work_items(
                         "batch_interval": format_interval(batch_interval),
                         "files": list(batched_record.files),
                         "frequency": record.frequency,
-                        "pressure_levels": (
-                            list(pressure_levels) if pressure_levels is not None else None
-                        ),
+                        "pressure_levels": (list(pressure_levels) if pressure_levels is not None else None),
                         "variable": record.variable,
                     }
                 )
@@ -222,10 +213,7 @@ def _chunk_pressure_levels(
 
     if chunk_size <= 0:
         return [levels]
-    return [
-        levels[index:index + chunk_size]
-        for index in range(0, len(levels), chunk_size)
-    ]
+    return [levels[index : index + chunk_size] for index in range(0, len(levels), chunk_size)]
 
 
 def _record_pressure_levels(record: SourceRecord) -> tuple[int, ...] | None:
@@ -236,10 +224,7 @@ def _record_pressure_levels(record: SourceRecord) -> tuple[int, ...] | None:
         return None
 
     level_values = sorted(
-        {
-            int(level)
-            for level in inventory["level"].dropna().tolist()
-        },
+        {int(level) for level in inventory["level"].dropna().tolist()},
         reverse=True,
     )
     return tuple(level_values) if level_values else None
@@ -249,7 +234,7 @@ def _pressure_level_groups_for_record(
     record: SourceRecord,
     *,
     pressure_level_group_size: int,
-) -> list[tuple[int, ...] | None]:
+) -> Sequence[tuple[int, ...] | None]:
     """Return worker pressure-level groups for one resolved source record."""
 
     if _batching_level_type(record) != "pressure":
@@ -303,10 +288,7 @@ def gather_plan(
     interval: Annotated[
         str | None,
         Param(
-            help=(
-                "Date interval START,END where each token may be YYYY, YYYYMM, "
-                "YYYYMMDD, or hyphenated equivalents."
-            )
+            help=("Date interval START,END where each token may be YYYY, YYYYMM, YYYYMMDD, or hyphenated equivalents.")
         ),
     ] = None,
     root: Annotated[
@@ -373,14 +355,9 @@ def gather_plan(
     ] = False,
     pressure_level_group_size: Annotated[
         int | None,
-        Param(
-            help=(
-                "Number of pressure levels to process per worker item. "
-                "Omit to use the dataset policy."
-            )
-        ),
+        Param(help=("Number of pressure levels to process per worker item. Omit to use the dataset policy.")),
     ] = None,
-    run_dir: RunDir = RunDir(),
+    run_dir: RunDir = RunDir(),  # noqa: B008 - Reflow injects the workflow run directory.
 ) -> list[dict[str, Any]]:
     """Resolve the request once and return self-contained array-job payloads.
 
@@ -389,7 +366,7 @@ def gather_plan(
     no downstream task needs to resolve source records or rebuild batches.
     """
 
-    from helpers.special import split_special_variables
+    from ..helpers.special import split_special_variables
 
     if chunk_size <= 0:
         raise ValueError("--chunk-size must be a positive integer.")
@@ -438,10 +415,7 @@ def gather_plan(
     record_cache_path.parent.mkdir(parents=True, exist_ok=True)
     with record_cache_path.open("w", encoding="utf-8") as handle:
         json.dump(
-            {
-                f"{record.variable}|{record.frequency}": _record_to_payload(record)
-                for record in records
-            },
+            {f"{record.variable}|{record.frequency}": _record_to_payload(record) for record in records},
             handle,
             sort_keys=True,
         )
@@ -490,11 +464,11 @@ def gather_plan(
 )
 def remap_variable_frequency(
     payload: Annotated[dict[str, Any], Result(step="gather_plan")],
-    run_dir: RunDir = RunDir(),
+    run_dir: RunDir = RunDir(),  # noqa: B008 - Reflow injects the workflow run directory.
 ) -> dict[str, Any]:
     """Remap one gathered ``variable x frequency x interval-batch`` payload."""
 
-    from helpers.mapper import map_grib_to_healpix
+    from ..helpers.mapper import map_grib_to_healpix
 
     item = payload["item"]
     plan = payload["plan"]
@@ -517,9 +491,7 @@ def remap_variable_frequency(
         requested_variables=(str(item["variable"]),),
         interval=parse_interval(str(item["batch_interval"])),
         pressure_levels=(
-            tuple(int(level) for level in item["pressure_levels"])
-            if item.get("pressure_levels")
-            else None
+            tuple(int(level) for level in item["pressure_levels"]) if item.get("pressure_levels") else None
         ),
         zarr_format=int(plan["zarr_format"]),
         use_inventory_cache=bool(plan["use_inventory_cache"]),
@@ -547,12 +519,12 @@ def remap_variable_frequency(
 def finalize_outputs(
     worker_results: Annotated[list[dict[str, Any]], Result(step="remap_variable_frequency")],
     plan_payloads: Annotated[list[dict[str, Any]], Result(step="gather_plan")],
-    run_dir: RunDir = RunDir(),
+    run_dir: RunDir = RunDir(),  # noqa: B008 - Reflow injects the workflow run directory.
 ) -> list[str]:
     """Merge all worker stores into the final publication root and consolidate metadata."""
 
-    from helpers.mapper import map_grib_to_healpix
-    from helpers.special import split_special_variables
+    from ..helpers.mapper import map_grib_to_healpix
+    from ..helpers.special import split_special_variables
 
     if not plan_payloads:
         raise ValueError("gather_plan returned no work payloads.")

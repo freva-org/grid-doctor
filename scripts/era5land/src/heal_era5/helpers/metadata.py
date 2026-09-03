@@ -1,8 +1,8 @@
 """Metadata helpers for ERA5/ERA5-Land HEALPix outputs."""
 
-from pathlib import Path
 from typing import Any
 
+from ..resources import CMOR_TABLES_DIR, CMOR_TABLES_ROOT
 from .file_fetcher import SOURCE_MAPPER, SourceRecord, load_json
 
 OUTPUT_ATTR_KEYS = tuple(SOURCE_MAPPER.get("var_attrs", []))
@@ -12,19 +12,12 @@ NOMINAL_RESOLUTION_INDEX_BY_SOURCE_ID = {
     "ERA-5": 1,
     "ERA-5-Land": 0,
 }
-SCRIPT_DIR = Path(__file__).resolve().parent
-CMOR_TABLES_ROOT = SCRIPT_DIR.parent / "tables" / "era5-cmor-tables"
-CMOR_TABLES_DIR = CMOR_TABLES_ROOT / "Tables"
 
 
 def clean_output_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
     """Keep only the curated output attrs for published variables."""
 
-    cleaned = {
-        key: value
-        for key, value in attrs.items()
-        if key in OUTPUT_ATTR_KEYS and value not in ("", None)
-    }
+    cleaned = {key: value for key, value in attrs.items() if key in OUTPUT_ATTR_KEYS and value not in ("", None)}
     for key in (LAST_DATA_UPDATE_ATTR, LAST_PERMANENT_UPDATE_ATTR):
         if attrs.get(key) not in ("", None):
             cleaned[key] = attrs[key]
@@ -108,11 +101,7 @@ def global_attrs_for_dataset_frequency(dataset: str, frequency: str) -> dict[str
         }
     )
 
-    return {
-        key: str(value)
-        for key, value in attrs.items()
-        if value not in ("", None)
-    }
+    return {key: str(value) for key, value in attrs.items() if value not in ("", None)}
 
 
 def global_attrs_for_records(records: list[SourceRecord]) -> dict[str, str]:

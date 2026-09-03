@@ -1,0 +1,10 @@
+# Native Conda dependencies for the heal-era5 conversion workflow.
+# Python packages are declared in pyproject.toml.
+channels:
+  - conda-forge
+dependencies:
+  # GRIB runtime library used by cfgrib.
+  - eccodes
+  # MPI-enabled regridding stack used by grid_doctor.
+  - "esmf=*=mpi_openmpi_*"
+  - esmpy
