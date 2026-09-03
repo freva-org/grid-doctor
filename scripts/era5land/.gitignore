@@ -10,6 +10,8 @@ tables/era5-cmor-tables
 # Python caches
 **/__pycache__/
 *.py[cod]
+.coverage
+htmlcov/
 
 # cfgrib/eccodes indexes and local data products
 *.idx

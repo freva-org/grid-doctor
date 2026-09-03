@@ -84,7 +84,8 @@ python3 -m pip install -e "scripts/era5land[dev]"
 ```
 
 From `scripts/era5land`, run all checks with `tox`, or select one check with
-`tox -e lint`, `tox -e types`, or `tox -e test`.
+`tox -e lint`, `tox -e types`, or `tox -e test`. The test environment prints
+a terminal coverage report and writes an HTML report to `htmlcov/index.html`.
 
 Ruff also sorts imports using its isort-compatible rules. To apply safe lint
 and import fixes, format the code, then verify linting and types:
@@ -942,25 +943,29 @@ If stderr is attached to an interactive terminal, these stages are colorised.
 
 ## Development Checks
 
-The ERA5-Land-specific automated coverage in this repository is currently
-centered on source resolution, especially `tests/test_era5land_file_fetcher.py`.
-
-Run that focused test module with:
+Run the full package suite with terminal and HTML coverage reports:
 
 ```console
-python3 -m pytest tests/test_era5land_file_fetcher.py
+tox -e test
+```
+
+Open `htmlcov/index.html` in a browser to inspect line and branch coverage.
+Run the source-resolution tests alone with:
+
+```console
+python3 -m pytest tests/test_heal_era5_file_fetcher.py
 ```
 
 Lint the current ERA5-Land script set with:
 
 ```console
-python3 -m ruff check scripts/era5land tests/test_era5land_file_fetcher.py
+python3 -m ruff check src tests
 ```
 
 Apply auto-fixable Ruff changes with:
 
 ```console
-python3 -m ruff check --fix scripts/era5land tests/test_era5land_file_fetcher.py
+python3 -m ruff check --fix src tests
 ```
 
 Format the ERA5-Land files with Ruff format:
