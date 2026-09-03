@@ -130,8 +130,18 @@ def test_main_dispatches_normal_commands(monkeypatch):
         lambda args: called.append(args.command) or 17,
     )
 
-    assert main.main(["fetch"]) == 17
+    assert main.main(["fetch", "--dataset", "era5land"]) == 17
     assert called == ["fetch"]
+
+
+@pytest.mark.parametrize("command", ["fetch", "remap", "update", "clean", "merge"])
+def test_bare_normal_commands_print_subcommand_help(capsys, command):
+    """A bare command should be equivalent to requesting that command's help."""
+
+    main = load_main_module()
+
+    assert main.main([command]) == 0
+    assert f" {command} [-h]" in capsys.readouterr().out
 
 
 def test_main_dispatches_delegated_commands(monkeypatch):
@@ -152,7 +162,11 @@ def test_main_dispatches_delegated_commands(monkeypatch):
 
     assert main.main(["remap-reflow", "status", "run-1"]) == 3
     assert main.main(["reflow-queue", "--plan", "intervals.txt"]) == 4
+    assert main.main(["remap-reflow"]) == 3
+    assert main.main(["reflow-queue"]) == 4
     assert calls == [
         ("workflow", ["status", "run-1"]),
         ("queue", ["--plan", "intervals.txt"]),
+        ("workflow", ["-h"]),
+        ("queue", ["-h"]),
     ]

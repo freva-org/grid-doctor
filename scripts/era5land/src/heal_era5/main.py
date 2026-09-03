@@ -244,6 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Resolve source GRIB files from the CMOR tables.",
         formatter_class=RichDefaultsHelpFormatter,
     )
+    fetch_cmd.set_defaults(_command_parser=fetch_cmd)
     add_dataset_argument(fetch_cmd)
     add_frequency_argument(fetch_cmd)
     add_variable_argument(fetch_cmd)
@@ -273,6 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Append newly available data and refresh the three-month permanent batch.",
         formatter_class=RichDefaultsHelpFormatter,
     )
+    update_cmd.set_defaults(_command_parser=update_cmd)
     add_dataset_argument(update_cmd)
     add_frequency_argument(update_cmd)
     add_variable_argument(update_cmd)
@@ -314,6 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Resolve GRIB files and remap them to HEALPix Zarr pyramids.",
         formatter_class=RichDefaultsHelpFormatter,
     )
+    remap_cmd.set_defaults(_command_parser=remap_cmd)
     add_dataset_argument(remap_cmd)
     add_frequency_argument(remap_cmd)
     add_variable_argument(remap_cmd)
@@ -414,6 +417,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Remove variables, levels, frequencies, or the whole HEALPix output root.",
         formatter_class=RichDefaultsHelpFormatter,
     )
+    clean_cmd.set_defaults(_command_parser=clean_cmd)
     add_dataset_argument(clean_cmd, help_text="Dataset to clean.")
     add_frequency_argument(clean_cmd, default=None)
     add_variable_argument(clean_cmd)
@@ -450,6 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Merge one or more (frequency) directories into a target (frequency) directory.",
         formatter_class=RichDefaultsHelpFormatter,
     )
+    merge_cmd.set_defaults(_command_parser=merge_cmd)
     merge_cmd.add_argument(
         "--source",
         dest="source_dirs",
@@ -993,6 +998,10 @@ def run_fetch(args: argparse.Namespace) -> int:
 
     from .helpers.special import split_special_variables
 
+    if args.dataset is None:
+        args._command_parser.print_help()
+        return 2
+
     variables = parse_cli_args(args.variables)
     frequencies = parse_cli_freqs(args.freq)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
@@ -1070,6 +1079,10 @@ def run_remap(args: argparse.Namespace) -> int:
     from .helpers.special import split_special_variables
 
     logger = logging.getLogger(__name__)
+    if args.dataset is None:
+        args._command_parser.print_help()
+        return 2
+
     variables = parse_cli_args(args.variables)
     frequencies = parse_cli_freqs(args.freq)
     interval = parse_interval(args.interval)
@@ -1705,6 +1718,10 @@ def run_update(args: argparse.Namespace) -> int:
     variables are not remapped.
     """
 
+    if args.dataset is None:
+        args._command_parser.print_help()
+        return 2
+
     variables = parse_cli_args(args.variables)
     frequencies = parse_cli_freqs(args.freq)
     _, requests = selected_requests(dataset=args.dataset, variables=variables)
@@ -1992,9 +2009,18 @@ def main(argv: list[str] | None = None) -> int:
         "reflow-queue": run_reflow_queue,
     }
     if raw_argv and raw_argv[0] in delegated_handlers:
+        if len(raw_argv) == 1:
+            return delegated_handlers[raw_argv[0]](["-h"])
         return delegated_handlers[raw_argv[0]](raw_argv[1:])
 
     parser = build_parser()
+    normal_commands = {"fetch", "remap", "update", "clean", "merge"}
+    if len(raw_argv) == 1 and raw_argv[0] in normal_commands:
+        try:
+            parser.parse_args([raw_argv[0], "-h"])
+        except SystemExit as exc:
+            return int(exc.code or 0)
+
     args = parser.parse_args(raw_argv)
 
     if args.command is None:
