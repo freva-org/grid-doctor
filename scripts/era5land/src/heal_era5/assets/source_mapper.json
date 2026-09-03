@@ -78,7 +78,6 @@
       "era5": {
         "surface": {
           "wave_size": 20,
-          "pressure_level_group_size": 0,
           "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
           "frequencies": {
             "1hr": {
@@ -101,7 +100,6 @@
         },
         "pressure": {
           "wave_size": 20,
-          "pressure_level_group_size": 0,
           "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
           "frequencies": {
             "1hr": {
@@ -124,7 +122,6 @@
         },
         "fixed": {
           "wave_size": 0,
-          "pressure_level_group_size": 0,
           "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
           "frequencies": {
             "1hr": {
@@ -149,7 +146,6 @@
       "era5land": {
         "surface": {
           "wave_size": 3,
-          "pressure_level_group_size": 0,
           "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
           "frequencies": {
             "1hr": {
@@ -172,7 +168,6 @@
         },
         "pressure": {
           "wave_size": 3,
-          "pressure_level_group_size": 0,
           "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
           "frequencies": {
             "1hr": {
@@ -195,7 +190,6 @@
         },
         "fixed": {
           "wave_size": 3,
-          "pressure_level_group_size": 0,
           "resources": {"cpus": 48, "time": "2:00:00", "mem": "40GB"},
           "frequencies": {
             "1hr": {

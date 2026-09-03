@@ -212,7 +212,7 @@ flowchart TD
     PLAN --> ITEMS[_batched_work_items]:::reflow_cli
     ITEMS --> FILE_BATCHES[batched_source_record_files]:::file_fetcher
     ITEMS --> TIME_BATCHES[batched_intervals]:::formatter
-    ITEMS --> PRESSURE[_pressure_level_groups_for_record]:::reflow_cli
+    ITEMS --> PRESSURE[_pressure_levels_for_record]:::reflow_cli
     MAIN --> WORK[remap_variable_frequency]:::reflow_cli
     WORK --> HEALPIX[map_grib_to_healpix]:::mapper
     MAIN --> FINAL[finalize_outputs]:::reflow_cli
@@ -536,10 +536,9 @@ flowchart LR
     _batch_settings_for_item --> _level_policy
     _batched_work_items --> batched_source_record_files
     _batched_work_items --> batched_intervals
-    _batched_work_items --> _pressure_level_groups_for_record
-    _pressure_level_groups_for_record --> _record_pressure_levels
+    _batched_work_items --> _pressure_levels_for_record
+    _pressure_levels_for_record --> _record_pressure_levels
     _record_pressure_levels --> cached_grib_inventory
-    cached_grib_inventory --> _chunk_pressure_levels
     reflow_main --> remap_variable_frequency
     remap_variable_frequency --> _load_record_cache
     _load_record_cache --> _record_from_payload
@@ -553,13 +552,13 @@ flowchart LR
     finalize_outputs --> special_fx_map[map_grib_to_healpix for special fx variables]
 
     class reflow,run_reflow remapper
-    class reflow_main,gather_plan,_batched_work_items,_batching_level_type,_batch_settings_for_item,_level_policy,_pressure_level_groups_for_record,_record_pressure_levels,remap_variable_frequency,_load_record_cache,_record_from_payload,_worker_output_root,finalize_outputs reflow_cli
+    class reflow_main,gather_plan,_batched_work_items,_batching_level_type,_batch_settings_for_item,_level_policy,_pressure_levels_for_record,_record_pressure_levels,remap_variable_frequency,_load_record_cache,_record_from_payload,_worker_output_root,finalize_outputs reflow_cli
     class selected_requests,extend_frequencies_for_special_variables remapper
-    class parse_cli_args,parse_cli_freqs,parse_interval supporting
+    class parse_cli_args,parse_cli_freqs,parse_interval,parse_pressure_levels supporting
     class batched_source_record_files,resolve_records file_fetcher
     class batched_intervals,dataset_output_root,destination_for_level formatter
     class split_special_variables special
-    class cached_grib_inventory,_chunk_pressure_levels supporting
+    class cached_grib_inventory supporting
     class map_grib_to_healpix,special_fx_map mapper
     class merge_zarr_stores zarr_publisher
     classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px

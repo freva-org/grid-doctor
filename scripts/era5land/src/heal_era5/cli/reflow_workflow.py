@@ -51,6 +51,7 @@ from ..main import (
     parse_cli_args,
     parse_cli_freqs,
     parse_interval,
+    parse_pressure_levels,
     selected_requests,
 )
 
@@ -148,7 +149,7 @@ def _batched_work_items(
     dataset: str,
     batch_files: int | None,
     batch_months: int | None,
-    pressure_level_group_size: int | None,
+    selected_pressure_levels: tuple[int, ...] | None,
 ) -> list[dict[str, Any]]:
     """Expand resolved records into workload-aware Reflow array items."""
 
@@ -162,10 +163,6 @@ def _batched_work_items(
         effective_batch_files, effective_batch_months = _batch_settings_for_item(
             dataset, record.frequency, level_type, batch_files, batch_months
         )
-        group_size = pressure_level_group_size
-        if group_size is None:
-            group_size = _level_policy(dataset, level_type)["pressure_level_group_size"]
-
         if effective_batch_files is not None:
             record_batches = batched_source_record_files(
                 record,
@@ -181,39 +178,28 @@ def _batched_work_items(
                 )
             )
 
-        pressure_level_groups = _pressure_level_groups_for_record(
+        pressure_levels = _pressure_levels_for_record(
             record,
-            pressure_level_group_size=int(group_size),
+            selected_pressure_levels=selected_pressure_levels,
         )
+        if pressure_levels == ():
+            continue
 
         for batch_index, (batched_record, batch_interval) in enumerate(record_batches):
-            for pressure_levels in pressure_level_groups:
-                work_items.append(
-                    {
-                        "batch_index": batch_index,
-                        "batch_interval": format_interval(batch_interval),
-                        "files": list(batched_record.files),
-                        "frequency": record.frequency,
-                        "pressure_levels": (list(pressure_levels) if pressure_levels is not None else None),
-                        "variable": record.variable,
-                    }
-                )
+            work_items.append(
+                {
+                    "batch_index": batch_index,
+                    "batch_interval": format_interval(batch_interval),
+                    "files": list(batched_record.files),
+                    "frequency": record.frequency,
+                    "pressure_levels": (list(pressure_levels) if pressure_levels is not None else None),
+                    "variable": record.variable,
+                }
+            )
 
     for item_index, item in enumerate(work_items):
         item["item_index"] = item_index
     return work_items
-
-
-def _chunk_pressure_levels(
-    levels: tuple[int, ...],
-    *,
-    chunk_size: int,
-) -> list[tuple[int, ...]]:
-    """Split pressure levels into stable groups for array execution."""
-
-    if chunk_size <= 0:
-        return [levels]
-    return [levels[index : index + chunk_size] for index in range(0, len(levels), chunk_size)]
 
 
 def _record_pressure_levels(record: SourceRecord) -> tuple[int, ...] | None:
@@ -230,25 +216,25 @@ def _record_pressure_levels(record: SourceRecord) -> tuple[int, ...] | None:
     return tuple(level_values) if level_values else None
 
 
-def _pressure_level_groups_for_record(
+def _pressure_levels_for_record(
     record: SourceRecord,
     *,
-    pressure_level_group_size: int,
-) -> Sequence[tuple[int, ...] | None]:
-    """Return worker pressure-level groups for one resolved source record."""
+    selected_pressure_levels: tuple[int, ...] | None,
+) -> tuple[int, ...] | None:
+    """Return the selected pressure levels for one record, or ``None`` for all."""
 
     if _batching_level_type(record) != "pressure":
-        return [None]
-    if pressure_level_group_size <= 0:
-        return [None]
+        return None
 
-    pressure_levels = _record_pressure_levels(record)
-    if not pressure_levels:
-        return [None]
-    return _chunk_pressure_levels(
-        pressure_levels,
-        chunk_size=pressure_level_group_size,
-    )
+    available_pressure_levels = _record_pressure_levels(record)
+    if not available_pressure_levels:
+        return None
+
+    if selected_pressure_levels is None:
+        return None
+
+    selected = set(selected_pressure_levels)
+    return tuple(level for level in available_pressure_levels if level in selected)
 
 
 def _record_to_payload(record: SourceRecord) -> dict[str, Any]:
@@ -353,9 +339,16 @@ def gather_plan(
         bool,
         Param(help="Raise on duplicate GRIB timestamps instead of dropping them"),
     ] = False,
-    pressure_level_group_size: Annotated[
-        int | None,
-        Param(help=("Number of pressure levels to process per worker item. Omit to use the dataset policy.")),
+    pressure_levels: Annotated[
+        str | None,
+        Param(
+            short="-pl",
+            help=(
+                "Comma-separated pressure levels in hPa to remap. Use 'all' to "
+                "retain every available level; "
+                "omit to use the configured selection."
+            ),
+        ),
     ] = None,
     run_dir: RunDir = RunDir(),  # noqa: B008 - Reflow injects the workflow run directory.
 ) -> list[dict[str, Any]]:
@@ -380,10 +373,14 @@ def gather_plan(
     variable_filter = parse_cli_args(var)
     frequencies = parse_cli_freqs(freq)
     parsed_interval = parse_interval(interval)
-    _, requests = selected_requests(
+    source_mapper, requests = selected_requests(
         dataset=dataset,
         variables=variable_filter,
         var_table=DEFAULT_VAR_TABLE,
+    )
+    selected_pressure_levels = parse_pressure_levels(
+        pressure_levels,
+        source_mapper=source_mapper,
     )
     requested_variable_names = tuple(request.name for request in requests)
     source_variables, _special_variables = split_special_variables(requested_variable_names)
@@ -408,7 +405,7 @@ def gather_plan(
         dataset=dataset,
         batch_files=batch_files,
         batch_months=batch_months,
-        pressure_level_group_size=pressure_level_group_size,
+        selected_pressure_levels=selected_pressure_levels,
     )
     worker_output_token = uuid.uuid4().hex
     record_cache_path = Path(run_dir) / f"source-records-{worker_output_token}.json"
@@ -431,7 +428,7 @@ def gather_plan(
         "highest_level_only": highest_level_only,
         "interval": interval,
         "output_path": output_path,
-        "pressure_level_group_size": pressure_level_group_size,
+        "pressure_levels": list(selected_pressure_levels) if selected_pressure_levels is not None else None,
         "requested_variables": list(requested_variable_names),
         "root": root,
         "record_cache_path": str(record_cache_path),

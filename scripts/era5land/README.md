@@ -206,6 +206,11 @@ heal-era5 remap-reflow submit \
   --clean true
 ```
 
+`remap-reflow submit` accepts the same `-pl` / `--pressure-levels` selection
+as direct `remap`: omit it for the configured hPa default, provide a
+comma-separated override, or use `--pressure-levels all` to retain every
+available level.
+
 Reflow coordinates the following stages:
 
 ```mermaid

@@ -11,11 +11,11 @@ requires-python = ">=3.10"
 dependencies = [
     "cfgrib",
     "grid-doctor",
+    "reflow-hpc",
     "rich-argparse",
 ]
 
 [project.optional-dependencies]
-reflow = ["reflow-hpc"]
 dev = ["mypy>=1.11", "pytest>=7", "pytest-cov>=5", "ruff>=0.1", "tox>=4"]
 
 [project.scripts]
@@ -89,7 +89,7 @@ deps =
     pytest>=7
     pytest-cov>=5
 commands =
-    python -m pytest --cov=heal_era5 --cov-report=term-missing --cov-report=html:htmlcov {posargs:tests}
+    python -m pytest -vv -ra --cov=heal_era5 --cov-report=term-missing --cov-report=html:htmlcov {posargs:tests}
 
 [testenv:types]
 description = Run static type checks.
