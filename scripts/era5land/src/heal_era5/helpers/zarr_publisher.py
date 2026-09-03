@@ -510,11 +510,7 @@ def _write_missing_variables(
 ) -> xr.Dataset:
     """Add variables missing from an existing store across the current time axis."""
 
-    missing = [
-        _string_name(name)
-        for name in candidate.data_vars
-        if name not in existing.data_vars
-    ]
+    missing = [_string_name(name) for name in candidate.data_vars if name not in existing.data_vars]
     if not missing:
         return existing
 

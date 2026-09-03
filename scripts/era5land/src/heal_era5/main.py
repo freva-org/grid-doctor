@@ -415,7 +415,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=RichDefaultsHelpFormatter,
     )
     add_dataset_argument(clean_cmd, help_text="Dataset to clean.")
-    add_frequency_argument(clean_cmd)
+    add_frequency_argument(clean_cmd, default=None)
     add_variable_argument(clean_cmd)
     clean_cmd.add_argument(
         "--levels",
@@ -1030,8 +1030,7 @@ def run_fetch(args: argparse.Namespace) -> int:
             )
         for unresolved_record in unresolved:
             print(
-                "unresolved: "
-                f"{unresolved_record.variable} {unresolved_record.frequency}: {unresolved_record.reason}",
+                f"unresolved: {unresolved_record.variable} {unresolved_record.frequency}: {unresolved_record.reason}",
                 file=sys.stderr,
             )
         return 1
@@ -1839,7 +1838,7 @@ def run_clean(args: argparse.Namespace) -> int:
     logger = logging.getLogger(__name__)
     variables = parse_cli_args(args.variables)
     levels = parse_level_selection(args.levels)
-    frequencies = parse_cli_freqs(args.freq)
+    frequencies = parse_cli_freqs(args.freq) if args.freq is not None else ()
 
     if args.truncate_after is not None:
         if variables is not None or levels is not None:

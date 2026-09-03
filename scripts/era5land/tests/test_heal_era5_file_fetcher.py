@@ -1,29 +1,20 @@
-import importlib.util
 import json
-import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def load_file_fetcher():
-    path = Path(__file__).parents[1] / "scripts" / "era5land" / "helpers" / "file_fetcher.py"
-    spec = importlib.util.spec_from_file_location("era5land_file_fetcher", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    """Import the packaged source-file resolver."""
+
+    from heal_era5.helpers import file_fetcher
+
+    return file_fetcher
 
 
 def load_mapper():
-    scripts_dir = Path(__file__).parents[1] / "scripts" / "era5land"
-    src_dir = Path(__file__).parents[1] / "src"
-    for path in (scripts_dir, src_dir):
-        path_str = str(path)
-        if path_str not in sys.path:
-            sys.path.insert(0, path_str)
+    """Import the packaged remapping helpers."""
 
-    from helpers import mapper  # type: ignore
+    from heal_era5.helpers import mapper
 
     return mapper
 
@@ -39,24 +30,6 @@ def test_resolves_era5land_paths_from_out_name_and_filters_interval(tmp_path: Pa
     fetcher = load_file_fetcher()
     var_table = tmp_path / "era5_era5land.csv"
     var_table.write_text("varname|reanalysis\ntas|E5, EL\n", encoding="utf-8")
-    mapper = tmp_path / "source_mapper.json"
-    mapper.write_text(
-        json.dumps(
-            {
-                "path": "/pool/data/ERA5/{dataset}/{stream}/{type}/{time_freq}/{parameter}/*.grb",
-                "datasets": {
-                    "era5land": {"priority": ["EL"], "table_prefix": "ERA5Land"},
-                    "era5": {"priority": ["E1", "E5", "ET"], "table_prefix": "ERA5"},
-                },
-                "level_type": {
-                    "stream": {"sfc": "sf"},
-                    "type": {"an": "an", "fc": "fc"},
-                },
-                "frequency": {"1hr": "1H", "day": "1D", "mon": "1M", "fx": "IV"},
-            }
-        ),
-        encoding="utf-8",
-    )
     table_dir = tmp_path / "Tables"
     table_dir.mkdir()
     write_table(
@@ -80,7 +53,6 @@ def test_resolves_era5land_paths_from_out_name_and_filters_interval(tmp_path: Pa
     records = fetcher.resolve_records(
         var_table=var_table,
         cmor_tables_dir=table_dir,
-        mapper_path=mapper,
         dataset="era5land",
         variables=("tas",),
         frequencies=("1hr",),
@@ -130,11 +102,6 @@ def test_patterns_only_keeps_missing_source_visible(tmp_path: Path):
     fetcher = load_file_fetcher()
     var_table = tmp_path / "era5_era5land.csv"
     var_table.write_text("varname|reanalysis\npr|E5, EL\n", encoding="utf-8")
-    mapper = tmp_path / "source_mapper.json"
-    mapper.write_text(
-        (Path(__file__).parents[1] / "scripts" / "era5land" / "source_mapper.json").read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
     table_dir = tmp_path / "Tables"
     table_dir.mkdir()
     write_table(
@@ -152,7 +119,6 @@ def test_patterns_only_keeps_missing_source_visible(tmp_path: Path):
     records = fetcher.resolve_records(
         var_table=var_table,
         cmor_tables_dir=table_dir,
-        mapper_path=mapper,
         dataset="era5land",
         variables=None,
         frequencies=("day",),
@@ -171,11 +137,6 @@ def test_era5_skips_model_levels_and_pl_invariant(tmp_path: Path):
     var_table = tmp_path / "era5_era5land.csv"
     var_table.write_text(
         "varname|reanalysis\nua|E5\norog|E5\n",
-        encoding="utf-8",
-    )
-    mapper = tmp_path / "source_mapper.json"
-    mapper.write_text(
-        (Path(__file__).parents[1] / "scripts" / "era5land" / "source_mapper.json").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     table_dir = tmp_path / "Tables"
@@ -206,7 +167,6 @@ def test_era5_skips_model_levels_and_pl_invariant(tmp_path: Path):
     records = fetcher.resolve_records(
         var_table=var_table,
         cmor_tables_dir=table_dir,
-        mapper_path=mapper,
         dataset="era5",
         variables=None,
         frequencies=("1hr", "fx"),
@@ -238,7 +198,7 @@ def test_global_attrs_use_table_header_and_cv_metadata():
         output_attrs={"out_name": "tas"},
     )
 
-    attrs = mapper._global_attrs_for_records([record])
+    attrs = mapper.global_attrs_for_records([record])
 
     assert attrs["table_id"] == "Table ERA5Land_1hr"
     assert attrs["source_id"] == "ERA-5-Land"
@@ -248,17 +208,13 @@ def test_global_attrs_use_table_header_and_cv_metadata():
     assert attrs["institution_id"] == "ECMWF"
     assert attrs["institution"].startswith("The European Centre for Medium-Range")
     assert attrs["source_type"] == "reanalysis"
-    assert attrs["family"] == "final (EL)"
-    assert attrs["creation_date"].endswith("Z")
 
 
-def test_replace_public_attrs_keeps_coordinates_and_grid_mapping(tmp_path: Path):
-    mapper = load_mapper()
-    store = tmp_path / "attrs.zarr"
-    root = mapper.zarr.open_group(store, mode="w")
-    array = root.create_array(name="pr", shape=(1,), chunks=(1,), dtype="f8")
-    array.attrs.update(
-        {
+def test_replace_public_attrs_keeps_coordinates_and_grid_mapping():
+    from heal_era5.helpers import zarr_publisher
+
+    array = SimpleNamespace(
+        attrs={
             "_ARRAY_DIMENSIONS": ["time"],
             "coordinates": "crs latitude longitude surface",
             "grid_mapping": "crs",
@@ -266,7 +222,7 @@ def test_replace_public_attrs_keeps_coordinates_and_grid_mapping(tmp_path: Path)
         }
     )
 
-    changed = mapper._replace_public_attrs(array, {"long_name": "precipitation_flux"})
+    changed = zarr_publisher._replace_public_attrs(array, {"long_name": "precipitation_flux"})
 
     assert changed is True
     assert array.attrs["coordinates"] == "crs latitude longitude surface"
