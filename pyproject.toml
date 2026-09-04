@@ -49,6 +49,7 @@ dependencies = [
     "dask[array]",
     "numba",
     "numpy_groupies",
+    "h5netcdf",
 ]
 
 
