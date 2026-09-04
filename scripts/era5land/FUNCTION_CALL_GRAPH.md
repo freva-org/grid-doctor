@@ -58,7 +58,7 @@ flowchart LR
 
     CLEAN --> TRUNCATE
     CLEAN --> DELETE[delete_dataset_root / delete_frequency_directory]:::cleanup
-    CLEAN --> REMOVE[remove_variables_from_frequency_stores]:::cleanup
+    CLEAN --> REMOVE[clean_frequency_stores]:::cleanup
 
     MERGE --> MERGE_STORES[merge_zarr_stores]:::zarr_publisher
     REFLOW --> WORKFLOW[cli.reflow_workflow.main]:::reflow_cli
@@ -185,8 +185,9 @@ flowchart LR
     TRUNC --> TRUNC_FREQ[truncate_frequency_destinations]:::cleanup
     TRUNC_FREQ --> SHRINK[truncate_zarr_store_after]:::cleanup
     SHRINK --> SHRINK_ARRAYS[_shrink_time_arrays_in_place]:::cleanup
-    CLEAN --> REMOVE[remove_variables_from_frequency_stores]:::cleanup
+    CLEAN --> REMOVE[clean_frequency_stores]:::cleanup
     REMOVE --> DROP[drop_variables_from_zarr_store]:::cleanup
+    REMOVE --> DROP_PLEV[_drop_pressure_levels_from_zarr_store]:::cleanup
     CLEAN --> DELETE_LEVEL[delete_frequency_level_stores]:::cleanup
     CLEAN --> DELETE_FREQ[delete_frequency_directory]:::cleanup
 
@@ -469,13 +470,14 @@ flowchart LR
     run_clean --> delete_frequency_level_stores
     delete_frequency_level_stores --> selected_level_destinations
     selected_level_destinations --> existing_level_destinations
-    run_clean --> remove_variables_from_frequency_stores
-    remove_variables_from_frequency_stores --> selected_level_destinations
-    remove_variables_from_frequency_stores --> drop_variables_from_zarr_store
+    run_clean --> clean_frequency_stores
+    clean_frequency_stores --> selected_level_destinations
+    clean_frequency_stores --> drop_variables_from_zarr_store
+    clean_frequency_stores --> _drop_pressure_levels_from_zarr_store
 
     class clean,run_clean,parse_level_selection remapper
     class parse_cli_args,parse_cli_freqs,parse_truncate_after,parse_coarsen_levels supporting
-    class truncate_existing_healpix_stores,delete_dataset_root,delete_frequency_directory,delete_frequency_level_stores,selected_level_destinations,remove_variables_from_frequency_stores,drop_variables_from_zarr_store cleanup
+    class truncate_existing_healpix_stores,delete_dataset_root,delete_frequency_directory,delete_frequency_level_stores,selected_level_destinations,clean_frequency_stores,drop_variables_from_zarr_store,_drop_pressure_levels_from_zarr_store cleanup
     class existing_level_destinations,existing_destinations_for_frequency formatter
     classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000

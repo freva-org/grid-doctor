@@ -12,7 +12,7 @@ import xarray as xr
 import zarr
 
 from .formatter import dataset_output_root, existing_destinations_for_frequency
-from .zarr_publisher import DEFAULT_TARGET_CHUNK_MB
+from .zarr_publisher import _rewrite_dataset_via_temp
 
 LOGGER = logging.getLogger(__name__)
 LEVEL_RE = re.compile(r"level_(?P<level>\d+)\.zarr$")
@@ -161,7 +161,6 @@ def drop_variables_from_zarr_store(
     *,
     variable_names: Iterable[str],
     zarr_format: int = 2,
-    target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
 ) -> tuple[bool, tuple[str, ...], bool]:
     """Remove named data variables from one existing Zarr store.
 
@@ -173,9 +172,6 @@ def drop_variables_from_zarr_store(
         Variable names to remove from the store.
     zarr_format:
         Output Zarr format version used when opening dataset metadata.
-    target_chunk_mb:
-        Unused compatibility parameter retained to keep the cleanup call
-        surface stable while variable removal is handled in place.
 
     Returns
     -------
@@ -212,25 +208,72 @@ def drop_variables_from_zarr_store(
         gc.collect()
 
 
-def remove_variables_from_frequency_stores(
+def _drop_pressure_levels_from_zarr_store(
+    *,
+    destination: str,
+    variable_names: tuple[str, ...] | None,
+    pressure_levels: tuple[int, ...] | None,
+    zarr_format: int = 2,
+) -> bool:
+    """Remove selected hPa levels from one store's pressure-level variables."""
+
+    path = Path(destination)
+    if not path.exists():
+        return False
+
+    requested_variables = set(variable_names) if variable_names is not None else None
+    existing = xr.open_zarr(destination, consolidated=(zarr_format == 2), chunks=None)
+    try:
+        pressure_variables = [
+            name
+            for name, data in existing.data_vars.items()
+            if "plev" in data.dims and (requested_variables is None or name in requested_variables)
+        ]
+        if not pressure_variables or "plev" not in existing.coords:
+            return False
+
+        selected_levels = set(pressure_levels or ())
+        available_levels = {int(value) for value in existing["plev"].values}
+        if pressure_levels is not None and not selected_levels.intersection(available_levels):
+            return False
+        remaining = (
+            []
+            if pressure_levels is None
+            else [value for value in existing["plev"].values if int(value) not in selected_levels]
+        )
+        if pressure_levels is None or not remaining:
+            cleaned = existing.drop_vars(pressure_variables)
+        else:
+            cleaned = existing.sel(plev=remaining)
+
+        if not any("plev" in data.dims for data in cleaned.data_vars.values()):
+            cleaned = cleaned.drop_vars("plev", errors="ignore")
+        _rewrite_dataset_via_temp(
+            cleaned,
+            destination,
+            zarr_format=zarr_format,
+        )
+        return True
+    finally:
+        existing.close()
+        gc.collect()
+
+
+def clean_frequency_stores(
     *,
     dataset: str,
     frequency: str,
-    variable_names: tuple[str, ...],
+    variable_names: tuple[str, ...] | None,
+    pressure_levels: tuple[int, ...] | None = None,
     levels: tuple[int, ...] | None,
     zarr_format: int = 2,
-    target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
     output_path: str | Path | None = None,
     dry_run: bool = False,
 ) -> list[str]:
-    """Remove variables from matching existing level stores for one frequency.
+    """Clean named variables or pressure levels from selected stores for one frequency."""
 
-    Returns
-    -------
-    list[str]
-        Human-readable descriptions of the changes that were applied or would be
-        applied when ``dry_run`` is enabled.
-    """
+    if variable_names is None and pressure_levels is None:
+        raise ValueError("A variable or pressure-level selection is required to clean frequency stores.")
 
     actions: list[str] = []
     for level, destination in selected_level_destinations(
@@ -239,6 +282,23 @@ def remove_variables_from_frequency_stores(
         levels=levels,
         output_path=output_path,
     ):
+        if pressure_levels is not None:
+            selection = ",".join(map(str, pressure_levels))
+            scope = "all pressure-level variables" if variable_names is None else ",".join(variable_names)
+            if dry_run:
+                actions.append(
+                    f"would remove pressure levels {selection} from {scope} in {destination} (level {level})"
+                )
+            elif _drop_pressure_levels_from_zarr_store(
+                destination=str(destination),
+                variable_names=variable_names,
+                pressure_levels=pressure_levels,
+                zarr_format=zarr_format,
+            ):
+                actions.append(f"❌ removed pressure levels {selection} from {destination} (level {level})")
+            continue
+
+        assert variable_names is not None
         if dry_run:
             actions.append(f"would remove variables {','.join(variable_names)} from {destination} (level {level})")
             continue
@@ -247,14 +307,13 @@ def remove_variables_from_frequency_stores(
             str(destination),
             variable_names=variable_names,
             zarr_format=zarr_format,
-            target_chunk_mb=target_chunk_mb,
         )
         if not changed:
             continue
         if deleted_store:
             actions.append(f"❌ deleted {destination} after removing all variables: {','.join(removed)}")
         else:
-            actions.append(f"removed variables {','.join(removed)} from {destination} (level {level})")
+            actions.append(f"❌ removed variables {','.join(removed)} from {destination} (level {level})")
     return actions
 
 

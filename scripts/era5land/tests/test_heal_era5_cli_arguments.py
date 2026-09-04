@@ -111,6 +111,15 @@ def test_main_parser_orders_commands_and_accepts_remap_modes():
     pressure_args = parser.parse_args(["remap", "-pl", "1000,850,500"])
     assert pressure_args.pressure_levels == "1000,850,500"
 
+    clean_pressure_args = parser.parse_args(["clean", "--pressure-levels", "1000,850"])
+    assert clean_pressure_args.pressure_levels == "1000,850"
+
+    clean_args = parser.parse_args(["clean"])
+    assert not hasattr(clean_args, "pressure_levels")
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["clean", "--var", "ta", "--pressure-levels", "1000"])
+
     merge_args = parser.parse_args(["merge", "--source", "/tmp/source", "--output-path", "/tmp/output"])
     assert merge_args.dataset is None
     assert merge_args.freq is None

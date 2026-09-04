@@ -454,11 +454,23 @@ def _merge_time_updates(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Datas
 
 
 def _requires_vertical_rewrite(existing: xr.Dataset, candidate: xr.Dataset) -> bool:
-    """Return True when a candidate updates only a subset of vertical levels."""
+    """Return whether existing and candidate have different sets of pressure levels."""
 
     if "plev" not in existing.indexes or "plev" not in candidate.indexes:
         return False
-    return not candidate.indexes["plev"].equals(existing.indexes["plev"])
+    existing_levels = existing.indexes["plev"].sort_values()
+    candidate_levels = candidate.indexes["plev"].sort_values()
+    return not candidate_levels.equals(existing_levels)
+
+
+def _align_vertical_levels_to_existing(existing: xr.Dataset, candidate: xr.Dataset) -> xr.Dataset:
+    """Reorder matching candidate pressure levels to the existing store order."""
+
+    if _requires_vertical_rewrite(existing, candidate):
+        return candidate
+    if "plev" not in existing.indexes or "plev" not in candidate.indexes:
+        return candidate
+    return candidate.sel(plev=existing["plev"])
 
 
 def _contiguous_slices(indices: np.ndarray) -> list[slice]:
@@ -685,6 +697,8 @@ def update_zarr_store(
             )
             _sync_dataset_metadata(dataset, destination)
             return
+
+        dataset = _align_vertical_levels_to_existing(existing, dataset)
 
         if "time" not in dataset.dims or "time" not in existing.dims:
             missing = [name for name in dataset.data_vars if name not in existing.data_vars]

@@ -532,6 +532,19 @@ heal-era5 clean \
   --levels 8-6
 ```
 
+Remove selected pressure levels from every pressure-level variable while
+leaving surface and fixed-level variables unchanged:
+
+```console
+heal-era5 clean \
+  --freq 1hr \
+  --pressure-levels 1000,850 \
+  --levels 8-6
+```
+
+`--pressure-levels` and `--var` are mutually exclusive. Use `--var` to remove
+complete variables; here, `--levels` still selects HEALPix zoom-level stores.
+
 Delete whole level stores:
 
 ```console
@@ -830,36 +843,44 @@ If stderr is attached to an interactive terminal, these stages are colorised.
 
 ## Development Checks
 
-Run the full package suite with terminal and HTML coverage reports:
+We use `tox` to keep the `test`, `lint`, and `types` checks in separate,
+isolated environments with their required dependencies. 
 
-```console
-tox -e test
-```
+- Run the full package suite with terminal and HTML coverage reports:
 
-Open `htmlcov/index.html` in a browser to inspect line and branch coverage.
-Run the source-resolution tests alone with:
+  ```console
+  tox -e test
+  ```
 
-```console
-python3 -m pytest tests/test_heal_era5_file_fetcher.py
-```
+  Open `htmlcov/index.html` in a browser to inspect line and branch coverage.
+  Run only a particular testfile with e.g.:
 
-Lint the current ERA5-Land script set with:
+  ```console
+  tox -e test -- tests/test_heal_era5_reflow.py
+  ```
 
-```console
-python3 -m ruff check src tests
-```
+- Verify linting and formatting with:
 
-Apply auto-fixable Ruff changes with:
+  ```console
+  tox -e lint
+  ```
 
-```console
-python3 -m ruff check --fix src tests
-```
+  Apply auto-fixable lint changes and format the code with:
 
-Format the ERA5-Land files with Ruff format:
+  ```console
+  python3 -m ruff check --fix src tests # lint rules
+  python3 -m ruff format src tests # formatting
+  ```
 
-```console
-python3 -m ruff format scripts/era5land tests/test_era5land_file_fetcher.py
-```
+- Run static type checks with:
+
+  ```console
+  tox -e types
+  ```
+
+  Static type errors reported by tools such as `mypy` generally need to be
+  fixed manually.
+
 
 You can also use `python3 -m py_compile` for a fast syntax-only check on the
 script files when you do not want to run the workflow itself.

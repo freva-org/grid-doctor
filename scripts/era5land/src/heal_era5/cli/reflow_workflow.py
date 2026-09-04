@@ -408,7 +408,7 @@ def gather_plan(
         selected_pressure_levels=selected_pressure_levels,
     )
     worker_output_token = uuid.uuid4().hex
-    record_cache_path = Path(run_dir) / f"source-records-{worker_output_token}.json"
+    record_cache_path = Path(str(run_dir)) / f"source-records-{worker_output_token}.json"
     record_cache_path.parent.mkdir(parents=True, exist_ok=True)
     with record_cache_path.open("w", encoding="utf-8") as handle:
         json.dump(
@@ -473,7 +473,7 @@ def remap_variable_frequency(
     record = records[str(payload["record_key"])]
     record = record._replace(files=tuple(str(path) for path in item["files"]))
     temp_output_root = _worker_output_root(
-        Path(run_dir),
+        Path(str(run_dir)),
         int(item["item_index"]),
         str(item["frequency"]),
         str(item["variable"]),
@@ -598,7 +598,7 @@ def finalize_outputs(
     for result in worker_results:
         shutil.rmtree(Path(str(result["output_root"])), ignore_errors=True)
 
-    worker_root = Path(run_dir) / "worker-output"
+    worker_root = Path(str(run_dir)) / "worker-output"
     try:
         worker_root.rmdir()
     except OSError:

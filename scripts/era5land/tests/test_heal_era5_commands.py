@@ -237,6 +237,91 @@ def test_clean_deletes_the_dataset_root(monkeypatch):
     assert calls == [{"dataset": "era5land", "output_path": Path("/tmp/output"), "dry_run": True}]
 
 
+def test_clean_removes_selected_pressure_levels(monkeypatch):
+    from heal_era5.helpers import cleanup
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        cleanup,
+        "clean_frequency_stores",
+        lambda **kwargs: calls.append(kwargs) or ["removed levels"],
+    )
+
+    result = main.run_clean(
+        Namespace(
+            variables=None,
+            levels="8-7",
+            pressure_levels="1000,850",
+            freq="1hr",
+            dataset="era5land",
+            output_path=None,
+            truncate_after=None,
+            dry_run=True,
+        )
+    )
+
+    assert result == 0
+    assert calls == [
+        {
+            "dataset": "era5land",
+            "frequency": "1hr",
+            "variable_names": None,
+            "pressure_levels": (1000, 850),
+            "levels": (8, 7),
+            "output_path": None,
+            "dry_run": True,
+        }
+    ]
+
+
+def test_clean_pressure_levels_cannot_be_combined_with_variables():
+    with pytest.raises(ValueError, match="cannot be combined"):
+        main.run_clean(
+            Namespace(
+                variables="ta",
+                levels=None,
+                pressure_levels="1000",
+                freq="1hr",
+                dataset="era5land",
+                output_path=None,
+                truncate_after=None,
+                dry_run=True,
+            )
+        )
+
+
+def test_clean_pressure_levels_rejects_all():
+    with pytest.raises(ValueError, match="does not accept 'all'"):
+        main.run_clean(
+            Namespace(
+                variables=None,
+                levels=None,
+                pressure_levels="all",
+                freq="1hr",
+                dataset="era5land",
+                output_path=None,
+                truncate_after=None,
+                dry_run=True,
+            )
+        )
+
+
+def test_clean_pressure_levels_cannot_be_combined_with_truncation():
+    with pytest.raises(ValueError, match="--pressure-levels"):
+        main.run_clean(
+            Namespace(
+                variables=None,
+                levels=None,
+                pressure_levels="850",
+                freq="1hr",
+                dataset="era5land",
+                output_path=None,
+                truncate_after="2024-01-01",
+                dry_run=False,
+            )
+        )
+
+
 # =============================================================================
 # Tests for run_merge
 # =============================================================================

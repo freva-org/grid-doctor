@@ -327,9 +327,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         metavar="HPA",
         help=(
-            "Comma-separated pressure levels in hPa to remap for pressure-level variables. "
-            "Use 'all' to retain every available level; when omitted, use the configured selection "
-            f"({','.join(str(level) for level in source_mapper['remap_defaults']['pressure_levels_hpa'])} hPa)."
+            "Override the configured pressure-level selection. "
+            "Provide comma-separated levels in hPa for pressure-level variables; "
+            "use 'all' to remap every level available in the input files. "
+            f"(default: [italic]{','.join(str(level) for level in source_mapper['remap_defaults']['pressure_levels_hpa'])}[/italic])"
         ),
     )
     remap_cmd.add_argument(
@@ -431,7 +432,8 @@ def build_parser() -> argparse.ArgumentParser:
     clean_cmd.set_defaults(_command_parser=clean_cmd)
     add_dataset_argument(clean_cmd, help_text="Dataset to clean.")
     add_frequency_argument(clean_cmd, default=None)
-    add_variable_argument(clean_cmd)
+    clean_selection = clean_cmd.add_mutually_exclusive_group()
+    add_variable_argument(clean_selection, default=None)  # type: ignore[arg-type]
     clean_cmd.add_argument(
         "--levels",
         default=None,
@@ -440,6 +442,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Optional comma-separated or descending-range level selection such as "
             "8,0 or 8-5. When omitted, all existing levels for each selected "
             "frequency are targeted."
+        ),
+    )
+    clean_selection.add_argument(
+        "-pl",
+        "--pressure-levels",
+        default=argparse.SUPPRESS,
+        metavar="HPA",
+        help=(
+            "Optional comma-separated pressure level subset (in hPa) to remove from "
+            "every pressure-level variable. Mutually exclusive with --var."
         ),
     )
     clean_cmd.add_argument(
@@ -1882,10 +1894,10 @@ def run_clean(args: argparse.Namespace) -> int:
     """Clean existing HEALPix outputs at variable, level, frequency, or root scope."""
 
     from .helpers.cleanup import (
+        clean_frequency_stores,
         delete_dataset_root,
         delete_frequency_directory,
         delete_frequency_level_stores,
-        remove_variables_from_frequency_stores,
         truncate_existing_healpix_stores,
     )
 
@@ -1893,10 +1905,21 @@ def run_clean(args: argparse.Namespace) -> int:
     variables = parse_cli_args(args.variables)
     levels = parse_level_selection(args.levels)
     frequencies = parse_cli_freqs(args.freq) if args.freq is not None else ()
+    pressure_levels_arg = getattr(args, "pressure_levels", None)
+    if pressure_levels_arg == "all":
+        raise ValueError("--pressure-levels does not accept 'all' for clean; omit it to remove the complete variable.")
+    pressure_levels = (
+        parse_pressure_levels(pressure_levels_arg, source_mapper=load_json(DEFAULT_SOURCE_MAPPER))
+        if pressure_levels_arg is not None
+        else None
+    )
+
+    if pressure_levels_arg is not None and variables is not None:
+        raise ValueError("--pressure-levels cannot be combined with --var.")
 
     if args.truncate_after is not None:
-        if variables is not None or levels is not None:
-            raise ValueError("--truncate-after cannot be combined with --var or --levels.")
+        if variables is not None or pressure_levels is not None or levels is not None:
+            raise ValueError("--truncate-after cannot be combined with --var, --pressure-levels, or --levels.")
         if args.dry_run:
             raise ValueError("--truncate-after does not support --dry-run.")
 
@@ -1918,7 +1941,7 @@ def run_clean(args: argparse.Namespace) -> int:
 
     actions: list[str] = []
 
-    if variables is None and levels is None and args.freq is None:
+    if variables is None and pressure_levels is None and levels is None and args.freq is None:
         actions.extend(
             delete_dataset_root(
                 dataset=args.dataset,
@@ -1926,7 +1949,7 @@ def run_clean(args: argparse.Namespace) -> int:
                 dry_run=args.dry_run,
             )
         )
-    elif variables is None and levels is None:
+    elif variables is None and pressure_levels is None and levels is None:
         for frequency in frequencies:
             actions.extend(
                 delete_frequency_directory(
@@ -1938,12 +1961,13 @@ def run_clean(args: argparse.Namespace) -> int:
             )
     else:
         for frequency in frequencies:
-            if variables:
+            if variables is not None or pressure_levels is not None:
                 actions.extend(
-                    remove_variables_from_frequency_stores(
+                    clean_frequency_stores(
                         dataset=args.dataset,
                         frequency=frequency,
                         variable_names=variables,
+                        pressure_levels=pressure_levels,
                         levels=levels,
                         output_path=args.output_path,
                         dry_run=args.dry_run,
