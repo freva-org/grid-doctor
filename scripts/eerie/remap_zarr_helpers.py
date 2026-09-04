@@ -28,6 +28,31 @@ def _fill_value_for_dtype(dtype):
     return None
 
 
+def _to_json_attr_value(value):
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return [_to_json_attr_value(v) for v in value.tolist()]
+    if isinstance(value, (list, tuple)):
+        return [_to_json_attr_value(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _to_json_attr_value(v) for k, v in value.items()}
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return str(value)
+
+
+def _source_dataset_attrs_json(source_ds: xr.Dataset) -> dict:
+    return {str(k): _to_json_attr_value(v) for k, v in dict(source_ds.attrs).items()}
+
+
 # =============================================================================
 # time encode/decode helpers
 # =============================================================================
@@ -90,7 +115,6 @@ def _prepare_time_storage(time_coord: xr.DataArray):
         }
         return values, np.int64, attrs
 
-    # numeric fallback
     raw = np.asarray(time_coord.values)
     attrs = {"_ARRAY_DIMENSIONS": ["time"], "axis": "T"}
     for key in ["units", "calendar", "long_name", "standard_name"]:
@@ -144,6 +168,14 @@ def _read_existing_time_decoded(store_path: str | Path) -> np.ndarray:
 # naming
 # =============================================================================
 
+def make_multiscales_root_path(*, out_root: str | Path) -> str:
+    out_root = Path(out_root)
+    out_root_str = str(out_root)
+    if out_root_str.endswith(".zarr"):
+        return out_root_str
+    return f"{out_root_str}.zarr"
+
+
 def make_zoom_store_path(
     *,
     out_root: str | Path,
@@ -152,7 +184,91 @@ def make_zoom_store_path(
     stat_tag: str,
     zoom: int,
 ) -> str:
-    return str(Path(out_root) / f"{dataset_id}_{frequency_tag}_{stat_tag}_{zoom}.zarr")
+    # dataset_id/frequency_tag/stat_tag kept in signature for API compatibility
+    del dataset_id, frequency_tag, stat_tag
+    return str(Path(make_multiscales_root_path(out_root=out_root)) / "multiscales" / f"zoom_{zoom}")
+
+
+# =============================================================================
+# multiscales / GeoZarr helpers
+# =============================================================================
+
+def _multiscales_convention_descriptor() -> list[dict]:
+    return [
+        {
+            "uuid": "d35379db-88df-4056-af3a-620245f8e347",
+            "name": "multiscales",
+            "schema_url": "https://raw.githubusercontent.com/zarr-conventions/multiscales/refs/tags/v1/schema.json",
+            "spec_url": "https://github.com/zarr-conventions/multiscales/blob/v1/README.md",
+        }
+    ]
+
+
+def _build_multiscales_layout(
+    *,
+    max_zoom: int,
+    min_zoom: int,
+) -> list[dict]:
+    layout = []
+    previous_asset = None
+
+    for zoom in range(int(max_zoom), int(min_zoom) - 1, -1):
+        asset = f"zoom_{zoom}"
+        entry = {"asset": asset}
+        if previous_asset is not None:
+            entry["derived_from"] = previous_asset
+            entry["transform"] = {"scale": [2.0]}
+        layout.append(entry)
+        previous_asset = asset
+
+    return layout
+
+
+def _ensure_multiscales_root_group(
+    *,
+    root_store_path: str | Path,
+    source_ds: xr.Dataset,
+    max_zoom: int,
+    min_zoom: int,
+    pyramid_agg: str,
+    dataset_id: str | None = None,
+    frequency_tag: str | None = None,
+    stat_tag: str | None = None,
+    nest: bool = True,
+) -> None:
+    root_store_path = Path(root_store_path)
+    source_attrs_json = _source_dataset_attrs_json(source_ds)
+
+    root = zarr.open_group(root_store_path, mode="a")
+    root_attrs = {
+        "dataset_id": dataset_id,
+        "frequency": frequency_tag,
+        "statistic": stat_tag,
+        "healpix_nest": bool(nest),
+        "healpix_zoom_min": int(min_zoom),
+        "healpix_zoom_max": int(max_zoom),
+        "source_dataset_attrs": source_attrs_json,
+    }
+    root.attrs.update({k: v for k, v in root_attrs.items() if v is not None})
+
+    multiscales_group_path = root_store_path / "multiscales"
+    multiscales_group = zarr.open_group(multiscales_group_path, mode="a")
+
+    multiscales_attrs = {
+        "dataset_id": dataset_id,
+        "frequency": frequency_tag,
+        "statistic": stat_tag,
+        "healpix_nest": bool(nest),
+        "healpix_zoom_min": int(min_zoom),
+        "healpix_zoom_max": int(max_zoom),
+        "source_dataset_attrs": source_attrs_json,
+        "zarr_conventions": _multiscales_convention_descriptor(),
+        "multiscales": {
+            "resampling_method": str(pyramid_agg),
+            "layout": _build_multiscales_layout(max_zoom=max_zoom, min_zoom=min_zoom),
+        },
+    }
+    multiscales_group.attrs.update({k: v for k, v in multiscales_attrs.items() if v is not None})
 
 
 # =============================================================================
@@ -282,7 +398,6 @@ def _ensure_store_base(
 
     source_time = _decode_time_like(time_coord)
 
-    # ensure time coordinate exists and matches
     if "time" not in root:
         _write_time_coordinate(store_path, time_coord)
     else:
@@ -294,7 +409,6 @@ def _ensure_store_base(
                 f"source: len={source_time.size}, first={source_time[0]}, last={source_time[-1]}"
             )
 
-    # ensure crs exists
     root = zarr.open_group(store_path, mode="a")
     if "crs" not in root:
         arr = root.create_dataset(
@@ -313,18 +427,58 @@ def _ensure_store_base(
         arr.attrs.update(_crs_attrs_for_healpix(zoom=zoom, nest=nest))
 
 
+def _ensure_1d_coord_array_exists(
+    *,
+    store_path: str | Path,
+    coord_name: str,
+    values,
+    attrs: dict | None = None,
+) -> None:
+    """
+    Create a 1D coordinate array manually with zarr-python if it does not exist yet.
+    Intended for passthrough singleton dims like height_2.
+    """
+    store_path = Path(store_path)
+    root = zarr.open_group(store_path, mode="a")
+
+    if coord_name in root:
+        return
+
+    values = np.asarray(values)
+    arr = root.create_dataset(
+        coord_name,
+        shape=values.shape,
+        chunks=values.shape,
+        dtype=values.dtype,
+        compressor=_blosc_lz4(),
+        fill_value=None,
+        order="C",
+        overwrite=False,
+        dimension_separator="/",
+    )
+    arr[:] = values
+    arr.attrs["_ARRAY_DIMENSIONS"] = [coord_name]
+    if attrs:
+        arr.attrs.update(dict(attrs))
+
+
 def _ensure_var_array_exists(
     *,
     store_path: str | Path,
     var_name: str,
-    ntime: int,
-    ncell: int,
+    shape: tuple[int, ...],
+    dims: tuple[str, ...],
     dtype,
     attrs: dict,
     cell_chunk: int = 65536,
 ) -> None:
     """
-    Create an empty 2D array (time, cell) manually with zarr-python.
+    Create an empty N-D variable manually with zarr-python.
+
+    Expected use here:
+      - (time, cell)
+      - (time, singleton_dim, cell)
+      - more singleton passthrough dims are okay
     """
     store_path = Path(store_path)
     root = zarr.open_group(store_path, mode="a")
@@ -332,12 +486,20 @@ def _ensure_var_array_exists(
         return
 
     dtype = np.dtype(dtype)
-    cell_chunk = min(int(cell_chunk), int(ncell))
+    shape = tuple(int(s) for s in shape)
+    dims = tuple(dims)
+
+    if len(shape) != len(dims):
+        raise ValueError(f"shape/dims mismatch for {var_name!r}: shape={shape}, dims={dims}")
+
+    chunks = list(shape)
+    chunks[0] = 1
+    chunks[-1] = min(int(cell_chunk), int(shape[-1]))
 
     arr = root.create_dataset(
         var_name,
-        shape=(int(ntime), int(ncell)),
-        chunks=(1, cell_chunk),
+        shape=shape,
+        chunks=tuple(chunks),
         dtype=dtype,
         compressor=_blosc_lz4(),
         fill_value=_fill_value_for_dtype(dtype),
@@ -345,8 +507,83 @@ def _ensure_var_array_exists(
         overwrite=False,
         dimension_separator="/",
     )
-    arr.attrs["_ARRAY_DIMENSIONS"] = ["time", "cell"]
+    arr.attrs["_ARRAY_DIMENSIONS"] = list(dims)
     arr.attrs.update(attrs)
+
+
+# =============================================================================
+# dimension detection helpers
+# =============================================================================
+
+def _detect_spatial_and_passthrough_dims(da_src: xr.DataArray, src_n_face: int):
+    """
+    Detect the source spatial dimension from the prepared source-face count.
+
+    Rules:
+      - 'time' must exist
+      - exactly one dimension must have size == src_n_face -> source face dim
+      - all remaining non-time, non-spatial dims are passthrough dims
+      - passthrough dims must currently be singleton (size == 1)
+
+    Returns
+    -------
+    src_face_dim : str
+    passthrough_dims : list[str]
+    passthrough_sizes : dict[str, int]
+    """
+    if "time" not in da_src.dims:
+        raise ValueError(f"{da_src.name!r} must have a 'time' dimension")
+
+    candidate_face_dims = [
+        d for d in da_src.dims
+        if d != "time" and int(da_src.sizes[d]) == int(src_n_face)
+    ]
+    if len(candidate_face_dims) != 1:
+        raise ValueError(
+            f"{da_src.name!r}: could not uniquely identify source face dimension from "
+            f"dims={da_src.dims} with sizes={dict(da_src.sizes)} and src_n_face={src_n_face}. "
+            f"Expected exactly one non-time dim with size == src_n_face."
+        )
+
+    src_face_dim = candidate_face_dims[0]
+    passthrough_dims = [d for d in da_src.dims if d not in ("time", src_face_dim)]
+    passthrough_sizes = {d: int(da_src.sizes[d]) for d in passthrough_dims}
+
+    bad = {d: n for d, n in passthrough_sizes.items() if n != 1}
+    if bad:
+        raise ValueError(
+            f"{da_src.name!r}: only singleton passthrough dims are currently supported. "
+            f"Found non-singleton extra dims: {bad}. "
+            f"Supported examples: (time, height_2, ncells) with height_2=1."
+        )
+
+    return src_face_dim, passthrough_dims, passthrough_sizes
+
+
+def _ensure_passthrough_coords_exist(
+    *,
+    store_path: str | Path,
+    source_ds: xr.Dataset,
+    passthrough_dims: list[str],
+) -> None:
+    """
+    Ensure singleton passthrough coordinates exist in the output store.
+    """
+    for d in passthrough_dims:
+        if d in source_ds.coords:
+            coord_da = source_ds.coords[d]
+            values = np.asarray(coord_da.values)
+            attrs = dict(coord_da.attrs)
+        else:
+            values = np.arange(int(source_ds.sizes[d]), dtype=np.int64)
+            attrs = {}
+
+        _ensure_1d_coord_array_exists(
+            store_path=store_path,
+            coord_name=d,
+            values=values,
+            attrs=attrs,
+        )
 
 
 # =============================================================================
@@ -504,8 +741,14 @@ def remap_variable_to_zoom_pyramid_stores(
     resume: bool = True,
     overwrite: bool = False,
     check_conservation_first_step: bool = False,
-    consolidate_at_end: bool = True,
+    consolidate_at_end: bool = False,
 ) -> None:
+    if not bool(prepared_max_zoom.nest):
+        raise ValueError(
+            "Pyramid construction by child aggregation requires nested HEALPix ordering "
+            "(nest=True)."
+        )
+
     if not bool(prepared_max_zoom.nest):
         raise ValueError(
             "Pyramid construction by child aggregation requires nested HEALPix ordering "
@@ -516,15 +759,9 @@ def remap_variable_to_zoom_pyramid_stores(
         raise KeyError(f"{var_name!r} not found in source dataset")
 
     da_src = source_ds[var_name]
-    if "time" not in da_src.dims:
-        raise ValueError(f"{var_name!r} must have a 'time' dimension")
-
-    other_dims = [d for d in da_src.dims if d != "time"]
-    if len(other_dims) != 1:
-        raise ValueError(
-            f"{var_name!r} currently only supported for 2D variables (time, ncells). "
-            f"Got dims={da_src.dims}"
-        )
+    src_face_dim, passthrough_dims, passthrough_sizes = _detect_spatial_and_passthrough_dims(
+        da_src, prepared_max_zoom.src_n_face
+    )
 
     ntime = int(da_src.sizes["time"])
     out_dtype = np.dtype(da_src.dtype)
@@ -532,9 +769,12 @@ def remap_variable_to_zoom_pyramid_stores(
     agg_fn, agg_name = _resolve_pyramid_aggregator(pyramid_agg)
     zooms = list(range(int(max_zoom), int(min_zoom) - 1, -1))
 
+    out_dims = ("time", *passthrough_dims, "cell")
+
     for zoom in zooms:
         store_path = store_paths[zoom]
         ncell = int(12 * (4**zoom))
+        out_shape = (ntime, *[passthrough_sizes[d] for d in passthrough_dims], ncell)
 
         _ensure_store_base(
             store_path=store_path,
@@ -546,11 +786,17 @@ def remap_variable_to_zoom_pyramid_stores(
             stat_tag=stat_tag,
         )
 
+        _ensure_passthrough_coords_exist(
+            store_path=store_path,
+            source_ds=source_ds,
+            passthrough_dims=passthrough_dims,
+        )
+
         _ensure_var_array_exists(
             store_path=store_path,
             var_name=var_name,
-            ntime=ntime,
-            ncell=ncell,
+            shape=out_shape,
+            dims=out_dims,
             dtype=out_dtype,
             attrs=_normalize_var_attrs(
                 da_src,
@@ -570,11 +816,15 @@ def remap_variable_to_zoom_pyramid_stores(
             root = zarr.open_group(store_paths[zoom], mode="a")
             if var_name in root.array_keys():
                 del root[var_name]
+
+            ncell = int(12 * (4**zoom))
+            out_shape = (ntime, *[passthrough_sizes[d] for d in passthrough_dims], ncell)
+
             _ensure_var_array_exists(
                 store_path=store_paths[zoom],
                 var_name=var_name,
-                ntime=ntime,
-                ncell=int(12 * (4**zoom)),
+                shape=out_shape,
+                dims=out_dims,
                 dtype=out_dtype,
                 attrs=_normalize_var_attrs(
                     da_src,
@@ -604,12 +854,32 @@ def remap_variable_to_zoom_pyramid_stores(
         f"{start_idx}/{ntime}"
     )
     print(
+        f"{Path(max_store_path).name} :: {var_name}: source dims={da_src.dims}, "
+        f"src_face_dim={src_face_dim}, passthrough_dims={passthrough_dims}"
+    )
+    print(
         f"{Path(max_store_path).name} :: {var_name}: output dtype = {out_dtype}, "
-        f"chunks=(1, {min(cell_chunk, max_ncell)}), pyramid={max_zoom}->{min_zoom}, agg={agg_name}"
+        f"chunks=(1, ..., {min(cell_chunk, max_ncell)}), pyramid={max_zoom}->{min_zoom}, agg={agg_name}"
+    )
+
+    squeeze_indexers = {d: 0 for d in passthrough_dims}
+
+    pbar = tqdm(
+        total=ntime,
+        desc=f"{Path(max_store_path).name} :: {var_name}",
+        initial=start_idx,
+        dynamic_ncols=True,
+        leave=True,
     )
 
     for i in range(start_idx, ntime):
-        da_i = da_src.isel(time=i).squeeze(drop=True).compute()
+        da_i = da_src.isel(time=i, **squeeze_indexers).squeeze(drop=True).compute()
+
+        if da_i.dims != (src_face_dim,):
+            raise ValueError(
+                f"{var_name!r}: expected 1D field after squeezing singleton passthrough dims, "
+                f"got dims={da_i.dims}, shape={da_i.shape}"
+            )
 
         res_hi = rnh_module.apply_prepared_healpix_regridder(
             prepared_max_zoom,
@@ -629,12 +899,14 @@ def remap_variable_to_zoom_pyramid_stores(
 
         for zoom in zooms:
             vals_i = vals_by_zoom[zoom]
+            arr_shape = (1, *[passthrough_sizes[d] for d in passthrough_dims], vals_i.size)
+            vals_out = vals_i.reshape(arr_shape)
 
             ds_i = xr.Dataset(
                 {
                     var_name: xr.DataArray(
-                        vals_i[None, :],
-                        dims=("time", "cell"),
+                        vals_out,
+                        dims=out_dims,
                     )
                 }
             )
@@ -655,11 +927,10 @@ def remap_variable_to_zoom_pyramid_stores(
             completed=(i + 1 == ntime),
         )
 
-        print(
-            f"{Path(max_store_path).name} :: {var_name}: wrote {i+1}/{ntime} "
-            f"to zooms {max_zoom}->{min_zoom}",
-            flush=True,
-        )
+        pbar.update(1)
+        pbar.set_postfix_str(f"time={i+1}/{ntime}")
+
+    pbar.close()
 
     if consolidate_at_end:
         for zoom in zooms:
@@ -705,6 +976,8 @@ def remap_variables_to_zoom_pyramid_stores(
             "Pyramid construction by child aggregation requires nest=True."
         )
 
+    multiscales_root_path = make_multiscales_root_path(out_root=out_root)
+
     zooms = list(range(int(max_zoom), int(min_zoom) - 1, -1))
     store_paths = {
         zoom: make_zoom_store_path(
@@ -718,10 +991,21 @@ def remap_variables_to_zoom_pyramid_stores(
     }
 
     if rebuild_stores:
-        for zoom in zooms:
-            p = Path(store_paths[zoom])
-            if p.exists():
-                shutil.rmtree(p)
+        p = Path(multiscales_root_path)
+        if p.exists():
+            shutil.rmtree(p)
+
+    _ensure_multiscales_root_group(
+        root_store_path=multiscales_root_path,
+        source_ds=source_ds,
+        max_zoom=int(max_zoom),
+        min_zoom=int(min_zoom),
+        pyramid_agg=str(pyramid_agg),
+        dataset_id=dataset_id,
+        frequency_tag=frequency_tag,
+        stat_tag=stat_tag,
+        nest=nest,
+    )
 
     print(f"\n=== PREPARE MAX ZOOM {max_zoom} ===")
     prepared_max = prepare_native_regridder_for_zoom(
@@ -756,8 +1040,11 @@ def remap_variables_to_zoom_pyramid_stores(
             resume=resume,
             overwrite=overwrite_variables,
             check_conservation_first_step=check_conservation_first_step,
-            consolidate_at_end=consolidate_at_end,
+            consolidate_at_end=False,
         )
+
+    if consolidate_at_end:
+        zarr.consolidate_metadata(multiscales_root_path)
 
     return prepared_max, store_paths
 
