@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 def chunk_for_target_store_size(
     *,
     level: int,
-    dtype: str | np.dtype = "float32",
+    dtype: str | np.dtype[Any] = "float32",
     target_stored_mib: float = 16.0,
     compression_ratio: float = 2.0,
     access: Literal["time_series", "map"] = "map",
