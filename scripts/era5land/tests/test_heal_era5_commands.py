@@ -464,12 +464,47 @@ def test_merge_uses_dataset_target_without_deleting_a_missing_directory(monkeypa
             "frequency": "day",
             "variable": ("tas",),
             "levels": (5, 4),
+            "pressure_levels": None,
             "interval": (main.date(2024, 1, 1), main.date(2024, 1, 31)),
             "clean": True,
             "zarr_format": 3,
             "target_chunk_mb": 16,
         }
     ]
+
+
+def test_merge_parses_pressure_level_selection(monkeypatch, tmp_path):
+    """Merge should pass an explicit pressure-level subset to the publisher."""
+
+    source = tmp_path / "worker"
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(main, "expand_source_dirs", lambda values: [source])
+    monkeypatch.setitem(
+        sys.modules,
+        "heal_era5.helpers.zarr_publisher",
+        SimpleNamespace(merge_zarr_stores=lambda **kwargs: calls.append(kwargs) or []),
+    )
+
+    assert (
+        main.run_merge(
+            Namespace(
+                variables=None,
+                dataset=None,
+                freq=None,
+                source_dirs=[str(source)],
+                chunk_size=16,
+                levels=None,
+                pressure_levels="1000,850",
+                interval=None,
+                output_path=str(tmp_path / "merged"),
+                from_scratch=False,
+                clean=False,
+                zarr_format=2,
+            )
+        )
+        == 0
+    )
+    assert calls[0]["pressure_levels"] == (1000, 850)
 
 
 def test_merge_returns_success_when_no_stores_match(monkeypatch, tmp_path):

@@ -435,6 +435,22 @@ heal-era5 merge \
   --output-path /scratch/$USER/era5land-final/era5
 ```
 
+`--levels` selects HEALPix zoom stores. To select values within the pressure
+coordinate of those stores, use `--pressure-levels` (or `-pl`) with
+comma-separated hPa values. When it is omitted, or set to `all`, every
+available pressure level is merged. Variables without a `plev` coordinate are
+unaffected:
+
+```console
+heal-era5 merge \
+  --source /scratch/$USER/era5land-reflow/merged \
+  --dataset era5 \
+  --freq 1hr \
+  --var ta \
+  --pressure-levels 1000,850,500 \
+  --output-path /scratch/$USER/era5land-final/era5
+```
+
 Use `--interval START,END` to restrict time-dependent data to an inclusive
 date interval. Dates may be specified as `YYYY`, `YYYYMM`, or `YYYYMMDD`;
 static `fx` stores are unaffected:
@@ -448,9 +464,10 @@ heal-era5 merge \
   --output-path /scratch/$USER/era5land-final/era5
 ```
 
-`--levels` and `--interval` can be combined. With `--clean`, only the selected
-levels and interval are written to the touched stores; without `--clean`, the
-interval is merged incrementally while data outside it is retained.
+`--levels`, `--pressure-levels`, and `--interval` can be combined. With
+`--clean`, only the selected data is written to the touched stores; without
+`--clean`, selected data is merged incrementally while existing data outside
+the interval or pressure-level selection is retained.
 
 For example, merge two frequencies and all variables:
 

@@ -30,3 +30,12 @@ def test_added_or_removed_pressure_levels_require_a_rewrite():
     candidate = _pressure_dataset([1000, 850, 250], [10, 8, 2])
 
     assert zarr_publisher._requires_vertical_rewrite(existing, candidate) is True
+
+
+def test_merge_pressure_level_selection_retains_requested_levels():
+    dataset = _pressure_dataset([1000, 850, 500], [10, 8, 5])
+
+    selected = zarr_publisher._select_merge_pressure_levels(dataset, (850, 500))
+
+    np.testing.assert_array_equal(selected["plev"].values, [850, 500])
+    np.testing.assert_array_equal(selected["ta"].values, [8, 5])

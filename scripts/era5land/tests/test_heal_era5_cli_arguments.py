@@ -111,6 +111,11 @@ def test_main_parser_orders_commands_and_accepts_remap_modes():
     pressure_args = parser.parse_args(["remap", "-pl", "1000,850,500"])
     assert pressure_args.pressure_levels == "1000,850,500"
 
+    merge_pressure_args = parser.parse_args(
+        ["merge", "--source", "/tmp/source", "--output-path", "/tmp/output", "-pl", "850,500"]
+    )
+    assert merge_pressure_args.pressure_levels == "850,500"
+
     clean_pressure_args = parser.parse_args(["clean", "--pressure-levels", "1000,850"])
     assert clean_pressure_args.pressure_levels == "1000,850"
 
@@ -163,6 +168,10 @@ def test_parse_pressure_levels_uses_configured_default_and_supports_all():
     assert main.parse_pressure_levels(None, source_mapper=source_mapper) == (1000, 850, 500)
     assert main.parse_pressure_levels("850,500,850", source_mapper=source_mapper) == (850, 500)
     assert main.parse_pressure_levels("all", source_mapper=source_mapper) is None
+    assert main.parse_pressure_levels("850,500") == (850, 500)
+
+    with pytest.raises(ValueError, match="source mapper"):
+        main.parse_pressure_levels(None)
 
     with pytest.raises(ValueError, match="positive integer"):
         main.parse_pressure_levels("0", source_mapper=source_mapper)

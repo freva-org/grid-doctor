@@ -516,6 +516,16 @@ def build_parser() -> argparse.ArgumentParser:
             "merge, such as 7 or 6-0. When omitted, all levels are merged."
         ),
     )
+    merge_cmd.add_argument(
+        "-pl",
+        "--pressure-levels",
+        default=argparse.SUPPRESS,
+        metavar="HPA",
+        help=(
+            "Restrict pressure-level variables to comma-separated levels in hPa. "
+            "When omitted or set to 'all', merge every available pressure level."
+        ),
+    )
     add_publication_arguments(
         merge_cmd,
         output_help=(
@@ -886,13 +896,15 @@ def parse_cli_args(value: str | None) -> tuple[str, ...] | None:
 def parse_pressure_levels(
     value: str | None,
     *,
-    source_mapper: dict[str, Any],
+    source_mapper: dict[str, Any] | None = None,
 ) -> tuple[int, ...] | None:
     """Resolve a pressure-level selection in hPa, with ``all`` disabling filtering."""
 
     if value == "all":
         return None
     if value is None:
+        if source_mapper is None:
+            raise ValueError("A source mapper is required to resolve default pressure levels.")
         value = ",".join(str(level) for level in source_mapper["remap_defaults"]["pressure_levels_hpa"])
 
     try:
@@ -2027,6 +2039,8 @@ def run_merge(args: argparse.Namespace) -> int:
 
     levels = parse_level_selection(args.levels)
     interval = parse_interval(args.interval)
+    pressure_levels_arg = getattr(args, "pressure_levels", None)
+    pressure_levels = parse_pressure_levels(pressure_levels_arg) if pressure_levels_arg is not None else None
 
     target_dir = Path(args.output_path)
     if args.dataset is not None:
@@ -2048,6 +2062,7 @@ def run_merge(args: argparse.Namespace) -> int:
         frequency=args.freq,
         variable=variables,
         levels=levels,
+        pressure_levels=pressure_levels,
         interval=interval,
         clean=args.clean,
         zarr_format=args.zarr_format,

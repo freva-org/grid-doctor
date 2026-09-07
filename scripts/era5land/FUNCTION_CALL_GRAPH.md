@@ -495,6 +495,7 @@ flowchart LR
     expand_source_dirs --> parse_cli_args
     run_merge --> parse_level_selection
     parse_level_selection --> parse_coarsen_levels
+    run_merge --> parse_pressure_levels
     run_merge --> parse_interval
     run_merge --> merge_dataset_root    
     run_merge --> merge_zarr_stores
@@ -506,11 +507,12 @@ flowchart LR
     merge_zarr_stores --> _is_selected_level_store
     merge_zarr_stores --> _merge_source_stores
     merge_zarr_stores --> _select_merge_interval
+    _merge_source_stores --> _select_merge_pressure_levels
     merge_zarr_stores --> update_zarr_store
 
     class merge,run_merge,expand_source_dirs,parse_level_selection remapper
-    class parse_cli_args,parse_coarsen_levels,parse_interval supporting
-    class merge_zarr_stores,_frequency_names,_variable_names,_worker_output_roots,_dataset_root_destinations,_is_selected_level_store,_merge_source_stores,_select_merge_interval,update_zarr_store zarr_publisher
+    class parse_cli_args,parse_coarsen_levels,parse_pressure_levels,parse_interval supporting
+    class merge_zarr_stores,_frequency_names,_variable_names,_worker_output_roots,_dataset_root_destinations,_is_selected_level_store,_merge_source_stores,_select_merge_interval,_select_merge_pressure_levels,update_zarr_store zarr_publisher
     class merge_dataset_root formatter
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000
     classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
