@@ -48,7 +48,6 @@ from .helpers.formatter import (
     normalise_frequencies,
 )
 from .helpers.metadata import LAST_PERMANENT_UPDATE_ATTR
-from .helpers.zarr_publisher import merge_zarr_stores, sync_named_variable_attrs
 from .resources import ASSETS_DIR, CMOR_TABLES_DIR, PACKAGE_DIR
 
 # Keep runtime state next to the legacy launcher rather than in site-packages.
@@ -104,6 +103,14 @@ class RichDefaultsHelpFormatter(
     RichHelpFormatter,
 ):
     """Rich help with argparse default values."""
+
+    def _get_help_string(self, action: argparse.Action) -> str:
+        """Display configured fallbacks without changing their runtime sentinel."""
+
+        display_default = getattr(action, "display_default", None)
+        if display_default is not None:
+            return f"{action.help or ''} (default: [italic]{display_default}[/italic])"
+        return super()._get_help_string(action) or ""
 
 
 class StageColorFormatter(logging.Formatter):
@@ -225,6 +232,8 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the top-level command parser."""
 
     source_mapper = load_json(DEFAULT_SOURCE_MAPPER)
+    source_root = str(source_mapper["source_path"]).partition("{dataset}")[0].rstrip("/")
+    output_path = str(source_mapper["output_path"])
 
     parser = argparse.ArgumentParser(
         description=f"ERA5/ERA5-Land source discovery and remapping tools (v{__version__})",
@@ -248,8 +257,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_dataset_argument(fetch_cmd)
     add_frequency_argument(fetch_cmd)
     add_variable_argument(fetch_cmd)
-    add_interval_argument(fetch_cmd)
-    add_root_argument(fetch_cmd)
+    add_interval_argument(fetch_cmd, display_default="all")
+    add_root_argument(fetch_cmd, display_default=source_root)
     fetch_cmd.add_argument(
         "--json",
         action="store_true",
@@ -278,8 +287,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_dataset_argument(update_cmd)
     add_frequency_argument(update_cmd)
     add_variable_argument(update_cmd)
-    add_root_argument(update_cmd)
-    add_publication_arguments(update_cmd)
+    add_root_argument(update_cmd, display_default=source_root)
+    add_publication_arguments(update_cmd, output_display_default=output_path)
     update_cmd.add_argument(
         "--batch-months",
         type=int,
@@ -320,7 +329,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_dataset_argument(remap_cmd)
     add_frequency_argument(remap_cmd)
     add_variable_argument(remap_cmd)
-    add_interval_argument(remap_cmd)
+    add_interval_argument(remap_cmd, display_default="all")
     remap_cmd.add_argument(
         "-pl",
         "--pressure-levels",
@@ -352,8 +361,8 @@ def build_parser() -> argparse.ArgumentParser:
             "calendar-month batching for remap execution."
         ),
     )
-    add_root_argument(remap_cmd)
-    add_publication_arguments(remap_cmd)
+    add_root_argument(remap_cmd, display_default=source_root)
+    add_publication_arguments(remap_cmd, output_display_default=output_path)
     add_cache_arguments(
         remap_cmd,
         weights_dir=str(source_mapper["weights_path"]),
@@ -489,9 +498,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_frequency_argument(
         merge_cmd,
         default=None,
-        help_text="Optional comma-separated frequencies (1hr,day,mon,fx).",
+        help_text="Optional comma-separated frequencies (1hr,day,mon,fx). Needs --dataset",
     )
-    add_variable_argument(merge_cmd, default=None)
+    add_variable_argument(
+        merge_cmd,
+        default=None,
+        display_default="all",
+        help_text="Comma-separated variables. Needs --dataset and --freq",
+    )
     add_interval_argument(merge_cmd)
     merge_cmd.add_argument(
         "--levels",
@@ -1644,6 +1658,8 @@ def _apply_permanent_update(
         batch_files=args.batch_files,
     )
 
+    from .helpers.zarr_publisher import sync_named_variable_attrs
+
     permanent_starts = []
     for record in selection.records:
         for source_file in record.files:
@@ -2022,6 +2038,8 @@ def run_merge(args: argparse.Namespace) -> int:
     if args.from_scratch and target_dir.exists():
         logger.warning("Deleting merge target directory %s", target_dir)
         shutil.rmtree(target_dir)
+
+    from .helpers.zarr_publisher import merge_zarr_stores
 
     merged_destinations = merge_zarr_stores(
         sources=source_dirs,

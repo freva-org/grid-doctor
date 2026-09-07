@@ -130,6 +130,30 @@ def test_main_parser_orders_commands_and_accepts_remap_modes():
     assert expected in help_text
 
 
+def test_remap_help_shows_configured_effective_defaults():
+    """Configured fallbacks should be displayed without becoming CLI values."""
+
+    main = load_main_module()
+    parser = main.build_parser()
+    remap_parser = next(
+        action.choices["remap"]
+        for action in parser._actions
+        if getattr(action, "choices", None) and "remap" in action.choices
+    )
+
+    help_text = " ".join(remap_parser.format_help().split())
+    args = parser.parse_args(["remap"])
+
+    assert "--interval INTERVAL" in help_text
+    assert "(default: all)" in help_text
+    assert "(default: /pool/data/ERA5)" in help_text
+    assert "(default: /work/ks1387/gw/data/reanalysis/healpix/{dataset}/" in help_text
+    assert "level_{zoom_number}.zarr)" in help_text
+    assert args.interval is None
+    assert args.root is None
+    assert args.output_path is None
+
+
 def test_parse_pressure_levels_uses_configured_default_and_supports_all():
     """Pressure-level selections should use hPa and permit an explicit all-level mode."""
 

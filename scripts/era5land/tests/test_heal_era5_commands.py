@@ -1,5 +1,6 @@
 """Unit tests for the direct heal-era5 command handlers."""
 
+import sys
 from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
@@ -334,10 +335,10 @@ def test_merge_deletes_target_and_merges_sources(monkeypatch, tmp_path):
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(main, "expand_source_dirs", lambda values: [source])
     monkeypatch.setattr(main.shutil, "rmtree", lambda path: calls.append({"removed": path}))
-    monkeypatch.setattr(
-        main,
-        "merge_zarr_stores",
-        lambda **kwargs: calls.append(kwargs) or [target / "level_4.zarr"],
+    monkeypatch.setitem(
+        sys.modules,
+        "heal_era5.helpers.zarr_publisher",
+        SimpleNamespace(merge_zarr_stores=lambda **kwargs: calls.append(kwargs) or [target / "level_4.zarr"]),
     )
 
     result = main.run_merge(
@@ -431,7 +432,11 @@ def test_merge_uses_dataset_target_without_deleting_a_missing_directory(monkeypa
     monkeypatch.setattr(main, "expand_source_dirs", lambda values: [source])
     monkeypatch.setattr(main, "merge_dataset_root", lambda *args, **kwargs: target_dir)
     monkeypatch.setattr(main.shutil, "rmtree", lambda path: calls.append({"removed": path}))
-    monkeypatch.setattr(main, "merge_zarr_stores", lambda **kwargs: calls.append(kwargs) or [])
+    monkeypatch.setitem(
+        sys.modules,
+        "heal_era5.helpers.zarr_publisher",
+        SimpleNamespace(merge_zarr_stores=lambda **kwargs: calls.append(kwargs) or []),
+    )
 
     assert (
         main.run_merge(
@@ -471,7 +476,11 @@ def test_merge_returns_success_when_no_stores_match(monkeypatch, tmp_path):
     source = tmp_path / "worker"
     target = tmp_path / "merged"
     monkeypatch.setattr(main, "expand_source_dirs", lambda values: [source])
-    monkeypatch.setattr(main, "merge_zarr_stores", lambda **kwargs: [])
+    monkeypatch.setitem(
+        sys.modules,
+        "heal_era5.helpers.zarr_publisher",
+        SimpleNamespace(merge_zarr_stores=lambda **kwargs: []),
+    )
 
     assert (
         main.run_merge(

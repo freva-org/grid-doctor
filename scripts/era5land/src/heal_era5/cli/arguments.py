@@ -1,6 +1,7 @@
 """Reusable argument definitions for the ERA5/ERA5-Land CLI."""
 
 import argparse
+from typing import Protocol, cast
 
 DATASET_CHOICES = ("era5land", "era5")
 DATASET_HELP = "Dataset to process: era5land or era5."
@@ -14,6 +15,18 @@ OUTPUT_PUBLICATION_HELP = (
     "Useful for test runs that should write outside the default location."
 )
 DEFAULT_CHUNK_SIZE: int = 16
+
+
+class _DisplayDefaultAction(Protocol):
+    """An argparse action carrying help-only default text."""
+
+    display_default: str
+
+
+def _set_display_default(action: argparse.Action, value: str) -> None:
+    """Attach display-only default text used by the Rich help formatter."""
+
+    cast(_DisplayDefaultAction, action).display_default = value
 
 
 def add_dataset_argument(
@@ -36,10 +49,14 @@ def add_variable_argument(
     parser: argparse.ArgumentParser,
     *,
     default: str | None = "all",
+    display_default: str | None = None,
+    help_text: str | None = VARIABLE_HELP,
 ) -> None:
     """Add the common variable selector to a command parser."""
 
-    parser.add_argument("--var", dest="variables", default=default, help=VARIABLE_HELP)
+    action = parser.add_argument("--var", dest="variables", default=default, help=help_text)
+    if display_default is not None:
+        _set_display_default(action, display_default)
 
 
 def add_frequency_argument(
@@ -53,20 +70,32 @@ def add_frequency_argument(
     parser.add_argument("--freq", default=default, help=help_text)
 
 
-def add_interval_argument(parser: argparse.ArgumentParser) -> None:
+def add_interval_argument(
+    parser: argparse.ArgumentParser,
+    *,
+    display_default: str | None = None,
+) -> None:
     """Add the common inclusive date interval option to a command parser."""
 
-    parser.add_argument("--interval", default=None, help=INTERVAL_HELP)
+    action = parser.add_argument("--interval", default=None, help=INTERVAL_HELP)
+    if display_default is not None:
+        _set_display_default(action, display_default)
 
 
-def add_root_argument(parser: argparse.ArgumentParser) -> None:
+def add_root_argument(
+    parser: argparse.ArgumentParser,
+    *,
+    display_default: str | None = None,
+) -> None:
     """Add the optional source-data root override."""
 
-    parser.add_argument(
+    action = parser.add_argument(
         "--root",
         default=None,
-        help="Override /pool/data/ERA5 for tests or alternate mounts.",
+        help="Override GRIB root folder for tests or alternate mounts.",
     )
+    if display_default is not None:
+        _set_display_default(action, display_default)
 
 
 def add_publication_arguments(
@@ -74,15 +103,18 @@ def add_publication_arguments(
     *,
     output_help: str = OUTPUT_PUBLICATION_HELP,
     output_required: bool = False,
+    output_display_default: str | None = None,
 ) -> None:
     """Add output path, Zarr format, and chunk-size options."""
 
-    parser.add_argument(
+    action = parser.add_argument(
         "--output-path",
         required=output_required,
         default=None,
         help=output_help,
     )
+    if output_display_default is not None:
+        _set_display_default(action, output_display_default)
     parser.add_argument(
         "--zarr-format",
         type=int,
