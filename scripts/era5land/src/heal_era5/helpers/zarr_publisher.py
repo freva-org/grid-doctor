@@ -527,6 +527,28 @@ def _write_missing_variables(
         return existing
 
     root = zarr.open_group(destination, mode="a")
+    missing_coordinates = {
+        _string_name(dim)
+        for name in missing
+        for dim in candidate[name].dims
+        if dim in candidate.coords and dim not in existing.coords
+    }
+    for name in sorted(missing_coordinates):
+        coordinate = candidate.coords[name]
+        values = np.asarray(coordinate.values)
+        if name in root:
+            array = root[name]
+        else:
+            array = root.create_dataset(  # type: ignore[attr-defined]
+                name,
+                shape=values.shape,
+                chunks=values.shape,
+                dtype=values.dtype,
+            )
+        array[...] = values
+        attrs = clean_output_attrs(dict(coordinate.attrs))
+        attrs["_ARRAY_DIMENSIONS"] = list(coordinate.dims)
+        array.attrs.update(attrs)
     encoding = _encoding_for_target_chunks(
         candidate[missing],
         target_mb=target_chunk_mb,

@@ -39,3 +39,32 @@ def test_merge_pressure_level_selection_retains_requested_levels():
 
     np.testing.assert_array_equal(selected["plev"].values, [850, 500])
     np.testing.assert_array_equal(selected["ta"].values, [8, 5])
+
+
+def test_missing_pressure_variable_writes_pressure_coordinate(monkeypatch):
+    """A newly added pressure variable must write its physical ``plev`` values."""
+
+    class FakeArray:
+        def __init__(self):
+            self.attrs: dict[str, object] = {}
+            self.values: np.ndarray | None = None
+
+        def __setitem__(self, key, values):
+            self.values = np.asarray(values)
+
+    class FakeRoot(dict):
+        def create_dataset(self, name, **kwargs):
+            array = FakeArray()
+            self[name] = array
+            return array
+
+    root = FakeRoot()
+    monkeypatch.setattr(zarr_publisher.zarr, "open_group", lambda *args, **kwargs: root)
+    monkeypatch.setattr(zarr_publisher.zarr, "consolidate_metadata", lambda *args, **kwargs: None)
+
+    existing = xr.Dataset({"surface": ("plev", [1, 2])})
+    candidate = _pressure_dataset([1000, 850], [10, 8]).rename({"ta": "zg"})
+    zarr_publisher._write_missing_variables(existing, candidate, "/tmp/test.zarr", zarr_format=2)
+
+    np.testing.assert_array_equal(root["plev"].values, [1000, 850])
+    assert root["plev"].attrs["_ARRAY_DIMENSIONS"] == ["plev"]
