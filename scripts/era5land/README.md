@@ -424,7 +424,7 @@ source may be either the dataset directory itself (for example,
 `.../merged/era5`) or its parent root (for example, `.../merged`).
 
 Use `--levels` to merge only selected HEALPix levels. It accepts comma-separated
-levels and descending ranges such as `7`, `7,5,3`, or `6-0`:
+levels and ranges in either direction such as `7`, `7,5,3`, `6-0`, or `0-6`:
 
 ```console
 heal-era5 merge \
@@ -768,7 +768,7 @@ heal-era5 remap \
   --clean
 ```
 
-You can also use descending ranges:
+You can use ranges in either direction:
 
 ```console
 heal-era5 remap \

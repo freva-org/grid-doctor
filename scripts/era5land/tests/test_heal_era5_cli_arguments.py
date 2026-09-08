@@ -45,6 +45,26 @@ def test_merge_dataset_and_frequency_defaults_can_be_unset():
     assert args.freq is None
 
 
+def test_level_selection_accepts_ranges_in_either_direction_for_merge_clean_and_remap():
+    """Clean/merge and remap entry points should share ascending-range support."""
+
+    from heal_era5 import main
+
+    assert main.parse_level_selection("0-5") == (5, 4, 3, 2, 1, 0)
+    assert main.parse_level_selection("5-0") == (5, 4, 3, 2, 1, 0)
+    assert main.parse_coarsen_levels("0-5") == (5, 4, 3, 2, 1, 0)
+
+    parser = main.build_parser()
+    assert (
+        parser.parse_args(
+            ["merge", "--source", "/tmp/source", "--output-path", "/tmp/output", "--levels", "0-5"]
+        ).levels
+        == "0-5"
+    )
+    assert parser.parse_args(["clean", "--levels", "0-5"]).levels == "0-5"
+    assert parser.parse_args(["remap", "--coarsen-only", "0-5"]).coarsen_only == "0-5"
+
+
 def test_dataset_argument_rejects_unknown_dataset():
     """Dataset choices should be enforced by argparse."""
 

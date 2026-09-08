@@ -55,9 +55,10 @@ class _TaskProgress(Callback):
     def _posttask(self, *args: object) -> None:
         self.completed += 1
         percent = min(100, self.completed * 100 // self.total_tasks)
-        if self.live and percent != self.last_percent:
-            self._render_live_progress(percent)
-            self.last_percent = percent
+        if self.live:
+            if percent != self.last_percent:
+                self._render_live_progress(percent)
+                self.last_percent = percent
             return
         if percent >= self.next_percent:
             log_stage(

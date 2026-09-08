@@ -174,8 +174,8 @@ def configure_logging() -> None:
 def parse_coarsen_levels(value: str | None) -> tuple[int, ...] | None:
     """Parse optional HEALPix levels for `--coarsen-only`.
 
-    Accepts comma-separated integers like ``8,0`` and descending ranges like
-    ``8-0``. Multiple comma-separated ranges may be combined.
+    Accepts comma-separated integers like ``8,0`` and ranges in either
+    direction such as ``8-0`` or ``0-8``. Multiple ranges may be combined.
     """
 
     if value in (None, "all"):
@@ -192,9 +192,8 @@ def parse_coarsen_levels(value: str | None) -> tuple[int, ...] | None:
                 raise ValueError(f"Unsupported coarsen level range {token!r}; use values like 8-0.") from exc
             if start_level < 0 or end_level < 0:
                 raise ValueError("Coarsen levels must be non-negative integers.")
-            if start_level < end_level:
-                raise ValueError(f"Unsupported ascending coarsen range {token!r}; use descending ranges like 8-0.")
-            levels.extend(range(start_level, end_level - 1, -1))
+            step = -1 if start_level >= end_level else 1
+            levels.extend(range(start_level, end_level + step, step))
             continue
 
         try:
@@ -454,8 +453,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="LEVELS",
         help=(
-            "Optional comma-separated or descending-range level selection such as "
-            "8,0 or 8-5. When omitted, all existing levels for each selected "
+            "Optional comma-separated levels or ranges in either direction such as "
+            "8,0, 8-5, or 0-5. When omitted, all existing levels for each selected "
             "frequency are targeted."
         ),
     )
@@ -518,8 +517,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="LEVELS",
         help=(
-            "Optional comma-separated or descending-range HEALPix levels to "
-            "merge, such as 7 or 6-0. When omitted, all levels are merged."
+            "Optional comma-separated HEALPix levels or ranges in either direction, "
+            "such as 7, 6-0, or 0-6. When omitted, all levels are merged."
         ),
     )
     merge_cmd.add_argument(
