@@ -548,6 +548,13 @@ def _time_range_label(index: Any) -> str:
     return f"{index.min()}..{index.max()} ({len(index)} steps)"
 
 
+def _source_payload_label(dataset: xr.Dataset) -> str:
+    """Return the logical, uncompressed size described by dataset metadata."""
+
+    bytes_total = sum(int(data.nbytes) for data in dataset.data_vars.values())
+    return f"{bytes_total / 1024**3:.2f}GiB"
+
+
 def _time_merge_action(existing: xr.Dataset, candidate: xr.Dataset) -> tuple[str, int, int]:
     """Classify a time merge without reading data chunks."""
 
@@ -711,11 +718,10 @@ def _rewrite_overlapping_times(
         region_ds = region_ds.drop_vars(to_drop, errors="ignore")
         region_ds = _align_to_existing_chunks(region_ds, existing)
         region = {"time": time_slice}
-        region_label = f"{progress_label} region={time_slice.start}:{time_slice.stop}" if progress_label else None
         _to_zarr(
             region_ds,
             destination,
-            progress_label=region_label,
+            progress_label=progress_label,
             mode="r+",
             region=region,
             zarr_format=zarr_format,
@@ -740,7 +746,16 @@ def update_zarr_store(
     path = Path(destination)
     if clean or not path.exists():
         action = "create" if not path.exists() else "clean-recreate"
-        LOGGER.info("stage=merge_plan destination=%s action=%s", destination, action)
+        source_time = _time_range_label(dataset.indexes["time"]) if "time" in dataset.dims else "static"
+        logical_data = _source_payload_label(dataset)
+        LOGGER.info(
+            "stage=merge_plan destination=%s action=%s source_time=%s variables=%s logical_data=%s",
+            destination,
+            action,
+            source_time,
+            len(dataset.data_vars),
+            logical_data,
+        )
         _stamp_data_update_attrs(dataset)
         _write_dataset(
             dataset,
@@ -766,8 +781,12 @@ def update_zarr_store(
     try:
         if _requires_vertical_rewrite(existing, dataset):
             LOGGER.info(
-                "stage=merge_plan destination=%s action=rewrite-store reason=pressure-level-change",
+                "stage=merge_plan destination=%s action=rewrite-store reason=pressure-level-change "
+                "source_time=%s variables=%s logical_data=%s",
                 destination,
+                _time_range_label(dataset.indexes["time"]) if "time" in dataset.dims else "static",
+                len(dataset.data_vars),
+                _source_payload_label(dataset),
             )
             _stamp_data_update_attrs(dataset)
             merged = dataset.combine_first(existing)
@@ -789,6 +808,14 @@ def update_zarr_store(
         if "time" not in dataset.dims or "time" not in existing.dims:
             missing = [name for name in dataset.data_vars if name not in existing.data_vars]
             overlapping = [name for name in dataset.data_vars if name in existing.data_vars]
+            action = "rewrite-static" if overlapping else "add-variables" if missing else "metadata-only"
+            LOGGER.info(
+                "stage=merge_plan destination=%s action=%s source_time=static variables=%s logical_data=%s",
+                destination,
+                action,
+                len(dataset.data_vars),
+                _source_payload_label(dataset),
+            )
             if overlapping or missing:
                 _stamp_data_update_attrs(dataset)
             if overlapping:
@@ -814,13 +841,16 @@ def update_zarr_store(
 
         action, overlap_count, new_count = _time_merge_action(existing, dataset)
         LOGGER.info(
-            "stage=merge_plan destination=%s action=%s source_time=%s destination_time=%s overlap_steps=%s new_steps=%s",
+            "stage=merge_plan destination=%s action=%s source_time=%s destination_time=%s "
+            "overlap_steps=%s new_steps=%s variables=%s logical_data=%s",
             destination,
             action,
             _time_range_label(dataset.indexes["time"]),
             _time_range_label(existing.indexes["time"]),
             overlap_count,
             new_count,
+            len(dataset.data_vars),
+            _source_payload_label(dataset),
         )
 
         missing_names = [name for name in dataset.data_vars if name not in existing.data_vars]

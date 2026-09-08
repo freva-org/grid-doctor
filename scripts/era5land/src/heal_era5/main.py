@@ -87,7 +87,7 @@ STAGE_COLORS = {
     "merge_plan": "\033[1;96m",
     "merge_write_start": "\033[1;33m",
     "merge_write_progress": "\033[33m",
-    "merge_write_done": "\033[1;32m",
+    "merge_write_done": "\033[1;33m",
     "merge_done": "\033[1;32m",
 }
 _ACTIVE_BATCH_STATE_PATH: Path | None = None
