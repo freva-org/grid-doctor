@@ -1,6 +1,7 @@
 """Tests for Zarr publication behavior."""
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from heal_era5.helpers import zarr_publisher
@@ -39,6 +40,17 @@ def test_merge_pressure_level_selection_retains_requested_levels():
 
     np.testing.assert_array_equal(selected["plev"].values, [850, 500])
     np.testing.assert_array_equal(selected["ta"].values, [8, 5])
+
+
+def test_time_merge_action_distinguishes_append_overlap_and_rewrite():
+    def dataset(times: list[str]) -> xr.Dataset:
+        return xr.Dataset({"ta": ("time", np.arange(len(times)))}, coords={"time": pd.to_datetime(times)})
+
+    existing = dataset(["2000-01-01", "2000-01-02"])
+
+    assert zarr_publisher._time_merge_action(existing, dataset(["2000-01-03"])) == ("append", 0, 1)
+    assert zarr_publisher._time_merge_action(existing, dataset(["2000-01-02"])) == ("rewrite-overlaps", 1, 0)
+    assert zarr_publisher._time_merge_action(existing, dataset(["1999-12-31"])) == ("rewrite-store", 0, 1)
 
 
 def test_missing_pressure_variable_writes_pressure_coordinate(monkeypatch):

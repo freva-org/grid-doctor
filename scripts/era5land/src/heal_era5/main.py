@@ -83,6 +83,12 @@ STAGE_COLORS = {
     "update_forward": "\033[1;38;5;208m",
     "update_batch": "\033[1;33m",
     "update_frequency": "\033[1;94m",
+    "merge_start": "\033[1;94m",
+    "merge_plan": "\033[1;96m",
+    "merge_write_start": "\033[1;33m",
+    "merge_write_progress": "\033[33m",
+    "merge_write_done": "\033[1;32m",
+    "merge_done": "\033[1;32m",
 }
 _ACTIVE_BATCH_STATE_PATH: Path | None = None
 _BATCH_FILES_CHILD_INDEX_ENV = "ERA5_BATCH_FILES_CHILD_INDEX"

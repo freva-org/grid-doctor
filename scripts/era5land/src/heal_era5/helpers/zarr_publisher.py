@@ -17,6 +17,7 @@ import zarr
 from .datasets import normalise_published_dataset
 from .file_fetcher import SOURCE_MAPPER
 from .formatter import merge_dataset_root
+from .logging_utils import compute_with_task_progress
 from .metadata import (
     LAST_DATA_UPDATE_ATTR,
     LAST_PERMANENT_UPDATE_ATTR,
@@ -192,6 +193,28 @@ def _encoding_for_target_chunks(
     return encoding
 
 
+def _to_zarr(
+    dataset: xr.Dataset,
+    destination: str,
+    *,
+    progress_label: str | None = None,
+    **options: Any,
+) -> None:
+    """Write a dataset, optionally reporting Dask task progress for a merge."""
+
+    if progress_label is None:
+        dataset.to_zarr(destination, **options)
+        return
+
+    delayed = dataset.to_zarr(destination, compute=False, **options)
+    compute_with_task_progress(
+        delayed,
+        logger=LOGGER,
+        stage="merge_write",
+        label=progress_label,
+    )
+
+
 def _write_dataset(
     dataset: xr.Dataset,
     destination: str,
@@ -200,6 +223,7 @@ def _write_dataset(
     zarr_format: int,
     append_dim: str | None = None,
     target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
+    progress_label: str | None = None,
 ) -> None:
     """Write one dataset to a Zarr store with consistent options."""
 
@@ -214,7 +238,7 @@ def _write_dataset(
         # Let xarray rechunk the append region when its start is not aligned
         # with the existing Zarr chunk grid.
         options["align_chunks"] = True
-        dataset.to_zarr(destination, **options)
+        _to_zarr(dataset, destination, progress_label=progress_label, **options)
         return
 
     encoding = _encoding_for_target_chunks(dataset, target_mb=target_chunk_mb)
@@ -234,8 +258,10 @@ def _write_dataset(
     if chunk_map:
         dataset = dataset.chunk(chunk_map)
 
-    dataset.to_zarr(
+    _to_zarr(
+        dataset,
         destination,
+        progress_label=progress_label,
         **options,
         encoding=encoding,
     )
@@ -247,6 +273,7 @@ def _rewrite_dataset_via_temp(
     *,
     zarr_format: int,
     target_chunk_mb: int = DEFAULT_TARGET_CHUNK_MB,
+    progress_label: str | None = None,
 ) -> None:
     """Rewrite a store via a temporary path to avoid reading and writing it in place."""
 
@@ -261,6 +288,7 @@ def _rewrite_dataset_via_temp(
             mode="w",
             zarr_format=zarr_format,
             target_chunk_mb=target_chunk_mb,
+            progress_label=progress_label,
         )
         if destination_path.exists():
             shutil.rmtree(destination_path)
@@ -512,6 +540,28 @@ def _can_append_new_times(existing: xr.Dataset, candidate: xr.Dataset) -> bool:
         return False
 
 
+def _time_range_label(index: Any) -> str:
+    """Return a compact, log-friendly description of a time index."""
+
+    if len(index) == 0:
+        return "empty"
+    return f"{index.min()}..{index.max()} ({len(index)} steps)"
+
+
+def _time_merge_action(existing: xr.Dataset, candidate: xr.Dataset) -> tuple[str, int, int]:
+    """Classify a time merge without reading data chunks."""
+
+    existing_times = existing.indexes["time"]
+    candidate_times = candidate.indexes["time"]
+    overlap = candidate_times.intersection(existing_times)
+    new_times = candidate_times.difference(existing_times)
+    if len(new_times) == 0:
+        return "rewrite-overlaps", len(overlap), 0
+    if len(overlap) == 0 and _can_append_new_times(existing, candidate):
+        return "append", 0, len(new_times)
+    return "rewrite-store", len(overlap), len(new_times)
+
+
 def _write_missing_variables(
     existing: xr.Dataset,
     candidate: xr.Dataset,
@@ -613,6 +663,7 @@ def _append_new_times(
     destination: str,
     *,
     zarr_format: int,
+    progress_label: str | None = None,
 ) -> bool:
     """Append strictly newer time slices to an existing store."""
 
@@ -632,6 +683,7 @@ def _append_new_times(
         mode="a",
         append_dim="time",
         zarr_format=zarr_format,
+        progress_label=progress_label,
     )
     return True
 
@@ -642,6 +694,7 @@ def _rewrite_overlapping_times(
     destination: str,
     *,
     zarr_format: int,
+    progress_label: str | None = None,
 ) -> bool:
     """Rewrite only the overlapping time regions in an existing store."""
 
@@ -658,8 +711,11 @@ def _rewrite_overlapping_times(
         region_ds = region_ds.drop_vars(to_drop, errors="ignore")
         region_ds = _align_to_existing_chunks(region_ds, existing)
         region = {"time": time_slice}
-        region_ds.to_zarr(
+        region_label = f"{progress_label} region={time_slice.start}:{time_slice.stop}" if progress_label else None
+        _to_zarr(
+            region_ds,
             destination,
+            progress_label=region_label,
             mode="r+",
             region=region,
             zarr_format=zarr_format,
@@ -683,6 +739,8 @@ def update_zarr_store(
     dataset = normalise_published_dataset(dataset)
     path = Path(destination)
     if clean or not path.exists():
+        action = "create" if not path.exists() else "clean-recreate"
+        LOGGER.info("stage=merge_plan destination=%s action=%s", destination, action)
         _stamp_data_update_attrs(dataset)
         _write_dataset(
             dataset,
@@ -690,6 +748,7 @@ def update_zarr_store(
             mode="w",
             zarr_format=zarr_format,
             target_chunk_mb=target_chunk_mb,
+            progress_label=f"destination={destination} operation={action}",
         )
         _sync_dataset_metadata(dataset, destination)
         return
@@ -706,6 +765,10 @@ def update_zarr_store(
     existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
     try:
         if _requires_vertical_rewrite(existing, dataset):
+            LOGGER.info(
+                "stage=merge_plan destination=%s action=rewrite-store reason=pressure-level-change",
+                destination,
+            )
             _stamp_data_update_attrs(dataset)
             merged = dataset.combine_first(existing)
             if "time" in merged.coords:
@@ -716,6 +779,7 @@ def update_zarr_store(
                 destination,
                 zarr_format=zarr_format,
                 target_chunk_mb=target_chunk_mb,
+                progress_label=f"destination={destination} operation=rewrite-store",
             )
             _sync_dataset_metadata(dataset, destination)
             return
@@ -734,6 +798,7 @@ def update_zarr_store(
                     destination,
                     zarr_format=zarr_format,
                     target_chunk_mb=target_chunk_mb,
+                    progress_label=f"destination={destination} operation=rewrite-static",
                 )
             elif missing:
                 _write_dataset(
@@ -742,9 +807,21 @@ def update_zarr_store(
                     mode="a",
                     zarr_format=zarr_format,
                     target_chunk_mb=target_chunk_mb,
+                    progress_label=f"destination={destination} operation=add-variables",
                 )
             _sync_dataset_metadata(dataset, destination)
             return
+
+        action, overlap_count, new_count = _time_merge_action(existing, dataset)
+        LOGGER.info(
+            "stage=merge_plan destination=%s action=%s source_time=%s destination_time=%s overlap_steps=%s new_steps=%s",
+            destination,
+            action,
+            _time_range_label(dataset.indexes["time"]),
+            _time_range_label(existing.indexes["time"]),
+            overlap_count,
+            new_count,
+        )
 
         missing_names = [name for name in dataset.data_vars if name not in existing.data_vars]
         overlap_rewritten = False
@@ -761,6 +838,7 @@ def update_zarr_store(
             dataset,
             destination,
             zarr_format=zarr_format,
+            progress_label=f"destination={destination} operation=rewrite-overlaps",
         )
 
         candidate_times = dataset.indexes["time"]
@@ -780,6 +858,7 @@ def update_zarr_store(
                 appendable_candidate,
                 destination,
                 zarr_format=zarr_format,
+                progress_label=f"destination={destination} operation=append",
             )
             _sync_dataset_metadata(dataset, destination)
             return
@@ -791,6 +870,7 @@ def update_zarr_store(
             destination,
             zarr_format=zarr_format,
             target_chunk_mb=target_chunk_mb,
+            progress_label=f"destination={destination} operation=rewrite-store",
         )
         _sync_dataset_metadata(dataset, destination)
     finally:
