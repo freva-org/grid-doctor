@@ -585,6 +585,37 @@ def _is_unstructured(ds: xr.Dataset) -> bool:
     )
 
 
+def _get_unstructured_vertices(ds: xr.Dataset) -> tuple[str | None, str | None]:
+    """Return longitude and latitude vertex variable names for *ds*.
+
+    Recognises the ICON-style names used by existing inputs, common CF-style
+    names, and arbitrary CF bounds variables referenced from the cell-centre
+    longitude and latitude coordinates.
+    """
+    for lon_name, lat_name in (
+        ("clon_vertices", "clat_vertices"),
+        ("lon_vertices", "lat_vertices"),
+        ("lon_bnds", "lat_bnds"),
+    ):
+        if lon_name in ds and lat_name in ds:
+            return lon_name, lat_name
+
+    for lon_center, lat_center in (("lon", "lat"), ("clon", "clat")):
+        if lon_center not in ds or lat_center not in ds:
+            continue
+        lon_bounds = ds[lon_center].attrs.get("bounds")
+        lat_bounds = ds[lat_center].attrs.get("bounds")
+        if (
+            isinstance(lon_bounds, str)
+            and isinstance(lat_bounds, str)
+            and lon_bounds in ds
+            and lat_bounds in ds
+        ):
+            return lon_bounds, lat_bounds
+
+    return None, None
+
+
 def _get_unstructured_dim(ds: xr.Dataset) -> str:
     """Return the name of the unstructured cell dimension in *ds*.
 
@@ -974,7 +1005,7 @@ def _regular_grid_mesh(
         )
         # Rewrite last column to point to column 0 nodes.
         node_idx_full[:, -1] = node_idx_full[:, 0]
-        face_nodes = np.stack(
+        face_nodes: IntArray = np.stack(
             (
                 node_idx_full[:-1, :-1],
                 node_idx_full[:-1, 1:],
@@ -1061,7 +1092,7 @@ def _curvilinear_grid_mesh(
     )
 
 
-def _collapse_repeated_corners(face_nodes: "np.ndarray") -> "np.ndarray":
+def _collapse_repeated_corners(face_nodes: IntArray) -> IntArray:
     """Remove cyclically consecutive duplicate node ids within each face.
 
     ``face_nodes`` has shape ``(n_face, max_corners)`` with ``-1`` padding.
@@ -1261,13 +1292,13 @@ def _source_mesh(
             vertex coordinates are missing.
     """
     if _is_unstructured(ds):
-        lon_name = "clon_vertices" if "clon_vertices" in ds else "lon_vertices"
-        lat_name = "clat_vertices" if "clat_vertices" in ds else "lat_vertices"
-        if lon_name not in ds or lat_name not in ds:
+        lon_name, lat_name = _get_unstructured_vertices(ds)
+        if lon_name is None or lat_name is None:
             raise ValueError(
-                "Unstructured grids require per-cell vertex "
-                "coordinates such as "
-                "'clon_vertices'/'clat_vertices'."
+                "Unstructured grids require per-cell vertex coordinates, for "
+                "example 'clon_vertices'/'clat_vertices', "
+                "'lon_vertices'/'lat_vertices', or CF bounds variables "
+                "referenced by lon:bounds and lat:bounds."
             )
         lon_v = _canonical_lon(
             _normalise_angle_units(_to_float64(ds[lon_name].values), source_units)

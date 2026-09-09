@@ -209,7 +209,7 @@ tox -e docs-serve    # live preview at http://127.0.0.1:8000
 
 
 ## Quick Start
-
+Running the example will likely require ESMF to be installed, see above.
 ```python
 import grid_doctor as gd
 
@@ -217,15 +217,15 @@ ds = gd.cached_open_dataset(["path/to/*.nc"])
 max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
 weights_dir="/scratch/{user[0]}/{user}/grid-doctor/weights"\
     .format(user=getuser(), level=level)
-gd.cached_weights(
+weights_file = gd.cached_weights(
     ds,
     level=max_level,
     prefer_offline=True,
-    cache_path=weights_path
+    cache_path=weights_dir
 )
 pyramid = gd.create_healpix_pyramid(
     ds,
-    weights_path=weights_dir,
+    weights_path=weights_file,
     max_level=max_level
 )
 gd.save_pyramid(
