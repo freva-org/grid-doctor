@@ -67,7 +67,7 @@ def list_buckets(endpoint: str, key: str, secret: str) -> list[str]:
             f"(check admin credentials / gateway permissions)"
         )
         sys.exit(0)
-    return set(names)
+    return sorted(names)
 
 
 def main() -> None:
@@ -91,7 +91,11 @@ def main() -> None:
         for b in os.environ.get("WATERPARK_BUCKET_BLACKLIST", "").split(",")
         if b.strip()
     }
-    buckets = list_buckets(args.endpoint, key, secret) - set(blacklist)
+    buckets = [
+        b
+        for b in list_buckets(args.endpoint, key, secret)
+        if b not in blacklist
+    ]
     # check if the JSON is already there.
     existing: dict = {}
     if args.out.exists():
