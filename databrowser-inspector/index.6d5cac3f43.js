@@ -1,8 +1,8 @@
-const E = {
+const M = {
   ERROR: "error",
   READY: "ready",
   LOADING: "loading"
-}, ct = {
+}, pt = {
   aggregate: "auto",
   join: null,
   compat: null,
@@ -15,11 +15,11 @@ const E = {
   chunk_size: 16,
   map_primary_chunksize: 1,
   timeout: 120
-}, pt = "https://gridlook.pages.dev/";
+}, ut = "https://gridlook.pages.dev/";
 function H(r) {
-  return `${pt}#${r}`;
+  return `${ut}#${r}`;
 }
-function ut(r) {
+function ht(r) {
   var e;
   const t = navigator;
   return (e = t.clipboard) != null && e.writeText ? t.clipboard.writeText(r) : new Promise((i, a) => {
@@ -31,7 +31,7 @@ function ut(r) {
     }
   });
 }
-function v(r, t = !1) {
+function x(r, t = !1) {
   return `<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="vertical-align:-0.14em;flex-shrink:0${t ? ";margin-right:.5em" : ""}">${r}</svg>`;
 }
 const m = {
@@ -49,7 +49,7 @@ const m = {
   refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v4h-4"/>',
   compress: '<path d="M9 5v4H5"/><path d="m4 4 5 5"/><path d="M15 5v4h4"/><path d="m20 4-5 5"/><path d="M9 19v-4H5"/><path d="m4 20 5-5"/><path d="M15 19v-4h4"/><path d="m20 20-5-5"/>',
   alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.3" r="0.6" fill="currentColor" stroke="none"/>'
-}, ht = `
+}, V = `
 data-inspector{
   --_di-bg:var(--di-bg,#fff);
   --_di-fg:var(--di-fg,#1f2937);
@@ -135,16 +135,24 @@ data-inspector{
 .di-empty-text{color:var(--_di-muted);font-size:13px;padding:0 12px;}
 [hidden]{display:none!important;}
 `;
-let V = !1;
+let Z = !1;
 function gt() {
-  if (V || typeof document > "u") return;
-  V = !0;
+  if (Z || typeof document > "u") return;
+  Z = !0;
+  try {
+    if (typeof CSSStyleSheet == "function" && Array.isArray(document.adoptedStyleSheets)) {
+      const t = new CSSStyleSheet();
+      t.replaceSync(V), document.adoptedStyleSheets = [...document.adoptedStyleSheets, t];
+      return;
+    }
+  } catch {
+  }
   const r = document.createElement("style");
-  r.setAttribute("data-data-inspector", "1"), r.textContent = ht, document.head.appendChild(r);
+  r.setAttribute("data-data-inspector", "1"), r.textContent = V, document.head.appendChild(r);
 }
 class mt extends HTMLElement {
   constructor() {
-    super(...arguments), this._pathInput = "", this._copied = !1, this._gridlookCopied = !1, this._activeTab = "metadata", this._dropdownOpen = !1, this._aggregationConfig = { ...ct }, this._output = null, this._built = !1, this._builtMode = !1, this._domOutput = void 0, this._domIframeUrl = void 0, this._domFileKey = void 0, this._copyTimer = null, this._gridlookTimer = null, this._restoreFocusTo = null, this._onOutsideClick = (t) => {
+    super(...arguments), this._pathInput = "", this._copied = !1, this._gridlookCopied = !1, this._activeTab = "metadata", this._dropdownOpen = !1, this._aggregationConfig = { ...pt }, this._output = null, this._built = !1, this._builtMode = !1, this._domOutput = void 0, this._domIframeUrl = void 0, this._domFileKey = void 0, this._copyTimer = null, this._gridlookTimer = null, this._restoreFocusTo = null, this._onOutsideClick = (t) => {
       const e = this.querySelector("#nc-dropdown-wrap");
       e && !e.contains(t.target) && this._dropdownOpen && (this._dropdownOpen = !1, this._syncDropdown());
     };
@@ -173,7 +181,7 @@ class mt extends HTMLElement {
     t === null ? this.removeAttribute("file") : this.setAttribute("file", Array.isArray(t) ? JSON.stringify(t) : t);
   }
   get status() {
-    return this.getAttribute("status") ?? E.READY;
+    return this.getAttribute("status") ?? M.READY;
   }
   set status(t) {
     this.setAttribute("status", t);
@@ -223,9 +231,9 @@ class mt extends HTMLElement {
     if (t === "open" && i !== null) {
       this._restoreFocusTo === null && (this._restoreFocusTo = document.activeElement), this._activeTab = "metadata", this._copied = !1, this._gridlookCopied = !1;
       const s = this.file;
-      s && this._output === null && this.status === E.READY && !this.isAggregation && this._emit("inspector-submit", { file: s, aggregationConfig: null });
+      s && this._output === null && this.status === M.READY && !this.isAggregation && this._emit("inspector-submit", { file: s, aggregationConfig: null });
     }
-    if (t === "file" && (i && !i.startsWith("[") && (this._pathInput = i), e !== null && e !== i && (this._output = null, this._domOutput = void 0, this._activeTab = "metadata", this._copied = !1, this._gridlookCopied = !1, this.hasAttribute("error") && this.removeAttribute("error"), this.hasAttribute("zarr-url") && this.removeAttribute("zarr-url"))), t === "status" && i === E.ERROR && (this._activeTab = "metadata"), t === "zarr-status-code" && this.isConnected && this._built) {
+    if (t === "file" && (i && !i.startsWith("[") && (this._pathInput = i), e !== null && e !== i && (this._output = null, this._domOutput = void 0, this._activeTab = "metadata", this._copied = !1, this._gridlookCopied = !1, this.hasAttribute("error") && this.removeAttribute("error"), this.hasAttribute("zarr-url") && this.removeAttribute("zarr-url"))), t === "status" && i === M.ERROR && (this._activeTab = "metadata"), t === "zarr-status-code" && this.isConnected && this._built) {
       const s = i ?? "3";
       (a = this.querySelector("#nc-pre-steps")) == null || a.setAttribute("status-code", s), (o = this.querySelector("#nc-body-steps")) == null || o.setAttribute("status-code", s);
       return;
@@ -253,7 +261,7 @@ class mt extends HTMLElement {
     });
   }
   _copy(t, e) {
-    ut(t).then(() => {
+    ht(t).then(() => {
       e === "zarr" ? this._copied = !0 : this._gridlookCopied = !0, this.open && this._update();
       const a = setTimeout(() => {
         e === "zarr" ? this._copied = !1 : this._gridlookCopied = !1, this.isConnected && this.open && this._update();
@@ -283,7 +291,7 @@ class mt extends HTMLElement {
   }
   _setCopyBtn(t, e, i) {
     const a = this._q(t);
-    a && (a.setAttribute("title", e ? "Copied!" : i), a.innerHTML = v(e ? m.check : m.copy));
+    a && (a.setAttribute("title", e ? "Copied!" : i), a.innerHTML = x(e ? m.check : m.copy));
   }
   // ── Build the static skeleton (once per open session / mode) ───────────────
   _build() {
@@ -296,7 +304,7 @@ class mt extends HTMLElement {
         <div class="di-header-row">
           <div class="di-header-main">
             <h1 class="di-title">
-              <span class="di-title-ico">${v(t ? m.layers : m.info)}</span>
+              <span class="di-title-ico">${x(t ? m.layers : m.info)}</span>
               <span id="nc-title">${t ? "Aggregate Files" : "File Inspector"}</span>
             </h1>
             ${t ? `<div id="nc-file-list-wrap" class="di-file-list" hidden>
@@ -305,10 +313,10 @@ class mt extends HTMLElement {
                    </div>` : this._pathBarHtml()}
             <div id="nc-zarr-row" class="di-zarr-row" hidden>
               <div class="di-zarr-inner">
-                <span class="di-muted" style="display:inline-flex;flex-shrink:0">${v(m.link)}</span>
+                <span class="di-muted" style="display:inline-flex;flex-shrink:0">${x(m.link)}</span>
                 <span class="di-muted" style="font-weight:500;flex-shrink:0">Zarr:</span>
                 <code id="nc-zarr-url" class="di-code"></code>
-                <button id="nc-copy-zarr" class="di-btn di-btn-outline" title="Copy Zarr URL">${v(m.copy)}</button>
+                <button id="nc-copy-zarr" class="di-btn di-btn-outline" title="Copy Zarr URL">${x(m.copy)}</button>
               </div>
             </div>
           </div>
@@ -319,7 +327,7 @@ class mt extends HTMLElement {
            <aggregation-config id="nc-agg-config"></aggregation-config>
            <div class="di-agg-actions">
              <button id="nc-cancel-btn" class="di-btn di-btn-secondary">Cancel</button>
-             <button id="nc-aggregate-btn" class="di-btn di-btn-primary">${v(m.compress, !0)}Aggregate Files</button>
+             <button id="nc-aggregate-btn" class="di-btn di-btn-primary">${x(m.compress, !0)}Aggregate Files</button>
            </div>
          </div>` : "", a = `
       <div id="nc-pre-loading" class="di-center" hidden>
@@ -328,17 +336,17 @@ class mt extends HTMLElement {
       </div>`, o = `
       <div id="nc-tabs-wrap" hidden>
         <div class="di-tabs" role="tablist" aria-label="Inspector views">
-          <button id="nc-tab-metadata" data-tab="metadata" class="nc-tab-btn di-tab" role="tab" aria-controls="nc-metadata" aria-selected="true">${v(m.database, !0)}Metadata</button>
-          <button id="nc-tab-gridlook" data-tab="gridlook" class="nc-tab-btn di-tab" role="tab" aria-controls="nc-gridlook" aria-selected="false">${v(m.cube, !0)}3D Viewer</button>
+          <button id="nc-tab-metadata" data-tab="metadata" class="nc-tab-btn di-tab" role="tab" aria-controls="nc-metadata" aria-selected="true">${x(m.database, !0)}Metadata</button>
+          <button id="nc-tab-gridlook" data-tab="gridlook" class="nc-tab-btn di-tab" role="tab" aria-controls="nc-gridlook" aria-selected="false">${x(m.cube, !0)}3D Viewer</button>
         </div>
         <div id="nc-body" class="di-body">
           <div id="nc-error" class="di-error" hidden>
             <div class="di-error-row">
-              <span class="di-error-ico">${v(m.alert)}</span>
+              <span class="di-error-ico">${x(m.alert)}</span>
               <div class="di-error-body">
                 <strong class="di-error-title">Error loading metadata</strong>
                 <div id="nc-error-msg" class="di-error-msg"></div>
-                <button id="nc-retry-btn" class="di-btn di-btn-danger">${v(m.refresh, !0)}Retry</button>
+                <button id="nc-retry-btn" class="di-btn di-btn-danger">${x(m.refresh, !0)}Retry</button>
               </div>
             </div>
           </div>
@@ -355,25 +363,25 @@ class mt extends HTMLElement {
           <div id="nc-gridlook" role="tabpanel" aria-labelledby="nc-tab-gridlook" tabindex="0" hidden>
             <div class="di-gridlook-bar">
               <div class="di-gridlook-inner">
-                <span class="di-gridlook-ico">${v(m.external)}</span>
+                <span class="di-gridlook-ico">${x(m.external)}</span>
                 <span class="di-gridlook-label">GridLook URL:</span>
                 <code id="nc-gridlook-url" class="di-gridlook-code"></code>
-                <button id="nc-copy-gridlook" class="di-btn di-gridlook-btn" title="Copy link">${v(m.copy)}</button>
-                <button id="nc-refresh-gridlook" class="di-btn di-gridlook-btn" title="Refresh GridLook viewer">${v(m.refresh)}</button>
-                <button id="nc-open-gridlook" class="di-btn di-gridlook-btn-primary" title="Open in new tab">${v(m.external, !0)}Open in New Tab</button>
+                <button id="nc-copy-gridlook" class="di-btn di-gridlook-btn" title="Copy link">${x(m.copy)}</button>
+                <button id="nc-refresh-gridlook" class="di-btn di-gridlook-btn" title="Refresh GridLook viewer">${x(m.refresh)}</button>
+                <button id="nc-open-gridlook" class="di-btn di-gridlook-btn-primary" title="Open in new tab">${x(m.external, !0)}Open in New Tab</button>
               </div>
             </div>
             <div id="nc-gridlook-frame" class="di-gridlook-frame"></div>
           </div>
 
           <div id="nc-empty-body" class="di-center" hidden>
-            <span class="di-empty-ico">${v(m.database)}</span>
+            <span class="di-empty-ico">${x(m.database)}</span>
             <p id="nc-empty-body-text" class="di-empty-text"></p>
           </div>
         </div>
       </div>`, s = `
       <div id="nc-empty-main" class="di-center" hidden>
-        <span class="di-empty-ico">${v(m.database)}</span>
+        <span class="di-empty-ico">${x(m.database)}</span>
         <p id="nc-empty-main-text" class="di-empty-text"></p>
       </div>`;
     this.innerHTML = `
@@ -417,11 +425,11 @@ class mt extends HTMLElement {
         <div class="di-pathbar-row">
           <input id="nc-path-input" type="text" class="di-input" placeholder="/path/to/data.nc" />
           <div id="nc-dropdown-wrap" class="di-dropdown-wrap di-btn-group">
-            <button id="nc-load-btn" class="di-btn di-btn-primary">${v(m.load, !0)}Load</button>
-            <button id="nc-load-toggle" class="di-btn di-btn-primary di-btn-split" title="More load options">${v(m.chevronDown)}</button>
+            <button id="nc-load-btn" class="di-btn di-btn-primary">${x(m.load, !0)}Load</button>
+            <button id="nc-load-toggle" class="di-btn di-btn-primary di-btn-split" title="More load options">${x(m.chevronDown)}</button>
             <ul id="nc-dropdown-menu" class="di-menu" hidden>
               <li>
-                <button id="nc-reload-btn" class="di-menu-item">${v(m.ban, !0)}Force Reload (bypass cache)</button>
+                <button id="nc-reload-btn" class="di-menu-item">${x(m.ban, !0)}Force Reload (bypass cache)</button>
               </li>
             </ul>
           </div>
@@ -430,27 +438,27 @@ class mt extends HTMLElement {
   }
   // ── Attach listeners once (nodes persist across updates) ───────────────────
   _attach() {
-    var e, i, a, o, s, n, l, d, h, p, u, y, _, $;
+    var e, i, a, o, s, n, d, l, h, u, p, f, _, $;
     (e = this._q("#nc-backdrop")) == null || e.addEventListener("click", (c) => {
       c.target === c.currentTarget && this._emit("inspector-close", null);
     }), (i = this._q("#nc-backdrop")) == null || i.addEventListener(
       "keydown",
       (c) => this._onKeydown(c)
-    ), (a = this._q("#nc-close-btn")) == null || a.addEventListener("click", () => this._emit("inspector-close", null)), (o = this._q("#nc-cancel-btn")) == null || o.addEventListener("click", () => this._emit("inspector-close", null)), (s = this._q("#nc-load-btn")) == null || s.addEventListener("click", () => this._handleInspect()), (n = this._q("#nc-aggregate-btn")) == null || n.addEventListener("click", () => this._handleInspect()), (l = this._q("#nc-retry-btn")) == null || l.addEventListener("click", () => this._handleInspect());
+    ), (a = this._q("#nc-close-btn")) == null || a.addEventListener("click", () => this._emit("inspector-close", null)), (o = this._q("#nc-cancel-btn")) == null || o.addEventListener("click", () => this._emit("inspector-close", null)), (s = this._q("#nc-load-btn")) == null || s.addEventListener("click", () => this._handleInspect()), (n = this._q("#nc-aggregate-btn")) == null || n.addEventListener("click", () => this._handleInspect()), (d = this._q("#nc-retry-btn")) == null || d.addEventListener("click", () => this._handleInspect());
     const t = this._q("#nc-path-input");
     t && (t.value = this._pathInput, t.addEventListener("input", (c) => {
       this._pathInput = c.target.value;
     }), t.addEventListener("keypress", (c) => {
       c.key === "Enter" && this._handleInspect();
-    })), (d = this._q("#nc-load-toggle")) == null || d.addEventListener("click", () => {
+    })), (l = this._q("#nc-load-toggle")) == null || l.addEventListener("click", () => {
       this._dropdownOpen = !this._dropdownOpen, this._syncDropdown();
-    }), (h = this._q("#nc-reload-btn")) == null || h.addEventListener("click", () => this._handleInspectReload()), (p = this._q("#nc-copy-zarr")) == null || p.addEventListener("click", () => {
+    }), (h = this._q("#nc-reload-btn")) == null || h.addEventListener("click", () => this._handleInspectReload()), (u = this._q("#nc-copy-zarr")) == null || u.addEventListener("click", () => {
       const c = this.zarrUrl;
       c && this._copy(c, "zarr");
-    }), (u = this._q("#nc-copy-gridlook")) == null || u.addEventListener("click", () => {
+    }), (p = this._q("#nc-copy-gridlook")) == null || p.addEventListener("click", () => {
       const c = this.zarrUrl;
       c && this._copy(H(c), "gridlook");
-    }), (y = this._q("#nc-refresh-gridlook")) == null || y.addEventListener("click", () => {
+    }), (f = this._q("#nc-refresh-gridlook")) == null || f.addEventListener("click", () => {
       var c;
       this.zarrUrl && ((c = this._q("#nc-gridlook-iframe")) == null || c.remove(), this._domIframeUrl = void 0, this._update());
     }), (_ = this._q("#nc-open-gridlook")) == null || _.addEventListener("click", () => {
@@ -468,65 +476,65 @@ class mt extends HTMLElement {
   // ── Patch dynamic state (no DOM rebuild) ───────────────────────────────────
   _update() {
     var j, O;
-    const t = this.isAggregation, e = this.status, i = e === E.LOADING, a = e === E.READY, o = e === E.ERROR, s = this.zarrUrl, n = this.file, l = Array.isArray(n) ? n : [], d = this._output != null && this._output !== "", h = String(this.zarrStatusCode ?? 3), p = t ? "Aggregating files and loading metadata..." : "Loading metadata...", u = t ? "Configure aggregation settings and click 'Aggregate Files' to begin" : "Enter a file path and click Load to inspect metadata";
+    const t = this.isAggregation, e = this.status, i = e === M.LOADING, a = e === M.READY, o = e === M.ERROR, s = this.zarrUrl, n = this.file, d = Array.isArray(n) ? n : [], l = this._output != null && this._output !== "", h = String(this.zarrStatusCode ?? 3), u = t ? "Aggregating files and loading metadata..." : "Loading metadata...", p = t ? "Configure aggregation settings and click 'Aggregate Files' to begin" : "Enter a file path and click Load to inspect metadata";
     if (t) {
-      const b = this._q("#nc-file-list-wrap"), A = l.length > 0;
-      if (this._toggle(b, A), A) {
+      const v = this._q("#nc-file-list-wrap"), A = d.length > 0;
+      if (this._toggle(v, A), A) {
         const I = this._q("#nc-file-list-label");
-        I && (I.textContent = `Selected files (${l.length}):`);
-        const K = this._q("#nc-file-list"), W = l.join("\0");
+        I && (I.textContent = `Selected files (${d.length}):`);
+        const K = this._q("#nc-file-list"), W = d.join("\0");
         K && this._domFileKey !== W && (K.replaceChildren(
-          ...l.map((lt) => {
+          ...d.map((ct) => {
             const P = document.createElement("li");
-            return P.textContent = lt, P;
+            return P.textContent = ct, P;
           })
         ), this._domFileKey = W);
       }
     }
     if (!t) {
-      const b = this._q("#nc-load-btn"), A = this._q("#nc-load-toggle");
-      b && (b.disabled = i), A && (A.disabled = i), this._syncDropdown();
+      const v = this._q("#nc-load-btn"), A = this._q("#nc-load-toggle");
+      v && (v.disabled = i), A && (A.disabled = i), this._syncDropdown();
     }
     const _ = !!s && s !== (typeof n == "string" ? n : null);
     if (this._toggle(this._q("#nc-zarr-row"), _), _ && s) {
-      const b = this._q("#nc-zarr-url");
-      b && (b.textContent = s);
+      const v = this._q("#nc-zarr-url");
+      v && (v.textContent = s);
     }
-    this._setCopyBtn("#nc-copy-zarr", this._copied, "Copy Zarr URL"), t && this._toggle(this._q("#nc-agg-form"), a && !d), this._toggle(this._q("#nc-pre-loading"), !s && i), this._toggle(this._q("#nc-tabs-wrap"), !!s && (d || i || o)), this._toggle(this._q("#nc-empty-main"), !s && !i && a && !d);
+    this._setCopyBtn("#nc-copy-zarr", this._copied, "Copy Zarr URL"), t && this._toggle(this._q("#nc-agg-form"), a && !l), this._toggle(this._q("#nc-pre-loading"), !s && i), this._toggle(this._q("#nc-tabs-wrap"), !!s && (l || i || o)), this._toggle(this._q("#nc-empty-main"), !s && !i && a && !l);
     const $ = this._q("#nc-pre-loading-text");
-    $ && ($.textContent = p), (j = this._q("#nc-pre-steps")) == null || j.setAttribute("status-code", h);
+    $ && ($.textContent = u), (j = this._q("#nc-pre-steps")) == null || j.setAttribute("status-code", h);
     const c = this._q('[data-tab="metadata"]'), k = this._q('[data-tab="gridlook"]');
     if (c) {
-      const b = this._activeTab === "metadata";
-      c.classList.toggle("di-tab-active", b), c.setAttribute("aria-selected", String(b));
+      const v = this._activeTab === "metadata";
+      c.classList.toggle("di-tab-active", v), c.setAttribute("aria-selected", String(v));
     }
     if (k) {
-      const b = this._activeTab === "gridlook";
-      k.disabled = e !== E.READY || !d, k.classList.toggle("di-tab-active", b), k.setAttribute("aria-selected", String(b));
+      const v = this._activeTab === "gridlook";
+      k.disabled = e !== M.READY || !l, k.classList.toggle("di-tab-active", v), k.setAttribute("aria-selected", String(v));
     }
     this._toggle(this._q("#nc-error"), o && this._activeTab === "metadata");
     const g = this._q("#nc-error-msg");
     g && (g.textContent = this.error ?? ""), this._toggle(this._q("#nc-loading"), i);
-    const f = this._q("#nc-loading-text");
-    f && (f.textContent = p), (O = this._q("#nc-body-steps")) == null || O.setAttribute("status-code", h), this._toggle(
+    const b = this._q("#nc-loading-text");
+    b && (b.textContent = u), (O = this._q("#nc-body-steps")) == null || O.setAttribute("status-code", h), this._toggle(
       this._q("#nc-metadata"),
-      this._activeTab === "metadata" && d && !i && !o
+      this._activeTab === "metadata" && l && !i && !o
     );
     const w = this._q("#nc-metadata-inner");
     w && this._domOutput !== this._output && (w.innerHTML = this._output ?? "", this._domOutput = this._output);
     const C = this._activeTab === "gridlook" && !!s;
     if (this._toggle(this._q("#nc-gridlook"), C), s) {
-      const b = H(s), A = this._q("#nc-gridlook-url");
-      if (A && (A.textContent = b), C) {
+      const v = H(s), A = this._q("#nc-gridlook-url");
+      if (A && (A.textContent = v), C) {
         const I = this._ensureIframe();
-        I && this._domIframeUrl !== b && (this._setIframeSrc(I, b), this._domIframeUrl = b);
+        I && this._domIframeUrl !== v && (this._setIframeSrc(I, v), this._domIframeUrl = v);
       }
     }
-    this._setCopyBtn("#nc-copy-gridlook", this._gridlookCopied, "Copy link"), this._toggle(this._q("#nc-empty-body"), !d && !i && !o);
-    const M = this._q("#nc-empty-body-text");
-    M && (M.textContent = u);
-    const S = this._q("#nc-empty-main-text");
-    S && (S.textContent = u);
+    this._setCopyBtn("#nc-copy-gridlook", this._gridlookCopied, "Copy link"), this._toggle(this._q("#nc-empty-body"), !l && !i && !o);
+    const S = this._q("#nc-empty-body-text");
+    S && (S.textContent = p);
+    const T = this._q("#nc-empty-main-text");
+    T && (T.textContent = p);
   }
   _syncDropdown() {
     const t = this._q("#nc-dropdown-menu");
@@ -560,12 +568,12 @@ class mt extends HTMLElement {
   }
 }
 customElements.define("data-inspector", mt);
-const Z = `<svg viewBox="0 0 448 512" width="10" height="10" style="vertical-align:middle;">
+const Y = `<svg viewBox="0 0 448 512" width="10" height="10" style="vertical-align:middle;">
   <path d="M207.029 381.476L12.686 187.132c-9.373-9.373-9.373-24.569 0-33.941l22.667-22.667
     c9.357-9.357 24.522-9.375 33.901-.04L224 284.505l154.745-154.021c9.379-9.335
     24.544-9.317 33.901.04l22.667 22.667c9.373 9.373 9.373 24.569 0 33.941
     L240.971 381.476c-9.373 9.372-24.569 9.372-33.942 0z" fill="currentColor"/>
-</svg>`, Y = `<svg viewBox="0 0 256 512" width="6" height="10" style="vertical-align:middle;">
+</svg>`, J = `<svg viewBox="0 0 256 512" width="6" height="10" style="vertical-align:middle;">
   <path d="M224.3 273l-136 136c-9.4 9.4-24.6 9.4-33.9 0l-22.6-22.6c-9.4-9.4-9.4-24.6
     0-33.9l96.4-96.4-96.4-96.4c-9.4-9.4-9.4-24.6 0-33.9L54.3 103c9.4-9.4
     24.6-9.4 33.9 0l136 136c9.5 9.4 9.5 24.6.1 34z" fill="currentColor"/>
@@ -601,7 +609,7 @@ class ft extends HTMLElement {
       if (t.target.closest("#nc-advanced-toggle")) {
         this._showAdvanced = !this._showAdvanced;
         const e = this.querySelector(".nc-advanced"), i = this.querySelector(".nc-chevron");
-        e && (e.style.display = this._showAdvanced ? "block" : "none"), i && (i.innerHTML = this._showAdvanced ? Z : Y);
+        e && (e.style.display = this._showAdvanced ? "block" : "none"), i && (i.innerHTML = this._showAdvanced ? Y : J);
       }
     };
   }
@@ -662,7 +670,7 @@ class ft extends HTMLElement {
         <!-- Advanced Toggle -->
         <button type="button" id="nc-advanced-toggle"
           class="btn btn-link btn-sm p-0 mb-3 text-decoration-none">
-          <span class="nc-chevron">${this._showAdvanced ? Z : Y}</span>
+          <span class="nc-chevron">${this._showAdvanced ? Y : J}</span>
           <span class="ms-2">Advanced Options</span>
         </button>
 
@@ -796,12 +804,12 @@ const bt = `
   }
   .zarr-spin { animation: zarrSpinArc 1.3s linear infinite; transform-origin: center; }
   .zarr-msg  { animation: zarrMsgIn 2.8s ease-in-out forwards; }
-`, J = [
+`, X = [
   { id: "submitted", label: "Submitted" },
   { id: "queued", label: "Queued" },
   { id: "converting", label: "Converting" },
   { id: "ready", label: "Ready" }
-], x = {
+], y = {
   done: "#0d9488",
   active: "#14b8a6",
   pending: "#d1d5db",
@@ -836,27 +844,27 @@ function vt() {
     r.id = "zarr-loading-keyframes", r.textContent = bt, document.head.appendChild(r);
   }
 }
-function X(r, t, e) {
+function Q(r, t, e) {
   const i = r < t, a = r === t, o = i ? `<svg width="10" height="8" viewBox="0 0 10 8" fill="none">
         <path d="M1 4L3.8 7L9 1" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
        </svg>` : a ? `<svg width="16" height="16" viewBox="0 0 16 16" class="zarr-spin" style="position:absolute;">
-        <circle cx="8" cy="8" r="5.5" fill="none" stroke="${x.active}" stroke-width="2"
+        <circle cx="8" cy="8" r="5.5" fill="none" stroke="${y.active}" stroke-width="2"
           stroke-dasharray="18 17" stroke-linecap="round"/>
-       </svg>` : `<div style="width:5px;height:5px;border-radius:50%;background:${x.pending};"></div>`, s = a ? `<div style="position:absolute;width:30px;height:30px;border-radius:50%;
-         border:2px solid ${x.active};animation:zarrPulseRing 2s ease-out infinite;pointer-events:none;"></div>` : "";
+       </svg>` : `<div style="width:5px;height:5px;border-radius:50%;background:${y.pending};"></div>`, s = a ? `<div style="position:absolute;width:30px;height:30px;border-radius:50%;
+         border:2px solid ${y.active};animation:zarrPulseRing 2s ease-out infinite;pointer-events:none;"></div>` : "";
   return `
     ${r > 0 ? `
-    <div style="flex:1;height:2px;background:${i ? `linear-gradient(90deg,${x.done},${x.active})` : x.track};
+    <div style="flex:1;height:2px;background:${i ? `linear-gradient(90deg,${y.done},${y.active})` : y.track};
       transition:background 0.5s ease;position:relative;overflow:hidden;">
       ${a ? `<div style="position:absolute;top:0;left:0;height:100%;
-        background:linear-gradient(90deg,${x.done},${x.active});
+        background:linear-gradient(90deg,${y.done},${y.active});
         animation:zarrTrackFill 0.6s ease forwards;"></div>` : ""}
     </div>` : ""}
     <div style="position:relative;display:flex;flex-direction:column;align-items:center;">
       ${s}
       <div style="width:22px;height:22px;border-radius:50%;
-        background:${i ? x.done : a ? "#fff" : "#f9fafb"};
-        border:2px solid ${i ? x.done : a ? x.active : x.pending};
+        background:${i ? y.done : a ? "#fff" : "#f9fafb"};
+        border:2px solid ${i ? y.done : a ? y.active : y.pending};
         display:flex;align-items:center;justify-content:center;
         position:relative;z-index:1;
         box-shadow:${a ? "0 0 0 4px rgba(20,184,166,0.12)" : "none"};
@@ -865,7 +873,7 @@ function X(r, t, e) {
       </div>
       <span style="position:absolute;top:28px;font-size:10.5px;
         font-weight:${a ? 600 : 400};
-        color:${i ? x.done : a ? x.textOn : x.textOff};
+        color:${i ? y.done : a ? y.textOn : y.textOff};
         white-space:nowrap;letter-spacing:0.03em;text-transform:uppercase;
         transition:color 0.4s ease;">
         ${e}
@@ -919,7 +927,7 @@ class xt extends HTMLElement {
     this.innerHTML = `
       <div style="padding:28px 12px 20px;display:flex;flex-direction:column;align-items:center;gap:0;">
         <div class="zarr-stages" style="display:flex;align-items:center;width:100%;max-width:360px;margin-bottom:28px;">
-          ${J.map((i, a) => X(a, t, i.label)).join("")}
+          ${X.map((i, a) => Q(a, t, i.label)).join("")}
         </div>
 
         <div style="height:20px;"></div>
@@ -929,7 +937,7 @@ class xt extends HTMLElement {
         </div>
 
         <div style="margin-top:10px;">
-          <span class="zarr-elapsed" style="font-size:11px;color:${x.timer};
+          <span class="zarr-elapsed" style="font-size:11px;color:${y.timer};
             font-variant-numeric:tabular-nums;letter-spacing:0.05em;">
             ${this._formatElapsed(this._elapsed)}
           </span>
@@ -937,14 +945,14 @@ class xt extends HTMLElement {
       </div>`;
   }
   _renderMessage(t, e) {
-    return t === 2 ? `<span key="${this._msgKey}" class="zarr-msg" style="font-size:13px;color:${x.msg};">
+    return t === 2 ? `<span key="${this._msgKey}" class="zarr-msg" style="font-size:13px;color:${y.msg};">
                 ${e[this._msgIdx]}
-              </span>` : t === 1 ? `<span style="font-size:13px;color:${x.msg};">Waiting for a worker to pick up the task…</span>` : "";
+              </span>` : t === 1 ? `<span style="font-size:13px;color:${y.msg};">Waiting for a worker to pick up the task…</span>` : "";
   }
   /** Update only the stage dots (called when statusCode changes). */
   _updateStages() {
     const t = D(this.statusCode), e = this.querySelector(".zarr-stages");
-    e && (e.innerHTML = J.map((a, o) => X(o, t, a.label)).join(""));
+    e && (e.innerHTML = X.map((a, o) => Q(o, t, a.label)).join(""));
     const i = this.querySelector(".zarr-msg-container");
     if (i) {
       const a = this.isAggregation ? q : L;
@@ -974,7 +982,7 @@ function G() {
     return {};
   }
 }
-function st(r) {
+function nt(r) {
   if (typeof r != "string") return r;
   let t = r.trim();
   for (; /^https?%(25)*3a/i.test(t); )
@@ -1021,10 +1029,10 @@ class qt {
     }
   }
 }
-const Q = { isZarr: !1, version: null, consolidated: !1 };
+const tt = { isZarr: !1, version: null, consolidated: !1 };
 async function Dt(r, t = {}) {
-  if (!r) return { ...Q };
-  const e = st(r).replace(/\/$/, ""), a = {
+  if (!r) return { ...tt };
+  const e = nt(r).replace(/\/$/, ""), a = {
     credentials: "same-origin",
     headers: (t.getAuthHeaders ?? G)(),
     signal: AbortSignal.timeout(t.timeoutMs ?? 5e3)
@@ -1038,13 +1046,13 @@ async function Dt(r, t = {}) {
     if (o.ok) {
       const s = await o.json(), n = s.zarr_format;
       if (n === 2 || n === 3) {
-        const l = n === 3 ? "consolidated_metadata" in s : !1;
-        return { isZarr: !0, version: n, consolidated: l };
+        const d = n === 3 ? "consolidated_metadata" in s : !1;
+        return { isZarr: !0, version: n, consolidated: d };
       }
     }
   } catch {
   }
-  return { ...Q };
+  return { ...tt };
 }
 function kt(r) {
   return {
@@ -1066,35 +1074,35 @@ function wt(r) {
   const t = { ...r };
   return delete t._ARRAY_DIMENSIONS, t;
 }
-function nt(r, t, e) {
+function dt(r, t, e) {
   const i = {}, a = {};
-  for (const [d, h] of Object.entries(r)) {
-    const { shape: p, chunks: u, dtype: y, dims: _, attrs: $ } = e(h);
-    _.forEach((g, f) => {
-      g in i || (i[g] = p[f] ?? 0);
+  for (const [l, h] of Object.entries(r)) {
+    const { shape: u, chunks: p, dtype: f, dims: _, attrs: $ } = e(h);
+    _.forEach((g, b) => {
+      g in i || (i[g] = u[b] ?? 0);
     });
-    const c = $.units, k = _.length === 1 && _[0] === d && (String(c ?? "").includes("since") || d === "time");
-    a[d] = {
-      shape: p,
-      chunks: u,
-      dtype: y,
+    const c = $.units, k = _.length === 1 && _[0] === l && (String(c ?? "").includes("since") || l === "time");
+    a[l] = {
+      shape: u,
+      chunks: p,
+      dtype: f,
       dims: _,
       attrs: $,
       _isTimeCoord: k
     };
   }
-  const o = /* @__PURE__ */ new Set(), s = (d) => String(d ?? "").split(/[\s,]+/).filter(Boolean);
-  for (const [d, h] of Object.entries(a))
-    h.dims.length === 1 && h.dims[0] === d && o.add(d);
-  s(t.coordinates).forEach((d) => o.add(d));
-  for (const d of Object.values(a))
-    s(d.attrs.coordinates).forEach((h) => o.add(h));
-  const n = {}, l = {};
-  for (const [d, h] of Object.entries(a))
-    (o.has(d) ? n : l)[d] = h;
-  return { dims: i, coords: n, data_vars: l, attrs: t };
+  const o = /* @__PURE__ */ new Set(), s = (l) => String(l ?? "").split(/[\s,]+/).filter(Boolean);
+  for (const [l, h] of Object.entries(a))
+    h.dims.length === 1 && h.dims[0] === l && o.add(l);
+  s(t.coordinates).forEach((l) => o.add(l));
+  for (const l of Object.values(a))
+    s(l.attrs.coordinates).forEach((h) => o.add(h));
+  const n = {}, d = {};
+  for (const [l, h] of Object.entries(a))
+    (o.has(l) ? n : d)[l] = h;
+  return { dims: i, coords: n, data_vars: d, attrs: t };
 }
-function T(r) {
+function E(r) {
   return Object.keys(r.coords).length + Object.keys(r.data_vars).length > 0;
 }
 function B(r, t) {
@@ -1114,13 +1122,13 @@ function B(r, t) {
   }
   for (const a of Object.keys(i))
     i[a].zarray || delete i[a];
-  return nt(i, e, (a) => {
-    var s, n, l, d;
+  return dt(i, e, (a) => {
+    var s, n, d, l;
     const o = a.zattrs ?? {};
     return {
       shape: ((s = a.zarray) == null ? void 0 : s.shape) ?? [],
-      chunks: ((n = a.zarray) == null ? void 0 : n.chunks) ?? ((l = a.zarray) == null ? void 0 : l.shape) ?? [],
-      dtype: kt(((d = a.zarray) == null ? void 0 : d.dtype) ?? "|u1"),
+      chunks: ((n = a.zarray) == null ? void 0 : n.chunks) ?? ((d = a.zarray) == null ? void 0 : d.shape) ?? [],
+      dtype: kt(((l = a.zarray) == null ? void 0 : l.dtype) ?? "|u1"),
       dims: o._ARRAY_DIMENSIONS ?? [],
       attrs: wt(o)
     };
@@ -1132,15 +1140,15 @@ function $t(r) {
     o === ".zgroup" || o === ".zattrs" || o.endsWith("/.zgroup") && e.add(o.slice(0, -8));
   if (e.size === 0) {
     const o = B(t, "");
-    if (!T(o))
+    if (!E(o))
       throw new Error("No arrays found in .zmetadata");
     return { groups: null, ...o };
   }
   const i = {}, a = B(t, "");
-  T(a) && (i["/"] = a);
+  E(a) && (i["/"] = a);
   for (const o of [...e].sort()) {
     const s = B(t, `${o}/`);
-    T(s) && (i[o] = s);
+    E(s) && (i[o] = s);
   }
   if (!Object.keys(i).length)
     throw new Error("No arrays found in .zmetadata");
@@ -1159,12 +1167,12 @@ function N(r, t) {
         if (!o || o.includes("/")) continue;
         a[o] = { zarray: s };
       }
-  return nt(a, i, (o) => {
-    var n, l;
+  return dt(a, i, (o) => {
+    var n, d;
     const s = o.zarray;
     return {
       shape: s.shape ?? [],
-      chunks: ((l = (n = s.chunk_grid) == null ? void 0 : n.configuration) == null ? void 0 : l.chunk_shape) ?? s.shape ?? [],
+      chunks: ((d = (n = s.chunk_grid) == null ? void 0 : n.configuration) == null ? void 0 : d.chunk_shape) ?? s.shape ?? [],
       // v3 dtypes are already human-readable.
       dtype: s.data_type ?? "float32",
       dims: s.dimension_names ?? [],
@@ -1182,22 +1190,22 @@ function zt(r) {
     !s || n.node_type !== "group" || e.add(s);
   if (e.size === 0) {
     const s = N(t, "");
-    if (!T(s))
+    if (!E(s))
       throw new Error("No arrays found in zarr.json");
     return { groups: null, ...s };
   }
   const i = {}, a = N(t, "");
-  T(a) && (i["/"] = a);
+  E(a) && (i["/"] = a);
   for (const s of [...e].sort()) {
     const n = N(t, s);
-    T(n) && (i[s] = n);
+    E(n) && (i[s] = n);
   }
   if (!Object.keys(i).length)
     throw new Error("No arrays found in zarr.json");
   return { groups: i };
 }
 async function At(r, t = {}) {
-  const e = st(r).replace(/\/$/, ""), a = { credentials: "same-origin", headers: (t.getAuthHeaders ?? G)() };
+  const e = nt(r).replace(/\/$/, ""), a = { credentials: "same-origin", headers: (t.getAuthHeaders ?? G)() };
   let o = null, s = 0;
   try {
     const n = await fetch(`${e}/.zmetadata`, a);
@@ -1221,60 +1229,60 @@ let Ct = 0;
 function U() {
   return `xr${++Ct}`;
 }
-function tt(r) {
+function et(r) {
   return `<svg class="icon xr-${r}"><use xlink:href="#${r}"></use></svg>`;
 }
-function Mt(r, t) {
+function St(r, t) {
   return Object.keys(r).length ? `<ul class='xr-dim-list'>${Object.entries(r).map(
     ([i, a]) => `<li><span${t.has(i) ? " class='xr-has-index'" : ""}>${z(i)}</span>: ${a}</li>`
   ).join("")}</ul>` : "";
 }
-function dt(r) {
+function lt(r) {
   const t = Object.entries(r);
   return t.length ? `<dl class='xr-attrs'>${t.map(([e, i]) => `<dt><span>${z(e)} :</span></dt><dd>${z(String(i))}</dd>`).join("")}</dl>` : "<em>No attributes</em>";
 }
-function Et(r) {
+function Mt(r) {
   const t = r.shape.reduce((e, i) => e * i, 1);
   return t === 0 ? "[]" : `${r.dtype} (${r.shape.join(" × ")} = ${t.toLocaleString()})`;
 }
-function et(r) {
+function it(r) {
   return r < 1024 ? r + " B" : r < 1024 ** 2 ? (r / 1024).toFixed(2) + " KiB" : r < 1024 ** 3 ? (r / 1024 ** 2).toFixed(2) + " MiB" : (r / 1024 ** 3).toFixed(2) + " GiB";
 }
-function Tt(r) {
+function Et(r) {
   if (!r.length) return "";
   const t = Math.min(r.length, 3), e = r.slice(-t), i = (w) => Math.max(20, Math.min(110, 20 + Math.log10(Math.max(1, w)) * 30)), a = (w) => w.toLocaleString(), s = "font-size:11px;fill:var(--xr-font-color2);font-family:monospace";
   if (t < 3) {
-    const w = i(e[t - 1]), C = t === 2 ? i(e[0]) : 12, M = t === 2 ? 42 : 2, S = 16, j = M + w + 4, O = C + S;
+    const w = i(e[t - 1]), C = t === 2 ? i(e[0]) : 12, S = t === 2 ? 42 : 2, T = 16, j = S + w + 4, O = C + T;
     return `<svg width="${Math.ceil(j)}" height="${Math.ceil(O)}"
         viewBox="0 0 ${Math.ceil(j)} ${Math.ceil(O)}"
         style="overflow:visible;display:block;flex-shrink:0">
-      <rect x="${M}" y="0" width="${w}" height="${C}"
+      <rect x="${S}" y="0" width="${w}" height="${C}"
             style="fill:var(--xr-chunk-face);stroke:var(--xr-chunk-edge);stroke-width:0.8"/>
-      ${t === 2 ? `<text x="${M - 5}" y="${C / 2 + 4}"
+      ${t === 2 ? `<text x="${S - 5}" y="${C / 2 + 4}"
             text-anchor="end" style="${s}">${a(e[0])}</text>` : ""}
-      <text x="${M + w / 2}" y="${C + S - 3}"
+      <text x="${S + w / 2}" y="${C + T - 3}"
             text-anchor="middle" style="${s}">${a(e[t - 1])}</text>
     </svg>`;
   }
-  const n = i(e[2]), l = i(e[1]), d = i(e[0]), h = 0.5, p = d * h, u = d * h * 0.45, y = 16, _ = 16, c = n + p + 52, k = y + l + u + _, g = 2, f = y + l + u;
+  const n = i(e[2]), d = i(e[1]), l = i(e[0]), h = 0.5, u = l * h, p = l * h * 0.45, f = 16, _ = 16, c = n + u + 52, k = f + d + p + _, g = 2, b = f + d + p;
   return `<svg width="${Math.ceil(c)}" height="${Math.ceil(k)}"
       viewBox="0 0 ${Math.ceil(c)} ${Math.ceil(k)}"
       style="overflow:visible;display:block;flex-shrink:0">
-    <polygon points="${g},${f} ${g + n},${f} ${g + n},${f - l} ${g},${f - l}"
+    <polygon points="${g},${b} ${g + n},${b} ${g + n},${b - d} ${g},${b - d}"
              style="fill:var(--xr-chunk-face);stroke:var(--xr-chunk-edge);stroke-width:0.8"/>
-    <polygon points="${g},${f - l} ${g + n},${f - l} ${g + n + p},${f - l - u} ${g + p},${f - l - u}"
+    <polygon points="${g},${b - d} ${g + n},${b - d} ${g + n + u},${b - d - p} ${g + u},${b - d - p}"
              style="fill:var(--xr-chunk-top);stroke:var(--xr-chunk-edge);stroke-width:0.8"/>
-    <polygon points="${g + n},${f} ${g + n + p},${f - u} ${g + n + p},${f - l - u} ${g + n},${f - l}"
+    <polygon points="${g + n},${b} ${g + n + u},${b - p} ${g + n + u},${b - d - p} ${g + n},${b - d}"
              style="fill:var(--xr-chunk-side);stroke:var(--xr-chunk-edge);stroke-width:0.8"/>
-    <text x="${g + n / 2}" y="${f + _ - 3}"
+    <text x="${g + n / 2}" y="${b + _ - 3}"
           text-anchor="middle" style="${s}">${a(e[2])}</text>
-    <text x="${g + n / 2 + p / 2}" y="${y - 3}"
+    <text x="${g + n / 2 + u / 2}" y="${f - 3}"
           text-anchor="middle" style="${s}">${a(e[1])}</text>
-    <text x="${g + n + p + 5}" y="${f - l / 2 - u / 2 + 4}"
+    <text x="${g + n + u + 5}" y="${b - d / 2 - p / 2 + 4}"
           text-anchor="start" style="${s}">${a(e[0])}</text>
   </svg>`;
 }
-function St(r) {
+function Tt(r) {
   const { shape: t, chunks: e, dtype: i } = r, a = {
     int8: 1,
     uint8: 1,
@@ -1287,10 +1295,10 @@ function St(r) {
     int64: 8,
     uint64: 8,
     float64: 8
-  }[i] ?? 4, o = t.reduce((u, y) => u * y, 1) * a;
+  }[i] ?? 4, o = t.reduce((p, f) => p * f, 1) * a;
   let s = null, n = null;
-  e && e.length === t.length && (s = e.reduce((u, y) => u * y, 1) * a, n = t.reduce((u, y, _) => u * Math.ceil(y / e[_]), 1));
-  const l = 'style="color:var(--xr-font-color3);padding:2px 16px 2px 0;white-space:nowrap;vertical-align:top"', d = 'style="padding:2px 16px 2px 0;white-space:nowrap;vertical-align:top"', h = 'style="padding:2px 0;white-space:nowrap;color:var(--xr-font-color2);vertical-align:top"', p = (u, y, _ = "") => `<tr><td ${l}>${u}</td><td ${d}>${y}</td><td ${h}>${_}</td></tr>`;
+  e && e.length === t.length && (s = e.reduce((p, f) => p * f, 1) * a, n = t.reduce((p, f, _) => p * Math.ceil(f / e[_]), 1));
+  const d = 'style="color:var(--xr-font-color3);padding:2px 16px 2px 0;white-space:nowrap;vertical-align:top"', l = 'style="padding:2px 16px 2px 0;white-space:nowrap;vertical-align:top"', h = 'style="padding:2px 0;white-space:nowrap;color:var(--xr-font-color2);vertical-align:top"', u = (p, f, _ = "") => `<tr><td ${d}>${p}</td><td ${l}>${f}</td><td ${h}>${_}</td></tr>`;
   return `<table style="border-collapse:collapse;padding:6px 0 12px"><tr>
     <td style="vertical-align:top;padding:0">
       <table style="font-size:12px;font-family:monospace;border-collapse:collapse;line-height:1.75">
@@ -1299,15 +1307,15 @@ function St(r) {
           <th style="font-weight:600;padding:0 16px 5px 0;text-align:left">Array</th>
           <th style="font-weight:600;padding:0 0 5px 0;text-align:left">Chunk</th>
         </tr></thead><tbody>
-          ${p("Bytes", et(o), s !== null ? et(s) : "—")}
-          ${p("Shape", "(" + t.join(", ") + ")", e ? "(" + e.join(", ") + ")" : "—")}
-          ${n !== null ? p("Chunks", n.toLocaleString() + " chunks") : ""}
-          ${p("dtype", z(i))}
-          ${p("dims", "(" + r.dims.join(", ") + ")")}
+          ${u("Bytes", it(o), s !== null ? it(s) : "—")}
+          ${u("Shape", "(" + t.join(", ") + ")", e ? "(" + e.join(", ") + ")" : "—")}
+          ${n !== null ? u("Chunks", n.toLocaleString() + " chunks") : ""}
+          ${u("dtype", z(i))}
+          ${u("dims", "(" + r.dims.join(", ") + ")")}
         </tbody>
       </table>
     </td>
-    <td style="vertical-align:middle;padding:0 0 0 32px">${Tt(t)}</td>
+    <td style="vertical-align:middle;padding:0 0 0 32px">${Et(t)}</td>
   </tr></table>`;
 }
 function jt(r, t, e) {
@@ -1316,30 +1324,30 @@ function jt(r, t, e) {
     <div class='xr-var-name'><span${e ? " class='xr-has-index'" : ""}>${z(r)}</span></div>
     <div class='xr-var-dims'>(${t.dims.map(z).join(", ")})</div>
     <div class='xr-var-dtype'>${z(t.dtype)}</div>
-    <div class='xr-var-preview xr-preview'>${z(Et(t))}</div>
+    <div class='xr-var-preview xr-preview'>${z(Mt(t))}</div>
     <input id='${i}' class='xr-var-attrs-in' type='checkbox'${o ? "" : " disabled"}>
-    <label for='${i}' title='Show/Hide attributes'>${tt("icon-file-text2")}</label>
+    <label for='${i}' title='Show/Hide attributes'>${et("icon-file-text2")}</label>
     <input id='${a}' class='xr-var-data-in' type='checkbox'>
-    <label for='${a}' title='Show/Hide data repr'>${tt("icon-database")}</label>
-    <div class='xr-var-attrs'>${dt(t.attrs)}</div>
-    <div class='xr-var-data'>${St(t)}</div>
+    <label for='${a}' title='Show/Hide data repr'>${et("icon-database")}</label>
+    <div class='xr-var-attrs'>${lt(t.attrs)}</div>
+    <div class='xr-var-data'>${Tt(t)}</div>
   `;
 }
-function it(r, t) {
+function rt(r, t) {
   return `<ul class='xr-var-list'>${Object.entries(r).map(
     ([e, i]) => `<li class='xr-var-item'>${jt(e, i, t.has(e))}</li>`
   ).join("")}</ul>`;
 }
 function R(r, t, e, i, a, o) {
-  const s = U(), n = (i ?? 0) > 0, l = i !== null ? ` <span>(${i})</span>` : "", d = a && n ? "" : " disabled";
+  const s = U(), n = (i ?? 0) > 0, d = i !== null ? ` <span>(${i})</span>` : "", l = a && n ? "" : " disabled";
   return `
-    <input id='${s}' class='xr-section-summary-in' type='checkbox'${d}${o || !n ? "" : " checked"} />
-    <label for='${s}' class='xr-section-summary'${d === "" ? " title='Expand/collapse section'" : ""}>${r}${l}</label>
+    <input id='${s}' class='xr-section-summary-in' type='checkbox'${l}${o || !n ? "" : " checked"} />
+    <label for='${s}' class='xr-section-summary'${l === "" ? " title='Expand/collapse section'" : ""}>${r}${d}</label>
     <div class='xr-section-inline-details'>${t}</div>
     ${e ? `<div class='xr-section-details'>${e}</div>` : ""}
   `;
 }
-const rt = `<svg style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+const at = `<svg class="xr-icons" aria-hidden="true"><defs>
 <symbol id="icon-database" viewBox="0 0 32 32">
   <path d="M16 0c-8.837 0-16 2.239-16 5v4c0 2.761 7.163 5 16 5s16-2.239 16-5v-4c0-2.761-7.163-5-16-5z"/>
   <path d="M16 17c-8.837 0-16-2.239-16-5v6c0 2.761 7.163 5 16 5s16-2.239 16-5v-6c0 2.761-7.163 5-16 5z"/>
@@ -1349,12 +1357,12 @@ const rt = `<svg style="position:absolute;width:0;height:0;overflow:hidden"><def
   <path d="M28.681 7.159c-0.694-0.947-1.662-2.053-2.724-3.116s-2.169-2.030-3.116-2.724c-1.612-1.182-2.393-1.319-2.841-1.319h-15.5c-1.378 0-2.5 1.121-2.5 2.5v27c0 1.378 1.122 2.5 2.5 2.5h23c1.378 0 2.5-1.122 2.5-2.5v-19.5c0-0.448-0.137-1.23-1.319-2.841zM24.543 5.457c0.959 0.959 1.712 1.825 2.268 2.543h-4.811v-4.811c0.718 0.556 1.584 1.309 2.543 2.268zM28 29.5c0 0.271-0.229 0.5-0.5 0.5h-23c-0.271 0-0.5-0.229-0.5-0.5v-27c0-0.271 0.229-0.5 0.5-0.5 0 0 15.499-0 15.5 0v7c0 0.552 0.448 1 1 1h7v19.5z"/>
 </symbol>
 </defs></svg>`;
-function at(r) {
+function ot(r) {
   const t = new Set(Object.keys(r.coords)), e = [];
   return e.push(
     R(
       "Dimensions:",
-      Mt(r.dims, t),
+      St(r.dims, t),
       "",
       Object.keys(r.dims).length,
       !1,
@@ -1364,7 +1372,7 @@ function at(r) {
     R(
       "Coordinates:",
       "",
-      it(r.coords, t),
+      rt(r.coords, t),
       Object.keys(r.coords).length,
       !0,
       !1
@@ -1373,7 +1381,7 @@ function at(r) {
     R(
       "Data variables:",
       "",
-      it(r.data_vars, /* @__PURE__ */ new Set()),
+      rt(r.data_vars, /* @__PURE__ */ new Set()),
       Object.keys(r.data_vars).length,
       !0,
       !1
@@ -1382,7 +1390,7 @@ function at(r) {
     R(
       "Attributes:",
       "",
-      dt(r.attrs),
+      lt(r.attrs),
       Object.keys(r.attrs).length,
       !0,
       !0
@@ -1396,7 +1404,7 @@ function at(r) {
 }
 function Ot(r) {
   if (!r.groups)
-    return `${rt}${at(r)}`;
+    return `${at}${ot(r)}`;
   const t = Object.entries(r.groups).map(
     ([e, i]) => `
     <details open style="margin-bottom:10px;border:1px solid var(--xr-border-color);border-radius:4px;overflow:hidden">
@@ -1404,11 +1412,11 @@ function Ot(r) {
         <span style="font-size:11px;color:var(--xr-font-color2)">▶</span>
         <span>Group: ${z(e)}</span>
       </summary>
-      <div style="padding:0 12px 8px">${at(i)}</div>
+      <div style="padding:0 12px 8px">${ot(i)}</div>
     </details>
   `
   ).join("");
-  return `${rt}<div style="font-family:monospace">${t}</div>`;
+  return `${at}<div style="font-family:monospace">${t}</div>`;
 }
 const It = `
 :root {
@@ -1476,21 +1484,31 @@ dl.xr-attrs{padding:0;margin:0;display:grid;grid-template-columns:125px auto}
 .xr-attrs dt,.xr-attrs dd{padding:0;margin:0;float:left;padding-right:10px;width:auto}
 .xr-attrs dt{font-weight:normal;grid-column:1}
 .xr-attrs dd{grid-column:2;white-space:pre-wrap;word-break:break-all}
+.xr-icons{position:absolute;width:0;height:0;overflow:hidden}
 .xr-icon-database,.xr-icon-file-text2{display:inline-block;vertical-align:middle;width:1em;height:1.5em!important;stroke-width:0;stroke:currentColor;fill:currentColor}
 .xr-var-attrs-in:checked+label>.xr-icon-file-text2,.xr-var-data-in:checked+label>.xr-icon-database{color:var(--xr-font-color0);filter:drop-shadow(1px 1px 5px var(--xr-font-color2));stroke-width:.8px}
 .xr-var-item>input+label{cursor:pointer;color:var(--xr-font-color2);padding:0 1px}
 `;
-let ot = !1;
+let st = !1;
 function Lt(r = {}) {
-  if (ot || typeof document > "u") return;
-  ot = !0;
-  const t = typeof window < "u" ? window.MAIN_COLOR : void 0, e = (r.mainColor ?? t ?? "#9b7a52").replace(/^#/, ""), i = parseInt(e.slice(0, 2), 16), a = parseInt(e.slice(2, 4), 16), o = parseInt(e.slice(4, 6), 16), s = (p) => `rgb(${Math.min(255, i * p | 0)},${Math.min(255, a * p | 0)},${Math.min(255, o * p | 0)})`, n = (p, u) => `rgba(${Math.min(255, i * p | 0)},${Math.min(255, a * p | 0)},${Math.min(255, o * p | 0)},${u})`, l = `rgb(${255 - i},${255 - a},${255 - o})`, d = `
-    :root{--xr-chunk-face:${s(0.85)};--xr-chunk-top:${s(1.25)};--xr-chunk-side:${s(0.55)};--xr-chunk-edge:${l}}
+  if (st || typeof document > "u") return;
+  st = !0;
+  const t = typeof window < "u" ? window.MAIN_COLOR : void 0, e = (r.mainColor ?? t ?? "#9b7a52").replace(/^#/, ""), i = parseInt(e.slice(0, 2), 16), a = parseInt(e.slice(2, 4), 16), o = parseInt(e.slice(4, 6), 16), s = (p) => `rgb(${Math.min(255, i * p | 0)},${Math.min(255, a * p | 0)},${Math.min(255, o * p | 0)})`, n = (p, f) => `rgba(${Math.min(255, i * p | 0)},${Math.min(255, a * p | 0)},${Math.min(255, o * p | 0)},${f})`, d = `rgb(${255 - i},${255 - a},${255 - o})`, h = `
+    :root{--xr-chunk-face:${s(0.85)};--xr-chunk-top:${s(1.25)};--xr-chunk-side:${s(0.55)};--xr-chunk-edge:${d}}
     html[data-theme="dark"],body[data-theme="dark"],body.vscode-dark{
-      --xr-chunk-face:${n(0.85, 0.65)};--xr-chunk-top:${n(1.25, 0.65)};--xr-chunk-side:${n(0.55, 0.65)};--xr-chunk-edge:${l}
+      --xr-chunk-face:${n(0.85, 0.65)};--xr-chunk-top:${n(1.25, 0.65)};--xr-chunk-side:${n(0.55, 0.65)};--xr-chunk-edge:${d}
     }
-  `, h = document.createElement("style");
-  h.setAttribute("data-xarray-repr", "1"), h.textContent = d + It, document.head.appendChild(h);
+  ` + It;
+  try {
+    if (typeof CSSStyleSheet == "function" && Array.isArray(document.adoptedStyleSheets)) {
+      const p = new CSSStyleSheet();
+      p.replaceSync(h), document.adoptedStyleSheets = [...document.adoptedStyleSheets, p];
+      return;
+    }
+  } catch {
+  }
+  const u = document.createElement("style");
+  u.setAttribute("data-xarray-repr", "1"), u.textContent = h, document.head.appendChild(u);
 }
 async function Rt(r, t = {}) {
   t.injectCss !== !1 && Lt({ mainColor: t.mainColor });
@@ -1500,7 +1518,7 @@ async function Rt(r, t = {}) {
 export {
   ft as AggregationConfigElement,
   mt as DataInspectorElement,
-  E as NcDumpDialogState,
+  M as NcDumpDialogState,
   xt as ZarrLoadingStepsElement,
   qt as ZarrPoller,
   Ot as buildXarrayRepr,
