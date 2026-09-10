@@ -21,6 +21,30 @@ body.waterpark-databrowser-page .md-content__inner::before {
   display: none;
 }
 
+/* TODO: fix in upstream. The widget's internal layers, sticky list head run to very
+   high z-indexes while Material's header sits at 2. Without a stacking context of
+   its own the mount shares Material's, and those layers paint over the nav.
+   `isolation` contains them; `z-index: 0` keeps the region under the header. */
+body.waterpark-databrowser-page .md-main {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}
+
+/* The page-level layer the terminal window and the File Inspector mount into.
+   Fixed and viewport-sized, so the widget gives a window that drags
+   anywhere on the page, docks at the bottom of the SCREEN, and maximizes to the
+   whole viewport. */
+#waterpark-databrowser-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+#waterpark-databrowser-overlay > * {
+  pointer-events: auto;
+}
+
 /* 2. Mount sizing */
 .waterpark-databrowser-wrapper {
   width: 100%;

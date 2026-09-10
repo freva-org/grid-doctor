@@ -15,6 +15,7 @@ Env overrides:
 """
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import os
@@ -107,6 +108,25 @@ def install_packages() -> dict[str, Path]:
     return dists
 
 
+def content_hash(path: Path, length: int = 10) -> str:
+    """Short sha256 of a file's bytes."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:length]
+
+
+def fingerprint(path: Path) -> str:
+    """
+    Rename ``x.js`` to ``x.<digest>.js`` and return the new name.
+
+    The URL changes when and only when the bytes change, so a browser that has
+    the old build fetches the new one on its next visit with no hard reload, and
+    a rebuild that resolves to the same package keeps its cache. It also makes
+    the file safe to serve with a far-future ``Cache-Control: immutable``.
+    """
+    target = path.with_name(f"{path.stem}.{content_hash(path)}{path.suffix}")
+    path.rename(target)
+    return target.name
+
+
 def entry_file(dist: Path) -> str:
     """
     The ESM entry, taken from the package's own ``exports``/``module``/``main``.
@@ -145,8 +165,10 @@ def bundle_browser(dist: Path) -> str:
           "--bundle", "--format=esm", "--minify",
           "--legal-comments=none", f"--outfile={out}"])
     size_kb = out.stat().st_size / 1024
-    print(f"[databrowser] bundled browser -> {out} ({size_kb:.0f} KB, 1 request)")
-    return BROWSER_BUNDLE
+    name = fingerprint(out)
+    print(f"[databrowser] bundled browser -> {target_dir / name} "
+          f"({size_kb:.0f} KB, 1 request)")
+    return name
 
 
 def copy_single(dist: Path, entry: str, subdir: str,
@@ -161,6 +183,7 @@ def copy_single(dist: Path, entry: str, subdir: str,
     target.mkdir(parents=True, exist_ok=True)
     name = dest_name or entry
     shutil.copy2(dist / entry, target / name)
+    name = fingerprint(target / name)
     print(f"[databrowser] copied {entry} -> {target / name}")
     return name
 
@@ -169,7 +192,11 @@ def render_page(entry_js: str, inspector_js: str) -> str:
     """Emit the mkdocs page: a sized mount div; the host loader does the rest."""
     entry_url = html.escape(f"{ASSET_URL}/{entry_js}", quote=True)
     inspector_url = html.escape(f"{INSPECTOR_URL}/{inspector_js}", quote=True)
-    config_url = html.escape(CONFIG_URL, quote=True)
+    # a digest in the query string busts the same cache.
+    config_ref = CONFIG_URL
+    if CONFIG_FILE.exists():
+        config_ref = f"{CONFIG_URL}?h={content_hash(CONFIG_FILE, 8)}"
+    config_url = html.escape(config_ref, quote=True)
     return f"""---
 title: Data Browser
 hide:
