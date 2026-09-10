@@ -10,10 +10,6 @@ export default {
   // Default metadata flavour.
   flavour: "waterpark",
 
-  // Optional freva-web-parity script that maps facet VALUES to human-readable
-  // descriptions.
-  metadataScriptUrl: "",
-
   // Public, read-only demo
   authEnabled: false,
   enableHeavyOps: false,
@@ -24,6 +20,45 @@ export default {
 
   // Scope: Waterpark-only "hosted filtered instance"
   baseFilters: { project: "waterpark" },
+
+  // the scope value renders locked and survives "Clear all". Set true to let
+  // a user take it off and see the wider archive.
+  scopeRemovable: false,
+
+  // Land on the metadata overview rather than the file list for the first time
+  // user. Always a user's own choice wins on every later visit.
+  defaultLayout: "overview",
+
+  // How the overview is laid out before a visitor rearranges it.
+  overview: {
+    order: [
+      "product",
+      "variable",
+      "time_frequency",
+      "healpix_level",
+      "experiment",
+      "model",
+      "realm",
+      "ensemble",
+      "time_aggregation",
+      "__time",
+      "__bbox",
+    ],
+    // Everything not listed here moves under "Show additional facets".
+    mainFacets: [
+      "product",
+      "variable",
+      "time_frequency",
+      "healpix_level",
+      "experiment",
+      "model",
+      "realm",
+      "ensemble",
+      "time_aggregation",
+      "__time",
+      "__bbox",
+    ],
+  },
 
   // Brand
   brand: {

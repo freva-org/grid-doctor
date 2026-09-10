@@ -90,6 +90,22 @@
     });
   }
 
+  // A fixed, viewport-sized layer for the window and the File Inspector.
+  function overlayLayer() {
+    var el = document.getElementById("waterpark-databrowser-overlay");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "waterpark-databrowser-overlay";
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  function removeOverlayLayer() {
+    var el = document.getElementById("waterpark-databrowser-overlay");
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+
   function teardown() {
     if (schemeObserver) {
       schemeObserver.disconnect();
@@ -104,6 +120,7 @@
       handle = null;
     }
     mountedEl = null;
+    removeOverlayLayer();
     document.body.classList.remove("waterpark-databrowser-page");
   }
 
@@ -165,6 +182,8 @@
       var config = parseConfigModule(results[1]);
       // Self-hosted inspector
       if (inspectorUrl) config.inspectorUrl = inspectorUrl;
+      // The terminal window and the File Inspector are page-level surfaces.
+      config.overlayRoot = overlayLayer();
       // Open in Waterpark's current light/dark mode from the first paint
       config.theme = config.theme || {};
       config.theme.mode = currentMode();
