@@ -677,6 +677,9 @@ def map_grib_to_healpix(
                     frequency=frequency,
                     variables=variable_names,
                     max_level=max_level,
+                    target_levels=(
+                        str(max_level) if highest_level_only else ",".join(map(str, range(max_level, -1, -1)))
+                    ),
                     weights=weight_file,
                     strategy="stepwise",
                 )

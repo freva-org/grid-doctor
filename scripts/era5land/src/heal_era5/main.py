@@ -1436,6 +1436,31 @@ def _existing_variable_last_date(
     return min(data_dates), permanent_date
 
 
+def _existing_frequency_variables(
+    dataset: str,
+    frequency: str,
+    *,
+    zarr_format: int,
+    output_path: str | Path | None,
+) -> set[str]:
+    """Return time-varying variable names already published at one frequency."""
+
+    import xarray as xr
+
+    names: set[str] = set()
+    for destination in existing_destinations_for_frequency(
+        dataset,
+        frequency,
+        output_path=output_path,
+    ):
+        opened = xr.open_zarr(destination, consolidated=(zarr_format == 2))
+        try:
+            names.update(str(name) for name, data in opened.data_vars.items() if "time" in data.dims)
+        finally:
+            opened.close()
+    return names
+
+
 def _existing_variable_pressure_levels(
     dataset: str,
     frequency: str,
@@ -1932,6 +1957,20 @@ def run_update(args: argparse.Namespace) -> int:
             "stage=update_frequency ─────────────── frequency=%s ───────────────",
             frequency,
         )
+        published_variables = _existing_frequency_variables(
+            args.dataset,
+            frequency,
+            zarr_format=args.zarr_format,
+            output_path=args.output_path,
+        )
+        update_variables = tuple(variable for variable in requested_variables if variable in published_variables)
+        for variable in requested_variables:
+            if variable not in published_variables:
+                logger.info(
+                    "stage=update_skip ⏭️  Skipping %s %s: variable is not in an existing time series",
+                    frequency,
+                    variable,
+                )
         # Snapshot every variable before the first write at this frequency.
         # Appending one variable extends the shared time coordinate and pads
         # its peers, so coverage must never be re-read mid-frequency.
@@ -1943,9 +1982,9 @@ def run_update(args: argparse.Namespace) -> int:
                 zarr_format=args.zarr_format,
                 output_path=args.output_path,
             )
-            for variable in requested_variables
+            for variable in update_variables
         }
-        for variable in requested_variables:
+        for variable in update_variables:
             latest_date, permanent_watermark = coverage_before_write[variable]
             if latest_date is None and force_from is None:
                 logger.info(

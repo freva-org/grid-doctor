@@ -192,6 +192,7 @@ def test_remap_uses_pressure_level_override(monkeypatch):
 def test_update_preview_skips_missing_stores(monkeypatch):
     logged: list[tuple[object, str]] = []
     monkeypatch.setattr(main, "selected_requests", lambda **_: _request())
+    monkeypatch.setattr(main, "_existing_frequency_variables", lambda *args, **kwargs: set())
     monkeypatch.setattr(main, "_existing_variable_last_date", lambda *args, **kwargs: (None, None))
     monkeypatch.setattr(main, "_log_update_preview", lambda rows, **kwargs: logged.append((rows, kwargs["batch_mode"])))
 
@@ -242,6 +243,7 @@ def test_update_uses_existing_pressure_levels_for_batched_remaps(monkeypatch):
     calls: list[dict[str, object]] = []
     pressure_record = _record(files=("/tmp/tas_2024-01-01.grb",))._replace(variable="ta", level_type="pl")
     monkeypatch.setattr(main, "selected_requests", lambda **_: _request("ta"))
+    monkeypatch.setattr(main, "_existing_frequency_variables", lambda *args, **kwargs: {"ta"})
     monkeypatch.setattr(
         main,
         "_existing_variable_last_date",
@@ -313,6 +315,7 @@ def test_update_force_from_overrides_stored_update_boundaries(monkeypatch):
     force_from = date(2026, 7, 1)
 
     monkeypatch.setattr(main, "selected_requests", lambda **_: _request())
+    monkeypatch.setattr(main, "_existing_frequency_variables", lambda *args, **kwargs: {"tas"})
     monkeypatch.setattr(
         main,
         "_existing_variable_last_date",
@@ -365,6 +368,7 @@ def test_update_snapshots_all_variable_coverage_before_writing(monkeypatch):
         "selected_requests",
         lambda **_: ({}, [SimpleNamespace(name="tas"), SimpleNamespace(name="uas")]),
     )
+    monkeypatch.setattr(main, "_existing_frequency_variables", lambda *args, **kwargs: {"tas", "uas"})
     monkeypatch.setattr(
         main,
         "_existing_variable_last_date",
