@@ -906,10 +906,32 @@ def _load_or_build_target_polygon_cache(
 # ESMF mesh builders
 # =============================================================================
 
+def _build_interleaved_lonlat_coords(
+    lon_deg: np.ndarray,
+    lat_deg: np.ndarray,
+) -> np.ndarray:
+    lon_deg = np.asarray(lon_deg, dtype=np.float64)
+    lat_deg = np.asarray(lat_deg, dtype=np.float64)
+
+    if lon_deg.shape != lat_deg.shape:
+        raise ValueError(
+            f"lon/lat shape mismatch for element coords: {lon_deg.shape} vs {lat_deg.shape}"
+        )
+
+    coords = np.empty(lon_deg.size * 2, dtype=np.float64)
+    coords[0::2] = lon_deg
+    coords[1::2] = lat_deg
+    return coords
+    
+
 def _build_triangle_mesh_from_arrays(
     node_lon: np.ndarray,
     node_lat: np.ndarray,
     tri_conn: np.ndarray,
+    *,
+    element_lon: np.ndarray | None = None,
+    element_lat: np.ndarray | None = None,
+    element_area: np.ndarray | None = None,
 ):
     ESMF = _get_ESMF()
 
@@ -928,11 +950,32 @@ def _build_triangle_mesh_from_arrays(
     elem_ids = np.arange(elem_count, dtype=np.int32)
     elem_types = np.full(elem_count, ESMF.MeshElemType.TRI, dtype=np.int32)
 
+    kwargs = {}
+
+    if element_area is not None:
+        area = np.asarray(element_area, dtype=np.float64)
+        if area.shape != (elem_count,):
+            raise ValueError(
+                f"triangle element_area shape mismatch: expected {(elem_count,)}, got {area.shape}"
+            )
+        kwargs["element_area"] = area
+
+    if element_lon is not None or element_lat is not None:
+        if element_lon is None or element_lat is None:
+            raise ValueError("element_lon and element_lat must be provided together")
+        if np.asarray(element_lon).shape != (elem_count,) or np.asarray(element_lat).shape != (elem_count,):
+            raise ValueError(
+                f"triangle element coords shape mismatch: expected {(elem_count,)}, "
+                f"got lon={np.asarray(element_lon).shape}, lat={np.asarray(element_lat).shape}"
+            )
+        kwargs["element_coords"] = _build_interleaved_lonlat_coords(element_lon, element_lat)
+
     mesh.add_elements(
         elem_count,
         elem_ids,
         elem_types,
         tri_conn.ravel().astype(np.int32),
+        **kwargs,
     )
     return mesh
 
@@ -943,6 +986,9 @@ def _build_polygon_mesh_from_arrays(
     elem_types: np.ndarray,
     elem_conn: np.ndarray,
     face_areas: np.ndarray | None = None,
+    *,
+    element_lon: np.ndarray | None = None,
+    element_lat: np.ndarray | None = None,
 ):
     ESMF = _get_ESMF()
 
@@ -962,7 +1008,22 @@ def _build_polygon_mesh_from_arrays(
 
     kwargs = {}
     if face_areas is not None:
-        kwargs["element_area"] = np.asarray(face_areas, dtype=np.float64)
+        area = np.asarray(face_areas, dtype=np.float64)
+        if area.shape != (elem_count,):
+            raise ValueError(
+                f"polygon face_areas shape mismatch: expected {(elem_count,)}, got {area.shape}"
+            )
+        kwargs["element_area"] = area
+
+    if element_lon is not None or element_lat is not None:
+        if element_lon is None or element_lat is None:
+            raise ValueError("element_lon and element_lat must be provided together")
+        if np.asarray(element_lon).shape != (elem_count,) or np.asarray(element_lat).shape != (elem_count,):
+            raise ValueError(
+                f"polygon element coords shape mismatch: expected {(elem_count,)}, "
+                f"got lon={np.asarray(element_lon).shape}, lat={np.asarray(element_lat).shape}"
+            )
+        kwargs["element_coords"] = _build_interleaved_lonlat_coords(element_lon, element_lat)
 
     mesh.add_elements(
         elem_count,
@@ -1058,12 +1119,18 @@ def prepare_healpix_regridder(
         src_n_face = int(src_grid.n_face)
 
         with _timed_step(timings, "build source mesh", verbose=verbose):
+            src_elem_lon = np.asarray(src_grid.face_lon.values, dtype=np.float64)[np.asarray(kept_src, dtype=np.int64)]
+            src_elem_lat = np.asarray(src_grid.face_lat.values, dtype=np.float64)[np.asarray(kept_src, dtype=np.int64)]
+
             if np.all(np.asarray(src_elem_types) == 3):
                 src_tri_conn = np.asarray(src_elem_conn, dtype=np.int32).reshape(-1, 3)
                 src_mesh = _build_triangle_mesh_from_arrays(
                     src_node_lon,
                     src_node_lat,
                     src_tri_conn,
+                    element_lon=src_elem_lon,
+                    element_lat=src_elem_lat,
+                    element_area=src_face_areas,
                 )
             else:
                 src_mesh = _build_polygon_mesh_from_arrays(
@@ -1071,6 +1138,9 @@ def prepare_healpix_regridder(
                     src_node_lat,
                     src_elem_types,
                     src_elem_conn,
+                    face_areas=src_face_areas,
+                    element_lon=src_elem_lon,
+                    element_lat=src_elem_lat,
                 )
 
         source_info["source_path_used"] = "native"
@@ -1140,12 +1210,17 @@ def prepare_healpix_regridder(
         pair_hash = hash_grid_pair(src_grid_hash, dst_grid_hash)
 
     with _timed_step(timings, "build target mesh", verbose=verbose):
+        dst_elem_lon = np.asarray(dst_grid.face_lon.values, dtype=np.float64)[np.asarray(kept_dst, dtype=np.int64)]
+        dst_elem_lat = np.asarray(dst_grid.face_lat.values, dtype=np.float64)[np.asarray(kept_dst, dtype=np.int64)]
+
         dst_mesh = _build_polygon_mesh_from_arrays(
             dst_node_lon,
             dst_node_lat,
             dst_elem_types,
             dst_elem_conn,
             face_areas=dst_face_areas,
+            element_lon=dst_elem_lon,
+            element_lat=dst_elem_lat,
         )
 
     ESMF = _get_ESMF()
@@ -1163,35 +1238,90 @@ def prepare_healpix_regridder(
     weight_file = weight_dir / f"{pair_hash}.nc"
     weight_meta_file = weight_dir / f"{pair_hash}.json"
 
-    if rebuild_weights and weight_file.exists():
-        weight_file.unlink()
+    weight_status = {
+        "mode": None,                  # "loaded_existing" | "built_new"
+        "reason": None,                # "existing_ok" | "missing" | "rebuild_requested" | "load_failed"
+        "load_error": None,
+    }
+
+    def _safe_unlink(path: Path) -> None:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+    def _build_regrid_and_write_weights(reason: str):
+        weight_status["mode"] = "built_new"
+        weight_status["reason"] = reason
+
+        if verbose:
+            print(f"building new weights: {weight_file}")
+
+        regrid_kwargs = dict(
+            srcfield=src_field,
+            dstfield=dst_field,
+            regrid_method=ESMF.RegridMethod.CONSERVE,
+            line_type=ESMF.LineType.GREAT_CIRCLE,
+            norm_type=ESMF.NormType.DSTAREA,
+            unmapped_action=ESMF.UnmappedAction.ERROR,
+            ignore_degenerate=True,
+            filename=str(weight_file),
+        )
+
+        try:
+            regrid_obj = ESMF.Regrid(large_file=True, **regrid_kwargs)
+        except TypeError:
+            regrid_obj = ESMF.Regrid(**regrid_kwargs)
+
+        if not weight_file.exists():
+            raise RuntimeError(
+                f"ESMF.Regrid completed but weight file was not created: {weight_file}"
+            )
+
+        try:
+            size = weight_file.stat().st_size
+        except FileNotFoundError:
+            size = 0
+
+        if size <= 0:
+            raise RuntimeError(
+                f"ESMF.Regrid completed but weight file is empty: {weight_file}"
+            )
+
+        return regrid_obj
+
+    if rebuild_weights:
+        if verbose and weight_file.exists():
+            print(f"rebuild_weights=True -> deleting existing weight file: {weight_file}")
+        _safe_unlink(weight_file)
+        _safe_unlink(weight_meta_file)
 
     with _timed_step(timings, "build/load regrid operator", verbose=verbose):
         if weight_file.exists():
             if verbose:
                 print(f"using existing weights: {weight_file}")
-            regrid = ESMF.RegridFromFile(
-                src_field,
-                dst_field,
-                filename=str(weight_file),
-            )
-        else:
-            if verbose:
-                print(f"building new weights: {weight_file}")
-            regrid_kwargs = dict(
-                srcfield=src_field,
-                dstfield=dst_field,
-                regrid_method=ESMF.RegridMethod.CONSERVE,
-                line_type=ESMF.LineType.GREAT_CIRCLE,
-                norm_type=ESMF.NormType.DSTAREA,
-                unmapped_action=ESMF.UnmappedAction.ERROR,
-                ignore_degenerate=True,
-                filename=str(weight_file),
-            )
             try:
-                regrid = ESMF.Regrid(large_file=True, **regrid_kwargs)
-            except TypeError:
-                regrid = ESMF.Regrid(**regrid_kwargs)
+                regrid = ESMF.RegridFromFile(
+                    src_field,
+                    dst_field,
+                    filename=str(weight_file),
+                )
+                weight_status["mode"] = "loaded_existing"
+                weight_status["reason"] = "existing_ok"
+            except Exception as e:
+                weight_status["load_error"] = repr(e)
+
+                if verbose:
+                    print(f"failed to load existing weights: {e}")
+                    print(f"deleting unreadable weight file and rebuilding: {weight_file}")
+
+                _safe_unlink(weight_file)
+                _safe_unlink(weight_meta_file)
+
+                regrid = _build_regrid_and_write_weights(reason="load_failed")
+        else:
+            reason = "rebuild_requested" if rebuild_weights else "missing"
+            regrid = _build_regrid_and_write_weights(reason=reason)
 
     meta = {
         "impl_version": REGRID_IMPL_VERSION,
@@ -1208,6 +1338,7 @@ def prepare_healpix_regridder(
         "weight_file": str(weight_file),
         "src_meta": src_meta,
         "dst_meta": dst_meta,
+         "weight_status": weight_status,
     }
     with open(weight_meta_file, "w") as f:
         json.dump(meta, f, indent=2)
