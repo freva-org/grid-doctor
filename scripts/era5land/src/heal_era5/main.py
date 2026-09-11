@@ -1401,6 +1401,46 @@ def _existing_variable_last_date(
     return max(data_dates), permanent_date
 
 
+def _existing_variable_pressure_levels(
+    dataset: str,
+    frequency: str,
+    variable: str,
+    *,
+    zarr_format: int,
+    output_path: str | Path | None,
+) -> tuple[int, ...] | None:
+    """Return the pressure levels already stored for one variable.
+
+    Surface variables return ``None``.  All zoom levels that contain a
+    pressure-level variable must agree, otherwise an update cannot safely
+    preserve the existing vertical coordinate.
+    """
+
+    import xarray as xr
+
+    stored_selections: list[tuple[int, ...]] = []
+    for destination in existing_destinations_for_frequency(
+        dataset,
+        frequency,
+        output_path=output_path,
+    ):
+        opened = xr.open_zarr(destination, consolidated=(zarr_format == 2))
+        try:
+            if variable not in opened or "plev" not in opened[variable].dims:
+                continue
+            stored_selections.append(tuple(int(level) for level in opened[variable]["plev"].values))
+        finally:
+            opened.close()
+
+    if not stored_selections:
+        return None
+    if len(set(stored_selections)) != 1:
+        raise ValueError(
+            f"Cannot update {frequency} {variable}: HEALPix zoom stores have different pressure-level selections."
+        )
+    return stored_selections[0]
+
+
 def _local_modification_date(source_file: str) -> date:
     """Return a source file's modification date in the machine's local timezone."""
 
@@ -1550,7 +1590,11 @@ class UpdatePreviewRow(NamedTuple):
     forward_files: int
 
 
-def _update_remap_args(args: argparse.Namespace) -> argparse.Namespace:
+def _update_remap_args(
+    args: argparse.Namespace,
+    *,
+    pressure_levels: tuple[int, ...] | None,
+) -> argparse.Namespace:
     """Build the remapping arguments used by an incremental update."""
 
     return argparse.Namespace(
@@ -1563,6 +1607,7 @@ def _update_remap_args(args: argparse.Namespace) -> argparse.Namespace:
         chunk_size=args.chunk_size,
         highest_level_only=args.highest_level_only,
         output_path=args.output_path,
+        pressure_levels=pressure_levels,
     )
 
 
@@ -1842,7 +1887,16 @@ def run_update(args: argparse.Namespace) -> int:
                 )
                 continue
 
-            remap_args = _update_remap_args(args)
+            remap_args = _update_remap_args(
+                args,
+                pressure_levels=_existing_variable_pressure_levels(
+                    args.dataset,
+                    frequency,
+                    variable,
+                    zarr_format=args.zarr_format,
+                    output_path=args.output_path,
+                ),
+            )
 
             permanent_date = today
             # A store without a permanent watermark may have been published

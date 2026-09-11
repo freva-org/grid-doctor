@@ -2,6 +2,7 @@
 
 import sys
 from argparse import Namespace
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -209,6 +210,73 @@ def test_update_preview_skips_missing_stores(monkeypatch):
 
     assert result == 0
     assert logged == [([], "direct")]
+
+
+def test_existing_variable_pressure_levels_reads_the_stored_coordinate(monkeypatch):
+    class Variable(dict):
+        dims = ("time", "plev")
+
+    class Dataset(dict):
+        def close(self):
+            pass
+
+    opened = {
+        "/tmp/level_0.zarr": Dataset({"ta": Variable({"plev": SimpleNamespace(values=[1000, 850])})}),
+        "/tmp/level_1.zarr": Dataset({"ta": Variable({"plev": SimpleNamespace(values=[1000, 850])})}),
+    }
+    monkeypatch.setattr(main, "existing_destinations_for_frequency", lambda *args, **kwargs: tuple(opened))
+    monkeypatch.setitem(
+        sys.modules,
+        "xarray",
+        SimpleNamespace(open_zarr=lambda destination, **kwargs: opened[destination]),
+    )
+
+    assert main._existing_variable_pressure_levels("era5land", "1hr", "ta", zarr_format=2, output_path=None) == (
+        1000,
+        850,
+    )
+
+
+def test_update_uses_existing_pressure_levels_for_batched_remaps(monkeypatch):
+    calls: list[dict[str, object]] = []
+    pressure_record = _record()._replace(variable="ta", level_type="pl")
+    monkeypatch.setattr(main, "selected_requests", lambda **_: _request("ta"))
+    monkeypatch.setattr(
+        main,
+        "_existing_variable_last_date",
+        lambda *args, **kwargs: (date(2024, 1, 1), date(2024, 1, 1)),
+    )
+    monkeypatch.setattr(main, "_resolve_update_records", lambda **_: [pressure_record])
+    monkeypatch.setattr(main, "_existing_variable_pressure_levels", lambda *args, **kwargs: (1000, 850))
+    monkeypatch.setattr(
+        main,
+        "_select_permanent_records",
+        lambda records, **_: main.UpdateSelection(records, (date(2024, 1, 1), date(2024, 1, 1)), 1),
+    )
+    monkeypatch.setattr(main, "_apply_permanent_update", lambda *args, **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(main, "_apply_forward_update", lambda *args, **kwargs: 0)
+
+    main.run_update(
+        Namespace(
+            variables="ta",
+            freq="1hr",
+            dataset="era5land",
+            zarr_format=2,
+            output_path=None,
+            chunk_size=16,
+            batch_files=8,
+            batch_months=None,
+            preview=False,
+            use_inventory_cache=True,
+            use_input_cache=False,
+            fail_on_duplicate_times=False,
+            weights_dir="/tmp/weights",
+            highest_level_only=False,
+            root=None,
+        )
+    )
+
+    assert calls[0]["remap_args"].pressure_levels == (1000, 850)
 
 
 # =============================================================================
