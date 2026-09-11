@@ -2,10 +2,11 @@
 
 import sys
 from argparse import Namespace
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from heal_era5 import main
@@ -239,7 +240,7 @@ def test_existing_variable_pressure_levels_reads_the_stored_coordinate(monkeypat
 
 def test_update_uses_existing_pressure_levels_for_batched_remaps(monkeypatch):
     calls: list[dict[str, object]] = []
-    pressure_record = _record()._replace(variable="ta", level_type="pl")
+    pressure_record = _record(files=("/tmp/tas_2024-01-01.grb",))._replace(variable="ta", level_type="pl")
     monkeypatch.setattr(main, "selected_requests", lambda **_: _request("ta"))
     monkeypatch.setattr(
         main,
@@ -253,8 +254,8 @@ def test_update_uses_existing_pressure_levels_for_batched_remaps(monkeypatch):
         "_select_permanent_records",
         lambda records, **_: main.UpdateSelection(records, (date(2024, 1, 1), date(2024, 1, 1)), 1),
     )
-    monkeypatch.setattr(main, "_apply_permanent_update", lambda *args, **kwargs: calls.append(kwargs))
-    monkeypatch.setattr(main, "_apply_forward_update", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(main, "_map_update_records", lambda *args, **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(main, "_persist_permanent_watermark", lambda *args, **kwargs: None)
 
     main.run_update(
         Namespace(
@@ -277,6 +278,134 @@ def test_update_uses_existing_pressure_levels_for_batched_remaps(monkeypatch):
     )
 
     assert calls[0]["remap_args"].pressure_levels == (1000, 850)
+
+
+def test_existing_variable_last_date_uses_last_real_data_attribute(monkeypatch):
+    class Variable:
+        dims = ("time", "cell")
+
+        def __init__(self):
+            self.attrs = {"last_real_data": "2026-07-20"}
+
+        def __getitem__(self, name):
+            assert name == "time"
+            return SimpleNamespace(values=np.array(["2026-07-20", "2026-09-05"]))
+
+    class Dataset(dict):
+        def close(self):
+            pass
+
+    stores = {path: Dataset({"tas": Variable()}) for path in ("/tmp/level_0.zarr", "/tmp/level_1.zarr")}
+    monkeypatch.setattr(main, "existing_destinations_for_frequency", lambda *args, **kwargs: tuple(stores))
+    monkeypatch.setitem(
+        sys.modules, "xarray", SimpleNamespace(open_zarr=lambda destination, **kwargs: stores[destination])
+    )
+
+    latest, permanent = main._existing_variable_last_date("era5land", "1hr", "tas", zarr_format=2, output_path=None)
+
+    assert latest == date(2026, 7, 20)
+    assert permanent is None
+
+
+def test_update_force_from_overrides_stored_update_boundaries(monkeypatch):
+    resolved_intervals: list[tuple[date, date]] = []
+    planned_intervals: list[tuple[date, date]] = []
+    force_from = date(2026, 7, 1)
+
+    monkeypatch.setattr(main, "selected_requests", lambda **_: _request())
+    monkeypatch.setattr(
+        main,
+        "_existing_variable_last_date",
+        lambda *args, **kwargs: (None, date(2026, 8, 31)),
+    )
+    monkeypatch.setattr(main, "_existing_variable_pressure_levels", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        main,
+        "_resolve_update_records",
+        lambda **kwargs: resolved_intervals.append(kwargs["interval"]) or [_record(files=("/tmp/tas_2026-07-01.grb",))],
+    )
+    monkeypatch.setattr(
+        main,
+        "_select_permanent_records",
+        lambda records, **kwargs: main.UpdateSelection([], None, 0),
+    )
+    monkeypatch.setattr(
+        main, "_map_update_records", lambda records, **kwargs: planned_intervals.append(kwargs["interval"])
+    )
+
+    main.run_update(
+        Namespace(
+            variables="tas",
+            freq="1hr",
+            dataset="era5land",
+            zarr_format=2,
+            output_path=None,
+            chunk_size=16,
+            batch_files=None,
+            batch_months=None,
+            preview=False,
+            force_from=force_from,
+            use_inventory_cache=True,
+            use_input_cache=False,
+            fail_on_duplicate_times=False,
+            weights_dir="/tmp/weights",
+            highest_level_only=False,
+            root=None,
+        )
+    )
+
+    assert resolved_intervals == [(force_from, datetime.now().astimezone().date())]
+    assert planned_intervals == [(force_from, force_from)]
+
+
+def test_update_snapshots_all_variable_coverage_before_writing(monkeypatch):
+    events: list[str] = []
+    monkeypatch.setattr(
+        main,
+        "selected_requests",
+        lambda **_: ({}, [SimpleNamespace(name="tas"), SimpleNamespace(name="uas")]),
+    )
+    monkeypatch.setattr(
+        main,
+        "_existing_variable_last_date",
+        lambda *args, **kwargs: events.append(f"coverage:{args[2]}") or (date(2026, 9, 4), date(2026, 8, 1)),
+    )
+    monkeypatch.setattr(main, "_existing_variable_pressure_levels", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        main,
+        "_resolve_update_records",
+        lambda **kwargs: [
+            _record(files=(f"/tmp/{kwargs['variable']}_2026-09-04.grb",))._replace(variable=kwargs["variable"])
+        ],
+    )
+    monkeypatch.setattr(main, "_select_permanent_records", lambda records, **_: main.UpdateSelection([], None, 0))
+    monkeypatch.setattr(
+        main, "_map_update_records", lambda records, **kwargs: events.append(f"map:{kwargs['variable']}")
+    )
+    monkeypatch.setattr(main, "_persist_real_data_watermark", lambda *args, **kwargs: None)
+
+    main.run_update(
+        Namespace(
+            variables="tas,uas",
+            freq="1hr",
+            dataset="era5land",
+            zarr_format=2,
+            output_path=None,
+            chunk_size=16,
+            batch_files=None,
+            batch_months=None,
+            preview=False,
+            force_from=None,
+            use_inventory_cache=True,
+            use_input_cache=False,
+            fail_on_duplicate_times=False,
+            weights_dir="/tmp/weights",
+            highest_level_only=False,
+            root=None,
+        )
+    )
+
+    assert events == ["coverage:tas", "coverage:uas", "map:tas", "map:uas"]
 
 
 # =============================================================================

@@ -21,6 +21,7 @@ from .logging_utils import compute_with_task_progress
 from .metadata import (
     LAST_DATA_UPDATE_ATTR,
     LAST_PERMANENT_UPDATE_ATTR,
+    LAST_REAL_DATA_ATTR,
     clean_output_attrs,
 )
 
@@ -356,6 +357,10 @@ def _replace_public_attrs(zarr_array, attrs: dict[str, Any]) -> bool:
     if previous_data_update and not attrs.get(LAST_DATA_UPDATE_ATTR):
         attrs[LAST_DATA_UPDATE_ATTR] = previous_data_update
 
+    previous_real_data = zarr_array.attrs.get(LAST_REAL_DATA_ATTR)
+    if previous_real_data and not attrs.get(LAST_REAL_DATA_ATTR):
+        attrs[LAST_REAL_DATA_ATTR] = previous_real_data
+
     previous_permanent_update = zarr_array.attrs.get(LAST_PERMANENT_UPDATE_ATTR)
     requested_permanent_update = attrs.get(LAST_PERMANENT_UPDATE_ATTR)
     if previous_permanent_update and requested_permanent_update:
@@ -448,6 +453,9 @@ def _preserve_update_attrs(
 
     for name in merged.data_vars:
         sources = [source[name] for source in (existing, candidate) if name in source]
+        real_values = [source.attrs[LAST_REAL_DATA_ATTR] for source in sources if LAST_REAL_DATA_ATTR in source.attrs]
+        if real_values:
+            merged[name].attrs[LAST_REAL_DATA_ATTR] = max(map(str, real_values))
         values = [
             source.attrs[LAST_PERMANENT_UPDATE_ATTR] for source in sources if LAST_PERMANENT_UPDATE_ATTR in source.attrs
         ]

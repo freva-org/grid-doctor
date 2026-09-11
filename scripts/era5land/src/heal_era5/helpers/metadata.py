@@ -7,6 +7,7 @@ from .file_fetcher import SOURCE_MAPPER, SourceRecord, load_json
 
 OUTPUT_ATTR_KEYS = tuple(SOURCE_MAPPER.get("var_attrs", []))
 LAST_DATA_UPDATE_ATTR = "last_data_update"
+LAST_REAL_DATA_ATTR = "last_real_data"
 LAST_PERMANENT_UPDATE_ATTR = "last_permanent_update"
 NOMINAL_RESOLUTION_INDEX_BY_SOURCE_ID = {
     "ERA-5": 1,
@@ -18,7 +19,7 @@ def clean_output_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
     """Keep only the curated output attrs for published variables."""
 
     cleaned = {key: value for key, value in attrs.items() if key in OUTPUT_ATTR_KEYS and value not in ("", None)}
-    for key in (LAST_DATA_UPDATE_ATTR, LAST_PERMANENT_UPDATE_ATTR):
+    for key in (LAST_DATA_UPDATE_ATTR, LAST_REAL_DATA_ATTR, LAST_PERMANENT_UPDATE_ATTR):
         if attrs.get(key) not in ("", None):
             cleaned[key] = attrs[key]
     return cleaned

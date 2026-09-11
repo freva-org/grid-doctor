@@ -65,6 +65,14 @@ def test_level_selection_accepts_ranges_in_either_direction_for_merge_clean_and_
     assert parser.parse_args(["remap", "--coarsen-only", "0-5"]).coarsen_only == "0-5"
 
 
+def test_update_force_from_accepts_an_iso_date():
+    from heal_era5 import main
+
+    args = main.build_parser().parse_args(["update", "--force-from", "2026-07-18"])
+
+    assert str(args.force_from) == "2026-07-18"
+
+
 def test_dataset_argument_rejects_unknown_dataset():
     """Dataset choices should be enforced by argparse."""
 

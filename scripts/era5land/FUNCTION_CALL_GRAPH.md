@@ -53,8 +53,9 @@ flowchart LR
     UPDATE --> REQUESTS
     UPDATE --> LAST[_existing_variable_last_date]:::remapper
     UPDATE --> UPDATE_RECORDS[_resolve_update_records]:::remapper
-    UPDATE --> PERMANENT[_apply_permanent_update]:::remapper
-    UPDATE --> FORWARD[_apply_forward_update]:::remapper
+    UPDATE --> SELECT[_select_permanent_records / _select_interval_records]:::remapper
+    UPDATE --> COMBINED[_combine_update_selections]:::remapper
+    UPDATE --> MAP_UPDATE[_map_update_records]:::remapper
 
     CLEAN --> TRUNCATE
     CLEAN --> DELETE[delete_dataset_root / delete_frequency_directory]:::cleanup
@@ -137,8 +138,7 @@ flowchart LR
     WRITE_SPECIAL --> PUBLISH
 
     REMAP[run_remap]:::remapper --> MAP
-    PERMANENT[_apply_permanent_update]:::remapper --> UPDATE_MAP[_map_update_records]:::remapper
-    FORWARD[_apply_forward_update]:::remapper --> UPDATE_MAP
+    COMBINED[_combine_update_selections]:::remapper --> UPDATE_MAP[_map_update_records]:::remapper
     UPDATE_MAP --> MAP
     WORKER[remap_variable_frequency]:::reflow_cli --> HEALPIX
 
@@ -163,8 +163,8 @@ the `write_special_variables` branch instead of the ordinary regridding path.
 
 This view shows the work that is *not* repeated in the shared remapping spine.
 For `run_update`, `_existing_variable_last_date` determines the already
-published boundary and `_select_permanent_records` chooses the appropriate
-source records.  Both update branches then enter `_map_update_records`, which
+published boundary and the selection helpers classify permanent and forward
+source records. Their deduplicated union enters `_map_update_records`, which
 continues through `map_records` in the **Shared remapping spine** above.
 `run_clean` is independent destructive-store maintenance, while `run_merge`
 combines worker Zarr stores; they share this diagram only because both are
@@ -175,11 +175,13 @@ flowchart LR
     UPDATE[run_update]:::remapper --> LAST[_existing_variable_last_date]:::remapper
     LAST --> EXISTING[existing_destinations_for_frequency]:::formatter
     UPDATE --> PERM[_select_permanent_records]:::remapper
-    UPDATE --> APPLY_PERM[_apply_permanent_update]:::remapper
-    UPDATE --> APPLY_FORWARD[_apply_forward_update]:::remapper
-    APPLY_PERM --> UPDATE_MAP[_map_update_records]:::remapper
-    APPLY_FORWARD --> UPDATE_MAP
-    APPLY_PERM --> SYNC[sync_named_variable_attrs]:::zarr_publisher
+    UPDATE --> FORWARD[_select_interval_records]:::remapper
+    UPDATE --> COMBINED[_combine_update_selections]:::remapper
+    PERM --> COMBINED
+    FORWARD --> COMBINED
+    COMBINED --> UPDATE_MAP[_map_update_records]:::remapper
+    UPDATE --> SYNC[_persist_permanent_watermark]:::remapper
+    SYNC --> SYNC_ATTRS[sync_named_variable_attrs]:::zarr_publisher
 
     CLEAN[run_clean]:::remapper --> TRUNC[truncate_existing_healpix_stores]:::cleanup
     TRUNC --> TRUNC_FREQ[truncate_frequency_destinations]:::cleanup
@@ -418,26 +420,31 @@ flowchart LR
     run_update --> _resolve_update_records
     _resolve_update_records --> resolve_records
     run_update --> _select_permanent_records
+    run_update --> _select_interval_records
+    run_update --> _combine_update_selections
     _select_permanent_records --> file_interval
     _select_permanent_records --> _is_final_source_file
     _is_final_source_file --> file_interval
     _select_permanent_records --> add_months
-    run_update --> _apply_permanent_update
-    _apply_permanent_update --> _map_update_records
+    _select_interval_records --> overlaps_interval
+    _combine_update_selections --> file_interval
+    run_update --> _map_update_records
     _map_update_records --> batched_intervals
     _map_update_records --> batched_source_record_files
     _map_update_records --> overlaps_interval
     _map_update_records --> file_interval
     _map_update_records --> map_records
     map_records --> map_grib_to_healpix
-    _apply_permanent_update --> existing_destinations_for_frequency
-    _apply_permanent_update --> sync_named_variable_attrs
-    run_update --> _apply_forward_update
-    _apply_forward_update --> _map_update_records
+    run_update --> _persist_real_data_watermark
+    run_update --> _persist_permanent_watermark
+    _persist_real_data_watermark --> existing_destinations_for_frequency
+    _persist_real_data_watermark --> sync_named_variable_attrs
+    _persist_permanent_watermark --> existing_destinations_for_frequency
+    _persist_permanent_watermark --> sync_named_variable_attrs
     run_update --> _preview_update_row
     run_update --> _log_update_preview
 
-    class update,run_update,selected_requests,_existing_variable_last_date,_update_remap_args,add_months,_resolve_update_records,_select_permanent_records,_is_final_source_file,_apply_permanent_update,_map_update_records,_apply_forward_update,_preview_update_row,_log_update_preview,map_records remapper
+    class update,run_update,selected_requests,_existing_variable_last_date,_update_remap_args,add_months,_resolve_update_records,_select_permanent_records,_select_interval_records,_combine_update_selections,_is_final_source_file,_persist_real_data_watermark,_persist_permanent_watermark,_map_update_records,_preview_update_row,_log_update_preview,map_records remapper
     class parse_cli_args,parse_cli_freqs supporting
     class existing_destinations_for_frequency formatter
     class resolve_records,batched_source_record_files,overlaps_interval,file_interval file_fetcher
@@ -584,7 +591,7 @@ flowchart LR
 | `remapper._resolve_update_records` and `resolve_records` | A thin update-specific adapter around the general resolver. | Keep only if it makes update defaults explicit; otherwise inline its small argument adaptation. |
 | `remapper._update_remap_args` | A thin `argparse.Namespace` adapter for reusing remap logic during update. | Keep as an explicit compatibility boundary; replacing it with an untyped dictionary would be worse. |
 | `zarr_publisher.sync_global_attrs` and `_sync_global_attrs` | Public wrapper around private implementation, not duplicated behavior. | Keep; it defines the module's supported API. |
-| `_apply_permanent_update` and `_apply_forward_update` | They share `_map_update_records`, but permanent updates also record permanent-update metadata. | Keep separate.  The common mapping helper is already the right extraction. |
+| `_select_permanent_records`, `_select_interval_records`, and `_combine_update_selections` | Classify permanent and forward work, then create one deduplicated mapping plan. | Keep separate: their boundaries are distinct, while mapping is intentionally shared. |
 | Cleanup deletion helpers | Similar traversal but distinct scopes: variable, selected level, frequency, or dataset root. | Keep separate; consolidating them would blur destructive-operation scope. |
 | `run_remap` and reflow workers | Both intentionally converge on `map_grib_to_healpix`. | Keep shared; reflow is orchestration/batching, not a competing mapping implementation. |
 

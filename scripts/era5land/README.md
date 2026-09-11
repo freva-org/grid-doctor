@@ -621,6 +621,25 @@ An update has two phases:
 - The forward phase searches from the latest stored timestamp through today,
   replacing provisional values and appending newer timestamps.
 
+The source inventory is resolved once per variable and frequency. Files needed
+by both phases are deduplicated and mapped once; ERA5 source precedence is
+`E1`, then `E5`, then provisional `ET` for each file-coverage period.
+
+`update` determines the latest timestamp from each variable's last non-missing
+data value; timestamps introduced as fill values while another variable was
+appended do not count as coverage. To deliberately reprocess a known range,
+use `--force-from`. It overrides both the stored coverage endpoint and
+`last_permanent_update` for that invocation, so every selected variable is
+processed from the given inclusive date:
+
+```console
+heal-era5 update \
+  --dataset era5land \
+  --freq 1hr,day \
+  --output-path /work/ks1387/era5 \
+  --force-from 2026-07-18
+```
+
 Use `--preview` to resolve and count both phases without modifying Zarr data or
 metadata:
 
