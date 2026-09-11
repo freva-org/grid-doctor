@@ -357,7 +357,7 @@ def test_update_force_from_overrides_stored_update_boundaries(monkeypatch):
         )
     )
 
-    assert resolved_intervals == [(force_from, datetime.now().astimezone().date())]
+    assert resolved_intervals == [(date(2026, 4, 1), datetime.now().astimezone().date())]
     assert planned_intervals == [(force_from, force_from)]
 
 

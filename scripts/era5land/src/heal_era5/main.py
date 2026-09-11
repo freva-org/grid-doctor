@@ -324,8 +324,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="YYYY-MM-DD",
         default=None,
         help=(
-            "Reprocess every variable from this inclusive date. Overrides both the "
-            "stored coverage endpoint and last_permanent_update for this run."
+            "Reprocess forward data from this inclusive date and permanent data "
+            "from three months earlier, ignoring stored update watermarks."
         ),
     )
     add_cache_arguments(
@@ -2015,12 +2015,9 @@ def run_update(args: argparse.Namespace) -> int:
             # long enough ago for a multi-month permanent refresh to be due.
             # Infer the missing watermark from the final stored coordinate.
             permanent_start = (
-                force_from
-                or permanent_watermark
-                or add_months(
-                    latest_date,
-                    -PERMANENT_DATA_LAG_MONTHS,
-                )
+                add_months(force_from, -PERMANENT_DATA_LAG_MONTHS)
+                if force_from is not None
+                else permanent_watermark or add_months(latest_date, -PERMANENT_DATA_LAG_MONTHS)
             )
             forward_start = force_from or latest_date
             source_start = min(permanent_start, forward_start)
@@ -2037,7 +2034,7 @@ def run_update(args: argparse.Namespace) -> int:
                 dataset=args.dataset,
                 frequency=frequency,
                 latest_date=latest_date,
-                permanent_watermark=force_from or permanent_watermark,
+                permanent_watermark=permanent_start if force_from is not None else permanent_watermark,
             )
             forward_interval = (forward_start, today)
             forward = _select_interval_records(

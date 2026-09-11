@@ -628,9 +628,9 @@ by both phases are deduplicated and mapped once; ERA5 source precedence is
 `update` determines the latest timestamp from each variable's last non-missing
 data value; timestamps introduced as fill values while another variable was
 appended do not count as coverage. To deliberately reprocess a known range,
-use `--force-from`. It overrides both the stored coverage endpoint and
-`last_permanent_update` for that invocation, so every selected variable is
-processed from the given inclusive date:
+use `--force-from`. It ignores stored update watermarks for that invocation:
+the forward selection begins on the given inclusive date and the permanent
+selection begins three months earlier:
 
 ```console
 heal-era5 update \
