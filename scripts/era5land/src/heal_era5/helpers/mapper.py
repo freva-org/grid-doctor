@@ -13,6 +13,7 @@ import xarray as xr
 from ..resources import ASSETS_DIR, CMOR_TABLES_DIR
 from .datasets import (
     EmptySourceDataError,
+    clear_reduced_gaussian_geometry_cache,
     merge_frequency_dataset,
     normalise_reduced_gaussian_dataset,
 )
@@ -333,6 +334,10 @@ def _coarsen_existing_frequency(
             )
         finally:
             _close_dataset_quietly(current)
+            # Each coarsened level can retain a Dask graph referring to the
+            # source level.  Collect before opening the next level so a full
+            # pyramid never accumulates in one update process.
+            gc.collect()
     return tuple(written_levels)
 
 
@@ -525,7 +530,6 @@ def map_grib_to_healpix(
         variable_names = _variable_names(frequency_records, special_requested_for_frequency)
         written_zoom_numbers: tuple[int, ...] = ()
         ds: xr.Dataset | None = None
-        current: xr.Dataset | None = None
         finest: xr.Dataset | None = None
         if coarsen_only:
             if not variable_names:
@@ -688,48 +692,52 @@ def map_grib_to_healpix(
                     max_level,
                     weights_path=weight_file,
                 )
-                current = finest.load()
                 written_zoom_numbers = (max_level,)
                 log_stage(
                     LOGGER,
-                    "remap_materialize_done",
+                    "remap_ready_for_write",
                     frequency=frequency,
                     variables=variable_names,
                     zoom=max_level,
                 )
-                _write_zoom_level(
-                    current,
-                    source_dataset=dataset,
-                    frequency=frequency,
-                    variables=variable_names,
-                    zoom_number=max_level,
-                    global_attrs=global_attrs,
-                    clean=clean,
-                    zarr_format=zarr_format,
-                    target_chunk_mb=target_chunk_mb,
-                    output_path=output_path,
-                    truncate_after=truncate_after,
-                )
+                try:
+                    # Do not call ``load`` here.  A single ERA5-Land level-9
+                    # batch is several GiB; materialising it retains the full
+                    # result while the lower pyramid levels are built.  Write
+                    # it lazily, then reopen each completed Zarr level as the
+                    # source for the next coarsening step.  This also cuts the
+                    # Dask graph's references to the original GRIB data.
+                    _write_zoom_level(
+                        finest,
+                        source_dataset=dataset,
+                        frequency=frequency,
+                        variables=variable_names,
+                        zoom_number=max_level,
+                        global_attrs=global_attrs,
+                        clean=clean,
+                        zarr_format=zarr_format,
+                        target_chunk_mb=target_chunk_mb,
+                        output_path=output_path,
+                        truncate_after=truncate_after,
+                    )
+                finally:
+                    _close_dataset_quietly(finest)
+                    finest = None
+                    gc.collect()
+
                 if not highest_level_only:
-                    remaining_zoom_numbers = tuple(range(max_level - 1, -1, -1))
-                    for zoom_number in remaining_zoom_numbers:
-                        current = gd.coarsen_healpix(
-                            _prepare_dataset_for_coarsen(current),
-                            zoom_number,
-                        )
-                        _write_zoom_level(
-                            current,
-                            source_dataset=dataset,
-                            frequency=frequency,
-                            variables=variable_names,
-                            zoom_number=zoom_number,
-                            global_attrs=global_attrs,
-                            clean=clean,
-                            zarr_format=zarr_format,
-                            target_chunk_mb=target_chunk_mb,
-                            output_path=output_path,
-                            truncate_after=truncate_after,
-                        )
+                    remaining_zoom_numbers = _coarsen_existing_frequency(
+                        source_dataset=dataset,
+                        frequency=frequency,
+                        variables=variable_names,
+                        zarr_format=zarr_format,
+                        clean=clean,
+                        target_chunk_mb=target_chunk_mb,
+                        output_path=output_path,
+                        interval=coarsen_interval,
+                        target_levels=tuple(range(max_level - 1, -1, -1)),
+                        truncate_after=truncate_after,
+                    )
                     written_zoom_numbers += remaining_zoom_numbers
 
             if special_requested_for_frequency:
@@ -761,10 +769,9 @@ def map_grib_to_healpix(
                 variables=variable_names,
             )
         finally:
-            _close_dataset_quietly(current)
-            if finest is not current:
-                _close_dataset_quietly(finest)
+            _close_dataset_quietly(finest)
             _close_dataset_quietly(ds)
+            clear_reduced_gaussian_geometry_cache()
             gc.collect()
 
 

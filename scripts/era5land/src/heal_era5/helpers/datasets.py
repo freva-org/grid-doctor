@@ -27,6 +27,18 @@ class EmptySourceDataError(ValueError):
     """Raised when a resolved source contains no usable payload data."""
 
 
+def clear_reduced_gaussian_geometry_cache() -> None:
+    """Release process-local reduced-Gaussian geometry arrays.
+
+    The on-disk cache remains intact, so this only bounds RAM in long-running
+    commands.  A geometry payload for ERA5's reduced Gaussian grid is
+    large enough that retaining it after a completed frequency/batch is
+    noticeable even though it is reusable.
+    """
+
+    _REDUCED_GAUSSIAN_GEOMETRY_CACHE.clear()
+
+
 def _find_coord_name(ds: xr.Dataset, candidates: tuple[str, ...]) -> str | None:
     """Return the first matching coordinate name from *candidates*."""
 

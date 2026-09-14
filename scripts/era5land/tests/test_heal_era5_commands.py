@@ -173,6 +173,62 @@ def test_remap_maps_resolved_records(monkeypatch):
     assert calls[0]["clean"] is True
 
 
+def test_mapper_writes_finest_level_lazily_then_coarsens_from_zarr(monkeypatch):
+    """The level-9 result must not stay materialised while making the pyramid."""
+
+    from heal_era5.helpers import mapper
+
+    class Dataset:
+        def __init__(self):
+            self.dims = {"time": 1, "cell": 1}
+            self.sizes = {"time": 1, "cell": 1}
+            self.attrs: dict[str, object] = {}
+            self.coords: dict[str, object] = {}
+            self.closed = False
+
+        def chunk(self, _chunks):
+            return self
+
+        def close(self):
+            self.closed = True
+
+    class FinestDataset(Dataset):
+        def load(self):
+            raise AssertionError("The finest level must be written lazily, not loaded into memory.")
+
+    source = Dataset()
+    finest = FinestDataset()
+    writes: list[object] = []
+    coarsen_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(mapper, "merge_frequency_dataset", lambda *args, **kwargs: source)
+    monkeypatch.setattr(mapper, "normalise_reduced_gaussian_dataset", lambda dataset, **kwargs: dataset)
+    monkeypatch.setattr(mapper, "global_attrs_for_records", lambda records: {})
+    monkeypatch.setattr(mapper.gd, "get_latlon_resolution", lambda dataset: 1.0)
+    monkeypatch.setattr(mapper.gd, "resolution_to_healpix_level", lambda resolution: 2)
+    monkeypatch.setattr(mapper.gd, "cached_weights", lambda *args, **kwargs: "/tmp/weights.nc")
+    monkeypatch.setattr(mapper.gd, "regrid_to_healpix", lambda *args, **kwargs: finest)
+    monkeypatch.setattr(mapper, "_write_zoom_level", lambda dataset, **kwargs: writes.append(dataset))
+    monkeypatch.setattr(
+        mapper,
+        "_coarsen_existing_frequency",
+        lambda **kwargs: coarsen_calls.append(kwargs) or (1, 0),
+    )
+
+    mapper.map_grib_to_healpix(
+        [_record()],
+        dataset="era5land",
+        frequencies=("1hr",),
+        requested_variables=("tas",),
+        interval=(date(2024, 1, 1), date(2024, 1, 1)),
+        output_path="/tmp/out",
+    )
+
+    assert writes == [finest]
+    assert finest.closed
+    assert source.closed
+    assert coarsen_calls[0]["target_levels"] == (1, 0)
+
+
 def test_remap_uses_pressure_level_override(monkeypatch):
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(main, "selected_requests", lambda **_: _request())

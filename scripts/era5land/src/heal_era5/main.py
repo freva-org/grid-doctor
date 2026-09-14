@@ -72,7 +72,7 @@ STAGE_COLORS = {
     "frequency_start": "\033[1;94m",
     "grib_merge_done": "\033[36m",
     "weight_calculation": "\033[93m",
-    "remap_materialize_done": "\033[95m",
+    "remap_ready_for_write": "\033[95m",
     "coarsen_source_open": "\033[36m",
     "zarr_write_start": "\033[32m",
     "frequency_done": "\033[1;32m",
