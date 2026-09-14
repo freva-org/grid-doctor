@@ -345,6 +345,12 @@ flowchart LR
     map_grib_to_healpix --> merge_frequency_dataset
     merge_frequency_dataset --> open_record_dataset
     open_record_dataset --> open_dataset
+    open_dataset --> cached_grib_inventory
+    cached_grib_inventory --> _cached_grib_inventory_for_file
+    _cached_grib_inventory_for_file --> _grib_inventory_from_sidecar
+    _cached_grib_inventory_for_file --> grib_inventory
+    grib_inventory --> _inventory_dataframe
+    _grib_inventory_from_sidecar --> _inventory_dataframe
     open_record_dataset --> validate_one_value_per_day
     open_record_dataset --> normalise_time_for_frequency
     merge_frequency_dataset --> select_time_interval
@@ -391,7 +397,7 @@ flowchart LR
     class global_attrs_for_records,global_attrs_for_dataset_frequency,attrs_for_record,get_vars metadata
     class group_records_by_frequency formatter
     class gd_get_latlon_resolution,gd_cached_weights,gd_regrid_to_healpix,gd_coarsen_healpix external
-    class open_dataset external
+    class open_dataset,cached_grib_inventory,_cached_grib_inventory_for_file,_grib_inventory_from_sidecar,grib_inventory,_inventory_dataframe grib
     classDef remapper fill:#e5e7eb,stroke:#4b5563,color:#000000,stroke-width:2px
     classDef formatter fill:#fde68a,stroke:#ca8a04,color:#000000
     classDef cleanup fill:#fee2e2,stroke:#dc2626,color:#000000
@@ -403,6 +409,7 @@ flowchart LR
     classDef metadata fill:#cbd5e1,stroke:#475569,color:#000000
     classDef external fill:#cffafe,stroke:#0891b2,color:#000000
     classDef supporting fill:#cbd5e1,stroke:#475569,color:#000000
+    classDef grib fill:#ddd6fe,stroke:#7c3aed,color:#000000
 ```
 
 ## Update

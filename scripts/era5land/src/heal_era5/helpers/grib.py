@@ -1,6 +1,8 @@
 import hashlib
 import json
 import logging
+import pickle
+import uuid
 from collections.abc import Collection
 from datetime import UTC, datetime
 from pathlib import Path
@@ -93,6 +95,12 @@ def grib_inventory(files: Collection[str | Path]) -> pd.DataFrame:
                 codes_release(gid)
                 message += 1
 
+    return _inventory_dataframe(rows)
+
+
+def _inventory_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    """Add the derived time columns used by GRIB inventory consumers."""
+
     df = pd.DataFrame(rows)
 
     df["ref_time"] = pd.to_datetime(
@@ -109,13 +117,102 @@ def grib_inventory(files: Collection[str | Path]) -> pd.DataFrame:
     return df
 
 
-def cached_grib_inventory(files: Collection[str | Path]) -> pd.DataFrame:
-    """Return a cached GRIB inventory keyed by file identity and metadata.
+def _grib_inventory_from_sidecar(file: str) -> pd.DataFrame | None:
+    """Read a provider ``.index`` sidecar, returning ``None`` when unusable.
 
-    The cache key includes the absolute file paths, file sizes, modification
-    times, and the list of GRIB keys used by :func:`grib_inventory`. Cached
-    inventories are stored as pickle files under ``grid_doctor``'s cache
-    directory.
+    The sidecars used in the ERA5 pool are JSON Lines files with one object per
+    GRIB message. They contain the message metadata needed by this module, so
+    reading them avoids an ecCodes scan of the corresponding GRIB file.
+    """
+
+    path = Path(file)
+    index_file = path.with_suffix(".index")
+    if not index_file.is_file():
+        return None
+
+    try:
+        file_size = path.stat().st_size
+        rows: list[dict[str, Any]] = []
+        with index_file.open(encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+
+                entry = json.loads(line)
+                attrs = entry["attrs"]
+                extra = entry["extra"]
+                offset = int(entry["_offset"])
+                length = int(entry["_length"])
+                if offset < 0 or length <= 0 or offset + length > file_size:
+                    raise ValueError(f"invalid message range {offset}:{length}")
+
+                step = _sidecar_number(entry["step"])
+                p1 = _sidecar_number(extra["P1"])
+                p2 = _sidecar_number(extra["P2"])
+                start_step, end_step = _sidecar_steps(str(attrs["stepType"]), step, p1, p2)
+                rows.append(
+                    {
+                        "file": file,
+                        "message": len(rows),
+                        "shortName": attrs["shortName"],
+                        "paramId": int(attrs["paramId"]),
+                        "typeOfLevel": attrs["typeOfLevel"],
+                        "level": _sidecar_number(entry["level"]),
+                        "dataDate": int(entry["date"]),
+                        "dataTime": int(entry["time"]),
+                        "stepRange": _sidecar_step_range(start_step, end_step),
+                        "startStep": start_step,
+                        "endStep": end_step,
+                        "P1": p1,
+                        "P2": p2,
+                        "timeRangeIndicator": int(extra["timeRangeIndicator"]),
+                    }
+                )
+
+        if not rows:
+            raise ValueError("index contains no messages")
+        return _inventory_dataframe(rows)
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        LOGGER.warning("Could not use GRIB index %s for %s: %s; falling back to ecCodes", index_file, path, exc)
+        return None
+
+
+def _sidecar_number(value: Any) -> int | float:
+    """Convert an ERA5 index numeric field without needlessly making it float."""
+
+    number = float(value)
+    return int(number) if number.is_integer() else number
+
+
+def _sidecar_steps(
+    step_type: str,
+    step: float,
+    p1: float,
+    p2: float,
+) -> tuple[float, float]:
+    """Derive ecCodes-style step bounds from provider-sidecar metadata."""
+
+    if step_type == "instant":
+        return step, step
+    if step_type in {"accum", "avg", "max", "min", "rms"}:
+        return p1, p2
+    raise ValueError(f"unsupported stepType {step_type!r}")
+
+
+def _sidecar_step_range(start_step: float, end_step: float) -> str:
+    """Return the conventional GRIB step-range representation."""
+
+    return str(end_step) if start_step == end_step else f"{start_step}-{end_step}"
+
+
+def cached_grib_inventory(files: Collection[str | Path]) -> pd.DataFrame:
+    """Return a cached GRIB inventory assembled from per-file caches.
+
+    Each source file has its own cache entry, keyed by its absolute path, size,
+    modification time, and the list of GRIB keys used by :func:`grib_inventory`.
+    This lets overlapping file collections reuse the inventory work already
+    done for their shared files. The returned inventory preserves the order of
+    ``files`` and is assembled in memory from those per-file entries.
 
     Parameters
     ----------
@@ -128,26 +225,52 @@ def cached_grib_inventory(files: Collection[str | Path]) -> pd.DataFrame:
         The inventory produced by :func:`grib_inventory`, loaded from cache
         when possible.
     """
-    files = [str(Path(file).expanduser().resolve()) for file in files]
+    normalised_files = [str(Path(file).expanduser().resolve()) for file in files]
+    inventories = [_cached_grib_inventory_for_file(file) for file in normalised_files]
+    return pd.concat(inventories, ignore_index=True)
+
+
+def _cached_grib_inventory_for_file(file: str) -> pd.DataFrame:
+    """Return the cached message inventory for one normalized GRIB file."""
+
+    sidecar_inventory = _grib_inventory_from_sidecar(file)
+    if sidecar_inventory is not None:
+        return sidecar_inventory
 
     digest = hashlib.sha256()
-    digest.update(b"grib_inventory_v1")
+    digest.update(b"grib_inventory_file_v1")
     digest.update(json.dumps(GRIB_KEYS, sort_keys=True).encode())
 
-    for file in sorted(files):
-        path = Path(file)
-        stat = path.stat()
-        digest.update(str(path).encode())
-        digest.update(str(stat.st_size).encode())
-        digest.update(str(stat.st_mtime_ns).encode())
+    path = Path(file)
+    stat = path.stat()
+    digest.update(str(path).encode())
+    digest.update(str(stat.st_size).encode())
+    digest.update(str(stat.st_mtime_ns).encode())
 
-    pickle_file = cache_dir() / f"grib_inventory_{digest.hexdigest()}.pickle"
+    pickle_file = cache_dir() / f"grib_inventory_file_{digest.hexdigest()}.pickle"
 
     if pickle_file.exists():
-        return cast(pd.DataFrame, pd.read_pickle(pickle_file))
+        try:
+            return cast(pd.DataFrame, pd.read_pickle(pickle_file))
+        except (
+            AttributeError,
+            EOFError,
+            ImportError,
+            OSError,
+            pickle.UnpicklingError,
+            TypeError,
+            UnicodeDecodeError,
+            ValueError,
+        ) as exc:  # pragma: no cover - defensive cache recovery
+            LOGGER.warning("Could not read cached GRIB inventory %s: %s", pickle_file, exc)
 
-    inv = grib_inventory(files)
-    inv.to_pickle(pickle_file)
+    inv = grib_inventory([file])
+    temporary_file = pickle_file.with_name(f".{pickle_file.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        inv.to_pickle(temporary_file)
+        temporary_file.replace(pickle_file)
+    finally:
+        temporary_file.unlink(missing_ok=True)
     return inv
 
 

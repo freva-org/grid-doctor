@@ -668,9 +668,21 @@ data writes update `last_data_update`; successful permanent refreshes update
 
 The remapper separates the two input-side caches:
 
-- GRIB inventory cache: enabled by default
+- GRIB inventory cache: enabled by default; it uses provider sidecars when available
 - reduced-Gaussian geometry cache in `grid_doctor.utils.cache_dir()`: enabled by default
 - pickled multi-file input-dataset cache: disabled by default
+
+For each source GRIB file, the inventory loader first looks for a sibling
+`.index` file, for example `file.grb` and `file.index`. These provider sidecars
+are JSON Lines message inventories and are read directly when their byte ranges
+match the GRIB file. No additional inventory pickle is created in that case.
+
+If the sidecar is missing, malformed, or cannot describe the message timing,
+the loader scans just that GRIB file with ecCodes and stores a small per-file
+pickle under `grid_doctor.utils.cache_dir()`. Its key includes the normalized
+path, size, modification time, and inventory schema. A request for many files
+loads their individual inventories and concatenates them in memory, allowing
+overlapping runs or file batches to reuse the metadata for shared files.
 
 The geometry cache stores the expensive reduced-Gaussian cell-vertex arrays so
 later runs can load them instead of rebuilding them. If the cache file

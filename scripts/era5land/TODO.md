@@ -1,14 +1,16 @@
 # TODO
 
-- [] pressure level selection for remapper, cleanup, merge. For update it should be whaever is already there.
+- [x] Cache fallback GRIB inventories per source file, rather than per complete file collection, so overlapping runs reuse scanned files.
+- [x] Read provider `.index` sidecars as the preferred per-file inventory source; fall back to the ecCodes-derived per-file cache when absent or invalid.
+- [ ] Evaluate replacing the per-file pickle fallback with a dedicated SQLite cache after measuring cache count, size, hit rate, and parallel filesystem locking behaviour.
+
+- [x] pressure level selection for remapper, cleanup, merge. For update it should be whaever is already there.
     - [x] remap
     - [x] remap-reflow
     - [x] cleanup
-    - [] merge
+    - [x] merge
 
-
-
-- [ ] solve bug in merge, currently 
+- [x] solve bug in merge, currently 
 ```
 heal-era5 merge \
   --source /work/ks1387/era5_from_grib_reflow/merged \
@@ -33,10 +35,9 @@ does not work, it needs to be `--source /work/ks1387/era5_from_grib_reflow/merge
 ---
 - [x] vertical level correct adding
 - [x] areacella calculation
-- [] add level_tpye, tier info into the csv file: var,dataset,level_type,tier so at 
-some point it can be processed also by --level_type (surface,pressure) or --tier 1,2,3...
+- [x] add level_type, tier info into the csv file: var,dataset,level_type,tier so at 
+some point it can be processed also by --level_type (surface,pressure) or --tier 1,2,3... --> done it in the config file
 - [x] update to the latest dates with quirugicall record replacement
-- [] the batchfolders in era5
 - [x] reflow to be able to send multiple jobs and then collect them.
 - [] cf checking?
 
