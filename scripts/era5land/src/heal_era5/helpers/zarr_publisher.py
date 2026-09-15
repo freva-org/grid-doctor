@@ -347,11 +347,9 @@ def rechunk_zarr_store(
 
 
 def _replace_public_attrs(zarr_array, attrs: dict[str, Any]) -> bool:
-    keep = {}
-    for key in ("_ARRAY_DIMENSIONS", "coordinates", "grid_mapping"):
-        if key in zarr_array.attrs:
-            keep[key] = zarr_array.attrs[key]
+    """Overlay refreshed public attrs without discarding stored metadata."""
 
+    existing_attrs = dict(zarr_array.attrs)
     attrs = dict(attrs)
     previous_data_update = zarr_array.attrs.get(LAST_DATA_UPDATE_ATTR)
     if previous_data_update and not attrs.get(LAST_DATA_UPDATE_ATTR):
@@ -371,13 +369,11 @@ def _replace_public_attrs(zarr_array, attrs: dict[str, Any]) -> bool:
     elif previous_permanent_update and not requested_permanent_update:
         attrs[LAST_PERMANENT_UPDATE_ATTR] = previous_permanent_update
 
-    new_attrs = {**keep, **attrs}
-    old_attrs = dict(zarr_array.attrs)
+    new_attrs = {**existing_attrs, **attrs}
 
-    if old_attrs == new_attrs:
+    if existing_attrs == new_attrs:
         return False
 
-    zarr_array.attrs.clear()
     zarr_array.attrs.update(new_attrs)
     return True
 
@@ -449,9 +445,24 @@ def _preserve_update_attrs(
     candidate: xr.Dataset,
     merged: xr.Dataset,
 ) -> xr.Dataset:
-    """Preserve monotonic update watermarks when rebuilding a store."""
+    """Merge variable attrs when a published store is rebuilt.
+
+    Args:
+        existing: Dataset currently published in the destination Zarr store.
+        candidate: Newly remapped source data with refreshed CMOR metadata.
+        merged: Combined data values that will replace the published store.
+
+    Returns:
+        The ``merged`` dataset with existing variable attrs retained unless
+        ``candidate`` supplies a refreshed value. Update watermarks retain the
+        latest value so they never move backwards.
+    """
 
     for name in merged.data_vars:
+        existing_attrs = dict(existing[name].attrs) if name in existing else {}
+        candidate_attrs = dict(candidate[name].attrs) if name in candidate else {}
+        merged[name].attrs = {**existing_attrs, **candidate_attrs}
+
         sources = [source[name] for source in (existing, candidate) if name in source]
         real_values = [source.attrs[LAST_REAL_DATA_ATTR] for source in sources if LAST_REAL_DATA_ATTR in source.attrs]
         if real_values:

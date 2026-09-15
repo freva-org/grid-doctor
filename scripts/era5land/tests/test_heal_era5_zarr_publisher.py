@@ -80,3 +80,48 @@ def test_missing_pressure_variable_writes_pressure_coordinate(monkeypatch):
 
     np.testing.assert_array_equal(root["plev"].values, [1000, 850])
     assert root["plev"].attrs["_ARRAY_DIMENSIONS"] == ["plev"]
+
+
+def test_refreshing_public_attrs_preserves_existing_variable_metadata():
+    class FakeArray:
+        def __init__(self):
+            self.attrs = {
+                "_ARRAY_DIMENSIONS": ["time", "cell"],
+                "grid_mapping": "crs",
+                "original_attribute": "keep me",
+                "long_name": "old name",
+                "last_real_data": "2026-09-01",
+            }
+
+    array = FakeArray()
+
+    changed = zarr_publisher._replace_public_attrs(
+        array,
+        {"long_name": "refreshed name", "units": "K"},
+    )
+
+    assert changed is True
+    assert array.attrs == {
+        "_ARRAY_DIMENSIONS": ["time", "cell"],
+        "grid_mapping": "crs",
+        "original_attribute": "keep me",
+        "long_name": "refreshed name",
+        "units": "K",
+        "last_real_data": "2026-09-01",
+    }
+
+
+def test_rebuilding_store_preserves_existing_variable_attrs():
+    existing = xr.Dataset({"tas": ("time", [1])})
+    existing["tas"].attrs = {"original_attribute": "keep me", "long_name": "old name"}
+    candidate = xr.Dataset({"tas": ("time", [2])})
+    candidate["tas"].attrs = {"long_name": "refreshed name", "units": "K"}
+    merged = candidate.combine_first(existing)
+
+    result = zarr_publisher._preserve_update_attrs(existing, candidate, merged)
+
+    assert result["tas"].attrs == {
+        "original_attribute": "keep me",
+        "long_name": "refreshed name",
+        "units": "K",
+    }
