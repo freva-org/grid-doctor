@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -154,7 +155,7 @@ class StageColorFormatter(logging.Formatter):
         return None
 
 
-def configure_logging() -> None:
+def configure_logging(*, verbosity: int = 0) -> None:
     """Configure terminal logging with ANSI colors for interactive stderr."""
 
     handler = logging.StreamHandler()
@@ -167,7 +168,7 @@ def configure_logging() -> None:
 
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
-    root_logger.setLevel(logging.INFO)
+    root_logger.setLevel(logging.DEBUG if verbosity else logging.INFO)
     root_logger.addHandler(handler)
 
 
@@ -245,11 +246,17 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=RichDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "-v",
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
         help="Show the remapper version and exit.",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Enable diagnostic DEBUG logging; may be repeated (for example, -vvv).",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -2308,6 +2315,16 @@ def main(argv: list[str] | None = None) -> int:
             return delegated_handlers[raw_argv[0]](["-h"])
         return delegated_handlers[raw_argv[0]](raw_argv[1:])
 
+    verbosity = 0
+    parser_argv: list[str] = []
+    for token in raw_argv:
+        if token == "--verbose":
+            verbosity += 1
+        elif re.fullmatch(r"-v+", token):
+            verbosity += len(token) - 1
+        else:
+            parser_argv.append(token)
+
     parser = build_parser()
     normal_commands = {"fetch", "remap", "update", "clean", "merge"}
     if len(raw_argv) == 1 and raw_argv[0] in normal_commands:
@@ -2316,13 +2333,14 @@ def main(argv: list[str] | None = None) -> int:
         except SystemExit as exc:
             return int(exc.code or 0)
 
-    args = parser.parse_args(raw_argv)
+    args = parser.parse_args(parser_argv)
+    args.verbose = verbosity
 
     if args.command is None:
         parser.print_help()
         return 2
 
-    configure_logging()
+    configure_logging(verbosity=args.verbose)
     handlers = {
         "fetch": run_fetch,
         "remap": run_remap,

@@ -6,9 +6,19 @@ from typing import Any
 
 from dask.callbacks import Callback
 
+_MIN_LIVE_PROGRESS_TASKS = 25
+
+
+def _stage_message(stage: str, fields: dict[str, object]) -> str:
+    """Build a compact structured message for one workflow stage."""
+
+    tokens = [f"stage={stage}"]
+    tokens.extend(f"{key}={value}" for key, value in fields.items())
+    return " ".join(tokens)
+
 
 def log_stage(logger: logging.Logger, stage: str, **fields: object) -> None:
-    """Emit a compact structured log line for one workflow stage.
+    """Emit an INFO-level compact structured log line for one workflow stage.
 
     Parameters
     ----------
@@ -20,9 +30,13 @@ def log_stage(logger: logging.Logger, stage: str, **fields: object) -> None:
         Additional structured key/value pairs appended to the message.
     """
 
-    tokens = [f"stage={stage}"]
-    tokens.extend(f"{key}={value}" for key, value in fields.items())
-    logger.info(" ".join(tokens))
+    logger.info(_stage_message(stage, fields))
+
+
+def log_debug_stage(logger: logging.Logger, stage: str, **fields: object) -> None:
+    """Emit a DEBUG-level compact structured log line for one workflow stage."""
+
+    logger.debug(_stage_message(stage, fields))
 
 
 class _TaskProgress(Callback):
@@ -35,7 +49,6 @@ class _TaskProgress(Callback):
         self.label = label
         self.total_tasks = 1
         self.completed = 0
-        self.next_percent = 5
         self.last_percent = -1
         self.live = sys.stderr.isatty()
 
@@ -43,7 +56,13 @@ class _TaskProgress(Callback):
         # ``dsk`` is the optimized graph Dask will execute, unlike the larger
         # pre-optimization graph returned by ``to_zarr(compute=False)``.
         self.total_tasks = max(1, len(dsk))
-        log_stage(self.logger, f"{self.stage}_start", label=self.label, tasks=self.total_tasks)
+        self.live = self.live and self.total_tasks >= _MIN_LIVE_PROGRESS_TASKS
+        log_debug_stage(
+            self.logger,
+            f"{self.stage}_start",
+            label=self.label,
+            tasks=self.total_tasks,
+        )
 
     def _render_live_progress(self, percent: int) -> None:
         width = 20
@@ -60,8 +79,10 @@ class _TaskProgress(Callback):
                 self._render_live_progress(percent)
                 self.last_percent = percent
             return
-        if percent >= self.next_percent:
-            log_stage(
+        # Non-interactive runs keep detailed progress available at DEBUG
+        # without filling scheduler logs with one line per five percent.
+        if percent == 100:
+            log_debug_stage(
                 self.logger,
                 f"{self.stage}_progress",
                 label=self.label,
@@ -69,7 +90,6 @@ class _TaskProgress(Callback):
                 completed_tasks=self.completed,
                 total_tasks=self.total_tasks,
             )
-            self.next_percent = (percent // 5 + 1) * 5
 
     def _finish(self, dsk: Any, state: Any, errored: bool) -> None:
         if not errored:
@@ -78,7 +98,7 @@ class _TaskProgress(Callback):
                 self._render_live_progress(100)
                 sys.stderr.write("\n")
                 sys.stderr.flush()
-            log_stage(
+            log_debug_stage(
                 self.logger,
                 f"{self.stage}_done",
                 label=self.label,
@@ -94,7 +114,7 @@ def compute_with_task_progress(
     stage: str,
     label: str,
 ) -> None:
-    """Compute a Dask delayed object while logging progress every five percent."""
+    """Compute a Dask delayed object with live TTY progress and DEBUG task details."""
 
     with _TaskProgress(logger, stage, label):
         delayed.compute()

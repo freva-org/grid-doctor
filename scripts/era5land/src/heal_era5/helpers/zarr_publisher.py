@@ -767,7 +767,7 @@ def update_zarr_store(
         action = "create" if not path.exists() else "clean-recreate"
         source_time = _time_range_label(dataset.indexes["time"]) if "time" in dataset.dims else "static"
         logical_data = _source_payload_label(dataset)
-        LOGGER.info(
+        LOGGER.debug(
             "stage=merge_plan destination=%s action=%s source_time=%s variables=%s logical_data=%s",
             destination,
             action,
@@ -799,7 +799,7 @@ def update_zarr_store(
     existing = xr.open_zarr(destination, consolidated=(zarr_format == 2))
     try:
         if _requires_vertical_rewrite(existing, dataset):
-            LOGGER.info(
+            LOGGER.debug(
                 "stage=merge_plan destination=%s action=rewrite-store reason=pressure-level-change "
                 "source_time=%s variables=%s logical_data=%s",
                 destination,
@@ -828,7 +828,7 @@ def update_zarr_store(
             missing = [name for name in dataset.data_vars if name not in existing.data_vars]
             overlapping = [name for name in dataset.data_vars if name in existing.data_vars]
             action = "rewrite-static" if overlapping else "add-variables" if missing else "metadata-only"
-            LOGGER.info(
+            LOGGER.debug(
                 "stage=merge_plan destination=%s action=%s source_time=static variables=%s logical_data=%s",
                 destination,
                 action,
@@ -859,7 +859,7 @@ def update_zarr_store(
             return
 
         action, overlap_count, new_count = _time_merge_action(existing, dataset)
-        LOGGER.info(
+        LOGGER.debug(
             "stage=merge_plan destination=%s action=%s source_time=%s destination_time=%s "
             "overlap_steps=%s new_steps=%s variables=%s logical_data=%s",
             destination,

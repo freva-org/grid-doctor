@@ -210,7 +210,8 @@ def test_main_dispatches_normal_commands(monkeypatch):
 
     main = load_main_module()
     called = []
-    monkeypatch.setattr(main, "configure_logging", lambda: None)
+    configured_verbosity = []
+    monkeypatch.setattr(main, "configure_logging", lambda *, verbosity: configured_verbosity.append(verbosity))
     monkeypatch.setattr(
         main,
         "run_fetch",
@@ -219,6 +220,20 @@ def test_main_dispatches_normal_commands(monkeypatch):
 
     assert main.main(["fetch", "--dataset", "era5land"]) == 17
     assert called == ["fetch"]
+    assert configured_verbosity == [0]
+
+
+def test_verbose_flags_enable_debug_logging_before_or_after_the_command(monkeypatch):
+    """Repeated short verbosity flags should work in the usual CLI positions."""
+
+    main = load_main_module()
+    configured_verbosity = []
+    monkeypatch.setattr(main, "configure_logging", lambda *, verbosity: configured_verbosity.append(verbosity))
+    monkeypatch.setattr(main, "run_fetch", lambda args: 0)
+
+    assert main.main(["-vvv", "fetch", "--dataset", "era5land"]) == 0
+    assert main.main(["fetch", "--dataset", "era5land", "-vv"]) == 0
+    assert configured_verbosity == [3, 2]
 
 
 @pytest.mark.parametrize("command", ["fetch", "remap", "update", "clean", "merge"])

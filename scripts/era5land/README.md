@@ -875,19 +875,27 @@ This updates global and variable attrs in existing stores only.
 
 ## Logging
 
-The remapper prints structured progress logs to the terminal. The output is
-deliberately milestone-based rather than per-file noisy. Typical stages include:
+The remapper prints concise structured progress logs to the terminal. Typical
+stages include:
 
 - `convert_start`
 - `frequency_start`
 - `grib_merge_done`
 - `weight_calculation`
 - `remap_start`
-- `remap_materialize_done`
-- `zarr_write_start`
 - `frequency_done`
 
 If stderr is attached to an interactive terminal, these stages are colorised.
+
+Use `-v` to include diagnostic `DEBUG` messages, such as per-level write plans
+and Dask task details. The flag can be placed before or after the command and
+may be repeated; `-vvv` is accepted and currently has the same DEBUG detail as
+`-v`:
+
+```console
+heal-era5 update --dataset era5land --freq 1hr -vvv
+heal-era5 -v update --dataset era5land --freq 1hr
+```
 
 ## Development Checks
 

@@ -23,7 +23,7 @@ from .formatter import (
     existing_destinations_for_frequency,
     group_records_by_frequency,
 )
-from .logging_utils import log_stage
+from .logging_utils import log_debug_stage, log_stage
 from .metadata import (
     attrs_for_record,
     global_attrs_for_dataset_frequency,
@@ -159,7 +159,7 @@ def _write_zoom_level(
         zoom_number,
         output_path=output_path,
     )
-    log_stage(
+    log_debug_stage(
         LOGGER,
         "zarr_write_start",
         frequency=frequency,
@@ -284,7 +284,7 @@ def _coarsen_existing_frequency(
 
         source_level = min(higher_levels)
         source_destination = available_destinations[source_level]
-        log_stage(
+        log_debug_stage(
             LOGGER,
             "coarsen_source_open",
             frequency=frequency,
@@ -681,9 +681,6 @@ def map_grib_to_healpix(
                     frequency=frequency,
                     variables=variable_names,
                     max_level=max_level,
-                    target_levels=(
-                        str(max_level) if highest_level_only else ",".join(map(str, range(max_level, -1, -1)))
-                    ),
                     weights=weight_file,
                     strategy="stepwise",
                 )
@@ -693,7 +690,7 @@ def map_grib_to_healpix(
                     weights_path=weight_file,
                 )
                 written_zoom_numbers = (max_level,)
-                log_stage(
+                log_debug_stage(
                     LOGGER,
                     "remap_ready_for_write",
                     frequency=frequency,
