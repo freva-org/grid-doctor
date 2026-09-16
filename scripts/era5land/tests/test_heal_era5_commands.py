@@ -364,6 +364,126 @@ def test_permanent_refresh_uses_last_data_update_not_permanent_watermark(monkeyp
     assert selection.interval == (date(2026, 6, 30), date(2026, 6, 30))
 
 
+def test_era5land_finality_uses_coverage_end_month(monkeypatch):
+    coverage = {
+        "jun": (date(2026, 6, 30), date(2026, 6, 30)),
+        "aug": (date(2026, 8, 31), date(2026, 8, 31)),
+        "annual": (date(2026, 1, 1), date(2026, 12, 31)),
+    }
+    modified = {
+        "jun": date(2026, 9, 8),
+        "aug": date(2026, 9, 8),
+        "annual": date(2026, 9, 8),
+    }
+    monkeypatch.setattr(main, "file_interval", lambda source_file, frequency: coverage[source_file])
+    monkeypatch.setattr(main, "_local_modification_date", lambda source_file: modified[source_file])
+
+    assert main._is_final_source_file("jun", dataset="era5land", frequency="1hr")
+    assert not main._is_final_source_file("aug", dataset="era5land", frequency="1hr")
+    assert not main._is_final_source_file("annual", dataset="era5land", frequency="mon")
+
+
+def test_forced_permanent_selection_keeps_annual_file_overlapping_lookback(monkeypatch):
+    annual_files = _record(files=("2024", "2025"))
+    coverage = {
+        "2024": (date(2024, 1, 1), date(2024, 12, 31)),
+        "2025": (date(2025, 1, 1), date(2025, 12, 31)),
+    }
+    monkeypatch.setattr(main, "file_interval", lambda source_file, frequency: coverage[source_file])
+    monkeypatch.setattr(main, "_is_final_source_file", lambda *args, **kwargs: True)
+
+    selection = main._select_permanent_records(
+        [annual_files],
+        dataset="era5land",
+        frequency="mon",
+        permanent_watermark=date(2025, 11, 1),
+        last_data_update=None,
+        include_overlapping_watermark=True,
+    )
+
+    assert selection.records[0].files == ("2025",)
+    assert selection.interval == coverage["2025"]
+
+
+def test_temporary_monthly_selection_keeps_complete_annual_file(monkeypatch):
+    annual = _record(files=("ELsf12_1M_2026_228.grb",))
+    coverage = (date(2026, 1, 1), date(2026, 12, 31))
+    monkeypatch.setattr(main, "file_interval", lambda source_file, frequency: coverage)
+    monkeypatch.setattr(
+        main,
+        "overlaps_interval",
+        lambda source_file, frequency, start, end: coverage[1] >= start and coverage[0] <= end,
+    )
+
+    selection = main._select_interval_records(
+        [annual], frequency="mon", interval=(date(2026, 6, 26), date(2026, 9, 17))
+    )
+
+    assert selection.interval == coverage
+
+
+def test_forced_update_starts_temporary_files_after_permanent_coverage(monkeypatch):
+    planned_files: list[tuple[str, ...]] = []
+    force_from = date(2026, 6, 26)
+    record = _record(files=("permanent", "before", "temporary"))
+    dates = {
+        "permanent": (date(2026, 6, 26), date(2026, 6, 30)),
+        "before": (date(2026, 6, 1), date(2026, 6, 25)),
+        "temporary": (date(2026, 7, 1), date(2026, 9, 10)),
+    }
+
+    monkeypatch.setattr(main, "selected_requests", lambda **_: _request())
+    monkeypatch.setattr(main, "_existing_frequency_variables", lambda *args, **kwargs: {"tas"})
+    monkeypatch.setattr(
+        main,
+        "_existing_variable_update_state",
+        lambda *args, **kwargs: main.VariableUpdateState(None, date(2026, 9, 10), date(2026, 8, 31)),
+    )
+    monkeypatch.setattr(main, "_existing_variable_pressure_levels", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main, "_resolve_update_records", lambda **kwargs: [record])
+    monkeypatch.setattr(main, "file_interval", lambda source_file, frequency: dates[source_file])
+    monkeypatch.setattr(
+        main,
+        "overlaps_interval",
+        lambda source_file, frequency, start, end: dates[source_file][1] >= start and dates[source_file][0] <= end,
+    )
+    monkeypatch.setattr(
+        main,
+        "_select_permanent_records",
+        lambda records, **kwargs: main.UpdateSelection([record._replace(files=("permanent",))], dates["permanent"], 1),
+    )
+    monkeypatch.setattr(
+        main,
+        "_map_update_records",
+        lambda records, **kwargs: planned_files.extend(current.files for current in records),
+    )
+    monkeypatch.setattr(main, "_persist_real_data_watermark", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main, "_persist_permanent_watermark", lambda *args, **kwargs: None)
+
+    main.run_update(
+        Namespace(
+            variables="tas",
+            freq="1hr",
+            dataset="era5land",
+            zarr_format=2,
+            output_path=None,
+            chunk_size=16,
+            batch_files=None,
+            batch_months=None,
+            preview=False,
+            force_from=force_from,
+            use_inventory_cache=True,
+            use_input_cache=False,
+            fail_on_duplicate_times=False,
+            weights_dir="/tmp/weights",
+            highest_level_only=False,
+            root=None,
+        )
+    )
+
+    assert planned_files == [("permanent", "temporary")]
+
+
 def test_update_force_from_overrides_stored_update_boundaries(monkeypatch):
     resolved_intervals: list[tuple[date, date]] = []
     planned_intervals: list[tuple[date, date]] = []

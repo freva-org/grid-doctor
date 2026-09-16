@@ -1505,9 +1505,11 @@ def _is_final_source_file(
 
     ERA5's ET files are explicitly provisional, so only E5/E1 files qualify.
     ERA5-Land is supplied as the merged EL collection; a file is final only
-    after it has been updated at least one calendar month after its covered
-    date.  A separate recent-modification check chooses which final files are
-    reconsidered by an ordinary update.
+    after its coverage-end month plus ``PERMANENT_DATA_LAG_MONTHS``. The
+    threshold is the first day of that target month, rather than three full
+    elapsed months. This is important for annual monthly files, whose start
+    date says nothing about their final month. A separate recent-modification
+    check chooses which final files are reconsidered by an ordinary update.
     """
 
     name = Path(source_file).name
@@ -1518,9 +1520,9 @@ def _is_final_source_file(
     if coverage is None:
         return False
 
-    file_start, _ = coverage
+    _, file_end = coverage
     modified_date = _local_modification_date(source_file)
-    return modified_date >= add_months(file_start, 1)
+    return modified_date >= add_months(file_end, PERMANENT_DATA_LAG_MONTHS)
 
 
 def _map_update_records(
@@ -1626,15 +1628,15 @@ class UpdateSelection(NamedTuple):
 
 
 class UpdatePreviewRow(NamedTuple):
-    """Summarize the planned permanent and forward updates for one variable."""
+    """Summarize the planned permanent and temporary updates for one variable."""
 
     frequency: str
     variable: str
-    stored_end: date
+    stored_end: date | None
     permanent: str
     permanent_files: int
-    forward: str
-    forward_files: int
+    temporary: str
+    temporary_files: int
 
 
 def _update_remap_args(
@@ -1686,6 +1688,7 @@ def _select_permanent_records(
     frequency: str,
     permanent_watermark: date | None,
     last_data_update: datetime | None,
+    include_overlapping_watermark: bool = False,
 ) -> UpdateSelection:
     """Keep source files eligible for the permanent refresh.
 
@@ -1694,6 +1697,8 @@ def _select_permanent_records(
     watermark only discards files whose covered date is already older than
     the recorded permanent range.  ``--force-from`` supplies no data-update
     timestamp, so its explicit three-month recovery range is used instead.
+    In that recovery case, annual files which overlap the beginning of the
+    range must be retained even when their start predates it.
     """
 
     selected_files: set[str] = set()
@@ -1703,9 +1708,15 @@ def _select_permanent_records(
             coverage = file_interval(source_file, frequency)
             if coverage is None:
                 continue
-            file_start, _ = coverage
-            if permanent_watermark and file_start < permanent_watermark:
-                continue
+            file_start, file_end = coverage
+            if permanent_watermark:
+                before_watermark = (
+                    file_end < permanent_watermark
+                    if include_overlapping_watermark
+                    else file_start < permanent_watermark
+                )
+                if before_watermark:
+                    continue
             if last_data_update is not None and _local_modification_time(source_file) < (
                 last_data_update - UPDATE_MTIME_LOOKBACK
             ):
@@ -1854,23 +1865,22 @@ def _preview_update_row(
     *,
     frequency: str,
     variable: str,
-    latest_date: date,
+    stored_end: date | None,
     permanent: UpdateSelection,
-    forward_files: int,
-    today: date,
+    temporary: UpdateSelection,
 ) -> UpdatePreviewRow:
     """Build one row for the update preview report."""
 
     permanent_range = f"{permanent.interval[0]}..{permanent.interval[1]}" if permanent.interval is not None else "-"
-    forward_range = f"{latest_date}..{today}" if forward_files else "-"
+    temporary_range = f"{temporary.interval[0]}..{temporary.interval[1]}" if temporary.interval is not None else "-"
     return UpdatePreviewRow(
         frequency,
         variable,
-        latest_date,
+        stored_end,
         permanent_range,
         permanent.file_count,
-        forward_range,
-        forward_files,
+        temporary_range,
+        temporary.file_count,
     )
 
 
@@ -1890,19 +1900,19 @@ def _log_update_preview(
         "stored_end",
         "permanent dates",
         "perm_files",
-        "forward dates",
-        "fwd_files",
+        "temporary dates",
+        "tmp_files",
     )
     for row in rows:
         logger.info(
             "stage=update_preview %-10s %-18s %-12s %-25s %10s %-25s %s",
             row.frequency,
             row.variable,
-            row.stored_end,
+            row.stored_end or "-",
             row.permanent,
             row.permanent_files,
-            row.forward,
-            row.forward_files,
+            row.temporary,
+            row.temporary_files,
         )
 
 
@@ -2008,7 +2018,6 @@ def run_update(args: argparse.Namespace) -> int:
             permanent_filter = (
                 add_months(force_from, -PERMANENT_DATA_LAG_MONTHS) if force_from is not None else permanent_watermark
             )
-            forward_start = force_from or latest_date
             source_start = permanent_filter if force_from is not None else None
             source_records: list[Any] = []
             if source_start is None or source_start <= today:
@@ -2024,29 +2033,43 @@ def run_update(args: argparse.Namespace) -> int:
                 frequency=frequency,
                 permanent_watermark=permanent_filter,
                 last_data_update=None if force_from is not None else update_state.last_data_update,
+                include_overlapping_watermark=force_from is not None,
             )
-            forward_interval = (forward_start, today)
-            forward = _select_interval_records(
-                source_records,
-                frequency=frequency,
-                interval=forward_interval,
+            # In recovery mode the stored real-data end must not control the
+            # request.  Temporary data starts directly after permanent
+            # coverage; absent permanent coverage it starts at --force-from.
+            # File selection expands a yearly monthly source file to its
+            # complete coverage, so a forced 2026 monthly update includes all
+            # of 2026 rather than only the supplied day.
+            temporary_start = (
+                permanent.interval[1] + timedelta(days=1)
+                if permanent.interval is not None
+                else force_from or latest_date
+            )
+            temporary = (
+                _select_interval_records(
+                    source_records,
+                    frequency=frequency,
+                    interval=(temporary_start, today),
+                )
+                if temporary_start <= today
+                else UpdateSelection([], None, 0)
             )
             if args.preview:
                 preview_rows.append(
                     _preview_update_row(
                         frequency=frequency,
                         variable=variable,
-                        latest_date=latest_date,
+                        stored_end=None if force_from is not None else latest_date,
                         permanent=permanent,
-                        forward_files=forward.file_count,
-                        today=today,
+                        temporary=temporary,
                     )
                 )
                 continue
             plan = _combine_update_selections(
                 source_records,
                 frequency=frequency,
-                selections=(permanent, forward),
+                selections=(permanent, temporary),
             )
             if plan.interval is not None:
                 logger.info(
