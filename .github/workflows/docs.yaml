@@ -15,6 +15,7 @@ on:
       - "mkdocs.tech.yml"
       - "mkdocs.data.yml"
   pull_request:
+    paths:
       - "docs/**"
       - ".github/workflows/docs.yml"
       - "mkdocs.tech.yml"
