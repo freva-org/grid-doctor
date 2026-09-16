@@ -187,27 +187,21 @@ commands =
 description = Prepare the documentation creation
 static =
     rm -rf .build site-tech site-data
-    mkdir -p .build/tech .build/data
+    mkdir -p .build/tech
     cp -a docs/technical/. .build/tech/
-    cp -a docs/data/. .build/data/
     cp -a docs/shared/. .build/tech/
-    cp -a docs/shared/. .build/data/
     cp -a docs/assets .build/tech/
-    cp -a docs/assets .build/data/
 
 serve =
     rm -rf .build
-    mkdir -p .build/tech .build/data
+    mkdir -p .build/tech
     cp -as {toxinidir}/docs/technical/. .build/tech/
-    cp -as {toxinidir}/docs/data/. .build/data/
     cp -as {toxinidir}/docs/shared/. .build/tech/
-    cp -as {toxinidir}/docs/shared/. .build/data/
     mkdir -p .build/tech/assets .build/data/assets
     cp -as {toxinidir}/docs/assets/. .build/tech/assets/
-    cp -as {toxinidir}/docs/assets/. .build/data/assets/
 
 [testenv:docs]
-description = Build docs. Usage: tox -e docs -- [tech|data|all]
+description = Build docs. Usage: tox -e docs
 allowlist_externals =
     rm
     cp
@@ -221,10 +215,10 @@ commands =
     python docs/scripts/build_stac_browser_docs.py {posargs:tech}
     python docs/scripts/build_databrowser_docs.py {posargs:tech}
     codespell {posargs: --quiet-level=2} docs
-    mkdocs build --strict -f mkdocs.{posargs:tech}.yml
+    mkdocs build --strict -f mkdocs.tech.yml
 
 [testenv:docs-serve]
-description = Serve docs locally. Usage: tox -e serve-docs -- [tech|data]
+description = Serve docs locally. Usage: tox -e serve-docs
 allowlist_externals =
     rm
     cp
@@ -235,10 +229,10 @@ deps =
 commands_pre =
     {[docs-prep]serve}
 commands =
-    python docs/scripts/build_stac_browser_docs.py {posargs:tech}
-    python docs/scripts/build_databrowser_docs.py {posargs:tech}
+    python docs/scripts/build_stac_browser_docs.py tech
+    python docs/scripts/build_databrowser_docs.py tech
     codespell --quiet-level=2 docs
-    mkdocs serve -f mkdocs.{posargs:tech}.yml --strict -a localhost:8000 --watch docs
+    mkdocs serve -f mkdocs.tech.yml --strict -a localhost:8000 --watch docs
 
 [testenv:types]
 description = Run mypy in strict mode

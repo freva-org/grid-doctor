@@ -36,6 +36,7 @@ theme:
 plugins:
   - search
   - social:
+      enabled: !ENV [SOCIAL_CARDS, false]
       cards_layout_options:
         background_image: docs/assets/modis-aqua.png
   - mkdocstrings:
@@ -81,13 +82,6 @@ markdown_extensions:
 
 extra_css:
   - assets/styles.css
-  - assets/waterpark-tree.css
-  - assets/stac-browser.css
-  - assets/databrowser.css
 
 extra_javascript:
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
-  - assets/stac-browser-loader.js
-  - assets/databrowser-loader.js
-  - assets/waterpark-tree.js
-  - assets/waterpark-inspector.js

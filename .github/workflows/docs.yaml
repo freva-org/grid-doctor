@@ -5,14 +5,30 @@ permissions:
   pages: write
   id-token: write
 
+
+permissions:
+  contents: write
+
+
 on:
   push:
     branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+      - "mkdocs.tech.yml"
+      - "mkdocs.data.yml"
+  pull_request:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+      - "mkdocs.tech.yml"
+      - "mkdocs.data.yml"
+
   workflow_dispatch:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -20,11 +36,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js (for STAC Browser build)
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
 
       - name: Setup micromamba
         uses: mamba-org/setup-micromamba@v1
@@ -49,23 +60,14 @@ jobs:
 
       - name: Build technical docs
         shell: bash -l {0}
-        run: tox -e docs -- tech
+        env:
+          SOCIAL_CARDS: "1"
+        run: tox -e docs
 
       - name: Upload technical docs artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: site-tech/
-
-      - name: Build data docs
-        shell: bash -l {0}
-        run: tox -e docs -- data
-
-      - name: Deploy data docs to gh-pages branch
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./site-data
-          publish_branch: gh-pages
 
   deploy:
     needs: build
