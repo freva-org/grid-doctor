@@ -4,8 +4,11 @@
     "cordex",
     "dyamond",
     "eerie",
+    "era5",
     "icdc",
     "icon-dream",
+    "misc",
+    "mlflow-artifacts",
     "nextgems",
     "obs",
     "palmod",
@@ -33,6 +36,9 @@
       "label": "Eddy-Rich Earth System Models",
       "href": "https://dataviewer.eerie-project.eu/home/eddy-rich"
     },
+    "era5": {
+      "title": "era5"
+    },
     "icdc": {
       "title": "ICDC",
       "label": "Integrated Climate Data Center",
@@ -42,6 +48,12 @@
       "title": "ICON-DREAM",
       "label": "DWD ICON Reanalysis",
       "href": "https://opendata.dwd.de/climate_environment/CDC/help/landing_pages/doi_landingpage_ICON-DREAM_v1-en.html"
+    },
+    "misc": {
+      "title": "misc"
+    },
+    "mlflow-artifacts": {
+      "title": "mlflow-artifacts"
     },
     "nextgems": {
       "title": "nextGEMS",
