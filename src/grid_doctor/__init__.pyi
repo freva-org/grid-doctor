@@ -1,5 +1,6 @@
 from . import helpers as helpers
 from . import log as log
+from . import multiscales as multiscales
 from . import remap as remap
 from . import select as select
 from . import swath as swath
@@ -11,6 +12,7 @@ from .helpers import latlon_to_healpix_pyramid as latlon_to_healpix_pyramid
 from .helpers import resolution_to_healpix_level as resolution_to_healpix_level
 from .helpers import save_pyramid as save_pyramid
 from .log import setup_logging as setup_logging
+from .multiscales import write_pyramid_to_multiscales_zarr
 from .remap import apply_weight_file as apply_weight_file
 from .remap import compute_healpix_weights as compute_healpix_weights
 from .remap import regrid_to_healpix as regrid_to_healpix
@@ -28,6 +30,6 @@ from .utils import cached_weights as cached_weights
 from .utils import chunk_for_target_store_size as chunk_for_target_store_size
 from .utils import get_s3_options as get_s3_options
 
-__all__ = ['__version__', 'helpers', 'log', 'remap', 'select', 'swath', 'utils', 'apply_weight_file', 'attach_cell_coords', 'bin_to_healpix', 'cached_open_dataset', 'cached_weights', 'chunk_for_target_store_size', 'coarsen_healpix', 'compute_healpix_weights', 'create_healpix_pyramid', 'get_latlon_resolution', 'get_s3_options', 'latlon_to_healpix_pyramid', 'regrid_to_healpix', 'regrid_unstructured_to_healpix', 'resolution_to_healpix_level', 'save_pyramid', 'select_bbox', 'select_cells', 'select_cone', 'setup_logging', 'sparse_to_dense']
+__all__ = ['__version__', 'helpers', 'log', 'remap', 'select', 'swath', 'utils', 'apply_weight_file', 'attach_cell_coords', 'bin_to_healpix', 'cached_open_dataset', 'cached_weights', 'chunk_for_target_store_size', 'coarsen_healpix', 'compute_healpix_weights', 'create_healpix_pyramid', 'get_latlon_resolution', 'get_s3_options', 'latlon_to_healpix_pyramid', 'regrid_to_healpix', 'regrid_unstructured_to_healpix', 'resolution_to_healpix_level', 'save_pyramid', 'select_bbox', 'select_cells', 'select_cone', 'setup_logging', 'sparse_to_dense', 'write_pyramid_to_multiscales_zarr']
 
 __version__: str
