@@ -19,6 +19,7 @@ on:
   workflow_call:
 
 concurrency:
+  group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
