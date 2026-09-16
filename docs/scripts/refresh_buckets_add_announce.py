@@ -10,8 +10,6 @@ import os
 import sys
 from pathlib import Path
 
-import s3fs
-
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUT = HERE.parent.parent / "docs" / "assets" / "waterpark-datasets.json"
 logger = logging.getLogger(__name__)
@@ -48,7 +46,9 @@ def render_announcement(text: str, target: Path = OVERRIDE_FILE) -> None:
         )
 
 
-def list_buckets(endpoint: str, key: str, secret: str) -> set[str]:
+def list_buckets(endpoint: str, key: str, secret: str) -> list[str]:
+    import s3fs
+
     fs = s3fs.S3FileSystem(
         key=key, secret=secret, client_kwargs={"endpoint_url": endpoint}
     )
@@ -67,7 +67,7 @@ def list_buckets(endpoint: str, key: str, secret: str) -> set[str]:
             f"(check admin credentials / gateway permissions)"
         )
         sys.exit(0)
-    return set(names)
+    return sorted(names)
 
 
 def main() -> None:
@@ -91,7 +91,11 @@ def main() -> None:
         for b in os.environ.get("WATERPARK_BUCKET_BLACKLIST", "").split(",")
         if b.strip()
     }
-    buckets = list_buckets(args.endpoint, key, secret) - set(blacklist)
+    buckets = [
+        b
+        for b in list_buckets(args.endpoint, key, secret)
+        if b not in blacklist
+    ]
     # check if the JSON is already there.
     existing: dict = {}
     if args.out.exists():
