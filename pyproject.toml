@@ -212,8 +212,6 @@ deps =
     -e .[docs]
     codespell
 commands =
-    python docs/scripts/build_stac_browser_docs.py {posargs:tech}
-    python docs/scripts/build_databrowser_docs.py {posargs:tech}
     codespell {posargs: --quiet-level=2} docs
     mkdocs build --strict -f mkdocs.tech.yml
 
