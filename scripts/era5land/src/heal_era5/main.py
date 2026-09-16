@@ -47,7 +47,7 @@ from .helpers.formatter import (
     merge_dataset_root,
     normalise_frequencies,
 )
-from .helpers.metadata import LAST_PERMANENT_UPDATE_ATTR, LAST_REAL_DATA_ATTR
+from .helpers.metadata import LAST_DATA_UPDATE_ATTR, LAST_PERMANENT_UPDATE_ATTR, LAST_REAL_DATA_ATTR
 from .resources import ASSETS_DIR, CMOR_TABLES_DIR, PACKAGE_DIR
 
 # Keep runtime state next to the legacy launcher rather than in site-packages.
@@ -56,6 +56,7 @@ DEFAULT_VAR_TABLE = ASSETS_DIR / "default_variables.csv"
 DEFAULT_SOURCE_MAPPER = ASSETS_DIR / "source_mapper.json"
 DEFAULT_CMOR_TABLES = CMOR_TABLES_DIR
 PERMANENT_DATA_LAG_MONTHS = 3
+UPDATE_MTIME_LOOKBACK = timedelta(days=7)
 FREQUENCIES = ("1hr", "day", "mon", "fx")
 UNRESOLVED_REASON = "not found in CMOR table, unsupported stream/frequency, or has no DKRZ_ID/grib_paramID"
 LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
@@ -1361,79 +1362,59 @@ def run_remap(args: argparse.Namespace) -> int:
     return 0
 
 
-def _existing_variable_last_date(
+class VariableUpdateState(NamedTuple):
+    """Stored watermarks used to plan one variable's incremental update."""
+
+    last_data_update: datetime | None
+    last_real_date: date | None
+    permanent_watermark: date | None
+
+
+def _existing_variable_update_state(
     dataset: str,
     frequency: str,
     variable: str,
     *,
     zarr_format: int,
     output_path: str | Path | None,
-) -> tuple[date | None, date | None]:
-    """Find one variable's real data endpoint and permanent-update watermark.
+) -> VariableUpdateState:
+    """Read the common update timestamp and informative coverage watermarks.
 
-    Parameters
-    ----------
-    dataset
-        Published dataset name used to locate its HEALPix Zarr stores.
-    frequency
-        Publication frequency whose level stores are inspected.
-    variable
-        Data-variable name whose time coverage is inspected.
-    zarr_format
-        Zarr metadata format; used to choose whether stores are opened with
-        consolidated metadata.
-    output_path
-        Optional root directory containing the published dataset.
-
-    Returns
-    -------
-    tuple[date | None, date | None]
-        ``(last_real_date, permanent_watermark)``. ``last_real_date`` is the
-        common ``last_real_data`` attribute. Legacy variables without that
-        attribute fall back to the final shared ``time`` coordinate. The
-        earliest endpoint across HEALPix levels is used so no incomplete level
-        is skipped. ``permanent_watermark`` is the common
-        ``last_permanent_update`` attribute, returned only when every level
-        containing the variable has the same value. Either value is ``None``
-        when it cannot be established safely.
+    ``last_data_update`` is the normal-update pivot.  The real-data and
+    permanent values describe coverage, but must not determine which source
+    files are searched for replacements.
     """
 
     import xarray as xr
 
-    destinations = existing_destinations_for_frequency(
-        dataset,
-        frequency,
-        output_path=output_path,
-    )
-    data_dates: list[date] = []
+    data_updates: list[datetime] = []
+    real_dates: list[date] = []
     permanent_dates: list[date] = []
     variable_destinations = 0
-    for destination in destinations:
+    for destination in existing_destinations_for_frequency(dataset, frequency, output_path=output_path):
         opened = xr.open_zarr(destination, consolidated=(zarr_format == 2))
         try:
             if variable not in opened or "time" not in opened[variable].dims:
                 continue
             variable_destinations += 1
-            data = opened[variable]
-            real_attr = data.attrs.get(LAST_REAL_DATA_ATTR)
-            data_date = date.fromisoformat(str(real_attr or data["time"].values[-1])[:10])
-            data_dates.append(data_date)
-            permanent_attr = opened[variable].attrs.get(LAST_PERMANENT_UPDATE_ATTR)
-            if permanent_attr:
-                permanent_dates.append(date.fromisoformat(str(permanent_attr)[:10]))
+            attrs = opened[variable].attrs
+            if value := attrs.get(LAST_DATA_UPDATE_ATTR):
+                data_updates.append(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+            real_value = attrs.get(LAST_REAL_DATA_ATTR) or opened[variable]["time"].values[-1]
+            real_dates.append(date.fromisoformat(str(real_value)[:10]))
+            if value := attrs.get(LAST_PERMANENT_UPDATE_ATTR):
+                permanent_dates.append(date.fromisoformat(str(value)[:10]))
         finally:
             opened.close()
 
-    if not data_dates:
-        return None, None
-
-    permanent_date = None
-    if variable_destinations > 0 and len(permanent_dates) == variable_destinations and len(set(permanent_dates)) == 1:
-        permanent_date = permanent_dates[0]
-
-    # An update writes every level. Start at the least complete one rather
-    # than allowing a more advanced level to hide another level's gap.
-    return min(data_dates), permanent_date
+    common_update = min(data_updates) if variable_destinations and len(data_updates) == variable_destinations else None
+    common_real = min(real_dates) if variable_destinations and len(real_dates) == variable_destinations else None
+    common_permanent = (
+        permanent_dates[0]
+        if variable_destinations and len(permanent_dates) == variable_destinations and len(set(permanent_dates)) == 1
+        else None
+    )
+    return VariableUpdateState(common_update, common_real, common_permanent)
 
 
 def _existing_frequency_variables(
@@ -1501,11 +1482,17 @@ def _existing_variable_pressure_levels(
     return stored_selections[0]
 
 
+def _local_modification_time(source_file: str) -> datetime:
+    """Return a source file's modification time in the machine's local timezone."""
+
+    timestamp = Path(source_file).stat().st_mtime
+    return datetime.fromtimestamp(timestamp, UTC).astimezone()
+
+
 def _local_modification_date(source_file: str) -> date:
     """Return a source file's modification date in the machine's local timezone."""
 
-    timestamp = Path(source_file).stat().st_mtime
-    return datetime.fromtimestamp(timestamp, UTC).astimezone().date()
+    return _local_modification_time(source_file).date()
 
 
 def _is_final_source_file(
@@ -1517,10 +1504,10 @@ def _is_final_source_file(
     """Return whether a source file is eligible for the permanent pass.
 
     ERA5's ET files are explicitly provisional, so only E5/E1 files qualify.
-    ERA5-Land is supplied as the merged EL collection; there the filesystem
-    modification date is used as the replacement marker. A file qualifies
-    only when it was modified at least one calendar month after the date in
-    its filename.
+    ERA5-Land is supplied as the merged EL collection; a file is final only
+    after it has been updated at least one calendar month after its covered
+    date.  A separate recent-modification check chooses which final files are
+    reconsidered by an ordinary update.
     """
 
     name = Path(source_file).name
@@ -1676,7 +1663,7 @@ def _resolve_update_records(
     args: argparse.Namespace,
     variable: str,
     frequency: str,
-    interval: tuple[date, date],
+    interval: tuple[date | None, date],
 ) -> list[Any]:
     """Resolve source records for one variable, frequency, and date interval."""
 
@@ -1697,15 +1684,16 @@ def _select_permanent_records(
     *,
     dataset: str,
     frequency: str,
-    latest_date: date,
     permanent_watermark: date | None,
+    last_data_update: datetime | None,
 ) -> UpdateSelection:
     """Keep source files eligible for the permanent refresh.
 
-    When no permanent watermark exists, the file modification date is used as
-    a bootstrap boundary: files must have arrived or changed on or after the
-    latest date already stored in the output. Finality is then checked using
-    the dataset-specific source-file policy.
+    Ordinary updates pivot on ``last_data_update`` and reconsider source files
+    modified since that timestamp (with a one-week overlap).  The permanent
+    watermark only discards files whose covered date is already older than
+    the recorded permanent range.  ``--force-from`` supplies no data-update
+    timestamp, so its explicit three-month recovery range is used instead.
     """
 
     selected_files: set[str] = set()
@@ -1718,8 +1706,9 @@ def _select_permanent_records(
             file_start, _ = coverage
             if permanent_watermark and file_start < permanent_watermark:
                 continue
-            modified_date = _local_modification_date(source_file)
-            if permanent_watermark is None and modified_date < latest_date:
+            if last_data_update is not None and _local_modification_time(source_file) < (
+                last_data_update - UPDATE_MTIME_LOOKBACK
+            ):
                 continue
             if not _is_final_source_file(
                 source_file,
@@ -1749,7 +1738,7 @@ def _select_interval_records(
     records: Sequence[Any],
     *,
     frequency: str,
-    interval: tuple[date, date],
+    interval: tuple[date | None, date],
 ) -> UpdateSelection:
     """Select source files that overlap one inclusive update interval."""
 
@@ -1768,7 +1757,9 @@ def _select_interval_records(
         coverage for source_file in selected_files if (coverage := file_interval(source_file, frequency)) is not None
     ]
     if not selected_intervals:
-        return UpdateSelection(selected_records, interval if selected_records else None, len(selected_files))
+        fallback_start = interval[0]
+        fallback_interval = (fallback_start, interval[1]) if selected_records and fallback_start is not None else None
+        return UpdateSelection(selected_records, fallback_interval, len(selected_files))
     return UpdateSelection(
         selected_records,
         (
@@ -1918,13 +1909,12 @@ def _log_update_preview(
 def run_update(args: argparse.Namespace) -> int:
     """Update each existing variable/frequency with permanent and new source data.
 
-    The permanent pass selects final source files from the permanent watermark
-    through the command date. For ERA5-Land, finality is inferred from the
-    source file's modification date being more than one calendar month after
-    the date encoded in its filename. The forward pass starts at the latest
-    stored date, allowing the publisher to replace provisional data and append
-    newer timestamps. Each variable is resolved separately so unrelated
-    variables are not remapped.
+    Normal updates reconsider source files modified around the stored
+    ``last_data_update`` timestamp. The permanent watermark only filters
+    superseded filenames; it does not control source discovery. The forward
+    pass starts at the latest stored date, allowing the publisher to replace
+    provisional data and append newer timestamps. Each variable is resolved
+    separately so unrelated variables are not remapped.
     """
 
     if args.dataset is None:
@@ -1975,7 +1965,7 @@ def run_update(args: argparse.Namespace) -> int:
         # Appending one variable extends the shared time coordinate and pads
         # its peers, so coverage must never be re-read mid-frequency.
         coverage_before_write = {
-            variable: _existing_variable_last_date(
+            variable: _existing_variable_update_state(
                 args.dataset,
                 frequency,
                 variable,
@@ -1985,7 +1975,9 @@ def run_update(args: argparse.Namespace) -> int:
             for variable in update_variables
         }
         for variable in update_variables:
-            latest_date, permanent_watermark = coverage_before_write[variable]
+            update_state = coverage_before_write[variable]
+            latest_date = update_state.last_real_date
+            permanent_watermark = update_state.permanent_watermark
             if latest_date is None and force_from is None:
                 logger.info(
                     "stage=update_skip ⏭️  Skipping %s %s: no existing time series found",
@@ -2011,18 +2003,15 @@ def run_update(args: argparse.Namespace) -> int:
                 ),
             )
 
-            # A store without a permanent watermark may have been published
-            # long enough ago for a multi-month permanent refresh to be due.
-            # Infer the missing watermark from the final stored coordinate.
-            permanent_start = (
-                add_months(force_from, -PERMANENT_DATA_LAG_MONTHS)
-                if force_from is not None
-                else permanent_watermark or add_months(latest_date, -PERMANENT_DATA_LAG_MONTHS)
+            # Recovery explicitly looks back three calendar months.  Ordinary
+            # updates search by source-file modification time instead.
+            permanent_filter = (
+                add_months(force_from, -PERMANENT_DATA_LAG_MONTHS) if force_from is not None else permanent_watermark
             )
             forward_start = force_from or latest_date
-            source_start = min(permanent_start, forward_start)
+            source_start = permanent_filter if force_from is not None else None
             source_records: list[Any] = []
-            if source_start <= today:
+            if source_start is None or source_start <= today:
                 source_records = _resolve_update_records(
                     args=args,
                     variable=variable,
@@ -2033,8 +2022,8 @@ def run_update(args: argparse.Namespace) -> int:
                 source_records,
                 dataset=args.dataset,
                 frequency=frequency,
-                latest_date=latest_date,
-                permanent_watermark=permanent_start if force_from is not None else permanent_watermark,
+                permanent_watermark=permanent_filter,
+                last_data_update=None if force_from is not None else update_state.last_data_update,
             )
             forward_interval = (forward_start, today)
             forward = _select_interval_records(

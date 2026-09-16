@@ -6,7 +6,6 @@ from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
 
 from heal_era5 import main
@@ -249,7 +248,6 @@ def test_update_preview_skips_missing_stores(monkeypatch):
     logged: list[tuple[object, str]] = []
     monkeypatch.setattr(main, "selected_requests", lambda **_: _request())
     monkeypatch.setattr(main, "_existing_frequency_variables", lambda *args, **kwargs: set())
-    monkeypatch.setattr(main, "_existing_variable_last_date", lambda *args, **kwargs: (None, None))
     monkeypatch.setattr(main, "_log_update_preview", lambda rows, **kwargs: logged.append((rows, kwargs["batch_mode"])))
 
     result = main.run_update(
@@ -302,8 +300,8 @@ def test_update_uses_existing_pressure_levels_for_batched_remaps(monkeypatch):
     monkeypatch.setattr(main, "_existing_frequency_variables", lambda *args, **kwargs: {"ta"})
     monkeypatch.setattr(
         main,
-        "_existing_variable_last_date",
-        lambda *args, **kwargs: (date(2024, 1, 1), date(2024, 1, 1)),
+        "_existing_variable_update_state",
+        lambda *args, **kwargs: main.VariableUpdateState(None, date(2024, 1, 1), date(2024, 1, 1)),
     )
     monkeypatch.setattr(main, "_resolve_update_records", lambda **_: [pressure_record])
     monkeypatch.setattr(main, "_existing_variable_pressure_levels", lambda *args, **kwargs: (1000, 850))
@@ -338,31 +336,32 @@ def test_update_uses_existing_pressure_levels_for_batched_remaps(monkeypatch):
     assert calls[0]["remap_args"].pressure_levels == (1000, 850)
 
 
-def test_existing_variable_last_date_uses_last_real_data_attribute(monkeypatch):
-    class Variable:
-        dims = ("time", "cell")
+def test_permanent_refresh_uses_last_data_update_not_permanent_watermark(monkeypatch):
+    record = _record(files=("old", "recent", "temporary"))
+    dates = {
+        "old": date(2026, 8, 31),
+        "recent": date(2026, 6, 30),
+        "temporary": date(2026, 9, 10),
+    }
+    modified = {
+        "old": datetime(2026, 9, 1, 12, tzinfo=main.UTC),
+        "recent": datetime(2026, 9, 8, 12, tzinfo=main.UTC),
+        "temporary": datetime(2026, 9, 10, 12, tzinfo=main.UTC),
+    }
+    monkeypatch.setattr(main, "file_interval", lambda source_file, frequency: (dates[source_file], dates[source_file]))
+    monkeypatch.setattr(main, "_local_modification_time", lambda source_file: modified[source_file])
+    monkeypatch.setattr(main, "_is_final_source_file", lambda source_file, **_: source_file != "temporary")
 
-        def __init__(self):
-            self.attrs = {"last_real_data": "2026-07-20"}
-
-        def __getitem__(self, name):
-            assert name == "time"
-            return SimpleNamespace(values=np.array(["2026-07-20", "2026-09-05"]))
-
-    class Dataset(dict):
-        def close(self):
-            pass
-
-    stores = {path: Dataset({"tas": Variable()}) for path in ("/tmp/level_0.zarr", "/tmp/level_1.zarr")}
-    monkeypatch.setattr(main, "existing_destinations_for_frequency", lambda *args, **kwargs: tuple(stores))
-    monkeypatch.setitem(
-        sys.modules, "xarray", SimpleNamespace(open_zarr=lambda destination, **kwargs: stores[destination])
+    selection = main._select_permanent_records(
+        [record],
+        dataset="era5land",
+        frequency="1hr",
+        permanent_watermark=date(2026, 6, 1),
+        last_data_update=datetime(2026, 9, 10, 12, tzinfo=main.UTC),
     )
 
-    latest, permanent = main._existing_variable_last_date("era5land", "1hr", "tas", zarr_format=2, output_path=None)
-
-    assert latest == date(2026, 7, 20)
-    assert permanent is None
+    assert selection.records[0].files == ("recent",)
+    assert selection.interval == (date(2026, 6, 30), date(2026, 6, 30))
 
 
 def test_update_force_from_overrides_stored_update_boundaries(monkeypatch):
@@ -374,8 +373,8 @@ def test_update_force_from_overrides_stored_update_boundaries(monkeypatch):
     monkeypatch.setattr(main, "_existing_frequency_variables", lambda *args, **kwargs: {"tas"})
     monkeypatch.setattr(
         main,
-        "_existing_variable_last_date",
-        lambda *args, **kwargs: (None, date(2026, 8, 31)),
+        "_existing_variable_update_state",
+        lambda *args, **kwargs: main.VariableUpdateState(None, None, date(2026, 8, 31)),
     )
     monkeypatch.setattr(main, "_existing_variable_pressure_levels", lambda *args, **kwargs: None)
     monkeypatch.setattr(
@@ -427,8 +426,10 @@ def test_update_snapshots_all_variable_coverage_before_writing(monkeypatch):
     monkeypatch.setattr(main, "_existing_frequency_variables", lambda *args, **kwargs: {"tas", "uas"})
     monkeypatch.setattr(
         main,
-        "_existing_variable_last_date",
-        lambda *args, **kwargs: events.append(f"coverage:{args[2]}") or (date(2026, 9, 4), date(2026, 8, 1)),
+        "_existing_variable_update_state",
+        lambda *args, **kwargs: (
+            events.append(f"coverage:{args[2]}") or main.VariableUpdateState(None, date(2026, 9, 4), date(2026, 8, 1))
+        ),
     )
     monkeypatch.setattr(main, "_existing_variable_pressure_levels", lambda *args, **kwargs: None)
     monkeypatch.setattr(
