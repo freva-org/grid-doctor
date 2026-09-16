@@ -58,7 +58,7 @@ jobs:
       - name: Build technical docs
         shell: bash -l {0}
         env:
-          SOCIAL_CARDS: "1"
+          SOCIAL_CARDS: "true"
         run: tox -e docs
 
       - name: Upload technical docs artifact
