@@ -299,7 +299,7 @@ def get_vars(ds: xr.Dataset) -> list[str]:
             continue
         if da.ndim == 0 or da.size < 100:
             continue
-        if not any(dim in da.dims for dim in ["values", "lat", "lon", "cell"]):
+        if not any(dim in da.dims for dim in ["values", "lat", "lon", "latitude", "longitude", "cell"]):
             continue
         candidates.append(str(name))
 

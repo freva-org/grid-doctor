@@ -152,6 +152,78 @@ Useful variants:
 - `--json`: emit resolved, missing, and unresolved records as JSON
 - `--strict`: exit non-zero if a resolved source pattern matches no files
 
+### Local Dummy Data
+
+`generate_dummy_hera5_data.py` creates a self-contained ERA5-Land and ERA5
+source tree for exercising `fetch`, `remap`, `update`, and `clean` without
+touching pool data. It writes valid GRIB1 messages for ERA5-Land `EL` (`tas`,
+`pr`) and ERA5 `E1`, `E5`, and `ET` (`tas`, `pr`, `zg`); `E1` is created only
+for 2001--2006. ERA5-Land `tas` is a surface forecast field (`sf/fc`), while
+ERA5 `tas` is a surface analysis field (`sf/an`); `zg` is created at 1000, 850,
+and 500 hPa. The 12x9 global grid maps to a very low HEALPix level, so the
+resulting Zarr stores remain small even over a long time span.
+By default, fixture file mtimes emulate EL/E5/ET/E1 releases: final data is
+timestamped on the eighth day of the month in which it becomes permanent, while
+newer data is stamped with the generator's current time. This exercises both
+normal and forced `update` selection.
+
+```console
+python scripts/era5land/generate_dummy_hera5_data.py \
+  --root /tmp/heal-era5-fixture \
+  --start-year 2020 \
+  --end-year 2026
+```
+
+The start and end options also accept inclusive partial calendar bounds:
+`YYYY`, `YYYY-MM`, `YYYYMMDD`, or `YYYY-MM-DD`. For example, the following
+creates source files covering 14 March through 2 April only:
+
+```console
+python scripts/era5land/generate_dummy_hera5_data.py \
+  --root /tmp/heal-era5-fixture \
+  --start 20250314 \
+  --end 20250402
+```
+
+By default the generator adds to the selected root (overwriting matching
+fixture files). To first delete the entire fixture root and recreate it, pass
+`--from-scratch`:
+
+```console
+python scripts/era5land/generate_dummy_hera5_data.py \
+  --root /tmp/heal-era5-fixture \
+  --start 2025-03 \
+  --end 2025-06 \
+  --from-scratch
+```
+
+`--from-scratch` deletes the supplied root, so use it only with a dedicated
+fixture directory.
+
+Pass that root to the regular CLI and keep only the finest (low-resolution)
+level when remapping:
+
+```console
+heal-era5 fetch --dataset era5land --var tas,pr --freq 1hr,day,mon \
+  --interval 2020,2026 --root /tmp/heal-era5-fixture --strict
+
+heal-era5 remap --dataset era5land --var tas,pr --freq 1hr,day,mon \
+  --interval 2020,2026 --root /tmp/heal-era5-fixture \
+  --output-path /tmp/heal-era5-output --highest-level-only
+
+heal-era5 update --dataset era5land --var tas,pr --freq 1hr,day,mon \
+  --root /tmp/heal-era5-fixture --output-path /tmp/heal-era5-output \
+  --force-from 2026-06-01
+
+heal-era5 remap --dataset era5 --var zg --freq 1hr,day,mon \
+  --interval 2020,2026 --root /tmp/heal-era5-fixture \
+  --output-path /tmp/heal-era5-output --highest-level-only
+```
+
+Run `heal-era5 clean --help` before removing fixture outputs. Use an isolated
+temporary `--output-path`; `clean` performs the same deletion operations as it
+does for a real publication.
+
 ## Remapping
 
 ```console
