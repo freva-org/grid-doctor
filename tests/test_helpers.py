@@ -23,6 +23,7 @@ from grid_doctor.helpers import (
     resolution_to_healpix_level,
     save_pyramid,
 )
+from grid_doctor.types import HEALPIX_INDEX
 
 
 class TestGridDetection:
@@ -175,13 +176,28 @@ class TestCoarsenHealpix:
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
-        assert coarse.sizes["cell"] == 48
+        assert coarse.sizes[HEALPIX_INDEX] == 48
         assert coarse.attrs["healpix_level"] == 1
+
+        assert "grid_mapping_name" not in coarse.attrs
+        assert "refinement_level" not in coarse.attrs
+        assert "indexing_scheme" not in coarse.attrs
+
+        assert "Conventions" in coarse.attrs
+        assert coarse.attrs["Conventions"] == "CF-1.13"
+
 
     def test_rejects_ring_order(self, healpix_ds: xr.Dataset) -> None:
         ds = healpix_ds.copy()
         ds.attrs["healpix_order"] = "ring"
         with pytest.raises(ValueError, match="only supports nested"):
+            coarsen_healpix(ds, target_level=1)
+
+    def test_rejects_higher_level(self, healpix_ds: xr.Dataset) -> None:
+        ds = healpix_ds.copy()
+        ds.attrs["healpix_level"] = 0
+        ds.attrs["healpix_nside"] = 2**0
+        with pytest.raises(ValueError, match="lower than the current HEALPix level."):
             coarsen_healpix(ds, target_level=1)
 
     def test_preserves_non_cell_variable(
@@ -275,6 +291,37 @@ class TestCoarsenHealpix:
             "Cells with only 4/16 valid children should be NaN"
         )
 
+    def test_has_cf_attrs(
+        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            helpers,
+            "_healpix_coords",
+            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+        )
+        coarse = coarsen_healpix(healpix_ds, target_level=1)
+        assert "crs" in coarse.coords
+        assert coarse.coords["crs"].attrs["grid_mapping_name"] == "healpix"
+        assert coarse.coords["crs"].attrs["refinement_level"] == 1
+        assert coarse.coords["crs"].attrs["indexing_scheme"] == "nested"
+        assert coarse.coords["crs"].attrs["earth_radius"] == 6371009
+
+        for name in coarse.data_vars:
+            if "cell" in coarse[name].dims:
+                assert coarse[name].attrs["grid_mapping"] == "crs"
+                assert "grid_mapping_name" not in coarse[name].attrs
+                assert "refinement_level" not in coarse[name].attrs
+                assert "indexing_scheme" not in coarse[name].attrs
+
+
+        assert 'Conventions' in coarse.attrs
+        assert coarse.attrs['Conventions'] == 'CF-1.13'
+
+        assert "grid_mapping_name" not in coarse.attrs
+        assert "refinement_level" not in coarse.attrs
+        assert "indexing_scheme" not in coarse.attrs
+
+
     def test_has_crs_variable(
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -289,6 +336,19 @@ class TestCoarsenHealpix:
         assert coarse.coords["crs"].attrs["healpix_nside"] == 2
         assert coarse.coords["crs"].attrs["healpix_level"] == 1
         assert coarse.coords["crs"].attrs["healpix_order"] == "nested"
+
+        assert coarse.coords["crs"].attrs["grid_mapping_name"] == "healpix"
+        assert coarse.coords["crs"].attrs["refinement_level"] == 1
+        assert coarse.coords["crs"].attrs["indexing_scheme"] == "nested"
+        assert coarse.coords["crs"].attrs["earth_radius"] == 6371009
+
+        assert 'Conventions' in coarse.attrs
+        assert coarse.attrs['Conventions'] == 'CF-1.13'
+
+        assert "grid_mapping_name" not in coarse.attrs
+        assert "refinement_level" not in coarse.attrs
+        assert "indexing_scheme" not in coarse.attrs
+
 
     def test_data_vars_have_grid_mapping(
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch

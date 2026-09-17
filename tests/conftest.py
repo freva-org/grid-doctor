@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from grid_doctor.types import HEALPIX_INDEX
 
 def _xy_to_latlon(
     x: np.ndarray,
@@ -168,12 +169,12 @@ def healpix_ds() -> xr.Dataset:
     lon = np.linspace(-180.0, 180.0, npix, endpoint=False)
     rng = np.random.default_rng(99)
     return xr.Dataset(
-        {"temperature": (("time", "cell"), rng.random((2, npix)).astype("float32"))},
+        {"temperature": (("time", HEALPIX_INDEX), rng.random((2, npix)).astype("float32"))},
         coords={
             "time": np.arange(2),
-            "cell": np.arange(npix),
-            "latitude": ("cell", lat),
-            "longitude": ("cell", lon),
+            HEALPIX_INDEX: np.arange(npix),
+            "latitude": (HEALPIX_INDEX, lat),
+            "longitude": (HEALPIX_INDEX, lon),
         },
         attrs={"healpix_nside": 2**level, "healpix_level": level, "healpix_order": "nested"},
     )
