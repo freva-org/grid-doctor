@@ -1905,19 +1905,19 @@ def _log_update_preview(
 
     logger.info("stage=update_preview 📋 Update preview (batch_mode=%s)", batch_mode)
     logger.info(
-        "stage=update_preview %5s %10s %12s %18s %25s %s %25s %s",
+        "stage=update_preview %4s %8s %10s %14s %22s %10s %22s %9s",
         "freq",
         "var",
-        "last_data",
-        "permanent_watermark",
-        "permanent_dates",
+        "last_date",
+        "last_perm_date",
+        "perm_interval",
         "perm_files",
-        "temporary_dates",
+        "tmp_interval",
         "tmp_files",
     )
     for row in rows:
         logger.info(
-            "stage=update_preview %5s %10s %12s %18s %25s %s %25s %s",
+            "stage=update_preview %4s %8s %10s %14s %22s %10s %22s %9s",
             row.frequency,
             row.variable,
             row.stored_end or "-",
