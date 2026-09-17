@@ -527,8 +527,9 @@ def test_normal_update_starts_temporary_files_at_stored_end(monkeypatch):
     monkeypatch.setattr(
         main,
         "_select_interval_records",
-        lambda records, *, frequency, interval: intervals.append(interval)
-        or main.UpdateSelection([record._replace(files=("temporary",))], interval, 1),
+        lambda records, *, frequency, interval: (
+            intervals.append(interval) or main.UpdateSelection([record._replace(files=("temporary",))], interval, 1)
+        ),
     )
     monkeypatch.setattr(main, "_map_update_records", lambda *args, **kwargs: None)
     monkeypatch.setattr(main, "_persist_real_data_watermark", lambda *args, **kwargs: None)
