@@ -176,6 +176,14 @@ def _write_zoom_level(
         truncate_after=truncate_after,
         target_chunk_mb=target_chunk_mb,
     )
+    log_stage(
+        LOGGER,
+        "zarr_level_done",
+        frequency=frequency,
+        variables=variables,
+        level=zoom_number,
+        destination=destination,
+    )
 
 
 def _prepare_dataset_for_coarsen(ds: xr.Dataset) -> xr.Dataset:

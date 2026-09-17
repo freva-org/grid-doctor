@@ -268,6 +268,19 @@ def test_update_preview_skips_missing_stores(monkeypatch):
     assert logged == [([], "direct")]
 
 
+def test_update_preview_row_includes_stored_permanent_watermark():
+    row = main._preview_update_row(
+        frequency="day",
+        variable="tas",
+        stored_end=date(2026, 8, 31),
+        stored_permanent=date(2026, 6, 1),
+        permanent=main.UpdateSelection([], None, 0),
+        temporary=main.UpdateSelection([], None, 0),
+    )
+
+    assert row.stored_permanent == date(2026, 6, 1)
+
+
 def test_existing_variable_pressure_levels_reads_the_stored_coordinate(monkeypatch):
     class Variable(dict):
         dims = ("time", "plev")
@@ -482,6 +495,67 @@ def test_forced_update_starts_temporary_files_after_permanent_coverage(monkeypat
     )
 
     assert planned_files == [("permanent", "temporary")]
+
+
+def test_normal_update_starts_temporary_files_at_stored_end(monkeypatch):
+    intervals: list[tuple[date | None, date]] = []
+    record = _record(files=("permanent", "temporary"))
+    permanent_dates = (date(2026, 6, 30), date(2026, 6, 30))
+
+    monkeypatch.setattr(main, "selected_requests", lambda **_: _request())
+    monkeypatch.setattr(main, "_existing_frequency_variables", lambda *args, **kwargs: {"tas"})
+    monkeypatch.setattr(
+        main,
+        "_existing_variable_update_state",
+        lambda *args, **kwargs: main.VariableUpdateState(
+            None,
+            date(2026, 9, 10),
+            date(2026, 6, 30),
+        ),
+    )
+    monkeypatch.setattr(main, "_existing_variable_pressure_levels", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main, "_resolve_update_records", lambda **kwargs: [record])
+    monkeypatch.setattr(
+        main,
+        "_select_permanent_records",
+        lambda records, **kwargs: main.UpdateSelection(
+            [record._replace(files=("permanent",))],
+            permanent_dates,
+            1,
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "_select_interval_records",
+        lambda records, *, frequency, interval: intervals.append(interval)
+        or main.UpdateSelection([record._replace(files=("temporary",))], interval, 1),
+    )
+    monkeypatch.setattr(main, "_map_update_records", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main, "_persist_real_data_watermark", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main, "_persist_permanent_watermark", lambda *args, **kwargs: None)
+
+    main.run_update(
+        Namespace(
+            variables="tas",
+            freq="1hr",
+            dataset="era5land",
+            zarr_format=2,
+            output_path=None,
+            chunk_size=16,
+            batch_files=None,
+            batch_months=None,
+            preview=False,
+            force_from=None,
+            use_inventory_cache=True,
+            use_input_cache=False,
+            fail_on_duplicate_times=False,
+            weights_dir="/tmp/weights",
+            highest_level_only=False,
+            root=None,
+        )
+    )
+
+    assert intervals[0][0] == date(2026, 9, 10)
 
 
 def test_update_force_from_overrides_stored_update_boundaries(monkeypatch):
