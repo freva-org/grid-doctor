@@ -12,6 +12,7 @@ dependencies = [
     "cfgrib",
     "grid-doctor",
     "reflow-hpc",
+    "rich",
     "rich-argparse",
 ]
 
