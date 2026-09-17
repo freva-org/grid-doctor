@@ -1640,6 +1640,7 @@ class UpdatePreviewRow(NamedTuple):
     frequency: str
     variable: str
     stored_end: date | None
+    stored_permanent: date | None
     permanent: str
     permanent_files: int
     temporary: str
@@ -1873,6 +1874,7 @@ def _preview_update_row(
     frequency: str,
     variable: str,
     stored_end: date | None,
+    stored_permanent: date | None,
     permanent: UpdateSelection,
     temporary: UpdateSelection,
 ) -> UpdatePreviewRow:
@@ -1884,6 +1886,7 @@ def _preview_update_row(
         frequency,
         variable,
         stored_end,
+        stored_permanent,
         permanent_range,
         permanent.file_count,
         temporary_range,
@@ -1901,10 +1904,11 @@ def _log_update_preview(
 
     logger.info("stage=update_preview 📋 Update preview (batch_mode=%s)", batch_mode)
     logger.info(
-        "stage=update_preview %-10s %-18s %-12s %-25s %s %-25s %s",
-        "frequency",
-        "variable",
+        "stage=update_preview %-5s %-10s %-12s %-18s %-25s %s %-25s %s",
+        "freq",
+        "var",
         "stored_end",
+        "permanent watermark",
         "permanent dates",
         "perm_files",
         "temporary dates",
@@ -1912,10 +1916,11 @@ def _log_update_preview(
     )
     for row in rows:
         logger.info(
-            "stage=update_preview %-10s %-18s %-12s %-25s %10s %-25s %s",
+            "stage=update_preview %-5s %-10s %-12s %-18s %-25s %10s %-25s %s",
             row.frequency,
             row.variable,
             row.stored_end or "-",
+            row.stored_permanent or "-",
             row.permanent,
             row.permanent_files,
             row.temporary,
@@ -2068,6 +2073,7 @@ def run_update(args: argparse.Namespace) -> int:
                         frequency=frequency,
                         variable=variable,
                         stored_end=None if force_from is not None else latest_date,
+                        stored_permanent=None if force_from is not None else permanent_watermark,
                         permanent=permanent,
                         temporary=temporary,
                     )
