@@ -1,0 +1,3 @@
+# Install from the repository root with:
+# /work/k20200/k202181/venv-regrid/bin/python -m pip install -r scripts/eerie/requirements.txt
+-e ../../
