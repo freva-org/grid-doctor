@@ -77,6 +77,7 @@ STAGE_COLORS = {
     "remap_ready_for_write": "\033[95m",
     "coarsen_source_open": "\033[36m",
     "zarr_write_start": "\033[32m",
+    "zarr_level_done": "\033[1;32m",
     "frequency_done": "\033[1;32m",
     "frequency_skip_empty": "\033[90m",
     "attrs_only": "\033[32m",
@@ -1904,19 +1905,19 @@ def _log_update_preview(
 
     logger.info("stage=update_preview 📋 Update preview (batch_mode=%s)", batch_mode)
     logger.info(
-        "stage=update_preview %-5s %-10s %-12s %-18s %-25s %s %-25s %s",
+        "stage=update_preview %5s %10s %12s %18s %25s %s %25s %s",
         "freq",
         "var",
-        "stored_end",
-        "permanent watermark",
-        "permanent dates",
+        "last_data",
+        "permanent_watermark",
+        "permanent_dates",
         "perm_files",
-        "temporary dates",
+        "temporary_dates",
         "tmp_files",
     )
     for row in rows:
         logger.info(
-            "stage=update_preview %-5s %-10s %-12s %-18s %-25s %10s %-25s %s",
+            "stage=update_preview %5s %10s %12s %18s %25s %s %25s %s",
             row.frequency,
             row.variable,
             row.stored_end or "-",
@@ -2047,17 +2048,16 @@ def run_update(args: argparse.Namespace) -> int:
                 last_data_update=None if force_from is not None else update_state.last_data_update,
                 include_overlapping_watermark=force_from is not None,
             )
-            # In recovery mode the stored real-data end must not control the
-            # request.  Temporary data starts directly after permanent
-            # coverage; absent permanent coverage it starts at --force-from.
-            # File selection expands a yearly monthly source file to its
-            # complete coverage, so a forced 2026 monthly update includes all
-            # of 2026 rather than only the supplied day.
-            temporary_start = (
-                permanent.interval[1] + timedelta(days=1)
-                if permanent.interval is not None
-                else force_from or latest_date
-            )
+            # A normal update refreshes only the stored coverage tail. In
+            # recovery mode, temporarily published data begins directly after
+            # permanent coverage; this intentionally reprocesses the full
+            # requested interval.
+            if force_from is None:
+                temporary_start = latest_date
+            elif permanent.interval is not None:
+                temporary_start = permanent.interval[1] + timedelta(days=1)
+            else:
+                temporary_start = force_from
             temporary = (
                 _select_interval_records(
                     source_records,
