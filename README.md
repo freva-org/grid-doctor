@@ -1,16 +1,17 @@
 # Grid Doctor HEALs your Grids
 <p align="center">
   <img src="docs/assets/logo-512.png" alt="Logo" width="200"><br>
+  <a href="https://freva-org.github.io/grid-doctor/">
   <img
-      src="https://img.shields.io/badge/grid--doctor-Documentation-green?logo=read-the-docs&amp;logoColor=white"
-      alt="Documentation"
-    >
+    src="https://img.shields.io/badge/grid--doctor-Documentation-green?logo=readthedocs&logoColor=white"
+    alt="Documentation"
+  >
+</a>
 </p>
 
-> [!NOTE]
-> This is a scripting solution for a proof of concept. An operational ready
-> approach will follow. For adding code for specific datasets please add
-> your script solution into the `scripts/<yourname>` folder.
+This repository contains the code for regridding data onto HEALPix grids.
+Example scripts can be found in the `scripts/` directory.
+For full documentation, see https://freva-org.github.io/grid-doctor/.
 
 ## Installation
 
