@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 from unittest import mock
 
@@ -409,9 +410,7 @@ class TestPyramidBuilders:
                 },
             )
 
-        def fake_coarsen(
-            ds: xr.Dataset, level: int, **kwargs: Any
-        ) -> xr.Dataset:
+        def fake_coarsen(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
             coarsen_calls.append(kwargs)
             npix = 12 * (4**level)
             return xr.Dataset(
@@ -439,26 +438,27 @@ class TestPyramidBuilders:
             assert call["min_valid_fraction"] == 0.75
 
 
-class TestSavePyramidToS3:
-    def _make_pyramid(self) -> dict[int, xr.Dataset]:
-        return {
-            level: xr.Dataset(
-                {"t": (("cell",), np.zeros(12 * (4**level), dtype=np.float32))},
-                coords={"cell": np.arange(12 * (4**level), dtype=np.int64)},
-                attrs={
-                    "healpix_nside": 2**level,
-                    "healpix_level": level,
-                    "healpix_order": "nested",
-                },
-            )
-            for level in (0, 1)
-        }
+def _make_pyramid() -> dict[int, xr.Dataset]:
+    return {
+        level: xr.Dataset(
+            {"t": (("cell",), np.zeros(12 * (4**level), dtype=np.float32))},
+            coords={"cell": np.arange(12 * (4**level), dtype=np.int64)},
+            attrs={
+                "healpix_nside": 2**level,
+                "healpix_level": level,
+                "healpix_order": "nested",
+            },
+        )
+        for level in (0, 1)
+    }
 
+
+class TestSavePyramidToS3:
     @mock.patch("grid_doctor.helpers.s3fs.S3FileSystem")
     @mock.patch("grid_doctor.helpers.s3fs.S3Map")
     def test_calls_to_zarr(self, mock_s3map: mock.Mock, mock_s3fs: mock.Mock) -> None:
         del mock_s3fs
-        pyramid = self._make_pyramid()
+        pyramid = _make_pyramid()
         mock_s3map.return_value = mock.MagicMock()
         with mock.patch.object(xr.Dataset, "to_zarr") as mock_zarr:
             save_pyramid(pyramid, "s3://bucket/test", s3_options={}, mode="w")
@@ -470,11 +470,63 @@ class TestSavePyramidToS3:
         self, mock_s3map: mock.Mock, mock_s3fs: mock.Mock
     ) -> None:
         del mock_s3fs
-        pyramid = self._make_pyramid()
+        pyramid = _make_pyramid()
         mock_s3map.return_value = mock.MagicMock()
         with mock.patch.object(xr.Dataset, "to_zarr") as mock_zarr:
-            save_pyramid(
-                pyramid, "s3://bucket/test", s3_options={}, zarr_format=3
-            )
+            save_pyramid(pyramid, "s3://bucket/test", s3_options={}, zarr_format=3)
             for call in mock_zarr.call_args_list:
                 assert "consolidated" not in call.kwargs
+
+
+class TestMultiscale:
+    def test_save_pyramid_multiscale(self, tmp_path):
+        pyramid = _make_pyramid()
+        root_attrs = {"source_attr_1": "attr1_val", "source_attr_2": 3}
+        additional_attrs = {"dataset_id": "test_dataset_id", "frequency": "monthly"}
+
+        save_pyramid(
+            pyramid=pyramid,
+            path=str(tmp_path),
+            zarr_format=3,
+            structure="multiscales",
+            multiscale_root_attrs=root_attrs,
+            multiscale_additional_attrs=additional_attrs,
+        )
+
+        print(f"[DEBUG] tmp path type: {type(tmp_path)}")
+        store_path = tmp_path / "multiscale_0-1.zarr"
+        assert os.path.isdir(str(store_path))
+        dt = xr.open_datatree(str(store_path))
+
+        assert tuple(sorted(dt.groups)) == (
+            "/",
+            "/multiscales",
+            "/multiscales/zoom_0",
+            "/multiscales/zoom_1",
+        )
+
+        ds_root = dt["/"]
+        assert ds_root.attrs == {
+            "healpix_zoom_min": 0,
+            "healpix_zoom_max": 1,
+            "source_dataset_attrs": {
+                "source_attr_1": "attr1_val",
+                "source_attr_2": "3",
+            },
+            "dataset_id": "test_dataset_id",
+            "frequency": "monthly",
+        }
+
+        ds1 = dt["/multiscales/zoom_1"]
+        assert ds1.attrs == {
+            "healpix_nside": 2,
+            "healpix_level": 1,
+            "healpix_order": "nested",
+            "healpix_zoom": 1,
+            "dataset_id": "test_dataset_id",
+            "frequency": "monthly",
+        }
+
+        xr.testing.assert_equal(ds1.coords, pyramid[1].coords)
+        xr.testing.assert_equal(ds1.t, pyramid[1].t)
+        xr.testing.assert_equal(ds1.cell, pyramid[1].cell)

@@ -20,6 +20,7 @@ import numpy as np
 import numpy.typing as npt
 import s3fs
 import xarray as xr
+import zarr
 
 from .remap import (
     _make_crs_variable,
@@ -453,6 +454,149 @@ def create_healpix_pyramid(
 # ===================================================================
 
 
+def _prepare_datasets(
+    pyramid: dict[int, xr.Dataset],
+    mode: Literal["a", "w", "r+"],
+    compute: bool,
+    region: Literal["auto"] | dict[str, slice],
+    zarr_format: Literal[2, 3],
+    encoding: dict[int, dict[str, dict[str, Any]]] | None,
+    write_coords: bool | Literal["auto"],
+) -> dict[int, tuple[xr.Dataset, ZarrOptions]]:
+
+    prepared_data = {}
+    for level, dataset in pyramid.items():
+        include_coords = (
+            write_coords
+            if isinstance(write_coords, bool)
+            else level <= WRITE_COORDS_MAX_LEVEL
+        )
+        if not include_coords:
+            dataset = dataset.drop_vars(
+                ["latitude", "longitude", "cell"], errors="ignore"
+            )
+            dataset.attrs["grid_doctor_implicit_coords"] = 1
+        zarr_options = ZarrOptions(compute=compute, mode=mode, zarr_format=zarr_format)
+        if zarr_format == 2:
+            zarr_options["consolidated"] = True
+        if encoding is not None:
+            zarr_options["encoding"] = encoding[level]
+
+        if not region == "auto":
+            region_keys = set(region)
+            to_drop = (
+                {
+                    name
+                    for name, var in dataset.data_vars.items()
+                    if region_keys.isdisjoint(map(str, var.dims))
+                }
+                | {str(dim) for dim in dataset.dims}
+                | {str(coord) for coord in dataset.coords}
+            )
+            dataset = dataset.drop_vars(to_drop, errors="ignore").isel(region)
+        prepared_data[level] = (dataset, zarr_options)
+    return prepared_data
+
+
+def _get_filesystem(
+    path: str,
+    s3_options: dict[str, Any] | None,
+) -> s3fs.S3FileSystem | None:
+    is_s3 = path.startswith("s3://")
+    fs = s3fs.S3FileSystem(**(s3_options or {})) if is_s3 else None
+    return fs
+
+
+def _get_store(path: str, store_name: str, fs: s3fs.S3FileSystem | None) -> Any:
+    root_path = f"{path}/{store_name}.zarr"
+    logger.info("Writing HEALPix to %s", root_path)
+    store: Any
+    if fs:
+        store = s3fs.S3Map(root=root_path, s3=fs)
+    else:
+        Path(root_path).parent.mkdir(parents=True, exist_ok=True)
+        store = root_path
+    return store
+
+
+def _write_to_multiscale(
+    data: dict[int, tuple[xr.Dataset, ZarrOptions]],
+    path: str,
+    s3_options: dict[str, Any] | None,
+    root_attrs: dict[str, Any] | None,
+    additional_attrs: dict[str, Any] | None,
+) -> None:
+    max_level = max(map(int, data))
+    min_level = min(map(int, data))
+
+    store_name = f"multiscale_{min_level}-{max_level}"
+    store = _get_store(path, store_name, _get_filesystem(path, s3_options))
+
+    root_attrs = root_attrs or {}
+    additional_attrs = additional_attrs or {}
+
+    root = zarr.open_group(store, mode="w")
+    root.attrs.update(
+        {
+            "healpix_zoom_min": int(min_level),
+            "healpix_zoom_max": int(max_level),
+            "source_dataset_attrs": {
+                str(key): str(value) for key, value in root_attrs.items()
+            },
+            **additional_attrs,
+        }
+    )
+
+    multiscales_group = zarr.open_group(Path(store) / "multiscales", mode="a")
+    multiscales_group.attrs.update(
+        additional_attrs,
+    )
+    for level in sorted(data, reverse=True):
+        ds, zarr_options = data[level]
+        zarr_options["mode"] = "w"
+        ds = ds.assign_attrs(
+            healpix_zoom=int(level),
+        )
+        ds.attrs.update(additional_attrs)
+        store_path = Path(store) / "multiscales" / f"zoom_{level}"
+        logger.info("Writing zoom %d to %s", level, store_path)
+        ds.to_zarr(
+            store_path,
+            **zarr_options,
+        )  # type: ignore[call-overload]
+
+    if zarr_options.get("consolidated", False):
+        zarr.consolidate_metadata(store)
+
+
+def _write_pyramid_flat(
+    data: dict[int, tuple[xr.Dataset, ZarrOptions]],
+    path: str,
+    s3_options: dict[str, Any] | None,
+    mode: Literal["a", "w", "r+"],
+    compute: bool,
+    region: Literal["auto"] | dict[str, slice],
+) -> None:
+    fs = _get_filesystem(path, s3_options)
+    for level, (dataset, zarr_options) in data.items():
+        store_name = f"level_{level}"
+        store = _get_store(path, store_name, fs)
+
+        if region == "auto":
+            dataset.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
+        else:
+            dataset.to_zarr(
+                store,
+                region=region,
+                **zarr_options,
+            )  # type: ignore[call-overload]
+
+        if mode == "w" and not compute:
+            coord_options = dict(zarr_options)
+            coord_options["mode"] = "w"
+            dataset[list(dataset.coords)].to_zarr(store, **coord_options)  # type: ignore[call-overload]
+
+
 def save_pyramid(
     pyramid: dict[int, xr.Dataset],
     path: str,
@@ -464,6 +608,9 @@ def save_pyramid(
     zarr_format: Literal[2, 3] = 2,
     encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
     write_coords: bool | Literal["auto"] = "auto",
+    structure: Literal["flat", "multiscales"] = "flat",
+    multiscale_root_attrs: dict[str, Any] | None = None,
+    multiscale_additional_attrs: dict[str, Any] | None = None,
 ) -> None:
     """Write a HEALPix pyramid to Zarr stores on S3 or local disk.
 
@@ -504,57 +651,39 @@ def save_pyramid(
         ([`select_bbox`][grid_doctor.select_bbox],
         [`select_cells`][grid_doctor.select_cells]), which reconstruct
         coordinates for exactly the cells they return.
+    structure: write pyramid as-as in separate zarr stores per level ('flat'),
+        or convert to single zarr tree with all levels in one store ('multiscales')
+    multiscale_root_attrs: only used with ``structure = multiscales``, attributes
+        added to the root group.
+    multiscale_additional_attrs: only used with ``structure = multiscales``,
+        attributes added to the root group and all level data.
     """
-    is_s3 = path.startswith("s3://")
-    fs = s3fs.S3FileSystem(**(s3_options or {})) if is_s3 else None
-    for level, dataset in pyramid.items():
-        include_coords = (
-            write_coords
-            if isinstance(write_coords, bool)
-            else level <= WRITE_COORDS_MAX_LEVEL
+    prepared_data = _prepare_datasets(
+        pyramid,
+        mode=mode,
+        compute=compute,
+        region=region,
+        zarr_format=zarr_format,
+        encoding=encoding,
+        write_coords=write_coords,
+    )
+    if structure == "flat":
+        _write_pyramid_flat(
+            prepared_data,
+            path=path,
+            s3_options=s3_options,
+            mode=mode,
+            compute=compute,
+            region=region,
         )
-        if not include_coords:
-            dataset = dataset.drop_vars(
-                ["latitude", "longitude", "cell"], errors="ignore"
-            )
-            dataset.attrs["grid_doctor_implicit_coords"] = 1
-        level_path = f"{path}/level_{level}.zarr"
-        logger.info("Writing HEALPix level %s to %s", level, level_path)
-        store: Any
-        if is_s3:
-            store = s3fs.S3Map(root=level_path, s3=fs)
-        else:
-            Path(level_path).parent.mkdir(parents=True, exist_ok=True)
-            store = level_path
-        zarr_options = ZarrOptions(compute=compute, mode=mode, zarr_format=zarr_format)
-        if zarr_format == 2:
-            zarr_options["consolidated"] = True
-        if encoding is not None:
-            zarr_options["encoding"] = encoding[level]
-
-        if region == "auto":
-            dataset.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
-        else:
-            region_keys = set(region)
-            to_drop = (
-                {
-                    name
-                    for name, var in dataset.data_vars.items()
-                    if region_keys.isdisjoint(map(str, var.dims))
-                }
-                | {str(dim) for dim in dataset.dims}
-                | {str(coord) for coord in dataset.coords}
-            )
-            dataset.drop_vars(to_drop, errors="ignore").isel(region).to_zarr(
-                store,
-                region=region,
-                **zarr_options,
-            )  # type: ignore[call-overload]
-
-        if mode == "w" and not compute:
-            coord_options = dict(zarr_options)
-            coord_options["mode"] = "w"
-            dataset[list(dataset.coords)].to_zarr(store, **coord_options)  # type: ignore[call-overload]
+    else:
+        _write_to_multiscale(
+            prepared_data,
+            path=path,
+            s3_options=s3_options,
+            root_attrs=multiscale_root_attrs,
+            additional_attrs=multiscale_additional_attrs,
+        )
 
 
 # ===================================================================

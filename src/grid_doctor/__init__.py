@@ -14,7 +14,6 @@ __version__ = "2604.0.0"
 _SUBMODULES: dict[str, str] = {
     "helpers": ".helpers",
     "log": ".log",
-    "multiscales": ".multiscales",
     "remap": ".remap",
     "select": ".select",
     "swath": ".swath",
@@ -45,12 +44,11 @@ _ATTRS: dict[str, str] = {
     "select_cone": ".select",
     "setup_logging": ".log",
     "sparse_to_dense": ".swath",
-    "write_pyramid_to_multiscales_zarr": ".multiscales",
 }
 
 
 if TYPE_CHECKING:
-    from . import helpers, log, multiscales, remap, select, swath, utils
+    from . import helpers, log, remap, select, swath, utils
     from .helpers import (
         coarsen_healpix,
         create_healpix_pyramid,
@@ -60,7 +58,6 @@ if TYPE_CHECKING:
         save_pyramid,
     )
     from .log import setup_logging
-    from .multiscales import write_pyramid_to_multiscales_zarr
     from .remap import (
         apply_weight_file,
         compute_healpix_weights,
@@ -107,7 +104,6 @@ __all__ = [
     "__version__",
     "helpers",
     "log",
-    "multiscales",
     "remap",
     "select",
     "swath",
@@ -133,5 +129,4 @@ __all__ = [
     "select_cone",
     "setup_logging",
     "sparse_to_dense",
-    "write_pyramid_to_multiscales_zarr",
 ]
