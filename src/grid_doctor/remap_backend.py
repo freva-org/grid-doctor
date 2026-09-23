@@ -251,6 +251,65 @@ class SourceDescription:
     metadata: dict[str, str | int | float | bool]
 
 
+@dataclass(frozen=True, slots=True)
+class TargetDescription:
+    """Resolved description of the target representation.
+
+    To be used by weight-generation entry point.
+
+    Attributes:
+        level: Healpix index resolution (zoom)
+        target: Target mesh storeed as compact node/connectivity
+            arrays.
+    """
+
+    level: int
+    target_mesh: PolygonMesh
+
+
+@dataclass(frozen=True, repr=False)
+class WeightsDescription:
+    """Resolved description of the weights representation.
+
+    To be used by weight-generation entry point.
+
+    Attributes:
+        source: Source description.
+        target: Target description.
+        method: Remapping method ('conservative' or 'nearest').
+        order: Healpix indexing order ('nest' or 'ring').
+        units: Source units ('rad' or 'deg').
+    """
+
+    source: SourceDescription
+    target: TargetDescription
+    method: RemapMethod
+    order: Literal["nest", "ring"]  # TODO: refactor with proper type
+    units: SourceUnits  # TODO: use canonical units
+
+    @property
+    def key(self) -> str:
+        """Return hash (sha256) that describes the object."""
+        if not hasattr(self, "_key"):
+            # frozen=True invalidates self._key = self._compute_key()
+            object.__setattr__(self, "_key", self._compute_key())
+        return self._key  # type: ignore
+
+    def _compute_key(self) -> str:
+        from .utils import _key_hash
+
+        return _key_hash(
+            self.source.dataset,
+            self.target.level,
+            method=self.method,
+            nest=self.order.startswith("nest"),
+            source_units=self.units,
+        )
+
+    def __repr__(self) -> str:  # noqa: D105
+        return self.key
+
+
 class SpectralTransformError(RuntimeError):
     """Raised when a spectral-to-grid transform command fails."""
 
@@ -1822,6 +1881,16 @@ def compute_healpix_weights_backend(
         workdir=offline_cfg.workdir,
     )
     _, target_mesh = _target_healpix_mesh(level, nest=nest)
+
+    desc = WeightsDescription(
+        source=source_desc,
+        target=TargetDescription(level=level, target_mesh=target_mesh),
+        method=method,
+        order="nest" if nest else "ring",
+        units=source_units,
+    )
+
+    logger.warning(f"COMPUTED key: {desc.key}")
 
     use_offline = _default_offline_enabled(
         method=method,
