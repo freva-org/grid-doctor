@@ -77,50 +77,71 @@ class TestCoarsenArray:
 
     def test_all_valid(self) -> None:
         data = np.array([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]])
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
+        result, weights = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
         np.testing.assert_allclose(result, [[2.5, 6.5]])
+        np.testing.assert_allclose(weights, [[1.0, 1.0]])
 
     def test_below_threshold_becomes_nan(self) -> None:
         """1 of 4 valid children (25%) is below the 50% threshold."""
         data = np.array([[1.0, np.nan, np.nan, np.nan, 5.0, 6.0, 7.0, 8.0]])
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
+        result, weights = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
         assert np.isnan(result[0, 0]), "1/4 valid should be NaN"
+        assert weights[0, 0] == 0.0
         np.testing.assert_allclose(result[0, 1], 6.5)
+        np.testing.assert_allclose(weights[0, 1], 1.0)
 
     def test_at_threshold_is_valid(self) -> None:
         """2 of 4 valid children (50%) meets the 50% threshold."""
         data = np.array([[1.0, 2.0, np.nan, np.nan]])
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
+        result, weights = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
         np.testing.assert_allclose(result[0, 0], 1.5)
+        np.testing.assert_allclose(weights[0, 0], 0.5)
 
     def test_all_nan_becomes_nan(self) -> None:
         data = np.full((1, 4), np.nan)
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
+        result, weights = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
         assert np.isnan(result[0, 0])
+        assert weights[0, 0] == 0.0
 
     def test_siberian_lake_killed(self) -> None:
         """A single valid pixel among 3 NaN siblings must not survive."""
         data = np.full((1, 4), np.nan)
         data[0, 2] = 15.0
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
+        result, weights = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
         assert np.isnan(result[0, 0])
+        assert weights[0, 0] == 0.0
 
     def test_batch_dims_preserved(self) -> None:
         data = np.ones((3, 5, 16))
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
+        result, weights = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
         assert result.shape == (3, 5, 4)
+        assert weights.shape == (3, 5, 4)
 
     def test_custom_threshold(self) -> None:
         """With threshold 0.25, 1 of 4 valid should survive."""
         data = np.array([[7.0, np.nan, np.nan, np.nan]])
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.25)
+        result, weights = _coarsen_array(data, factor=4, min_valid_fraction=0.25)
         np.testing.assert_allclose(result[0, 0], 7.0)
+        np.testing.assert_allclose(weights[0, 0], 0.25)
 
     def test_strict_threshold(self) -> None:
         """With threshold 1.0, any NaN child kills the parent."""
         data = np.array([[1.0, 2.0, 3.0, np.nan]])
-        result = _coarsen_array(data, factor=4, min_valid_fraction=1.0)
+        result, weights = _coarsen_array(data, factor=4, min_valid_fraction=1.0)
         assert np.isnan(result[0, 0])
+        assert weights[0, 0] == 0.0
+
+    def test_weighted_children_preserve_partial_coverage(self) -> None:
+        data = np.array([[0.0, 100.0, np.nan, np.nan]])
+        weights = np.array([[1.0, 0.25, 0.0, 0.0]])
+        result, parent_weights = _coarsen_array(
+            data,
+            factor=4,
+            min_valid_fraction=0.25,
+            weights=weights,
+        )
+        np.testing.assert_allclose(result[0, 0], 20.0)
+        np.testing.assert_allclose(parent_weights[0, 0], 0.3125)
 
 
 class TestCoarsenArrayMode:
@@ -336,14 +357,17 @@ class TestPyramidBuilders:
         monkeypatch.setattr(
             helpers,
             "coarsen_healpix",
-            lambda ds, level, **kwargs: xr.Dataset(
-                {"t": (("cell",), np.zeros(12 * (4**level)))},
-                attrs=ds.attrs
-                | {
-                    "healpix_level": level,
-                    "healpix_nside": 2**level,
-                    "healpix_order": "nested",
-                },
+            lambda ds, level, **kwargs: (
+                xr.Dataset(
+                    {"t": (("cell",), np.zeros(12 * (4**level)))},
+                    attrs=ds.attrs
+                    | {
+                        "healpix_level": level,
+                        "healpix_nside": 2**level,
+                        "healpix_order": "nested",
+                    },
+                ),
+                {"t": xr.DataArray(np.ones(12 * (4**level)), dims=["cell"])},
             ),
         )
         pyramid = create_healpix_pyramid(regular_ds, max_level=3, min_level=1)
@@ -411,10 +435,10 @@ class TestPyramidBuilders:
 
         def fake_coarsen(
             ds: xr.Dataset, level: int, **kwargs: Any
-        ) -> xr.Dataset:
+        ) -> tuple[xr.Dataset, dict[str, xr.DataArray]]:
             coarsen_calls.append(kwargs)
             npix = 12 * (4**level)
-            return xr.Dataset(
+            out = xr.Dataset(
                 {"t": (("cell",), np.zeros(npix))},
                 attrs=ds.attrs
                 | {
@@ -423,6 +447,7 @@ class TestPyramidBuilders:
                     "healpix_order": "nested",
                 },
             )
+            return out, {"t": xr.DataArray(np.ones(npix), dims=["cell"])}
 
         monkeypatch.setattr(helpers, "regrid_to_healpix", fake_regrid)
         monkeypatch.setattr(helpers, "coarsen_healpix", fake_coarsen)
@@ -437,6 +462,126 @@ class TestPyramidBuilders:
         for call in coarsen_calls:
             assert call["coarsen_mode"] == "mode"
             assert call["min_valid_fraction"] == 0.75
+
+    def test_create_healpix_pyramid_preserves_partial_coverage(
+        self, regular_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            helpers,
+            "_healpix_coords",
+            lambda level, nest: (
+                np.zeros(12 * (4**level), dtype=np.float64),
+                np.zeros(12 * (4**level), dtype=np.float64),
+            ),
+        )
+
+        def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
+            del kwargs
+            npix = 12 * (4**level)
+            pattern = np.array(
+                [0.0, 0.0, 0.0, 0.0, 100.0, np.nan, np.nan, np.nan]
+                + [np.nan] * 8,
+                dtype=np.float64,
+            )
+            tiled = np.tile(pattern, npix // 16)
+            return xr.Dataset(
+                {"t": (("cell",), tiled)},
+                coords={"cell": np.arange(npix, dtype=np.int64)},
+                attrs=ds.attrs
+                | {
+                    "healpix_nside": 2**level,
+                    "healpix_level": level,
+                    "healpix_order": "nested",
+                },
+            )
+
+        monkeypatch.setattr(helpers, "regrid_to_healpix", fake_regrid)
+
+        pyramid = create_healpix_pyramid(
+            regular_ds,
+            max_level=2,
+            min_level=0,
+            min_valid_fraction=0.25,
+        )
+        np.testing.assert_allclose(pyramid[0]["t"].values, 20.0)
+
+    def test_global_cell_mean_matches_all_levels_mixed_child_counts(
+        self, regular_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            helpers,
+            "_healpix_coords",
+            lambda level, nest: (
+                np.zeros(12 * (4**level), dtype=np.float64),
+                np.zeros(12 * (4**level), dtype=np.float64),
+            ),
+        )
+        level = 3
+        npix = 12 * (4**level)
+
+        # Mixed coverage pattern by parent (2, 3, 4, 4 valid children):
+        #  - [0, 100, NaN, NaN]       -> 2 valid
+        #  - [0, 30, 70, NaN]         -> 3 valid
+        #  - [0, 10, 10, 20]          -> 4 valid
+        #  - [20, 20, 20, 20]         -> 4 valid
+        # Repeating this 16-cell block ensures every coarsening block sees
+        # the same coverage mixture.
+        pattern16 = np.array(
+            [
+                0.0,
+                100.0,
+                np.nan,
+                np.nan,
+                0.0,
+                30.0,
+                70.0,
+                np.nan,
+                0.0,
+                10.0,
+                10.0,
+                20.0,
+                20.0,
+                20.0,
+                20.0,
+                20.0,
+            ],
+            dtype=np.float64,
+        )
+        finest_values = np.tile(pattern16, npix // 16)
+        current = xr.Dataset(
+            {"t": (("cell",), finest_values)},
+            coords={"cell": np.arange(npix, dtype=np.int64)},
+            attrs=regular_ds.attrs
+            | {
+                "healpix_nside": 2**level,
+                "healpix_level": level,
+                "healpix_order": "nested",
+            },
+        )
+
+        pyramid: dict[int, xr.Dataset] = {level: current}
+        weight_pyramid: dict[int, xr.DataArray] = {
+            level: xr.where(np.isfinite(current["t"]), 1.0, 0.0)
+        }
+        current_weights: dict[str, xr.DataArray] = {"t": weight_pyramid[level]}
+
+        for target_level in range(level - 1, -1, -1):
+            current, current_weights = helpers.coarsen_healpix(
+                current,
+                target_level,
+                min_valid_fraction=0.00001,
+                child_weights=current_weights,
+                return_weights=True,
+            )
+            pyramid[target_level] = current
+            weight_pyramid[target_level] = current_weights["t"]
+
+        level_means = {
+            lev: float(pyramid[lev]["t"].mean("cell").values) for lev in pyramid
+        }
+        reference = level_means[level]
+        for mean_value in level_means.values():
+            np.testing.assert_allclose(mean_value, reference)
 
 
 class TestSavePyramidToS3:

@@ -149,14 +149,15 @@ def _coarsen_array(
     *,
     factor: int,
     min_valid_fraction: float = 0.5,
-) -> FloatArray:
+    weights: npt.NDArray[np.floating[Any]] | None = None,
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """Coarsen a HEALPix array by grouping contiguous nested cells.
 
     The last dimension is treated as the cell dimension.  All leading
     dimensions are batch dimensions that are preserved.
 
-    Uses a fused sum/count approach instead of ``np.nanmean`` to
-    avoid redundant NaN detection passes.
+    Uses a fused weighted-sum / weight-sum approach instead of
+    ``np.nanmean`` to avoid redundant NaN detection passes.
 
     Args:
         values: Input array with shape ``(*batch, n_cells)``.
@@ -165,27 +166,50 @@ def _coarsen_array(
             children required.  Parent cells with fewer valid
             children are set to NaN.  Default ``0.5`` (at least
             half of the children must be valid).
+        weights: Optional child weights with the same shape as
+            ``values``.  When omitted, finite children receive weight
+            1 and NaN children receive weight 0.
 
     Returns:
-        Array with shape ``(*batch, n_cells // factor)``.
+        Tuple ``(coarsened_values, parent_weights)`` where both arrays
+        have shape ``(*batch, n_cells // factor)``.
+
+        ``parent_weights`` is the valid-weight fraction in ``[0, 1]``
+        after thresholding.  Values that fail ``min_valid_fraction``
+        receive weight 0.
     """
     arr = np.asarray(values, dtype=np.float64)
+    if weights is None:
+        child_weights = np.where(np.isfinite(arr), 1.0, 0.0)
+    else:
+        child_weights = np.asarray(weights, dtype=np.float64)
+        if child_weights.shape != arr.shape:
+            raise ValueError("weights must have the same shape as values.")
+
     batch_shape = arr.shape[:-1]
     n_cells = arr.shape[-1]
     n_target = n_cells // factor
     grouped = arr.reshape(*batch_shape, n_target, factor)
-    valid = np.isfinite(grouped)
-    valid_count = valid.sum(axis=-1)
-    filled = np.where(valid, grouped, 0.0)
+    grouped_weights = child_weights.reshape(*batch_shape, n_target, factor)
 
-    min_count = max(1, int(np.ceil(min_valid_fraction * factor)))
+    valid = (
+        np.isfinite(grouped)
+        & np.isfinite(grouped_weights)
+        & (grouped_weights > 0.0)
+    )
+    used_weights = np.where(valid, grouped_weights, 0.0)
+    weight_sum = used_weights.sum(axis=-1)
+    weighted_values = np.where(valid, grouped * grouped_weights, 0.0)
+
+    min_weight = max(1.0, float(np.ceil(min_valid_fraction * factor)))
+    parent_weights = np.where(weight_sum >= min_weight, weight_sum / factor, 0.0)
     with np.errstate(invalid="ignore"):
         result = np.where(
-            valid_count >= min_count,
-            filled.sum(axis=-1) / valid_count,
+            weight_sum >= min_weight,
+            weighted_values.sum(axis=-1) / weight_sum,
             np.nan,
         )
-    return cast(FloatArray, result)
+    return result, parent_weights
 
 
 def _coarsen_array_mode(
@@ -248,7 +272,10 @@ def coarsen_healpix(
     target_level: int,
     coarsen_mode: CoarsenMode = "auto",
     min_valid_fraction: float = 0.5,
-) -> xr.Dataset:
+    *,
+    child_weights: dict[str, xr.DataArray] | None = None,
+    return_weights: bool = False,
+) -> xr.Dataset | tuple[xr.Dataset, dict[str, xr.DataArray]]:
     """Coarsen a HEALPix dataset to a lower-resolution level.
 
     The coarsening is performed as a single reshape + reduction over
@@ -271,11 +298,20 @@ def coarsen_healpix(
         produce a valid parent cell.  Parents with fewer valid
         children are set to NaN.  Default ``0.5`` (at least half
         of the children must be valid).
+    child_weights:
+        Optional per-variable child weights for ``cell``-resolved
+        variables.  When omitted, finite child values are weighted as
+        1 and NaNs as 0.
+    return_weights:
+        When ``True``, return a tuple ``(coarsened_dataset,
+        parent_weights)`` where ``parent_weights`` is a dictionary of
+        propagated per-variable valid-weight fractions.
 
     Returns
     -------
-    xarray.Dataset
-        Coarsened dataset.
+    xarray.Dataset or tuple[xarray.Dataset, dict[str, xarray.DataArray]]
+        Coarsened dataset.  When ``return_weights=True``, also returns
+        propagated per-variable parent weights.
 
     Notes
     -----
@@ -320,35 +356,82 @@ def coarsen_healpix(
     else:
         resolved_mode = coarsen_mode
 
-    coarsen_func = _coarsen_array_mode if resolved_mode == "mode" else _coarsen_array
-
     factor = 4**delta_level
     npix_target = ds.sizes["cell"] // factor
 
     coarsened_vars: dict[str, xr.DataArray] = {}
+    output_weights: dict[str, xr.DataArray] = {}
     for name, data in ds.data_vars.items():
         if "cell" not in data.dims:
             coarsened_vars[str(name)] = data
             continue
 
-        coarsened_vars[str(name)] = cast(
-            xr.DataArray,
+        if resolved_mode == "mode":
+            coarsened_vars[str(name)] = cast(
+                xr.DataArray,
+                xr.apply_ufunc(
+                    _coarsen_array_mode,
+                    data,
+                    input_core_dims=[["cell"]],
+                    output_core_dims=[["cell"]],
+                    exclude_dims={"cell"},
+                    dask="parallelized",
+                    kwargs={
+                        "factor": factor,
+                        "min_valid_fraction": min_valid_fraction,
+                    },
+                    output_dtypes=[np.float64],
+                    dask_gufunc_kwargs={"output_sizes": {"cell": npix_target}},
+                    keep_attrs=True,
+                ),
+            )
+            # Keep a simple availability fraction for downstream weighted means.
+            output_weights[str(name)] = cast(
+                xr.DataArray,
+                xr.apply_ufunc(
+                    _coarsen_array,
+                    data,
+                    xr.where(np.isfinite(data), 1.0, 0.0),
+                    input_core_dims=[["cell"], ["cell"]],
+                    output_core_dims=[["cell"], ["cell"]],
+                    exclude_dims={"cell"},
+                    dask="parallelized",
+                    kwargs={
+                        "factor": factor,
+                        "min_valid_fraction": min_valid_fraction,
+                    },
+                    output_dtypes=[np.float64, np.float64],
+                    dask_gufunc_kwargs={"output_sizes": {"cell": npix_target}},
+                )[1],
+            )
+            continue
+
+        var_weights = (
+            child_weights[str(name)]
+            if child_weights is not None and str(name) in child_weights
+            else xr.where(np.isfinite(data), 1.0, 0.0)
+        )
+        coarsened_data, parent_weights = cast(
+            tuple[xr.DataArray, xr.DataArray],
             xr.apply_ufunc(
-                coarsen_func,
+                _coarsen_array,
                 data,
-                input_core_dims=[["cell"]],
-                output_core_dims=[["cell"]],
+                var_weights,
+                input_core_dims=[["cell"], ["cell"]],
+                output_core_dims=[["cell"], ["cell"]],
                 exclude_dims={"cell"},
                 dask="parallelized",
                 kwargs={
                     "factor": factor,
                     "min_valid_fraction": min_valid_fraction,
                 },
-                output_dtypes=[np.float64],
+                output_dtypes=[np.float64, np.float64],
                 dask_gufunc_kwargs={"output_sizes": {"cell": npix_target}},
                 keep_attrs=True,
             ),
         )
+        coarsened_vars[str(name)] = coarsened_data
+        output_weights[str(name)] = parent_weights
 
     result = xr.Dataset(coarsened_vars, attrs=ds.attrs.copy())
     lat_deg, lon_deg = _healpix_coords(target_level, nest=True)
@@ -372,6 +455,8 @@ def coarsen_healpix(
     result.attrs["healpix_level"] = target_level
     result.attrs["healpix_order"] = "nested"
     result.attrs["grid_doctor_coarsened_from_level"] = current_level
+    if return_weights:
+        return result, output_weights
     return result
 
 
@@ -433,12 +518,22 @@ def create_healpix_pyramid(
     is_nested = bool(kwargs.get("nest", True))
     if is_nested:
         current = finest
+        current_weights: dict[str, xr.DataArray] | None = {
+            str(name): xr.where(np.isfinite(var), 1.0, 0.0)
+            for name, var in current.data_vars.items()
+            if "cell" in var.dims
+        }
         for level in range(max_level - 1, min_level - 1, -1):
-            current = coarsen_healpix(
+            current, current_weights = cast(
+                tuple[xr.Dataset, dict[str, xr.DataArray]],
+                coarsen_healpix(
                 current,
                 level,
                 coarsen_mode=coarsen_mode,
                 min_valid_fraction=min_valid_fraction,
+                child_weights=current_weights,
+                return_weights=True,
+                ),
             )
             pyramid[level] = current
         return pyramid
