@@ -185,6 +185,42 @@ def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
     return dataset
 
 
+def _key_hash(
+    ds: xr.Dataset,
+    level: int | None = None,
+    *,
+    method: RemapMethod = "conservative",
+    nest: bool = True,
+    source_units: SourceUnits = "auto",
+) -> str:
+
+    digest = hashlib.sha256()
+    for candidate in (
+        "clon_vertices",
+        "clat_vertices",
+        "lon_vertices",
+        "lat_vertices",
+        "clon",
+        "clat",
+        "lon",
+        "lat",
+        "longitude",
+        "latitude",
+        "rlon",
+        "rlat",
+        "X",
+        "Y",
+    ):
+        if candidate in ds:
+            digest.update(
+                np.ascontiguousarray(np.asarray(ds[candidate].values)).tobytes()
+            )
+    digest.update(
+        f"level={level};method={method};nest={nest};units={source_units}".encode()
+    )
+    return digest.hexdigest()
+
+
 def cached_weights(
     ds: xr.Dataset,
     level: int | None = None,
@@ -231,31 +267,7 @@ def cached_weights(
     from .helpers import get_latlon_resolution, resolution_to_healpix_level
     from .remap import compute_healpix_weights
 
-    digest = hashlib.sha256()
-    for candidate in (
-        "clon_vertices",
-        "clat_vertices",
-        "lon_vertices",
-        "lat_vertices",
-        "clon",
-        "clat",
-        "lon",
-        "lat",
-        "longitude",
-        "latitude",
-        "rlon",
-        "rlat",
-        "X",
-        "Y",
-    ):
-        if candidate in ds:
-            digest.update(
-                np.ascontiguousarray(np.asarray(ds[candidate].values)).tobytes()
-            )
-    digest.update(
-        f"level={level};method={method};nest={nest};units={source_units}".encode()
-    )
-    key = digest.hexdigest()[:16]
+    key = _key_hash(ds, level, method=method, nest=nest, source_units=source_units)[:16]
 
     if cache_path is None:
         weight_file = cache_dir() / f"weights_{key}.nc"
