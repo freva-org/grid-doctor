@@ -14,7 +14,7 @@ from typing import Any, Collection, Literal, cast
 import numpy as np
 import xarray as xr
 
-from .types import RemapMethod, SourceUnits
+from .types import HEALPIX_INDEX, RemapMethod, SourceUnits
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def chunk_for_target_store_size(
     Returns
     -------
     dict[str, int]
-        Chunk sizes, e.g. {"time": 5, "cell": 786432}.
+        Chunk sizes, e.g. {"time": 5, "healpix_index": 786432}.
     """
     nside = 2**level
     ncell = 12 * nside * nside
@@ -68,7 +68,7 @@ def chunk_for_target_store_size(
     if access == "map":
         cell_chunk = ncell if max_cell_chunk is None else min(ncell, max_cell_chunk)
         time_chunk = max(1, target_uncompressed_bytes // (itemsize * cell_chunk))
-        return {"time": int(time_chunk), "cell": int(cell_chunk)}
+        return {"time": int(time_chunk), HEALPIX_INDEX: int(cell_chunk)}
 
     if access == "time_series":
         if max_time_chunk is not None:
@@ -89,7 +89,7 @@ def chunk_for_target_store_size(
         if max_cell_chunk is not None:
             cell_chunk = min(cell_chunk, max_cell_chunk)
 
-        return {"time": int(time_chunk), "cell": int(cell_chunk)}
+        return {"time": int(time_chunk), HEALPIX_INDEX: int(cell_chunk)}
 
     raise ValueError(f"Unsupported access mode: {access!r}")
 

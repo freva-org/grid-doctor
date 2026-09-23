@@ -19,7 +19,7 @@ merged into contiguous runs, and read as a handful of contiguous slices
 power of four.
 
 The returned subset is the compact ("sparse") representation also
-produced by ``bin_to_healpix(..., dense=False)``: the ``cell``
+produced by ``bin_to_healpix(..., dense=False)``: the ``healpix_index``
 coordinate holds the actual global HEALPix indices, cell-centre
 ``latitude``/``longitude`` are computed on the fly for exactly the
 selected cells, and ``grid_doctor_sparse = 1`` is set.
@@ -39,9 +39,16 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from .cf import HealpixNested
 from .remap import _make_crs_variable
 from .remap_backend import _canonical_lon, _require_healpix_geo_module
-from .types import Int64Array
+from .types import (
+    HEALPIX_INDEX,
+    HEALPIX_LEVEL,
+    HEALPIX_NSIDE,
+    HEALPIX_ORDER,
+    Int64Array,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +85,7 @@ def _dataset_level(ds: xr.Dataset, level: int | None) -> int:
     if level is not None:
         return level
     try:
-        return int(ds.attrs["healpix_level"])
+        return int(ds.attrs[HEALPIX_LEVEL])
     except KeyError:
         raise ValueError(
             "Dataset has no `healpix_level` attribute; pass `level=` explicitly."
@@ -87,8 +94,8 @@ def _dataset_level(ds: xr.Dataset, level: int | None) -> int:
 
 def _require_nested(ds: xr.Dataset) -> None:
     """Range-based selection relies on nested ordering."""
-    order = str(ds.attrs.get("healpix_order", "nested"))
-    if order not in {"nested", "nest"}:
+    order = str(ds.attrs.get(HEALPIX_ORDER, HealpixNested))
+    if order not in {HealpixNested, "nest"}:
         raise ValueError(f"Region selection requires nested ordering, got {order!r}.")
 
 
@@ -107,7 +114,7 @@ def select_cells(
     """Extract the given HEALPix cells from a dataset.
 
     Works on dense datasets (positional index equals cell ID, with or
-    without materialised coordinates) and on compact subsets (``cell``
+    without materialised coordinates) and on compact subsets (``healpix_index``
     coordinate holds actual IDs).  Contiguous ID runs are read as
     contiguous slices, so a spatially compact selection touches only
     the chunks it needs.
@@ -118,7 +125,7 @@ def select_cells(
         HEALPix dataset, typically opened with
         ``xr.open_zarr(store, chunks=None)``.
     cells:
-        Global HEALPix cell IDs to extract (any order; duplicates are
+        Global HEALPix index IDs to extract (any order; duplicates are
         dropped).
     level:
         HEALPix level override when the ``healpix_level`` attribute is
@@ -130,7 +137,7 @@ def select_cells(
     Returns
     -------
     xarray.Dataset
-        Compact subset: ``cell`` coordinate holds the requested IDs,
+        Compact subset: ``healpix_index`` coordinate holds the requested IDs,
         cell-centre ``latitude``/``longitude`` are attached, and
         ``grid_doctor_sparse = 1`` is set.
     """
@@ -145,10 +152,10 @@ def select_cells(
             f"Cell IDs must be within [0, {npix}) for level {resolved_level}."
         )
 
-    if "cell" in ds.coords:
+    if HEALPIX_INDEX in ds.coords:
         # Compact dataset (or legacy dense store with coordinates):
         # positions are found through the coordinate values.
-        coord = np.asarray(ds["cell"].values, dtype=np.int64)
+        coord = np.asarray(ds[HEALPIX_INDEX].values, dtype=np.int64)
         pos = np.searchsorted(coord, wanted)
         pos = np.clip(pos, 0, coord.size - 1)
         present = coord[pos] == wanted
@@ -158,16 +165,16 @@ def select_cells(
                 f"{missing.size} requested cells are not present in the "
                 f"dataset (first missing: {int(missing[0])})."
             )
-        pieces = [ds.isel(cell=slice(a, b)) for a, b in _contiguous_runs(pos)]
+        pieces = [ds.isel({HEALPIX_INDEX: slice(a, b)}) for a, b in _contiguous_runs(pos)]
     else:
         # Dense store without materialised coordinates: positional
         # index *is* the cell ID.
-        pieces = [ds.isel(cell=slice(a, b)) for a, b in _contiguous_runs(wanted)]
+        pieces = [ds.isel({HEALPIX_INDEX: slice(a, b)}) for a, b in _contiguous_runs(wanted)]
 
     subset = (
         pieces[0]
         if len(pieces) == 1
-        else xr.concat(pieces, dim="cell", data_vars="minimal", coords="minimal")
+        else xr.concat(pieces, dim=HEALPIX_INDEX, data_vars="minimal", coords="minimal")
     )
     if load:
         subset = subset.load()
@@ -304,9 +311,9 @@ def attach_cell_coords(
     Parameters
     ----------
     ds:
-        Subset whose ``cell`` dimension corresponds to *cells*.
+        Subset whose ``healpix_index`` dimension corresponds to *cells*.
     cells:
-        Global HEALPix cell IDs, one per position along ``cell``.
+        Global HEALPix cell IDs, one per position along ``healpix_index``.
     level:
         HEALPix level of the IDs.
     attrs:
@@ -316,38 +323,40 @@ def attach_cell_coords(
     Returns
     -------
     xarray.Dataset
-        Subset with ``cell``, ``latitude``, ``longitude``, and ``crs``
+        Subset with ``healpix_index``, ``latitude``, ``longitude``, and ``crs``
         coordinates, ``grid_mapping`` tags, and ``grid_doctor_sparse``
         set.
     """
     cells = np.asarray(cells, dtype=np.int64)
-    if ds.sizes.get("cell") != cells.size:
+    if ds.sizes.get(HEALPIX_INDEX) != cells.size:
         raise ValueError(
-            f"Dataset has {ds.sizes.get('cell')} cells but {cells.size} "
+            f"Dataset has {ds.sizes.get(HEALPIX_INDEX)} cells but {cells.size} "
             "IDs were provided."
         )
     module, kwargs = _require_healpix_geo_module(nest=True)
     lon_deg, lat_deg = module.healpix_to_lonlat(cells, level, **kwargs)
 
     result = ds.assign_coords(
-        cell=cells,
-        latitude=("cell", np.asarray(lat_deg, dtype=np.float64)),
-        longitude=(
-            "cell",
-            _canonical_lon(np.asarray(lon_deg, dtype=np.float64)),
-        ),
-        crs=_make_crs_variable(level=level, nside=2**level, order="nested"),
+        {
+            HEALPIX_INDEX: cells,
+            "latitude": (HEALPIX_INDEX, np.asarray(lat_deg, dtype=np.float64)),
+            "longitude": (
+                HEALPIX_INDEX,
+                _canonical_lon(np.asarray(lon_deg, dtype=np.float64)),
+            ),
+            "crs": _make_crs_variable(level=level, nside=2**level, order=HealpixNested),
+        }
     )
     for name in result.data_vars:
-        if "cell" in result[name].dims:
+        if HEALPIX_INDEX in result[name].dims:
             result[name].attrs["grid_mapping"] = "crs"
     if attrs:
         merged = dict(attrs)
         merged.update(result.attrs)
         result.attrs = merged
-    result.attrs["healpix_level"] = level
-    result.attrs["healpix_nside"] = 2**level
-    result.attrs["healpix_order"] = "nested"
+    result.attrs[HEALPIX_LEVEL] = level
+    result.attrs[HEALPIX_NSIDE] = 2**level
+    result.attrs[HEALPIX_ORDER] = HealpixNested
     result.attrs["grid_doctor_sparse"] = 1
     return result
 

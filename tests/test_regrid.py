@@ -12,7 +12,7 @@ import xarray as xr
 from grid_doctor import remap
 from grid_doctor.helpers import latlon_to_healpix_pyramid
 from grid_doctor.remap import regrid_to_healpix
-
+from grid_doctor.types import HEALPIX_INDEX
 
 @pytest.mark.parametrize("method", ["nearest", "conservative"])
 def test_latlon_to_healpix_pyramid_weight_methods(
@@ -25,7 +25,7 @@ def test_latlon_to_healpix_pyramid_weight_methods(
         del kwargs
         return xr.Dataset(
             {
-                name: (("cell",), np.arange(12 * (4**level), dtype=np.float64))
+                name: ((HEALPIX_INDEX,), np.arange(12 * (4**level), dtype=np.float64))
                 for name in ds.data_vars
             },
             attrs=ds.attrs

@@ -5,15 +5,15 @@ catchment) at very high HEALPix levels (16 is roughly 100 m, 20 roughly
 6 m cells).  These stores look different from the global pyramids in
 two ways, and both change how you load them:
 
-1. **No coordinate arrays.**  The global cell dimension at level 16 has
+1. **No coordinate arrays.**  The global `healpix_index` (commonly called `cell`) dimension at level 16 has
    about 5.2 × 10¹⁰ entries; materialised `latitude`/`longitude` arrays
    would cost hundreds of gigabytes while carrying no information,
-   because HEALPix coordinates are a pure function of the cell index.
+   because HEALPix coordinates are a pure function of the index.
    These stores carry only the `crs` variable and the `healpix_*`
    attributes (`grid_doctor_implicit_coords = 1` marks them), and
    coordinates are computed on the fly for whatever cells you actually
    read.
-2. **All access is region-driven.**  Nobody loads the full cell
+2. **All access is region-driven.**  Nobody loads the full `healpix_index`
    dimension, the same way nobody downloads a complete XYZ tile set.
    You select a region; the selection is small by construction.
 
@@ -103,7 +103,7 @@ def merge_ranges(parents, shift):
 
 ranges = merge_ranges(parents, shift)
 region = xr.concat(
-    [ds.isel(cell=slice(a, b)) for a, b in ranges], dim="cell"
+    [ds.isel(healpix_index=slice(a, b)) for a, b in ranges], dim="healpix_index"
 )
 ```
 
@@ -120,20 +120,20 @@ cell_ids = np.concatenate(
 lon_c, lat_c = nested.healpix_to_lonlat(cell_ids, level)
 
 region = region.assign_coords(
-    cell=("cell", cell_ids),
-    longitude=("cell", lon_c),
-    latitude=("cell", lat_c),
+    healpix_index=("healpix_index", cell_ids),
+    longitude=("healpix_index", lon_c),
+    latitude=("healpix_index", lat_c),
 )
 
 inside = (
     (lon_c >= lon_min) & (lon_c <= lon_max)
     & (lat_c >= lat_min) & (lat_c <= lat_max)
 )
-berlin = region.isel(cell=np.flatnonzero(inside)).load()
+berlin = region.isel(healpix_index=np.flatnonzero(inside)).load()
 ```
 
 `berlin` is now a small, fully loaded dataset with per-cell
-coordinates and the global HEALPix indices in `berlin["cell"]`:
+coordinates and the global HEALPix indices in `berlin["healpix_index"]`:
 
 ```python
 berlin["t2m"].mean()
@@ -155,7 +155,7 @@ def gc_distance_deg(lon, lat, lon0, lat0):
     return np.degrees(2 * np.arcsin(np.sqrt(s)))
 
 inside = gc_distance_deg(lon_c, lat_c, 13.41, 52.52) <= 0.05
-station = region.isel(cell=np.flatnonzero(inside)).load()
+station = region.isel(healpix_index=np.flatnonzero(inside)).load()
 ```
 
 ### Why this is fast
@@ -195,9 +195,9 @@ place your high-resolution selection onto, say, an ERA5 pyramid level,
 reuse the slice expansion from above at the coarser level:
 
 ```python
-parents_l9 = np.unique(berlin["cell"].values >> (2 * (16 - 9)))
+parents_l9 = np.unique(berlin["healpix_index"].values >> (2 * (16 - 9)))
 era5_region = era5_level9.isel(
-    cell=np.concatenate([np.arange(p, p + 1) for p in parents_l9])
+    healpix_index=np.concatenate([np.arange(p, p + 1) for p in parents_l9])
 )
 ```
 
