@@ -259,12 +259,21 @@ class TargetDescription:
 
     Attributes:
         level: Healpix index resolution (zoom)
+        order: Healpix indexing order ('nest' or 'ring').
         target: Target mesh storeed as compact node/connectivity
             arrays.
     """
 
     level: int
-    target_mesh: PolygonMesh
+    order: Literal["nest", "ring"]  # TODO: refactor with proper type
+    target_mesh: PolygonMesh | None = None
+#    field(init=False)
+
+    def __post_init__(self) -> None:
+        """Initialization of optional PolygonMesh."""
+        if self.target_mesh is None:
+            _, m = _target_healpix_mesh(self.level, nest=self.order.startswith('nest'))
+            object.__setattr__(self, 'target_mesh', m)
 
 
 @dataclass(frozen=True, repr=False)
@@ -277,14 +286,12 @@ class WeightsDescription:
         source: Source description.
         target: Target description.
         method: Remapping method ('conservative' or 'nearest').
-        order: Healpix indexing order ('nest' or 'ring').
         units: Source units ('rad' or 'deg').
     """
 
     source: SourceDescription
     target: TargetDescription
     method: RemapMethod
-    order: Literal["nest", "ring"]  # TODO: refactor with proper type
     units: SourceUnits  # TODO: use canonical units
 
     @property
@@ -302,7 +309,7 @@ class WeightsDescription:
             self.source.dataset,
             self.target.level,
             method=self.method,
-            nest=self.order.startswith("nest"),
+            nest=self.target.order.startswith("nest"),
             source_units=self.units,
         )
 
@@ -1884,9 +1891,12 @@ def compute_healpix_weights_backend(
 
     desc = WeightsDescription(
         source=source_desc,
-        target=TargetDescription(level=level, target_mesh=target_mesh),
+        target=TargetDescription(
+            level=level,
+            order="nest" if nest else "ring",
+            target_mesh=target_mesh
+        ),
         method=method,
-        order="nest" if nest else "ring",
         units=source_units,
     )
 
