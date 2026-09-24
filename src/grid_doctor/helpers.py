@@ -21,15 +21,15 @@ import numpy.typing as npt
 import s3fs
 import xarray as xr
 
+from .misc import (
+    _get_latlon_arrays,
+    _get_unstructured_dim,
+    _is_unstructured,
+)
 from .remap import (
     _make_crs_variable,
     regrid_to_healpix,
     regrid_unstructured_to_healpix,
-)
-from .remap_backend import (
-    _get_latlon_arrays,
-    _get_unstructured_dim,
-    _is_unstructured,
 )
 from .types import CoarsenMode, FloatArray, ZarrOptions
 

@@ -10,7 +10,7 @@ import numpy as np
 import numpy_groupies as npg
 import xarray as xr
 
-from ..remap_backend import (
+from ..misc import (
     _LAT_NAMES,
     _LON_NAMES,
     _canonical_lon,
