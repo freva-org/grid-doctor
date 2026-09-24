@@ -250,6 +250,18 @@ class SourceDescription:
     ignore_unmapped: bool
     metadata: dict[str, str | int | float | bool]
 
+    @classmethod
+    def from_dataset(cls, ds: xr.Dataset) -> SourceDescription:
+        """Factory helper for default construction.
+
+        Wraps [`decribe_source`][grid_doctor.remap_backend,describe_source]
+        with default arguments
+
+        Args:
+            ds: Source dataset
+        """
+        return describe_source(ds)
+
 
 @dataclass(frozen=True, slots=True)
 class TargetDescription:
