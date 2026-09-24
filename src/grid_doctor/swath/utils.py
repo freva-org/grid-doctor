@@ -14,7 +14,7 @@ from ..misc import (
     _LAT_NAMES,
     _LON_NAMES,
     _canonical_lon,
-    _normalise_angle_units,
+    _normalize_angle_units,
 )
 from ..types import BinAgg, FloatArray, Int64Array, SourceUnits
 
@@ -320,11 +320,11 @@ def resolve_point_coords(
             f"{lat_var.shape} vs {lon_var.shape}."
         )
 
-    lat = _normalise_angle_units(
+    lat = _normalize_angle_units(
         np.asarray(lat_var.values, dtype=np.float64).ravel(), source_units
     )
     lon = _canonical_lon(
-        _normalise_angle_units(
+        _normalize_angle_units(
             np.asarray(lon_var.values, dtype=np.float64).ravel(), source_units
         )
     )

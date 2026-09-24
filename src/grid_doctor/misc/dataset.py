@@ -67,7 +67,7 @@ def _looks_like_radians(values: FloatArray) -> bool:
     return bool(float(np.nanmax(np.abs(finite))) <= (2.0 * np.pi + 1e-6))
 
 
-def _normalise_angle_units(
+def _normalize_angle_units(
     values: FloatArray,
     units: SourceUnits,
 ) -> FloatArray:

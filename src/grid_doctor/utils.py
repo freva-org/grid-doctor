@@ -162,8 +162,8 @@ def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
         The opened dataset.
     """
     digest = hashlib.sha256()
-    normalised = sorted({str(path) for path in files})
-    digest.update("\0".join(normalised).encode())
+    normalized = sorted({str(path) for path in files})
+    digest.update("\0".join(normalized).encode())
     pickle_file = cache_dir() / f"{digest.hexdigest()}.pickle"
 
     if pickle_file.exists():
@@ -178,7 +178,7 @@ def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
 
     merged_kwargs: dict[str, Any] = {"parallel": True, "chunks": "auto"} | kwargs
     with ProgressBar():
-        dataset = xr.open_mfdataset(normalised, **merged_kwargs)
+        dataset = xr.open_mfdataset(normalized, **merged_kwargs)
 
     with pickle_file.open("wb") as handle:
         pickle.dump(dataset, handle)

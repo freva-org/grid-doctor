@@ -40,7 +40,7 @@ from .misc import (
     _get_spatial_dims,
     _get_unstructured_dim,
     _is_unstructured,
-    _normalise_angle_units,
+    _normalize_angle_units,
     _to_float64,
 )
 from .types import (
@@ -620,8 +620,8 @@ def _looks_global(
         *True* when the source appears global.
     """
     lat, lon = _get_latlon_arrays(ds)
-    lat_deg = _normalise_angle_units(lat.ravel(), source_units)
-    lon_deg = _normalise_angle_units(lon.ravel(), source_units)
+    lat_deg = _normalize_angle_units(lat.ravel(), source_units)
+    lon_deg = _normalize_angle_units(lon.ravel(), source_units)
     lon_cov = _lon_coverage_from_centres(lon_deg)
     lat_cov = _lat_coverage_from_centres(lat_deg)
     return bool(lon_cov >= 350.0 and lat_cov >= 170.0)
@@ -674,7 +674,7 @@ def _vectorized_polygon_centres(
 ) -> tuple[FloatArray, FloatArray]:
     """Compute spherical polygon centres from padded corner arrays.
 
-    The centre of each polygon is the normalised mean Cartesian vector
+    The centre of each polygon is the normalized mean Cartesian vector
     of its valid corners, projected back to lon/lat.
 
     Args:
@@ -1007,15 +1007,15 @@ def _source_mesh(
                 "'clon_vertices'/'clat_vertices'."
             )
         lon_v = _canonical_lon(
-            _normalise_angle_units(_to_float64(ds[lon_name].values), source_units)
+            _normalize_angle_units(_to_float64(ds[lon_name].values), source_units)
         )
-        lat_v = _normalise_angle_units(_to_float64(ds[lat_name].values), source_units)
+        lat_v = _normalize_angle_units(_to_float64(ds[lat_name].values), source_units)
         mesh = _corner_mesh_from_arrays(lon_v, lat_v)
         return mesh, (_get_unstructured_dim(ds),)
 
     lat, lon = _get_latlon_arrays(ds)
-    lat = _normalise_angle_units(lat, source_units)
-    lon = _normalise_angle_units(lon, source_units)
+    lat = _normalize_angle_units(lat, source_units)
+    lon = _normalize_angle_units(lon, source_units)
     y_dim, x_dim = _get_spatial_dims(ds)
 
     if lat.ndim == 1:

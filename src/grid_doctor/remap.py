@@ -31,7 +31,7 @@ from .misc import (
     _get_spatial_dims,
     _get_unstructured_dim,
     _is_unstructured,
-    _normalise_angle_units,
+    _normalize_angle_units,
 )
 from .remap_apply import (
     apply_weights_nd,
@@ -74,8 +74,8 @@ def _source_centre_arrays(
         ``(lat, lon, source_dims)``.
     """
     lat, lon = _get_latlon_arrays(ds)
-    lat = _normalise_angle_units(lat, source_units)
-    lon = _canonical_lon(_normalise_angle_units(lon, source_units))
+    lat = _normalize_angle_units(lat, source_units)
+    lon = _canonical_lon(_normalize_angle_units(lon, source_units))
 
     if _is_unstructured(ds):
         spatial_dim = _get_unstructured_dim(ds)

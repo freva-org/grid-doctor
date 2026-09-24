@@ -28,7 +28,7 @@ from grid_doctor.remap_backend import (
     _infer_bounds_1d,
     _infer_curvilinear_corners,
     _looks_global,
-    _normalise_angle_units,
+    _normalize_angle_units,
     _regular_grid_mesh,
 )
 from .helpers import _FakeHealpixModule
@@ -47,9 +47,9 @@ class TestPrimitiveHelpers:
             wrapped, np.array([170.0, -180.0, 0.0, -180.0, -170.0])
         )
 
-    def test_normalise_angle_units_auto_detects_radians(self) -> None:
+    def test_normalize_angle_units_auto_detects_radians(self) -> None:
         values = np.array([0.0, np.pi / 2.0, np.pi])
-        result = _normalise_angle_units(values, "auto")
+        result = _normalize_angle_units(values, "auto")
         np.testing.assert_allclose(result, np.array([0.0, 90.0, 180.0]))
 
     def test_infer_bounds_1d(self) -> None:
