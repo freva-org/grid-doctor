@@ -116,11 +116,11 @@ def _make_unstructured_dataset(ncells: int = 4, *, radians: bool = False) -> xr.
     )
 
 
+# High level fixture to resolve indirect ones; parametrize via ``helpers.TEST_DS``
 @pytest.fixture
 def test_ds(request: pytest.FixtureRequest) -> xr.Dataset:
-    if request.param == "era5":
-        return _make_era5_dataset()
-    return _make_structured_dataset(grid=request.param)
+    """Resolve a fixture name to its dataset; parametrize with ``indirect=True``."""
+    return request.getfixturevalue(request.param)
 
 
 @pytest.fixture

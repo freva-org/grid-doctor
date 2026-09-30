@@ -31,7 +31,7 @@ from grid_doctor.remap_backend import (
     _normalize_angle_units,
     _regular_grid_mesh,
 )
-from .helpers import _FakeHealpixModule
+from .helpers import TEST_DS, _FakeHealpixModule
 
 
 # ===================================================================

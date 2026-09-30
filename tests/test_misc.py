@@ -12,17 +12,8 @@ import xarray as xr
 from grid_doctor.misc import _get_spatial_dims, normalize_dataset
 from grid_doctor.misc.dataset import _norm_lon
 
-UNSTRUCTURED = {"unstructured_ds"}
-STRUCTURED = {"regular_ds", "curvilinear_ds"}
-MISC = {"era5_ds", "limited_area_ds"}
+from .helpers import MISC, STRUCTURED, TEST_DS, UNSTRUCTURED
 
-ALL = UNSTRUCTURED | STRUCTURED | MISC
-
-
-@pytest.fixture
-def test_ds(request: pytest.FixtureRequest) -> xr.Dataset:
-    """Resolve a fixture name to its dataset; parametrize with ``indirect=True``."""
-    return request.getfixturevalue(request.param)
 
 
 class TestNormalizeHelpers:
@@ -36,7 +27,7 @@ class TestNormalizeHelpers:
         np.testing.assert_array_equal(norm_ds["lat"], [0, 1_111_111e-6, 12.345679])
         np.testing.assert_array_equal(norm_ds["lon"], [0, 2_222_222e-6, 98.765432])
 
-    @pytest.mark.parametrize("test_ds", STRUCTURED | MISC, indirect=True)
+    @TEST_DS(STRUCTURED | MISC)
     def test_normalize_structured_dataset(self, test_ds):
         norm_ds = normalize_dataset(test_ds)
         lat, lon = (norm_ds[name] for name in _get_spatial_dims(norm_ds))
