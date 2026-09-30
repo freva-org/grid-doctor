@@ -27,6 +27,14 @@ class TestNormalizeHelpers:
         np.testing.assert_array_equal(norm_ds["lat"], [0, 1_111_111e-6, 12.345679])
         np.testing.assert_array_equal(norm_ds["lon"], [0, 2_222_222e-6, 98.765432])
 
+    @TEST_DS(UNSTRUCTURED)
+    def test_normalize_unstructured_dataset(self, test_ds):
+        n_ds = normalize_dataset(test_ds)
+        lat, lon = n_ds["clat_vertices"], n_ds["clon_vertices"]
+        assert -180.0 <= lon.min() and lon.max() < 180.0
+        assert -90.0 <= lat.min() and lat.max() <= 90.0
+        assert lat.attrs["units"] == "degrees_north"
+
     @TEST_DS(STRUCTURED | MISC)
     def test_normalize_structured_dataset(self, test_ds):
         norm_ds = normalize_dataset(test_ds)

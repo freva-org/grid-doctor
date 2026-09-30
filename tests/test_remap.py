@@ -11,6 +11,11 @@ import pytest
 import xarray as xr
 
 from grid_doctor import remap
+from grid_doctor.misc.dataset import (
+    _get_latlon_arrays,
+    _looks_like_radians,
+)
+
 from grid_doctor.remap import (
     _attach_healpix_coords,
     _flattened_size,
@@ -76,6 +81,11 @@ class TestPrimitiveHelpers:
         with pytest.raises(ValueError, match="Could not determine"):
             _get_spatial_dims(unstructured_ds)
 
+    @TEST_DS([("unstructured_ds", False), ("unstructured_rad_ds", True)], "is_rad")
+    def test_unstructured_looks_like_radians(self, test_ds: xr.Dataset, is_rad: bool) -> None:
+        latv, lonv = _get_latlon_arrays(test_ds)
+        assert is_rad == _looks_like_radians(latv)
+        assert is_rad == _looks_like_radians(lonv)
 
 # ===================================================================
 # Regular grid mesh (antimeridian & periodicity)
