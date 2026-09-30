@@ -1594,13 +1594,6 @@ def compute_healpix_weights_backend(
         raise ValueError("Only 'nearest' and 'conservative' are supported.")
 
     offline_cfg = offline or OfflineWeightConfig()
-    target = (
-        Path(weights_path)
-        if weights_path is not None
-        else Path(tempfile.mkstemp(suffix=".nc")[1])
-    )
-    target.parent.mkdir(parents=True, exist_ok=True)
-
     source_desc = describe_source(
         source,
         grid=grid,
@@ -1622,7 +1615,12 @@ def compute_healpix_weights_backend(
         units=source_units,
     )
 
-    logger.warning(f"COMPUTED key: {desc.key}")
+    target = (
+        Path(weights_path)
+        if weights_path is not None
+        else Path(tempfile.mkdtemp()) / Path(desc.key + ".nc")
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
 
     use_offline = _default_offline_enabled(
         method=method,
