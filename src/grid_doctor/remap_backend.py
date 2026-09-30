@@ -42,6 +42,7 @@ from .misc import (
     _is_unstructured,
     _normalize_angle_units,
     _to_float64,
+    normalize_dataset,
 )
 from .types import (
     FloatArray,
@@ -160,16 +161,16 @@ class SourceDescription:
     metadata: dict[str, str | int | float | bool]
 
     @classmethod
-    def from_dataset(cls, ds: xr.Dataset) -> SourceDescription:
-        """Factory helper for default construction.
+    def from_normalized_dataset(cls, ds: xr.Dataset) -> SourceDescription:
+        """Class factory to construct **normalized** description of the input dataset.
 
         Wraps [`decribe_source`][grid_doctor.remap_backend,describe_source]
-        with default arguments
+        with default arguments but normatzied
 
         Args:
             ds: Source dataset
         """
-        return describe_source(ds)
+        return describe_source(ds.pipe(normalize_dataset))
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,7 +192,7 @@ class TargetDescription:
 #    field(init=False)
 
     def __post_init__(self) -> None:
-        """Initialization of optional PolygonMesh."""
+        """Initialize optional PolygonMesh."""
         if self.target_mesh is None:
             _, m = _target_healpix_mesh(self.level, nest=self.order.startswith('nest'))
             object.__setattr__(self, 'target_mesh', m)

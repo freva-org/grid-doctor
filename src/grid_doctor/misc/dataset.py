@@ -3,6 +3,7 @@
 INTERNAL: NOT TO BE EXPOSED!!!
 """
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,12 @@ from .constants import (
     _X_CANDIDATES,
     _Y_CANDIDATES,
 )
+
+# CF-convention unit strings written by the normalisers.
+_LAT_UNITS = "degrees_north"
+_LON_UNITS = "degrees_east"
+
+_MICRO_SCALE = 1_000_000
 
 # ===================================================================
 # Low-level coordinate helpers (fully vectorised)
@@ -129,10 +136,7 @@ def _get_latlon_arrays(ds: xr.Dataset) -> tuple[FloatArray, FloatArray]:
 
     if lat is None or lon is None:
         available = sorted({*map(str, ds.coords), *map(str, ds.data_vars)})
-        raise ValueError(
-            "Could not locate latitude/longitude coordinates. "
-            f"Available names are: {available}."
-        )
+        raise ValueError(f"Could not locate latitude/longitude coordinates. Available names are: {available}.")
     return lat, lon
 
 
@@ -152,10 +156,7 @@ def _is_unstructured(ds: xr.Dataset) -> bool:
     """
     if _UNSTRUCTURED_DIMS & {str(dim) for dim in ds.dims}:
         return True
-    return any(
-        var.attrs.get("CDI_grid_type") == "unstructured"
-        for var in ds.data_vars.values()
-    )
+    return any(var.attrs.get("CDI_grid_type") == "unstructured" for var in ds.data_vars.values())
 
 
 def _get_unstructured_dim(ds: xr.Dataset) -> str:
@@ -178,9 +179,7 @@ def _get_unstructured_dim(ds: xr.Dataset) -> str:
         for name in _LAT_NAMES:
             if name in ds and ds[name].ndim == 1:
                 return str(ds[name].dims[0])
-    raise ValueError(
-        "Could not determine the source cell dimension for the unstructured grid."
-    )
+    raise ValueError("Could not determine the source cell dimension for the unstructured grid.")
 
 
 def _get_spatial_dims(ds: xr.Dataset) -> tuple[str, str]:
@@ -219,9 +218,7 @@ def _get_spatial_dims(ds: xr.Dataset) -> tuple[str, str]:
                         return dims[0], dims[1]
 
     if y_dim is None or x_dim is None:
-        raise ValueError(
-            f"Could not determine spatial dimensions from {list(ds.dims)}."
-        )
+        raise ValueError(f"Could not determine spatial dimensions from {list(ds.dims)}.")
     return y_dim, x_dim
 
 
@@ -235,16 +232,125 @@ def _get_vertex_names(ds: xr.Dataset) -> tuple[str, str]:
     lon_name = "clon_vertices" if "clon_vertices" in ds else "lon_vertices"
     if lat_name not in ds or lon_name not in ds:
         raise ValueError(
-            "Unstructured grids require per-cell vertex "
-            "coordinates such as "
-            "'clat_vertices'/'clon_vertices'/."
+            "Unstructured grids require per-cell vertex coordinates such as 'clat_vertices'/'clon_vertices'/."
         )
     return lat_name, lon_name
 
 
-def _replace_values(ds: xr.Dataset, name: str, values: np.ndarray) -> xr.Dataset:
+def _replace_values(ds: xr.Dataset, mapping: Mapping[str, np.ndarray | xr.DataArray]) -> xr.Dataset:
     """Return *ds* with the values of variable ``name`` replaced, keeping dims and attrs."""
-    new = ds[name].copy(data=values)
-    if name in ds.coords:
-        return ds.assign_coords({name: new})
-    return ds.assign({name: new})
+    for name, values in mapping.items():
+        new = values if isinstance(values, xr.DataArray) else ds[name].copy(data=values)
+        if name in ds.coords:
+            ds = ds.assign_coords({name: new})
+            continue
+        ds = ds.assign({name: new})
+    return ds
+
+
+def _to_micro(a: FloatArray, scale: int) -> FloatArray:
+    a = _to_float64(a)
+    if not np.all(np.isfinite(a)):
+        raise ValueError("NaN/inf in input")
+    return np.rint(a * scale).astype(np.int64)
+
+
+def _has_degree_unit(da: xr.DataArray) -> bool:
+    unit = da.attrs.get("units")
+    return unit is not None and unit.lower().startswith("deg")
+
+
+def _norm_lon(lon: FloatArray, *, scale: int = _MICRO_SCALE) -> FloatArray:
+    """Convention lon: [-180, 180)°."""
+    q = _to_micro(lon, scale)
+    half = 180 * scale
+    q = (q + half) % (2 * half) - half  # exact wrap to [-180, 180)
+    return q / scale
+
+
+def normalize_lon(lon: xr.DataArray) -> xr.DataArray:
+    """Convert longiture to expected [-180, 180) range.
+
+    Attribute `unit` is expected to be `degree`.
+
+    Args:
+        lon: xr.DataArray - longitude coordinate in degree
+    Return:
+        xr.DataArray with values and `unit` attribute adjusted (`degree_west`)
+    """
+    if not _has_degree_unit(lon) and _looks_like_radians(lon.values):
+        raise ValueError(f"`{lon.name}` DataArray is not in degrees (try applying `normalize_degrees()`.")
+
+    return xr.DataArray(_norm_lon(lon.values), dims=lon.dims, attrs=lon.attrs | {"units": _LON_UNITS})
+
+
+def _norm_lat(lat: FloatArray, *, scale: int = _MICRO_SCALE) -> FloatArray:
+    """Convention lat: [-90, 90]°."""
+    q = _to_micro(lat, scale)
+    if np.any(np.abs(q) > 90 * scale):
+        raise ValueError("latitude outside [-90, 90]")
+    return q / scale
+
+
+def normalize_lat(lat: xr.DataArray) -> xr.DataArray:
+    """Convert latitudes to expected [-90, 90] range.
+
+    Attribute `unit` is expected to be `degree`.
+
+    Args:
+        lat: xr.DataArray - latidude coordinate in degree
+    Return:
+        xr.DataArray with values and `unit` attribute adjusted (`degree_north`)
+    """
+    if not _has_degree_unit(lat) and _looks_like_radians(lat.values):
+        raise ValueError(f"`{lat.name}` DataArray is not in degrees (try applying `normalize_degrees()`.")
+
+    return xr.DataArray(_norm_lat(lat.values), dims=lat.dims, attrs=lat.attrs | {"units": _LAT_UNITS})
+
+
+def normalize_degrees(array: xr.DataArray) -> xr.DataArray:
+    """Extract `units` from `xarray.DataArray` attributes and apply angle normalization (degree)."""
+    d_array = array.copy(deep=True)
+    if _has_degree_unit(array):
+        return d_array
+
+    source_unit: SourceUnits = "auto"
+    if units := d_array.attrs.get("units"):
+        if units.startswith("rad"):
+            source_unit = "rad"
+
+        elif units.startswith("deg"):
+            source_unit = "deg"
+
+    d_array = d_array.copy(data=_normalize_angle_units(d_array.values, source_unit))
+    d_array.attrs["units"] = "degree"
+    return d_array
+
+
+def normalize_dataset(ds: xr.Dataset) -> xr.Dataset:
+    """Return a normalized copy of the input dataset.
+
+    Spatial dimensions and respective units are inferred and normatised.
+
+    Args:
+        ds: Source geometry dataset.
+
+    Returns:
+        ``xr.Dataset`` .
+
+    Raises:
+        ValueError: When the grid type cannot be handled or required
+            vertex coordinates are missing.
+    """
+    lat_name, lon_name = _get_vertex_names(ds) if _is_unstructured(ds) else _get_spatial_dims(ds)
+
+    if ds[lat_name].ndim > 2 or ds[lon_name].ndim > 2:
+        raise ValueError("Latitude/longitude coordinates must be 1-D or 2-D.")
+
+    return _replace_values(
+        ds,
+        {
+            lat_name: normalize_lat(normalize_degrees(ds[lat_name])),
+            lon_name: normalize_lon(normalize_degrees(ds[lon_name])),
+        },
+    )

@@ -139,7 +139,7 @@ class TestWeightsDescription:
         self, regular_ds: xr.Dataset, method, level, expected
     ) -> None:
         weight_desc = WeightsDescription(
-            source=SourceDescription.from_dataset(regular_ds),
+            source=SourceDescription.from_normalized_dataset(regular_ds),
             target=TargetDescription(level=level, order="nest"),
             method=method,
             units="auto",

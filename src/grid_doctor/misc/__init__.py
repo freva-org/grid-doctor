@@ -20,6 +20,7 @@ from .dataset import (
     _looks_like_radians,
     _normalize_angle_units,
     _to_float64,
+    normalize_dataset,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     '_get_unstructured_dim',
     '_get_spatial_dims',
     '_is_unstructured',
+    'normalize_dataset',
 ]
