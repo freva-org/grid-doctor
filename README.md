@@ -1,16 +1,17 @@
 # Grid Doctor HEALs your Grids
 <p align="center">
   <img src="docs/assets/logo-512.png" alt="Logo" width="200"><br>
+  <a href="https://freva-org.github.io/grid-doctor/">
   <img
-      src="https://img.shields.io/badge/grid--doctor-Documentation-green?logo=read-the-docs&amp;logoColor=white"
-      alt="Documentation"
-    >
+    src="https://img.shields.io/badge/grid--doctor-Documentation-green?logo=readthedocs&logoColor=white"
+    alt="Documentation"
+  >
+</a>
 </p>
 
-> [!NOTE]
-> This is a scripting solution for a proof of concept. An operational ready
-> approach will follow. For adding code for specific datasets please add
-> your script solution into the `scripts/<yourname>` folder.
+This repository contains the code for regridding data onto HEALPix grids.
+Example scripts can be found in the `scripts/` directory.
+For full documentation, see https://freva-org.github.io/grid-doctor/.
 
 ## Installation
 
@@ -209,7 +210,7 @@ tox -e docs-serve    # live preview at http://127.0.0.1:8000
 
 
 ## Quick Start
-
+Running the example will likely require ESMF to be installed, see above.
 ```python
 import grid_doctor as gd
 
@@ -217,15 +218,15 @@ ds = gd.cached_open_dataset(["path/to/*.nc"])
 max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
 weights_dir="/scratch/{user[0]}/{user}/grid-doctor/weights"\
     .format(user=getuser(), level=level)
-gd.cached_weights(
+weights_file = gd.cached_weights(
     ds,
     level=max_level,
     prefer_offline=True,
-    cache_path=weights_path
+    cache_path=weights_dir
 )
 pyramid = gd.create_healpix_pyramid(
     ds,
-    weights_path=weights_dir,
+    weights_path=weights_file,
     max_level=max_level
 )
 gd.save_pyramid(

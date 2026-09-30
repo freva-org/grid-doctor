@@ -108,7 +108,7 @@ def resolution_to_healpix_level(resolution_deg: float) -> int:
     """
     if resolution_deg <= 0.0:
         raise ValueError("resolution_deg must be positive.")
-    level = int(np.floor(np.log2(58.6 / resolution_deg)))
+    level = int(np.round(np.log2(58.6 / resolution_deg)))
     return max(0, level)
 
 

@@ -49,6 +49,7 @@ dependencies = [
     "dask[array]",
     "numba",
     "numpy_groupies",
+    "h5netcdf",
 ]
 
 
@@ -70,6 +71,11 @@ tests = [
     "pytest-mock",
     "pytest-cov",
     "healpy",
+    "pandas>=2.2",
+    "bottleneck",
+    "cftime",
+    "netCDF4",
+    "numexpr",
 ]
 docs = [
     "mkdocs>=1.6,<2",
@@ -160,7 +166,7 @@ deps = -e .
        codespell
        bandit[toml]
 commands =
-    python3 -m isort --check --profile black -t py312 -l 79 src
+    isort --check --profile black --py 312 -l 79 src
     python3 -m flake8 src --count --max-complexity=10 --ignore=F405,F403,E704,W503,C901 --max-line-length=120 --statistics --show-source
     codespell {posargs: --quiet-level=2} src/
     python3 -m pydocstyle src/grid_doctor
@@ -169,6 +175,9 @@ commands =
 setenv =
     VIRTUALENV_SYSTEM_SITE_PACKAGES=true
 description = "Run the unit tests."
+# Keep system packages available for external libraries, but install declared
+# dependencies locally so they take precedence over inherited packages.
+install_command = python -I -m pip install --ignore-installed {opts} {packages}
 deps = -e .[tests]
 commands =
     python3 -m pytest -vv --cov=grid_doctor --cov-report=html:coverage_report --junitxml report.xml --cov-report xml tests/
@@ -178,27 +187,21 @@ commands =
 description = Prepare the documentation creation
 static =
     rm -rf .build site-tech site-data
-    mkdir -p .build/tech .build/data
+    mkdir -p .build/tech
     cp -a docs/technical/. .build/tech/
-    cp -a docs/data/. .build/data/
     cp -a docs/shared/. .build/tech/
-    cp -a docs/shared/. .build/data/
     cp -a docs/assets .build/tech/
-    cp -a docs/assets .build/data/
 
 serve =
     rm -rf .build
-    mkdir -p .build/tech .build/data
+    mkdir -p .build/tech
     cp -as {toxinidir}/docs/technical/. .build/tech/
-    cp -as {toxinidir}/docs/data/. .build/data/
     cp -as {toxinidir}/docs/shared/. .build/tech/
-    cp -as {toxinidir}/docs/shared/. .build/data/
     mkdir -p .build/tech/assets .build/data/assets
     cp -as {toxinidir}/docs/assets/. .build/tech/assets/
-    cp -as {toxinidir}/docs/assets/. .build/data/assets/
 
 [testenv:docs]
-description = Build docs. Usage: tox -e docs -- [tech|data|all]
+description = Build docs. Usage: tox -e docs
 allowlist_externals =
     rm
     cp
@@ -209,13 +212,11 @@ deps =
     -e .[docs]
     codespell
 commands =
-    python docs/scripts/build_stac_browser_docs.py {posargs:tech}
-    python docs/scripts/build_databrowser_docs.py {posargs:tech}
     codespell {posargs: --quiet-level=2} docs
-    mkdocs build --strict -f mkdocs.{posargs:tech}.yml
+    mkdocs build --strict -f mkdocs.tech.yml
 
 [testenv:docs-serve]
-description = Serve docs locally. Usage: tox -e serve-docs -- [tech|data]
+description = Serve docs locally. Usage: tox -e serve-docs
 allowlist_externals =
     rm
     cp
@@ -226,10 +227,10 @@ deps =
 commands_pre =
     {[docs-prep]serve}
 commands =
-    python docs/scripts/build_stac_browser_docs.py {posargs:tech}
-    python docs/scripts/build_databrowser_docs.py {posargs:tech}
+    python docs/scripts/build_stac_browser_docs.py tech
+    python docs/scripts/build_databrowser_docs.py tech
     codespell --quiet-level=2 docs
-    mkdocs serve -f mkdocs.{posargs:tech}.yml --strict -a localhost:8000 --watch docs
+    mkdocs serve -f mkdocs.tech.yml --strict -a localhost:8000 --watch docs
 
 [testenv:types]
 description = Run mypy in strict mode

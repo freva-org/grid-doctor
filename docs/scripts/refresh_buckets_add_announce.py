@@ -3,18 +3,16 @@ Refresh docs/assets/waterpark-datasets.json from the live bucket listing.
 """
 
 from __future__ import annotations
-
+import logging
 import argparse
 import json
 import os
 import sys
 from pathlib import Path
 
-import s3fs
-
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUT = HERE.parent.parent / "docs" / "assets" / "waterpark-datasets.json"
-
+logger = logging.getLogger(__name__)
 #: Override directory registered as ``theme.custom_dir`` in
 #: mkdocs.data.yml (docs/data/overrides). NOTE: this lives inside the
 #: docs tree, so it must stay listed under ``exclude_docs`` -- otherwise
@@ -49,6 +47,8 @@ def render_announcement(text: str, target: Path = OVERRIDE_FILE) -> None:
 
 
 def list_buckets(endpoint: str, key: str, secret: str) -> list[str]:
+    import s3fs
+
     fs = s3fs.S3FileSystem(
         key=key, secret=secret, client_kwargs={"endpoint_url": endpoint}
     )
@@ -62,10 +62,11 @@ def list_buckets(endpoint: str, key: str, secret: str) -> list[str]:
         except Exception:
             continue
     if not names:
-        raise SystemExit(
+        logger.warning(
             f"could not list buckets from {endpoint} "
             f"(check admin credentials / gateway permissions)"
         )
+        sys.exit(0)
     return sorted(names)
 
 
@@ -84,17 +85,17 @@ def main() -> None:
             "set WATERPARK_S3_KEY and WATERPARK_S3_SECRET in the environment"
         )
 
-    buckets = list_buckets(args.endpoint, key, secret)
-
     # Blacklist
     blacklist = {
         b.strip()
         for b in os.environ.get("WATERPARK_BUCKET_BLACKLIST", "").split(",")
         if b.strip()
     }
-    if blacklist:
-        buckets = [b for b in buckets if b not in blacklist]
-
+    buckets = [
+        b
+        for b in list_buckets(args.endpoint, key, secret)
+        if b not in blacklist
+    ]
     # check if the JSON is already there.
     existing: dict = {}
     if args.out.exists():

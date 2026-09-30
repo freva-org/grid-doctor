@@ -441,6 +441,42 @@ def _ensure_ccw(
 
 
 # ===================================================================
+# Dataset coordinate introspection
+# ===================================================================
+
+
+def _get_unstructured_vertices(ds: xr.Dataset) -> tuple[str | None, str | None]:
+    """Return longitude and latitude vertex variable names for *ds*.
+
+    Recognises the ICON-style names used by existing inputs, common CF-style
+    names, and arbitrary CF bounds variables referenced from the cell-centre
+    longitude and latitude coordinates.
+    """
+    for lon_name, lat_name in (
+        ("clon_vertices", "clat_vertices"),
+        ("lon_vertices", "lat_vertices"),
+        ("lon_bnds", "lat_bnds"),
+    ):
+        if lon_name in ds and lat_name in ds:
+            return lon_name, lat_name
+
+    for lon_center, lat_center in (("lon", "lat"), ("clon", "clat")):
+        if lon_center not in ds or lat_center not in ds:
+            continue
+        lon_bounds = ds[lon_center].attrs.get("bounds")
+        lat_bounds = ds[lat_center].attrs.get("bounds")
+        if (
+            isinstance(lon_bounds, str)
+            and isinstance(lat_bounds, str)
+            and lon_bounds in ds
+            and lat_bounds in ds
+        ):
+            return lon_bounds, lat_bounds
+
+    return None, None
+
+
+# ===================================================================
 # Bounds and coverage inference
 # ===================================================================
 
@@ -762,7 +798,7 @@ def _regular_grid_mesh(
         )
         # Rewrite last column to point to column 0 nodes.
         node_idx_full[:, -1] = node_idx_full[:, 0]
-        face_nodes = np.stack(
+        face_nodes: IntArray = np.stack(
             (
                 node_idx_full[:-1, :-1],
                 node_idx_full[:-1, 1:],
@@ -849,6 +885,32 @@ def _curvilinear_grid_mesh(
     )
 
 
+def _collapse_repeated_corners(face_nodes: IntArray) -> IntArray:
+    """Remove cyclically consecutive duplicate node ids within each face.
+
+    ``face_nodes`` has shape ``(n_face, max_corners)`` with ``-1`` padding.
+    Cell count and order are preserved (so source indexing stays aligned
+    with the data); only repeated corner references are dropped and the
+    freed slots re-padded with ``-1``.
+    """
+    n_face, max_nodes = face_nodes.shape
+    out = np.full_like(face_nodes, -1)
+    for f in range(n_face):
+        row = face_nodes[f]
+        ids = row[row >= 0]
+        if ids.size == 0:
+            continue
+        kept: list[int] = [int(ids[0])]
+        for node in ids[1:]:
+            if int(node) != kept[-1]:
+                kept.append(int(node))
+        # Drop a closing duplicate (last vertex repeats the first).
+        if len(kept) > 1 and kept[-1] == kept[0]:
+            kept.pop()
+        out[f, : len(kept)] = kept
+    return out
+
+
 def _corner_mesh_from_arrays(
     cell_lon: FloatArray,
     cell_lat: FloatArray,
@@ -885,6 +947,12 @@ def _corner_mesh_from_arrays(
         raise ValueError(f"Source cell {bad} has fewer than three valid vertices.")
 
     canonical = _canonical_lon(cell_lon)
+    # At |lat| == 90 the longitude is degenerate: every (lon, 90) pair denotes
+    # the same point.  Without this, the cells meeting at each pole dedup to
+    # distinct nodes and the mesh is disconnected there (ESMF: "gid missing
+    # from search list").
+    pole = np.isclose(np.abs(cell_lat), 90.0, atol=1e-9) & mask
+    canonical = np.where(pole, 0.0, canonical)
 
     # Round for deduplication, keeping original values for output.
     rounded_lon = np.round(np.where(mask, canonical, 0.0), node_round_ndigits)
@@ -908,6 +976,24 @@ def _corner_mesh_from_arrays(
 
     face_nodes = np.full(cell_lon.shape, -1, dtype=np.int32)
     face_nodes.ravel()[flat_mask] = inverse.astype(np.int32, copy=False)
+
+    # Unstructured grids (e.g. FESOM) often pad each cell to a fixed vertex
+    # count by repeating vertices. After node de-duplication those repeats
+    # become the *same* node id within a face, which ESMF rejects at mesh
+    # creation ("repeated points" in triangulate_warea). Collapse cyclically
+    # consecutive duplicate node ids per face, preserving cell order/count so
+    # the source indexing still matches the data array.
+    face_nodes = _collapse_repeated_corners(face_nodes)
+    remaining = (face_nodes >= 0).sum(axis=1)
+    if np.any(remaining < 3):
+        n_bad = int(np.count_nonzero(remaining < 3))
+        first = int(np.flatnonzero(remaining < 3)[0])
+        raise ValueError(
+            f"{n_bad} source cell(s) have fewer than three distinct vertices "
+            f"after de-duplication (first: cell {first}). The source grid has "
+            f"degenerate cells that cannot form polygons for conservative "
+            f"remapping."
+        )
 
     face_lon, face_lat = _vectorized_polygon_centres(canonical, cell_lat)
 
@@ -999,13 +1085,13 @@ def _source_mesh(
             vertex coordinates are missing.
     """
     if _is_unstructured(ds):
-        lon_name = "clon_vertices" if "clon_vertices" in ds else "lon_vertices"
-        lat_name = "clat_vertices" if "clat_vertices" in ds else "lat_vertices"
-        if lon_name not in ds or lat_name not in ds:
+        lon_name, lat_name = _get_unstructured_vertices(ds)
+        if lon_name is None or lat_name is None:
             raise ValueError(
-                "Unstructured grids require per-cell vertex "
-                "coordinates such as "
-                "'clon_vertices'/'clat_vertices'."
+                "Unstructured grids require per-cell vertex coordinates, for "
+                "example 'clon_vertices'/'clat_vertices', "
+                "'lon_vertices'/'lat_vertices', or CF bounds variables "
+                "referenced by lon:bounds and lat:bounds."
             )
         lon_v = _canonical_lon(
             _normalize_angle_units(_to_float64(ds[lon_name].values), source_units)
@@ -1457,13 +1543,32 @@ def describe_source(
     geometry_ds = grid if grid is not None else dataset
     resolved_kind = _classify_source_kind(geometry_ds, explicit_kind=effective_kind)
     source_mesh, source_dims = _source_mesh(geometry_ds, source_units=source_units)
-    ignore_unmapped = not _looks_global(geometry_ds, source_units=source_units)
+
+    # The HEALPix target is a complete global tessellation. A source that
+    # does not fully tile the sphere -- ocean/land-masked grids, regional
+    # domains, polar gaps -- leaves some destination cells with no
+    # overlapping source cell. Those cells must become missing values, not
+    # abort weight generation, so unmapped destinations are ignored by
+    # default. Callers can pass ignore_unmapped=False to require full
+    # coverage (e.g. for a source that is expected to be globally complete).
+    #
+    # _looks_global is retained as a diagnostic: a source that *does* look
+    # global yet still leaves cells unmapped may indicate a grid problem
+    # (e.g. NaN coordinates or broken corner inference) rather than a mask.
+    looks_global = _looks_global(geometry_ds, source_units=source_units)
+    ignore_unmapped = True
+    if not looks_global:
+        logger.debug(
+            "Source grid does not look global (lon/lat extent below "
+            "thresholds); unmapped HEALPix destinations are expected."
+        )
 
     metadata: dict[str, str | int | float | bool] = {
         "grid_doctor_source_kind": resolved_kind,
         "grid_doctor_source_dims": json.dumps(list(source_dims)),
         "grid_doctor_source_size": source_mesh.face_count,
         "grid_doctor_source_units": source_units,
+        "grid_doctor_source_looks_global": int(looks_global),
     }
 
     return SourceDescription(
