@@ -142,7 +142,7 @@ def _build_numba_kernels() -> (
     ) -> None:
         """Fused NaN-aware sparse apply with renormalization."""
         n_target = indptr.size - 1
-        for i in numba.prange(n_target):  # type: ignore
+        for i in numba.prange(n_target):
             wsum = 0.0
             sup = 0.0
             for j in range(indptr[i], indptr[i + 1]):
@@ -164,7 +164,7 @@ def _build_numba_kernels() -> (
     ) -> None:
         """Fused sparse apply that propagates NaN."""
         n_target = indptr.size - 1
-        for i in numba.prange(n_target):  # type: ignore
+        for i in numba.prange(n_target):
             wsum = 0.0
             has_nan = False
             for j in range(indptr[i], indptr[i + 1]):
