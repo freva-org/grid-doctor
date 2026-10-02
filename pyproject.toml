@@ -216,7 +216,7 @@ commands =
     mkdocs build --strict -f mkdocs.tech.yml
 
 [testenv:docs-serve]
-description = Serve docs locally. Usage: tox -e serve-docs
+description = Serve docs locally. Usage: tox -e docs-serve
 allowlist_externals =
     rm
     cp
@@ -228,7 +228,6 @@ commands_pre =
     {[docs-prep]serve}
 commands =
     python docs/scripts/build_stac_browser_docs.py tech
-    python docs/scripts/build_databrowser_docs.py tech
     codespell --quiet-level=2 docs
     mkdocs serve -f mkdocs.tech.yml --strict -a localhost:8000 --watch docs
 
