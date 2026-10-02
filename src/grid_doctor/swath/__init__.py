@@ -63,9 +63,9 @@ from collections.abc import Mapping
 import numpy as np
 import xarray as xr
 
+from ..misc import _canonical_lon
 from ..remap import _attach_healpix_coords
 from ..remap_backend import (
-    _canonical_lon,
     _require_healpix_geo_module,
 )
 from ..types import BinAgg, Int64Array, SourceUnits

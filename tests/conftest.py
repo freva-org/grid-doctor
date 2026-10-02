@@ -69,8 +69,8 @@ def _make_era5_dataset() -> xr.Dataset:
     )
 
 
-def _make_unstructured_dataset(ncells: int = 4, *, radians: bool = False) -> xr.Dataset:
-    lon_vertices_deg = np.array(
+def _make_unstructured_dataset(ncells: int = 4, cell_size: int = 10, *, radians: bool = False) -> xr.Dataset:
+    lon_vertices_deg = cell_size * np.array(
         [
             [0.0, 1.0, 0.0],
             [1.0, 1.0, 0.0],
@@ -79,7 +79,7 @@ def _make_unstructured_dataset(ncells: int = 4, *, radians: bool = False) -> xr.
         ],
         dtype=np.float64,
     )[:ncells]
-    lat_vertices_deg = np.array(
+    lat_vertices_deg = cell_size * np.array(
         [
             [0.0, 0.0, 1.0],
             [0.0, 1.0, 1.0],
@@ -116,11 +116,11 @@ def _make_unstructured_dataset(ncells: int = 4, *, radians: bool = False) -> xr.
     )
 
 
+# High level fixture to resolve indirect ones; parametrize via ``helpers.TEST_DS``
 @pytest.fixture
 def test_ds(request: pytest.FixtureRequest) -> xr.Dataset:
-    if request.param == "era5":
-        return _make_era5_dataset()
-    return _make_structured_dataset(grid=request.param)
+    """Resolve a fixture name to its dataset; parametrize with ``indirect=True``."""
+    return request.getfixturevalue(request.param)
 
 
 @pytest.fixture

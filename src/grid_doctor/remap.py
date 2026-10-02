@@ -24,19 +24,21 @@ from typing import Any, cast
 import numpy as np
 import xarray as xr
 
-from .remap_apply import (
-    apply_weights_nd,
-    extract_sparse_weights,
-)
-from .remap_backend import (
+from .misc import (
     _UNSTRUCTURED_DIMS,
-    OfflineWeightConfig,
     _canonical_lon,
     _get_latlon_arrays,
     _get_spatial_dims,
     _get_unstructured_dim,
     _is_unstructured,
-    _normalise_angle_units,
+    _normalize_angle_units,
+)
+from .remap_apply import (
+    apply_weights_nd,
+    extract_sparse_weights,
+)
+from .remap_backend import (
+    OfflineWeightConfig,
     _require_healpix_geo_module,
     compute_healpix_weights_backend,
 )
@@ -72,8 +74,8 @@ def _source_centre_arrays(
         ``(lat, lon, source_dims)``.
     """
     lat, lon = _get_latlon_arrays(ds)
-    lat = _normalise_angle_units(lat, source_units)
-    lon = _canonical_lon(_normalise_angle_units(lon, source_units))
+    lat = _normalize_angle_units(lat, source_units)
+    lon = _canonical_lon(_normalize_angle_units(lon, source_units))
 
     if _is_unstructured(ds):
         spatial_dim = _get_unstructured_dim(ds)

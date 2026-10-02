@@ -39,8 +39,9 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from .misc import _canonical_lon
 from .remap import _make_crs_variable
-from .remap_backend import _canonical_lon, _require_healpix_geo_module
+from .remap_backend import _require_healpix_geo_module
 from .types import Int64Array
 
 logger = logging.getLogger(__name__)
