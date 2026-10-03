@@ -1,151 +1,117 @@
 name: CI
 
-permissions:
-  contents: read
-  pull-requests: write
-
 on:
   push:
-    paths:
-      - "src/**"
-      - ".github/workflows/ci.yml"
+    branches: [main]
   pull_request:
-    pahts:
-      - "src/**"
-      - ".github/workflows/ci.yml"
-
   workflow_dispatch:
 
-  workflow_call:
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  lint:
+  # Decide which parts of the pipeline a change needs. The workflow itself
+  # always runs, so the final `ci-ok` job can be the single required check.
+  changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      docs: ${{ steps.filter.outputs.docs }}
     steps:
       - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - "src/**"
+              - "tests/**"
+              - "pyproject.toml"
+              - ".github/workflows/ci.yaml"
+            docs:
+              - "docs/**"
+              - "src/**"
+              - "mkdocs.*.yml"
+              - "pyproject.toml"
+              - ".github/workflows/ci.yaml"
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+  lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-
-      - name: Install tox
-        run: pip install tox
-
-      - name: Run linters
-        run: tox -e lint
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install "tox>=4"
+      - run: tox -e lint
 
   types:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v1
+      - uses: actions/setup-python@v5
         with:
-          micromamba-version: "latest"
-          environment-name: grid-doctor
-          cache-environment: true
-          create-args: >-
-            python=3.13
-            pip
-          condarc: |
-            channels:
-              - conda-forge
-            channel_priority: strict
-          init-shell: bash
-
-      - name: Install packages
-        shell: bash -l {0}
-        run: |
-          python -m pip install -e .[dev]
-          pip install tox
-
-      - name: Run type checker
-        shell: bash -l {0}
-        run: tox -e types
-
-  docs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v1
-        with:
-          micromamba-version: "latest"
-          environment-name: grid-doctor
-          cache-environment: true
-          create-args: >-
-            python=3.13
-            pip
-          condarc: |
-            channels:
-              - conda-forge
-            channel_priority: strict
-          init-shell: bash
-
-      - name: Install packages
-        shell: bash -l {0}
-        run: |
-          python -m pip install -e .[dev]
-          pip install tox
-
-      - name: Build docs (strict)
-        shell: bash -l {0}
-        run: tox -e docs
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install "tox>=4"
+      - run: tox -e types
 
   tests:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
-      max-parallel: 5
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          submodules: recursive
-
-      - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v1
-        with:
-          micromamba-version: "latest"
-          environment-name: grid-doctor
-          cache-environment: true
-          create-args: >-
-            python=${{ matrix.python-version }}
-            gdal
-            rasterio
-            h5py
-            h5netcdf
-            hdf5
-            netcdf4
-            pip
-            cfgrib
-            xarray
-            cffi
-            tox
-          condarc: |
-            channels:
-              - conda-forge
-            channel_priority: strict
-          init-shell: bash
-
-      - name: Install Python packages
-        shell: bash -l {0}
-        run: python -m pip install -e .[dev]
-
-      - name: Run tests
-        shell: bash -l {0}
-        run: tox -e test
-
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install "tox>=4"
+      - run: tox -e test
       - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          verbose: true
+          files: coverage.xml
+          flags: py${{ matrix.python-version }}
+          fail_ci_if_error: false
+
+  docs:
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/docs-build.yaml
+
+  # Single required status check for branch protection. Skipped jobs count
+  # as success; failed or cancelled jobs fail the gate.
+  ci-ok:
+    if: always()
+    needs: [changes, lint, types, tests, docs]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check job results
+        run: |
+          echo '${{ toJSON(needs) }}' | jq -e 'all(.[]; .result == "success" or .result == "skipped")'
