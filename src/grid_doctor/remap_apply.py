@@ -440,7 +440,12 @@ def apply_weights_nd(
     Returns:
         Remapped array with shape ``(*batch_dims, n_target)``.
     """
-    arr = np.asarray(values, dtype=np.float64)
+    # float32 sources stay float32: the kernels accumulate in float64
+    # anyway (the weights are float64), and converting would copy the
+    # whole source field in every task that reads it.
+    arr = np.asarray(values)
+    if arr.dtype not in (np.float32, np.float64):
+        arr = arr.astype(np.float64)
     n_target, n_source = matrix.shape
 
     # Flatten source dims into a single trailing dimension.

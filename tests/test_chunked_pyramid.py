@@ -275,3 +275,31 @@ def test_dask_tasks_use_serial_kernels(
         _source(chunked), weights, cell_chunks=cell_chunks
     ).compute()
     assert seen and set(seen) == {expected}
+
+
+@pytest.mark.parametrize("policy", ["renormalize", "propagate"])
+@pytest.mark.parametrize(
+    ("backend", "parallel", "batch"),
+    [("scipy", True, 3), ("numba", True, 1), ("numba", False, 1), ("numba", False, 3)],
+)
+def test_float32_sources_are_not_upcast_copied(
+    policy: str, backend: str, parallel: bool, batch: int
+) -> None:
+    """float32 input skips the full-field float64 copy without changing results."""
+    from scipy.sparse import random as sparse_random
+
+    from grid_doctor.remap_apply import apply_weights_nd
+
+    matrix = sparse_random(500, 300, density=0.02, format="csr", random_state=3)
+    values = np.random.default_rng(4).normal(size=(batch, 300)).astype(np.float32)
+    values[:, ::11] = np.nan
+    kwargs: dict[str, Any] = {
+        "matrix": matrix,
+        "missing_policy": policy,
+        "backend": backend,
+        "parallel": parallel,
+    }
+    as32 = apply_weights_nd(values, **kwargs)
+    as64 = apply_weights_nd(values.astype(np.float64), **kwargs)
+    assert as32.dtype == np.float64
+    np.testing.assert_array_equal(as32, as64)
