@@ -477,6 +477,9 @@ ds = pyramid[3]
 ds.sst.weighted(ds.sst_valid_fraction.fillna(0)).mean("cell")
 ```
 
+Worked examples (global, regional and zonal means, area integrals) are
+in the [Averaging masked fields](recipes/averaging.md) recipe.
+
 The option is opt-in because the fraction has the shape of its variable:
 
 - `True` stores a fraction for every cell variable, with its full shape.
@@ -570,7 +573,7 @@ returned.  Combined with `fill_value = NaN` and empty-chunk elision on
 the data variables, storage and access cost are proportional to the
 domain, not the globe, while cross-dataset and cross-level alignment
 stay a bit-shift (`parent = id >> 2k`) exactly as for every other
-dataset in the hub.
+nested HEALPix dataset.
 
 Levels at or below the threshold within the same pyramid are written
 with materialised coordinates as usual, so coarse overview levels stay

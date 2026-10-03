@@ -25,11 +25,12 @@ spacing, exactly as
 [`resolution_to_healpix_level`][grid_doctor.helpers.resolution_to_healpix_level]
 would suggest.
 
-All cell geometry uses a perfect sphere, consistent with the rest of
-grid-doctor and with the Waterpark technical decisions.  Geodetic (WGS84)
-latitudes are deliberately interpreted as spherical: the maximum
-discrepancy (~0.19° at 45° latitude) is accepted so that all datasets in a
-hub share one indexing geometry and overlay without systematic offsets.
+All cell geometry uses a perfect sphere, consistent with remapping in
+grid-doctor.  Geodetic (WGS84) positions are assigned to the spherical
+cell that contains them.  This is as accurate as indexing on the
+ellipsoid, but the two are different grids (cells displaced by up to
+~0.13° at 45° latitude), so binned and remapped data overlay without
+offsets only when both use the same definition.
 
 The output of the dense path carries the full grid-doctor metadata
 (``crs`` variable, ``healpix_*`` and ``grid_doctor_*`` attributes) so that
@@ -45,7 +46,7 @@ through per-class counting — was informed by earlier EarthCARE-to-HEALPix
 conversion work by Anne Fouilloux
 (https://github.com/annefou/earthcare-dggs, MIT licensed).  This module
 is an independent implementation and deliberately diverges on cell
-indexing (perfect sphere instead of WGS84, for hub-wide alignment) and
+indexing (perfect sphere instead of WGS84, to match remapped data) and
 fill-value handling (declared attributes instead of dtype conventions).
 
 The initial implementation of this module, its test suite, and the

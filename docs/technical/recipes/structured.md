@@ -58,7 +58,7 @@ pyramid = gd.create_healpix_pyramid(ds, max_level=7)
 
 For variables with missing values, store the valid fraction of each cell
 so that averages over coarse levels stay consistent with the finest one
-(see [Averaging over coarse levels](../technical-decisions.md#averaging-over-coarse-levels-valid-fractions)):
+(see [Averaging masked fields](averaging.md) for how to use them):
 
 ```python
 pyramid = gd.create_healpix_pyramid(

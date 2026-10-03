@@ -1,6 +1,6 @@
 # Accessing High-Resolution Regional Data
 
-Some datasets in the hub cover a small area (a city, an island, a
+Some datasets cover a small area (a city, an island, a
 catchment) at very high HEALPix levels (16 is roughly 100 m, 20 roughly
 6 m cells).  These stores look different from the global pyramids in
 two ways, and both change how you load them:
@@ -149,8 +149,10 @@ berlin["t2m"].mean()
     ds.sst.weighted(ds.sst_valid_fraction.fillna(0)).mean("cell")
     ```
 
-    See [Averaging over coarse levels](technical-decisions.md#averaging-over-coarse-levels-valid-fractions)
-    for the background.
+    The [Averaging masked fields](recipes/averaging.md) recipe has
+    worked examples, and
+    [Averaging over coarse levels](technical-decisions.md#averaging-over-coarse-levels-valid-fractions)
+    the background.
 
 ### Circular regions
 
@@ -215,7 +217,7 @@ era5_region = era5_level9.isel(
 ```
 
 No interpolation, no index join.  The hierarchies coincide by
-construction, which is one of the reasons the hub uses nested ordering
+construction, which is one of the reasons to use nested ordering
 everywhere.
 
 ## Coarser overview levels
@@ -223,7 +225,7 @@ everywhere.
 High-level stores are still pyramids.  For a quick overview, open a
 coarse level of the *same* store.  Levels at or below the coordinate
 threshold are written with materialised coordinates and behave exactly
-like every other dataset in the hub, including in the browser viewer:
+like every other global pyramid, including in the browser viewer:
 
 ```python
 overview = xr.open_zarr(".../city-example.zarr/level_8.zarr", chunks=None)
