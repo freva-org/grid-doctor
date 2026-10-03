@@ -19,8 +19,9 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
+import dask.array as da
 import numpy as np
 import xarray as xr
 
@@ -365,6 +366,64 @@ def _resolve_source_dims_for_weight_application(
 # ===================================================================
 
 
+DEFAULT_CELL_CHUNK = 4**11
+"""Default output chunk along ``cell`` (4 Mi cells, 32 MiB as float64)."""
+
+
+def _resolve_cell_chunk(
+    cell_chunks: int | Literal["auto"] | None, n_target: int
+) -> int | None:
+    """Validate the cell chunk size; ``None`` when no chunking is needed."""
+    if cell_chunks is None:
+        return None
+    size = DEFAULT_CELL_CHUNK if cell_chunks == "auto" else int(cell_chunks)
+    if size < 4:
+        raise ValueError("cell_chunks must be at least 4.")
+    size -= size % 4  # nested parents must never straddle a chunk
+    return size if size < n_target else None
+
+
+def _apply_weights_rowblocked(
+    data: xr.DataArray,
+    source_dims: tuple[str, ...],
+    row_blocks: list[Any],
+    **kwargs: Any,
+) -> xr.DataArray:
+    """Apply weights to dask-backed *data*, one output chunk per row block.
+
+    Rows of the weight matrix are independent, so output chunk ``k`` is
+    ``W[rows_k] @ x``.  The source still has to be complete per batch
+    chunk, but every task only produces (and carries the weights for)
+    its own slice of HEALPix cells.
+    """
+    batch_dims = [str(d) for d in data.dims if d not in source_dims]
+    ordered = data.transpose(*batch_dims, *source_dims)
+    n_batch = len(batch_dims)
+    arr = ordered.data.rechunk({i: -1 for i in range(n_batch, ordered.ndim)})
+    flat = arr.reshape(*arr.shape[:n_batch], -1)
+    parts = [
+        flat.map_blocks(
+            apply_weights_nd,
+            matrix=block,
+            n_source_dims=1,
+            chunks=(*flat.chunks[:-1], (block.shape[0],)),
+            dtype=np.float64,
+            meta=np.empty((0,) * flat.ndim, dtype=np.float64),
+            **kwargs,
+        )
+        for block in row_blocks
+    ]
+    coords = {
+        str(k): v for k, v in ordered.coords.items() if set(v.dims) <= set(batch_dims)
+    }
+    return xr.DataArray(
+        da.concatenate(parts, axis=-1),
+        dims=(*batch_dims, "cell"),
+        coords=coords,
+        name=data.name,
+    )
+
+
 def apply_weight_file(
     ds: xr.Dataset,
     weights_path: str | Path,
@@ -374,6 +433,7 @@ def apply_weight_file(
     source_dims: tuple[str, ...] | None = None,
     source_units: SourceUnits = "auto",
     backend: ApplyBackend = "auto",
+    cell_chunks: int | Literal["auto"] | None = "auto",
 ) -> xr.Dataset:
     """Apply a previously generated ESMF weight file to *ds*.
 
@@ -425,6 +485,14 @@ def apply_weight_file(
     backend:
         Application backend (``"auto"``, ``"scipy"``, ``"numba"``).
 
+    cell_chunks:
+        Chunk size of the output along ``cell`` for dask-backed input.
+        Each output chunk is computed from its own slice of weight-matrix
+        rows, so no task holds the whole HEALPix field.  ``"auto"`` uses
+        ``DEFAULT_CELL_CHUNK`` cells (rounded to a multiple of 4), ``None``
+        produces a single chunk.  NumPy-backed input is always computed
+        in one piece.
+
     Returns
     -------
     xarray.Dataset
@@ -452,11 +520,28 @@ def apply_weight_file(
         stored_source_dims=stored_sd,
     )
     n_src_dims = len(resolved_sd)
+    cell_chunk = _resolve_cell_chunk(cell_chunks, n_target)
+    row_blocks: list[Any] | None = None
 
     regridded: dict[str, xr.DataArray] = {}
     for name, data in ds.data_vars.items():
         if not set(resolved_sd).issubset(map(str, data.dims)):
             regridded[str(name)] = data
+            continue
+
+        if cell_chunk is not None and data.chunks is not None:
+            if row_blocks is None:
+                row_blocks = [
+                    matrix[start : start + cell_chunk]
+                    for start in range(0, n_target, cell_chunk)
+                ]
+            regridded[str(name)] = _apply_weights_rowblocked(
+                data,
+                resolved_sd,
+                row_blocks,
+                missing_policy=missing_policy,
+                backend=backend,
+            )
             continue
 
         regridded[str(name)] = cast(
@@ -600,6 +685,7 @@ def regrid_to_healpix(
     keep_intermediates: bool = False,
     workdir: str | Path | None = None,
     spectral_transform_command: list[str] | tuple[str, ...] | None = None,
+    cell_chunks: int | Literal["auto"] | None = "auto",
 ) -> xr.Dataset:
     """Regrid *ds* to a HEALPix target grid.
 
@@ -650,6 +736,10 @@ def regrid_to_healpix(
         Working directory for offline intermediate files.
     spectral_transform_command:
         External command for ``source_kind="spectral"``.
+    cell_chunks:
+        Output chunk size along ``cell`` for dask-backed input, see
+        [`apply_weight_file`][grid_doctor.remap.apply_weight_file].
+        Coarser pyramid levels keep the same chunk size.
 
     Returns
     -------
@@ -681,6 +771,7 @@ def regrid_to_healpix(
         weight_file,
         missing_policy=missing_policy,
         backend=backend,
+        cell_chunks=cell_chunks,
     )
 
 

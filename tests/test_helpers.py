@@ -409,23 +409,14 @@ class TestPyramidBuilders:
                 },
             )
 
-        def fake_coarsen(
-            ds: xr.Dataset, level: int, **kwargs: Any
-        ) -> xr.Dataset:
+        def fake_coarse_levels(
+            finest: xr.Dataset, **kwargs: Any
+        ) -> dict[int, xr.Dataset]:
             coarsen_calls.append(kwargs)
-            npix = 12 * (4**level)
-            return xr.Dataset(
-                {"t": (("cell",), np.zeros(npix))},
-                attrs=ds.attrs
-                | {
-                    "healpix_level": level,
-                    "healpix_nside": 2**level,
-                    "healpix_order": "nested",
-                },
-            )
+            return {}
 
         monkeypatch.setattr(helpers, "regrid_to_healpix", fake_regrid)
-        monkeypatch.setattr(helpers, "coarsen_healpix", fake_coarsen)
+        monkeypatch.setattr(helpers, "_coarse_levels", fake_coarse_levels)
         create_healpix_pyramid(
             regular_ds,
             max_level=2,
@@ -433,10 +424,14 @@ class TestPyramidBuilders:
             coarsen_mode="mode",
             min_valid_fraction=0.75,
         )
-        assert len(coarsen_calls) == 2
-        for call in coarsen_calls:
-            assert call["coarsen_mode"] == "mode"
-            assert call["min_valid_fraction"] == 0.75
+        assert coarsen_calls == [
+            {
+                "max_level": 2,
+                "min_level": 0,
+                "coarsen_mode": "mode",
+                "min_valid_fraction": 0.75,
+            }
+        ]
 
 
 class TestSavePyramidToS3:
