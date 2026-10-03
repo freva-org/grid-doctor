@@ -510,7 +510,9 @@ Every output dataset carries a standardised set of metadata.
 | `healpix_order`                    | `nested` or `ring` |
 | `grid_doctor_version`              | Package version that produced the data |
 | `grid_doctor_method`               | `conservative` or `nearest` |
-| `grid_doctor_coarsened_from_level` | Immediate parent level (coarsened levels only) |
+| `grid_doctor_coarsened_from_level` | Level the values were coarsened from: the finest level for pyramids, the input level for `coarsen_healpix` (coarsened levels only) |
+| `grid_doctor_coarsen_mode`         | `mean` or `mode` (coarsened levels only) |
+| `grid_doctor_min_valid_fraction`   | Threshold below which cells were set to NaN: cumulative over finest-level cells for `mean`, per coarsening step for `mode` (coarsened levels only) |
 
 ### CRS variable
 

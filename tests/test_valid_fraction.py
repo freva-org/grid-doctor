@@ -162,3 +162,37 @@ def test_fractions_are_written(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
             stored["ice_valid_fraction"].values, ds["ice_valid_fraction"].values
         )
         assert stored["sst"].attrs["ancillary_variables"] == "sst_valid_fraction"
+
+
+@pytest.mark.parametrize(("mode", "threshold"), [("mean", 0.25), ("mode", 0.75)])
+def test_coarse_levels_record_how_they_were_built(
+    monkeypatch: pytest.MonkeyPatch, mode: str, threshold: float
+) -> None:
+    pyramid = _pyramid(monkeypatch, coarsen_mode=mode, min_valid_fraction=threshold)
+    finest = pyramid[LEVEL].attrs
+    assert "grid_doctor_coarsen_mode" not in finest
+    assert "grid_doctor_min_valid_fraction" not in finest
+    for level in range(LEVEL):
+        attrs = pyramid[level].attrs
+        assert attrs["grid_doctor_coarsen_mode"] == mode
+        assert attrs["grid_doctor_min_valid_fraction"] == threshold
+        assert attrs["grid_doctor_coarsened_from_level"] == LEVEL
+
+
+def test_coarsen_healpix_records_resolved_mode() -> None:
+    ds = _finest()
+    ds.attrs["grid_doctor_method"] = "nearest"
+    coarse = coarsen_healpix(ds, 1, coarsen_mode="auto", min_valid_fraction=0.0)
+    assert coarse.attrs["grid_doctor_coarsen_mode"] == "mode"
+    assert coarse.attrs["grid_doctor_min_valid_fraction"] == 0.0
+    assert coarse.attrs["grid_doctor_coarsened_from_level"] == LEVEL
+
+
+def test_build_attributes_survive_zarr(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pyramid = _pyramid(monkeypatch, min_valid_fraction=0.3)
+    save_pyramid(pyramid, str(tmp_path), mode="w")
+    stored = xr.open_zarr(tmp_path / "level_1.zarr").attrs
+    assert stored["grid_doctor_coarsen_mode"] == "mean"
+    assert stored["grid_doctor_min_valid_fraction"] == 0.3

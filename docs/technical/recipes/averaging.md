@@ -145,7 +145,8 @@ precision on every level.
   with the default threshold coarse-level means describe a slightly
   smaller area than the finest level.  Build the pyramid with
   `min_valid_fraction=0` if exact agreement across levels matters more
-  than hiding sparsely covered cells.
+  than hiding sparsely covered cells.  The threshold a level was built
+  with is stored in its `grid_doctor_min_valid_fraction` attribute.
 - **Static fractions for changing masks.**  `"static"` stores the mask
   of the first time step only.  Use the full shape (`True`) for masks
   that change over time or height, such as sea ice or clouds.

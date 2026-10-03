@@ -72,8 +72,16 @@ def assemble_coarse_level(
     data_vars: dict[str, xr.DataArray],
     target_level: int,
     source_level: int,
+    *,
+    coarsen_mode: CoarsenMode,
+    min_valid_fraction: float,
 ) -> xr.Dataset:
-    """Build a coarse-level dataset with HEALPix coordinates and metadata."""
+    """Build a coarse-level dataset with HEALPix coordinates and metadata.
+
+    Records how the level was derived: the source level, the resolved
+    coarsening mode and the minimum valid fraction, so that readers can
+    tell masked cells from missing data.
+    """
     target_nside = 2**target_level
     npix_target = 12 * target_nside**2
     result = xr.Dataset(data_vars, attrs=template.attrs.copy())
@@ -98,6 +106,8 @@ def assemble_coarse_level(
     result.attrs["healpix_level"] = target_level
     result.attrs["healpix_order"] = "nested"
     result.attrs["grid_doctor_coarsened_from_level"] = source_level
+    result.attrs["grid_doctor_coarsen_mode"] = str(coarsen_mode)
+    result.attrs["grid_doctor_min_valid_fraction"] = float(min_valid_fraction)
     return result
 
 
@@ -254,7 +264,14 @@ def coarsen_dataset(
                 source_level=source_level,
             )
 
-    return assemble_coarse_level(ds, coarsened_vars, target_level, source_level)
+    return assemble_coarse_level(
+        ds,
+        coarsened_vars,
+        target_level,
+        source_level,
+        coarsen_mode=coarsen_mode,
+        min_valid_fraction=min_valid_fraction,
+    )
 
 
 def coarse_levels(
@@ -330,5 +347,12 @@ def coarse_levels(
                     shape=fractions[name],
                     source_level=max_level,
                 )
-        levels[level] = assemble_coarse_level(finest, data_vars, level, max_level)
+        levels[level] = assemble_coarse_level(
+            finest,
+            data_vars,
+            level,
+            max_level,
+            coarsen_mode=coarsen_mode,
+            min_valid_fraction=min_valid_fraction,
+        )
     return levels
