@@ -79,179 +79,71 @@ that mode  every pyramid level is independently remapped from the
 source grid, which is substantially more expensive.
 
 
-## Spherical geometry
+## Sphere or ellipsoid
 
-All HEALPix cell boundaries and centre coordinates are computed on a
-**perfect sphere**, not on the WGS84 ellipsoid[^wgs84].  The remapping
-software we use,
-[ESMF](https://earthsystemmodeling.org/regrid/) (Earth System Modeling
-Framework, a widely used library for regridding Earth-system model
-output), computes conservative overlap areas exclusively on the sphere,
-with great-circle cell edges; it has no ellipsoidal geometry
-mode[^esmf].  The HEALPix target mesh, the source mesh, and the overlap
-calculation therefore all use one and the same geometry.
+HEALPix can be defined on a perfect sphere, the original
+construction[^gorski], or on the WGS84 ellipsoid[^wgs84], where the cell
+boundaries are laid out in authalic latitude so that cells stay
+equal-area on the ellipsoid[^gibb][^hpgeo].  grid-doctor uses the sphere
+by default.
 
-**Plain-language summary.**  It is tempting to think that a spherical
-pipeline is "off by up to 21 km" compared to the real, slightly
-flattened Earth, and that switching the grid definition to the WGS84
-ellipsoid would fix this.  Neither is true.  As long as *every* step of
-the pipeline uses the same convention, the sphere approximation cancels
-out of the remapping almost entirely: the residual error is a few parts
-per million.  The 14 to 21 km error only becomes real when conventions
-are *mixed*, that is, when an ellipsoid-defined grid is fed into a
-sphere-based remapping tool (or vice versa).  Adopting ellipsoidal
-HEALPix today, while ESMF and the rest of the regridding ecosystem
-remain spherical, would create exactly that mixed state.  It would
-*introduce* a systematic geolocation error of up to about 14 km, many
-pixel widths at kilometre-scale resolution, into a change whose stated
-motivation is geolocation accuracy.  Consistency beats fidelity.
+Both definitions give the same results with
+[ESMF](https://earthsystemmodeling.org/regrid/), even though ESMF
+computes all overlap areas on the sphere[^esmf].  healpix-geo returns the
+cell vertices of either definition in geodetic coordinates, the same
+coordinates the source data uses, so source and target mesh always
+share one coordinate space; the ellipsoidal definition only moves where
+the cell boundaries lie.  The remaining distortion of the sphere
+approximation affects the numerator and denominator of every
+conservative weight[^jones] almost equally and cancels to a relative
+error of about $10^{-5}$ at level 10, smaller at finer levels.
 
-### Why the sphere approximation cancels
+What does not work is converting a remapped product from one definition
+to the other.  Re-binning already averaged cells onto displaced cells
+adds a second interpolation step and roughly doubles the error.
+Products for either definition should always be remapped from the
+native data.
 
-Everyone's data carries geodetic (WGS84) latitude $\varphi$.  Our
-pipeline interprets $\varphi$ directly as spherical latitude, a smooth
-and invertible convention applied identically to the source grid and
-the HEALPix target.  Because both grids are transformed the same way,
-their overlap topology in $(\lambda, \varphi)$ space is preserved
-exactly; a geodetic position round-trips to the same HEALPix cell
-without loss.
+| Route | Product | RMS error | × local contrast |
+|:--|:--|--:|--:|
+| A | native → spherical HEALPix | 0.0840 K | 0.94 |
+| B | native → ellipsoidal (WGS84) HEALPix | 0.0841 K | 0.94 |
+| C | A converted to ellipsoidal | 0.1639 K | 1.84 |
 
-The only distortion is the *area measure*.  On the sphere the area
-element is $dA_s = R^2 \cos\varphi \, d\varphi \, d\lambda$; on the
-ellipsoid it is $dA_e = M(\varphi) N(\varphi) \cos\varphi \, d\varphi
-\, d\lambda$, with the meridional and prime-vertical radii of
-curvature[^snyder]
+/// caption
+One day of MODIS-Aqua night-time SST (4 km) remapped to HEALPix
+level 10 (about 6.4 km) with ESMF conservative weights, about 2.66
+million ocean cells.  Each route is scored against a reference that bins
+the native pixels directly into cells of the same definition.  The local
+contrast (median spread within groups of four neighbouring cells,
+0.089 K) is the relevant scale because remapping errors live at the cell
+scale.  A and B agree within 1 % between 60° S and 45° N and within 5 %
+poleward of that.
+///
 
-$$
-M(\varphi) = \frac{a (1 - e^2)}{(1 - e^2 \sin^2\varphi)^{3/2}},
-\qquad
-N(\varphi) = \frac{a}{(1 - e^2 \sin^2\varphi)^{1/2}},
-$$
+### Different definitions are different grids
 
-and WGS84 eccentricity $e^2 = f(2-f) \approx 0.006694$[^wgs84].  Write
-the distortion ratio $\rho(\varphi) = dA_e / dA_s$.  A first-order
-conservative remapping weight is a **ratio of areas**[^jones],
-
-
-$$
-w_{ij} \;=\; \frac{A(S_i \cap T_j)}{A(T_j)},
-$$
-
-
-where $S_i$ is cell $i$ of the source grid (for example an ICON
-triangle or a satellite pixel footprint), $T_j$ is target HEALPix cell
-$j$, and $A(\cdot)$ denotes area.  The weight $w_{ij}$ is the fraction
-of the target cell covered by that source cell, and the remapped field
-is the weighted average $\tilde f_j = \sum_i w_{ij} f_i$.  Numerator
-and denominator sample $\rho$ at the *same latitude*, so the distortion
-cancels to first order:
-
-
-$$
-w_{ij}^{\mathrm{sphere}}
-= \frac{\displaystyle\int_{S_i \cap T_j} \rho^{-1}\, dA_e}
-       {\displaystyle\int_{T_j} \rho^{-1}\, dA_e}
-= w_{ij}^{\mathrm{ellipsoid}}
-  \left( 1 + \mathcal{O}\!\left(\tfrac{\rho'}{\rho}\,
-  \Delta\varphi_{\mathrm{cell}} \right) \right).
-$$
-
-The residual scales with the *variation* of $\rho$ across a single
-cell, $\rho'/\rho \sim 2 e^2 \sin 2\varphi \approx 0.013$ per radian.
-For a level-10 HEALPix cell ($\Delta\varphi_{\mathrm{cell}} \approx 5.4
-\times 10^{-4}$ rad) the relative weight error is
-
-$$
-\varepsilon_{\mathrm{consistent}}
-\;\sim\; 2 e^2 \, \Delta\varphi_{\mathrm{cell}}
-\;\approx\; 7 \times 10^{-6},
-$$
-
-and it *shrinks* with increasing resolution.  What does not cancel is
-the absolute area of a cell: integrating with spherical cell areas over
-ellipsoidal data carries a smooth latitude-dependent bias
-$\rho(\varphi) - 1$ of roughly $-0.4\,\%$ at the equator to $+0.9\,\%$
-at the poles.  This affects diagnostics, not remapping, and is fully
-correctable in post-processing by integrating with true ellipsoidal
-cell areas.
-
-### Why mixing conventions does not cancel
-
-An ellipsoidal HEALPix grid keeps its cells equal-area on the ellipsoid
-by defining cell boundaries through an auxiliary latitude[^snyder].
-Suitable choices are the authalic latitude $\xi$ (the construction used
-by the rHEALPix DGGS on the ellipsoid[^gibb] and by healpix-geo's WGS84
-support[^hpgeo]) or, for pure geolocation, the geocentric latitude
-$\psi$:
+Two datasets on HEALPix at the same level are not on the same grid
+unless they use the same definition.  The same cell index denotes a
+different patch of the Earth under the two definitions, displaced by
+the difference between geodetic and authalic latitude[^snyder]:
 
 $$
 \varphi - \xi \approx \tfrac{e^2}{3} \sin 2\varphi
-\quad (\text{max } 7.7' \approx 14\ \mathrm{km}),
-\qquad
-\varphi - \psi \approx \tfrac{e^2}{2} \sin 2\varphi
-\quad (\text{max } 11.5' \approx 21\ \mathrm{km}),
+\quad (\text{max } 7.7' \approx 14\ \mathrm{km\ at}\ 45°),
 $$
 
-both maximal at $\varphi = 45°$.  Feed such a grid into a spherical
-remapper together with a source grid whose coordinates are plain
-geodetic latitudes, and the two grids are now expressed in *different*
-latitude conventions: the target is displaced relative to the source by
-$\delta\varphi(\varphi)$.  Conservative overlaps are then computed
-between systematically misregistered polygons, and the remapped field
-is, to first order, the true field evaluated at a shifted position:
+with WGS84 eccentricity $e^2 \approx 0.006694$.  That is about 2 cell
+widths at level 10, 9 at level 12 and 18 at level 13; at level 10,
+99.8 % of all cells have a different index under the two definitions.
 
-$$
-\tilde f(\mathbf{x}) \;\approx\; f(\mathbf{x} + \boldsymbol{\delta}),
-\qquad |\boldsymbol{\delta}| \lesssim 14\text{ to }21\ \mathrm{km}.
-$$
-
-Unlike the consistent case, this error is **first order** in $e^2$ and
-is a *displacement*, the worst kind of error for high-resolution data:
-HEALPix cells measure roughly 6.4 km at level 10, 1.6 km at level 12,
-and 0.8 km at level 13, so the misregistration amounts to **10 to 20
-cell widths** at kilometre scale.  Every front, coastline, and swath
-edge lands in the wrong cells.  Comparing the two regimes at level 12:
-
-$$
-\frac{\varepsilon_{\mathrm{mixed}}}{\varepsilon_{\mathrm{consistent}}}
-\;\sim\;
-\frac{e^2/3}{2 e^2 \, \Delta\varphi_{\mathrm{cell}}}
-\;=\;
-\frac{1}{6\,\Delta\varphi_{\mathrm{cell}}}
-\;\approx\; 10^3 .
-$$
-
-Switching the grid definition without switching the remapping stack
-makes the error roughly **three orders of magnitude larger** than
-staying consistently spherical.
-
-### Migration path
-
-Ellipsoidal HEALPix is not wrong, it is premature.  The correct
-construction defines the grid through the authalic latitude, following
-the rHEALPix ellipsoidal DGGS[^gibb] and healpix-geo[^hpgeo].  Because
-the authalic mapping is equal-area by construction[^snyder], a
-spherical conservative remapping performed in authalic coordinates is
-*exactly* area-preserving on the ellipsoid; the only residual is the
-difference between great-circle edges and images of ellipsoidal
-geodesics, which is $\mathcal{O}(e^4)$.  A correct ellipsoidal pipeline
-therefore requires the transform $\varphi \to \xi(\varphi)$ to be
-applied to the source mesh before weight generation, either inside the
-remapping tool (an ellipsoid-aware ESMF or equivalent) or consistently
-in every tool that touches the data, including downstream cell lookups.
-
-A half-migrated ecosystem is strictly worse than either pure
-convention.  Our commitment is therefore:
-
-1. **Today**: all geometry (HEALPix boundaries[^gorski], source
-   meshes, ESMF overlap calculation) stays on the perfect sphere,
-   with geodetic latitude interpreted as spherical latitude end to end.
-2. **When** an ellipsoid-aware conservative remapping tool is available
-   and validated (a new ESMF version or an equivalent that applies the
-   authalic transform internally), we switch the pipeline **and remap
-   all published datasets** in one coordinated step, so that no dataset
-   ever mixes conventions with another.
-
+Data on different definitions must therefore not be compared, overlaid
+or differenced cell by cell, and cells must not be located with the
+other definition (for example `lonlat_to_healpix` with a different
+ellipsoid than the data was produced with).  Otherwise the field appears
+shifted by up to 14 km: fronts, coastlines and swath edges land in the
+wrong cells.  To compare such datasets, remap both from their native
+data onto the same definition.
 
 ## Target level selection
 
@@ -431,16 +323,15 @@ excluded because they do not commute with mean coarsening in the pyramid;
 if an RMS quantity is required, bin the *squared* field with the mean and
 apply the square root at read time.
 
-### Sphere, not ellipsoid — also for satellite data
+### Sphere, also for satellite data
 
-Satellite geolocation is geodetic (WGS84).  Binning nevertheless indexes
-cells on the **perfect sphere**, exactly like all remapped datasets.  The
-geodetic-vs-spherical latitude discrepancy (up to ~0.19° at 45° latitude,
-~21 km) is accepted so that every dataset in the hub shares a single
-indexing geometry.  Indexing one dataset on the ellipsoid while all others
-use the sphere would shift it by dozens of pixels at typical swath target
-levels, producing visible misregistration (offset coastlines) when
-datasets are overlaid.
+Satellite geolocation is geodetic (WGS84).  Binning indexes cells on the
+**perfect sphere**, like remapping, by assigning each geodetic position
+to the cell that contains it; this is as accurate as binning on the
+ellipsoid (see [Sphere or ellipsoid](#sphere-or-ellipsoid)).  Data
+binned on one definition is not comparable cell by cell with data on the
+other: the cells are displaced by up to ~0.13° (~14 km) at 45° latitude,
+several to dozens of pixels at typical swath target levels.
 
 ### Minimum sample count and coverage tracking
 
