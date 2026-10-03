@@ -38,10 +38,10 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "numpy",
-    "xarray>2026.0.0",
+    "xarray>=2025.1",
     "requests",
     "healpix-geo",
-    "zarr",
+    "zarr>=3",
     "s3fs",
     "scipy",
     "fsspec",

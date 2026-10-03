@@ -12,9 +12,10 @@ Remapping itself lives in [`grid_doctor.remap`][grid_doctor.remap].
 
 from __future__ import annotations
 
+import inspect
 import logging
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from typing import Any, Dict, Literal, NamedTuple, Union, cast
 
 import dask.array as da
 import numpy as np
@@ -50,6 +51,22 @@ materialises coordinate arrays.  At level 10 the two float64 coordinate
 arrays cost ~200 MB per store; one level up they double, and by level 16
 they would reach hundreds of GB while carrying no information that is not
 already implied by the cell index."""
+
+# ``encode_zarr_variable`` gained ``zarr_format`` in recent xarray releases.
+_ENCODE_TAKES_FORMAT = (
+    "zarr_format" in inspect.signature(encode_zarr_variable).parameters
+)
+
+
+def _encode_zarr_variable(
+    var: xr.Variable, *, name: str, zarr_format: Literal[2, 3]
+) -> xr.Variable:
+    """Encode *var* exactly as ``to_zarr`` would, across xarray versions."""
+    kwargs: Dict[str, Union[str, Literal[2, 3]]] = {"name": name}
+    if _ENCODE_TAKES_FORMAT:
+        kwargs["zarr_format"] = zarr_format
+    encoded = encode_zarr_variable(var, **kwargs)  # type: ignore
+    return cast(xr.Variable, encoded)
 
 
 # ===================================================================
@@ -709,7 +726,7 @@ def _deferred_writes(
     for name, var in lazy.items():
         var = var.copy(deep=False)
         var.encoding = {**var.encoding, **(encoding or {}).get(name, {})}
-        encoded = encode_zarr_variable(var, name=name, zarr_format=zarr_format)
+        encoded = _encode_zarr_variable(var, name=name, zarr_format=zarr_format)
         target_region = tuple(
             (region or {}).get(str(dim), slice(None)) for dim in var.dims
         )
