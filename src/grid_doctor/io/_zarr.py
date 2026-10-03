@@ -16,7 +16,9 @@ from typing import Any, Dict, Literal, NamedTuple, Union, cast
 import dask.array as da
 import xarray as xr
 import zarr
-from xarray.backends.zarr import encode_zarr_variable as _xr_encode_zarr_variable
+from xarray.backends.zarr import (
+    encode_zarr_variable as _xr_encode_zarr_variable,
+)
 
 # ``encode_zarr_variable`` gained ``zarr_format`` in recent xarray releases.
 _ENCODE_TAKES_FORMAT = (
