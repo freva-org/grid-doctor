@@ -21,6 +21,7 @@ import numpy.typing as npt
 import s3fs
 import xarray as xr
 
+from .pyramid import coarsen_mean
 from .remap import (
     _make_crs_variable,
     regrid_to_healpix,
@@ -155,8 +156,9 @@ def _coarsen_array(
     The last dimension is treated as the cell dimension.  All leading
     dimensions are batch dimensions that are preserved.
 
-    Uses a fused sum/count approach instead of ``np.nanmean`` to
-    avoid redundant NaN detection passes.
+    Thin wrapper around
+    [`coarsen_mean`][grid_doctor.pyramid.coarsen_mean], which
+    is exact only when ``values`` is the finest level.
 
     Args:
         values: Input array with shape ``(*batch, n_cells)``.
@@ -169,23 +171,7 @@ def _coarsen_array(
     Returns:
         Array with shape ``(*batch, n_cells // factor)``.
     """
-    arr = np.asarray(values, dtype=np.float64)
-    batch_shape = arr.shape[:-1]
-    n_cells = arr.shape[-1]
-    n_target = n_cells // factor
-    grouped = arr.reshape(*batch_shape, n_target, factor)
-    valid = np.isfinite(grouped)
-    valid_count = valid.sum(axis=-1)
-    filled = np.where(valid, grouped, 0.0)
-
-    min_count = max(1, int(np.ceil(min_valid_fraction * factor)))
-    with np.errstate(invalid="ignore"):
-        result = np.where(
-            valid_count >= min_count,
-            filled.sum(axis=-1) / valid_count,
-            np.nan,
-        )
-    return cast(FloatArray, result)
+    return coarsen_mean(values, factor=factor, min_valid_fraction=min_valid_fraction)
 
 
 def _coarsen_array_mode(
@@ -243,6 +229,15 @@ def _coarsen_array_mode(
     return result
 
 
+def _resolve_coarsen_mode(ds: xr.Dataset, coarsen_mode: CoarsenMode) -> CoarsenMode:
+    """Resolve ``"auto"`` to ``"mean"`` or ``"mode"`` from dataset attributes."""
+    if coarsen_mode != "auto":
+        return coarsen_mode
+    method = str(ds.attrs.get("grid_doctor_method", "conservative"))
+    is_categorical = method == "nearest" or method.endswith("-mode")
+    return "mode" if is_categorical else "mean"
+
+
 def coarsen_healpix(
     ds: xr.Dataset,
     target_level: int,
@@ -288,6 +283,12 @@ def coarsen_healpix(
     Ring-ordered datasets do not have contiguous parent-child layout
     and must be remapped directly at each target level.
 
+    With ``coarsen_mode="mean"``, always coarsen from the finest level
+    rather than chaining level by level.  A chained mean weights every
+    valid parent equally, regardless of how many valid finest-level
+    cells it was built from, so data with NaNs (land, sea ice,
+    observation gaps) drifts between levels.
+
     Raises
     ------
     ValueError
@@ -312,13 +313,7 @@ def coarsen_healpix(
     if delta_level <= 0:
         raise ValueError("target_level must be lower than the current HEALPix level.")
 
-    # Resolve coarsening strategy.
-    if coarsen_mode == "auto":
-        method = str(ds.attrs.get("grid_doctor_method", "conservative"))
-        is_categorical = method == "nearest" or method.endswith("-mode")
-        resolved_mode: CoarsenMode = "mode" if is_categorical else "mean"
-    else:
-        resolved_mode = coarsen_mode
+    resolved_mode = _resolve_coarsen_mode(ds, coarsen_mode)
 
     coarsen_func = _coarsen_array_mode if resolved_mode == "mode" else _coarsen_array
 
@@ -432,12 +427,17 @@ def create_healpix_pyramid(
 
     is_nested = bool(kwargs.get("nest", True))
     if is_nested:
+        resolved_mode = _resolve_coarsen_mode(finest, coarsen_mode)
         current = finest
         for level in range(max_level - 1, min_level - 1, -1):
+            # Means are only exact when taken from the finest level
+            # (issue #54). Modes stay chained: the mode kernel scales
+            # quadratically with the number of children.
+            source = finest if resolved_mode == "mean" else current
             current = coarsen_healpix(
-                current,
+                source,
                 level,
-                coarsen_mode=coarsen_mode,
+                coarsen_mode=resolved_mode,
                 min_valid_fraction=min_valid_fraction,
             )
             pyramid[level] = current

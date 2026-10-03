@@ -192,7 +192,7 @@ def bin_to_healpix(
     )
     pyramid = {11: hpx}
     for lvl in range(10, -1, -1):
-        pyramid[lvl] = gd.coarsen_healpix(pyramid[lvl + 1], lvl)
+        pyramid[lvl] = gd.coarsen_healpix(hpx, lvl)
     ```
     """
     if not 0 <= level <= MAX_NESTED_LEVEL:
