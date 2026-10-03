@@ -19,6 +19,14 @@ arithmetic mean of all pixels. No latitude-dependent cosine weighting
 is needed, and an entire class of subtle statistics bugs, forgotten
 or misapplied area weights, simply cannot occur.
 
+!!! note "Fields with missing values"
+    This holds for complete fields.  For fields with NaNs (ocean-only
+    variables, sea ice, observation gaps), a coarse cell can be partly
+    valid, and its value is the mean over that valid part only.  Averages
+    over coarse levels then need the valid fraction of each cell as a
+    weight; see
+    [Averaging over coarse levels](#averaging-over-coarse-levels-valid-fractions).
+
 ![Equal area comparison](assets/healpix-equal-area.png#only-dark)
 ![Equal area comparison](assets/healpix-equal-area-light.png#only-light)
 /// caption
@@ -459,6 +467,9 @@ and ``"nearest"`` do for remapped data.
 The multi-resolution pyramid is built by first remapping the source
 dataset to the finest HEALPix level, then deriving all coarser levels
 by iterated coarsening, one level at a time, always a factor of 4.
+Every level builds on the previous one, so the whole pyramid is a single
+lazy computation (see
+[Chunked application and single-pass writes](#chunked-application-and-single-pass-writes)).
 
 ### Why coarsen rather than remap at each level?
 
@@ -473,7 +484,26 @@ coarsening hierarchy.
 ### Mean coarsening (continuous fields)
 
 For continuous fields (those remapped with conservative weights), each
-parent cell's value is the NaN-aware mean of its 4 children.
+coarse cell's value is the mean over **all valid finest-level cells**
+beneath it.  This is not the same as the mean of its 4 children once
+children are only partly valid: a child built from a single valid
+finest-level cell would otherwise count as much as a child built from
+four.  Repeated over several levels, that mean of means drifts away from
+the finest level.
+
+The pyramid therefore carries two running totals per cell instead of a
+mean: the sum of the valid finest-level values and their count.  Both
+coarsen exactly by summing groups of 4, and the mean is only formed when
+a level is written:
+
+$$
+\bar{x}_\text{parent} = \frac{\sum_{c} s_c}{\sum_{c} n_c},
+\qquad s_c = \sum_{\text{valid } i \in c} x_i, \quad n_c = \#\{\text{valid } i \in c\}
+$$
+
+Every level is therefore identical to coarsening directly from the
+finest level, while each step stays a local reduction of 4 neighbouring
+cells.
 
 ### Mode coarsening (categorical fields)
 
@@ -487,17 +517,28 @@ stored in the dataset attributes: `grid_doctor_method = "nearest"`
 triggers mode coarsening, `"conservative"` triggers mean coarsening.
 An explicit `coarsen_mode` parameter is available to override this.
 
+Unlike the mean, a mode of modes is not the mode of all finest-level
+cells, and mode coarsening is applied level by level, with the minimum
+valid fraction checked against the 4 children at each step.
+
 ### Minimum valid fraction (default: 50%)
 
-A parent cell is set to NaN when fewer than half of its children are
-valid (at least 2 of 4).
+For mean coarsening, a cell is set to NaN when fewer than half of the
+**finest-level** cells beneath it are valid.  The threshold is applied to
+this cumulative fraction, not to the 4 children of each step.
 
-**Representativeness.**  A parent cell's value should represent the
-majority of its area.  With at least 2 of 4 valid children, the value
-is guaranteed to cover at least half the parent cell's area.  Below
-that, a single child pixel's value would "speak for" 3 other pixels
-that have no data, which is indistinguishable from interpolation into
-unknown territory.
+**Representativeness.**  A cell's value should represent the majority
+of its area.  Because the threshold uses the finest-level count, the
+value is guaranteed to cover at least half of the cell's area at every
+level.  A per-step rule could not guarantee this: 2 valid children out
+of 4, each built from 2 valid children out of 4, cover only a quarter of
+the area two levels up.  Below the threshold, a few pixels' values would
+"speak for" an area that has no data, which is indistinguishable from
+interpolation into unknown territory.
+
+Cells masked by the threshold keep their running sums and counts, so
+their valid data still contributes to coarser levels where it is part of
+a majority.
 
 **Cascade prevention.**  Each coarsening step is a factor-of-4
 reduction.  If only 1 of 4 valid children were sufficient, a single
@@ -511,6 +552,55 @@ coarsening steps to level 3, covering a 16 384× larger area.  With a
 the very first step because 1/4 < 1/2.  A feature can only survive
 coarsening if it covers at least half the area at every scale, which is
 exactly when it is a real, resolvable feature at that resolution.
+
+The threshold is configurable with `min_valid_fraction`.  Set it to `0`
+to keep every cell that contains any valid data, for instance when the
+coarse levels are only used for weighted aggregates.
+
+### Averaging over coarse levels: valid fractions
+
+Because every coarse value is a mean over its valid area, a plain mean
+over coarse cells weights a coastal cell that is 10% ocean as much as an
+open-ocean cell.  The level-to-level consistency of the pyramid only
+holds for means weighted by the number of valid finest-level cells:
+with two coarse cells, one fully valid at 10 °C (4 valid cells) and one
+with a single valid cell at 20 °C, the finest-level mean is
+(4 × 10 + 20) / 5 = 12 °C, while the plain mean of the two coarse values
+is 15 °C.  Both coarse values are correct; the plain average is not.
+
+The weights cannot be folded into the stored values without losing their
+meaning (a coastal cell would no longer hold the SST of its ocean
+part).  Instead, the pyramid can store them alongside:
+
+```python
+pyramid = gd.create_healpix_pyramid(ds, valid_fraction=True)
+```
+
+adds `<name>_valid_fraction` (float32, fraction of valid finest-level
+cells, linked through the CF `ancillary_variables` attribute) to every
+level, including the finest one.  Global or regional means then agree
+across all levels:
+
+```python
+ds = pyramid[3]
+ds.sst.weighted(ds.sst_valid_fraction.fillna(0)).mean("cell")
+```
+
+The option is opt-in because the fraction has the shape of its variable:
+
+- `True` stores a fraction for every cell variable, with its full shape.
+  This is correct for masks that change over time or height (sea ice,
+  clouds, orography on pressure levels).
+- `"static"` stores a single `cell`-only fraction taken from the first
+  time step / level.  It is tiny, but only correct when the mask never
+  changes, as for a land-sea mask.
+- A list of names, or a mapping such as `{"sst": "static", "ice": True}`,
+  restricts the fractions to selected variables.
+
+Fractions are mostly exactly 0 or 1 and compress well; in a test with 8
+time steps the full-shape fractions added about 7% to the store, the
+static ones under 1%.  This mirrors the `ocean_fraction` variables of
+the nextGEMS HEALPix output.
 
 
 ## Output metadata and CRS convention
@@ -620,6 +710,28 @@ amortised over the batch.
 
 The backend can be overridden explicitly via `backend="scipy"`,
 `"numba"`, or `"cupy"` in any remapping call.
+
+### Chunked application and single-pass writes
+
+For dask-backed input, the regridded field is chunked along `cell`
+(`cell_chunks`, by default 4^10 cells).  Rows of the weight matrix are
+independent, so each output chunk is computed from its own block of
+matrix rows; the blocks share the matrix memory instead of copying it.
+No task holds the whole HEALPix field, and the coarser levels keep the
+same chunking because every coarsening step only combines groups of 4
+neighbouring cells.
+
+Inside dask tasks the Numba kernels run single-threaded: dask already
+runs many tasks in parallel, and a multi-threaded kernel per task would
+start one thread team per task and exhaust the process thread limit on
+many-core nodes.  Without dask, the multi-threaded kernels are used.
+
+`save_pyramid` writes all levels in a single computation, so the
+regridding of each finest-level chunk runs exactly once and is shared by
+all coarser levels.  Computing levels separately (for example
+`pyramid[5].compute()` followed by `pyramid[4].compute()`) regrids the
+source again each time; `persist()` the finest level when exploring
+interactively.
 
 
 ---

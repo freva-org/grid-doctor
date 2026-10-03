@@ -139,6 +139,19 @@ coordinates and the global HEALPix indices in `berlin["cell"]`:
 berlin["t2m"].mean()
 ```
 
+!!! note "Fields with missing values"
+    For variables with NaNs (ocean-only fields, observation gaps), cells
+    on coarser levels can be only partly valid, and a plain mean over
+    cells is biased.  If the store has a `<name>_valid_fraction`
+    variable, use it as the weight:
+
+    ```python
+    ds.sst.weighted(ds.sst_valid_fraction.fillna(0)).mean("cell")
+    ```
+
+    See [Averaging over coarse levels](technical-decisions.md#averaging-over-coarse-levels-valid-fractions)
+    for the background.
+
 ### Circular regions
 
 Select a bounding box around the centre as above, then mask by

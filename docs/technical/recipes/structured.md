@@ -10,25 +10,33 @@ data and applying *conservative* remapping:
 
 ```python
 from getpass import getuser
+from pathlib import Path
+
 import grid_doctor as gd
 
 # 1. Open
 ds = gd.cached_open_dataset(["era5_2m_temperature_*.nc"])
 
-# 2. Weights file
+# 2. Weights file (computed once, then reused from the cache directory)
 weights_dir = Path(
     "/scratch/{user[0]}/{user}/healpix-weights".format(user=getuser())
 )
+weights_dir.mkdir(parents=True, exist_ok=True)
+level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
 weights_file = gd.cached_weights(
     ds,
-    weights_path=weights_dir,
+    level=level,
+    cache_path=weights_dir,
     nproc=4,
-    prefer_offline=True
+    prefer_offline=True,
 )
-# 2. Convert
-pyramid = gd.create_healpix_pyramid(ds)
 
-# 3. Upload
+# 3. Convert
+pyramid = gd.create_healpix_pyramid(
+    ds, max_level=level, weights_path=weights_file
+)
+
+# 4. Upload
 gd.save_pyramid(
     pyramid,
     "s3://my-bucket/era5/2t",
@@ -45,6 +53,25 @@ matching HEALPix level.  To override:
 ```python
 pyramid = gd.create_healpix_pyramid(ds, max_level=7)
 ```
+
+## Masked fields (ocean, sea ice)
+
+For variables with missing values, store the valid fraction of each cell
+so that averages over coarse levels stay consistent with the finest one
+(see [Averaging over coarse levels](../technical-decisions.md#averaging-over-coarse-levels-valid-fractions)):
+
+```python
+pyramid = gd.create_healpix_pyramid(
+    ds,
+    max_level=level,
+    weights_path=weights_file,
+    # land-sea masked SST: one cell-only fraction is enough;
+    # sea ice changes over time and needs the full shape
+    valid_fraction={"sst": "static", "siconc": True},
+)
+```
+
+Variables without missing values do not need fractions.
 
 ## Full CLI Script
 
