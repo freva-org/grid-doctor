@@ -10,18 +10,27 @@ once).  The public entry points stay in
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
 
 from ..remap import _healpix_centres, _make_crs_variable
-from ..types import CoarsenMode, FloatArray
-from ._blocks import MeanPartials, coarsen_mean_steps, coarsen_mode_steps
+from ..types import CoarsenMode, FloatArray, ValidFraction
+from ._blocks import (
+    MeanPartials,
+    coarsen_counts,
+    coarsen_mean_steps,
+    coarsen_mode_steps,
+    count_valid_steps,
+)
 
 ModeKernel = Callable[..., np.ndarray]
 """Array kernel ``f(values, *, factor, min_valid_fraction)`` for mode coarsening."""
+
+FractionShape = Literal["full", "static"]
+"""Resolved shape of one ``<name>_valid_fraction`` variable."""
 
 
 def healpix_coords(level: int, *, nest: bool) -> tuple[FloatArray, FloatArray]:
@@ -92,6 +101,108 @@ def assemble_coarse_level(
     return result
 
 
+def resolve_valid_fraction(
+    spec: ValidFraction, ds: xr.Dataset
+) -> dict[str, FractionShape]:
+    """Map variable name to fraction shape for the requested variables."""
+    cell_vars = [str(n) for n, v in ds.data_vars.items() if "cell" in v.dims]
+    items: Any
+    if spec is False:
+        return {}
+    if spec is True or spec == "static":
+        items = ((name, spec) for name in cell_vars)
+    elif isinstance(spec, str):
+        raise ValueError(
+            f"valid_fraction={spec!r}: use True, 'static', or variable names."
+        )
+    elif isinstance(spec, Mapping):
+        items = spec.items()
+    else:
+        items = ((name, True) for name in spec)
+
+    resolved: dict[str, FractionShape] = {}
+    for name, shape in items:
+        if name not in cell_vars:
+            raise ValueError(
+                f"valid_fraction: {name!r} is not a variable with a 'cell' "
+                f"dimension (available: {cell_vars})."
+            )
+        if shape is False:
+            continue
+        if shape is not True and shape != "static":
+            raise ValueError(f"valid_fraction[{name!r}] must be True or 'static'.")
+        resolved[name] = "static" if shape == "static" else "full"
+
+    clashes = sorted(
+        f"{name}_valid_fraction"
+        for name in resolved
+        if f"{name}_valid_fraction" in ds.variables
+    )
+    if clashes:
+        raise ValueError(f"valid_fraction: {clashes} already exist in the dataset.")
+    return resolved
+
+
+def add_fraction(
+    data_vars: dict[str, xr.DataArray],
+    name: str,
+    template: xr.DataArray,
+    counts: Any,
+    *,
+    n_fine: int,
+    shape: FractionShape,
+    source_level: int,
+) -> None:
+    """Add ``<name>_valid_fraction`` and link it from ``data_vars[name]``.
+
+    *counts* holds the valid source cells per cell (cell axis last);
+    *n_fine* is the number of source cells under each cell.
+    """
+    fraction = (counts / n_fine).astype(np.float32)
+    if shape == "static":
+        fraction = fraction[(0,) * (fraction.ndim - 1)]
+        frac_da = xr.DataArray(fraction, dims=("cell",))
+    else:
+        frac_da = wrap_cells(template, fraction)
+    frac_name = f"{name}_valid_fraction"
+    frac_da.attrs = {
+        "long_name": f"fraction of valid level-{source_level} cells of {name}",
+        "units": "1",
+    }
+    if "grid_mapping" in template.attrs:
+        frac_da.attrs["grid_mapping"] = template.attrs["grid_mapping"]
+    data_vars[frac_name] = frac_da
+
+    data = data_vars[name].copy()
+    linked = str(data.attrs.get("ancillary_variables", "")).split()
+    if frac_name not in linked:
+        data.attrs["ancillary_variables"] = " ".join([*linked, frac_name])
+    data_vars[name] = data
+
+
+def with_finest_fractions(
+    finest: xr.Dataset,
+    fractions: dict[str, FractionShape],
+    level: int,
+) -> xr.Dataset:
+    """Add 0/1 valid fractions to the finest level (it is its own source)."""
+    if not fractions:
+        return finest
+    data_vars = {str(n): v for n, v in finest.data_vars.items()}
+    for name, shape in fractions.items():
+        template = finest[name].transpose(..., "cell")
+        add_fraction(
+            data_vars,
+            name,
+            template,
+            np.isfinite(template.data),
+            n_fine=1,
+            shape=shape,
+            source_level=level,
+        )
+    return finest.assign(data_vars)
+
+
 def coarsen_dataset(
     ds: xr.Dataset,
     *,
@@ -100,13 +211,16 @@ def coarsen_dataset(
     coarsen_mode: CoarsenMode,
     min_valid_fraction: float,
     mode_kernel: ModeKernel,
+    valid_fraction: ValidFraction = False,
 ) -> xr.Dataset:
     """Coarsen every cell variable of *ds* from *source_level* to *target_level*.
 
     *coarsen_mode* must already be resolved (``"mean"`` or ``"mode"``).
+    Fractions are relative to the cells of *ds*.
     """
     steps = source_level - target_level
     cell_chunk = cell_chunk_of(ds)
+    fractions = resolve_valid_fraction(valid_fraction, ds)
     coarsened_vars: dict[str, xr.DataArray] = {}
     for name, data in ds.data_vars.items():
         if "cell" not in data.dims:
@@ -129,6 +243,16 @@ def coarsen_dataset(
                 cell_chunk=cell_chunk,
             )
         coarsened_vars[str(name)] = wrap_cells(template, out)
+        if str(name) in fractions:
+            add_fraction(
+                coarsened_vars,
+                str(name),
+                template,
+                count_valid_steps(template.data, steps, cell_chunk=cell_chunk),
+                n_fine=4**steps,
+                shape=fractions[str(name)],
+                source_level=source_level,
+            )
 
     return assemble_coarse_level(ds, coarsened_vars, target_level, source_level)
 
@@ -141,6 +265,7 @@ def coarse_levels(
     coarsen_mode: CoarsenMode,
     min_valid_fraction: float,
     mode_kernel: ModeKernel,
+    valid_fraction: dict[str, FractionShape] | None = None,
 ) -> dict[int, xr.Dataset]:
     """Coarsen *finest* level by level, sharing work between levels.
 
@@ -156,7 +281,10 @@ def coarse_levels(
         for name, data in finest.data_vars.items()
         if "cell" in data.dims
     }
+    fractions = valid_fraction or {}
     state: dict[str, Any] = {name: t.data for name, t in templates.items()}
+    # Mode coarsening has no counts of its own; keep a separate chain.
+    count_state: dict[str, Any] = {name: t.data for name, t in templates.items()}
     levels: dict[int, xr.Dataset] = {}
     for level in range(max_level - 1, min_level - 1, -1):
         data_vars: dict[str, xr.DataArray] = {}
@@ -174,6 +302,13 @@ def coarse_levels(
                     cell_chunk=cell_chunk,
                 )
                 values = state[name]
+                if name in fractions:
+                    count_state[name] = (
+                        count_valid_steps(count_state[name], 1, cell_chunk=cell_chunk)
+                        if level == max_level - 1
+                        else coarsen_counts(count_state[name], cell_chunk=cell_chunk)
+                    )
+                counts = count_state[name]
             else:
                 partials = state[name]
                 partials = (
@@ -183,6 +318,17 @@ def coarse_levels(
                 ).rechunk(cell_chunk)
                 state[name] = partials
                 values = partials.mean(min_valid_fraction)
+                counts = partials.counts
             data_vars[name] = wrap_cells(templates[name], values)
+            if name in fractions:
+                add_fraction(
+                    data_vars,
+                    name,
+                    templates[name],
+                    counts,
+                    n_fine=4 ** (max_level - level),
+                    shape=fractions[name],
+                    source_level=max_level,
+                )
         levels[level] = assemble_coarse_level(finest, data_vars, level, max_level)
     return levels

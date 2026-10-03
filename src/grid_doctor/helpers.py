@@ -27,6 +27,8 @@ from .pyramid import (
     coarsen_dataset,
     coarsen_mean,
     resolve_coarsen_mode,
+    resolve_valid_fraction,
+    with_finest_fractions,
 )
 from .remap import (
     regrid_to_healpix,
@@ -37,7 +39,7 @@ from .remap_backend import (
     _get_unstructured_dim,
     _is_unstructured,
 )
-from .types import CoarsenMode, FloatArray, ZarrOptions
+from .types import CoarsenMode, FloatArray, ValidFraction, ZarrOptions
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +213,7 @@ def coarsen_healpix(
     target_level: int,
     coarsen_mode: CoarsenMode = "auto",
     min_valid_fraction: float = 0.5,
+    valid_fraction: ValidFraction = False,
 ) -> xr.Dataset:
     """Coarsen a HEALPix dataset to a lower-resolution level.
 
@@ -234,6 +237,12 @@ def coarsen_healpix(
         produce a valid parent cell.  Parents with fewer valid
         children are set to NaN.  Default ``0.5`` (at least half
         of the children must be valid).
+    valid_fraction:
+        Add ``<name>_valid_fraction`` variables: the fraction of valid
+        cells of *ds* under each coarse cell (see
+        [`create_healpix_pyramid`][grid_doctor.helpers.create_healpix_pyramid]).
+        Fractions are relative to the level of *ds*, so coarsen from the
+        finest level to get weights for exact global means.
 
     Returns
     -------
@@ -288,6 +297,7 @@ def coarsen_healpix(
         coarsen_mode=resolve_coarsen_mode(ds, coarsen_mode),
         min_valid_fraction=min_valid_fraction,
         mode_kernel=_coarsen_array_mode,
+        valid_fraction=valid_fraction,
     )
 
 
@@ -303,6 +313,7 @@ def create_healpix_pyramid(
     *,
     coarsen_mode: CoarsenMode = "auto",
     min_valid_fraction: float = 0.5,
+    valid_fraction: ValidFraction = False,
     **kwargs: Any,
 ) -> dict[int, xr.Dataset]:
     """Create a multi-resolution HEALPix pyramid.
@@ -339,6 +350,22 @@ def create_healpix_pyramid(
     min_valid_fraction:
         Minimum fraction of valid children for a parent cell to be
         valid.  Default ``0.5``.
+    valid_fraction:
+        Store ``<name>_valid_fraction`` next to the selected variables on
+        every level: the fraction of valid finest-level cells under each
+        cell, as float32, linked via the CF ``ancillary_variables``
+        attribute.  Cell values are means over their valid area, so
+        global or regional means over a coarse level need these weights,
+        e.g. ``ds.sst.weighted(ds.sst_valid_fraction.fillna(0)).mean("cell")``.
+
+        ``False`` (default) stores nothing.  ``True`` gives every cell
+        variable a fraction of its full shape (correct for masks that
+        change over time or height).  ``"static"`` stores one ``cell``-only
+        fraction from the first slice along all other dimensions -- small,
+        but only correct when the mask never changes (e.g. land/sea).
+        A list of names selects variables (full shape); a mapping such as
+        ``{"sst": "static", "ice": True}`` sets the shape per variable.
+        Requires nested ordering.
     **kwargs:
         Forwarded to
         [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix].
@@ -351,12 +378,17 @@ def create_healpix_pyramid(
     if max_level is None:
         max_level = resolution_to_healpix_level(get_latlon_resolution(ds))
 
+    is_nested = bool(kwargs.get("nest", True))
+    if not is_nested and valid_fraction is not False:
+        raise ValueError("valid_fraction requires nested ordering (nest=True).")
+
     pyramid: dict[int, xr.Dataset] = {}
     finest = regrid_to_healpix(ds, max_level, **kwargs)
     pyramid[max_level] = finest
 
-    is_nested = bool(kwargs.get("nest", True))
     if is_nested:
+        fractions = resolve_valid_fraction(valid_fraction, finest)
+        pyramid[max_level] = with_finest_fractions(finest, fractions, max_level)
         pyramid.update(
             coarse_levels(
                 finest,
@@ -365,6 +397,7 @@ def create_healpix_pyramid(
                 coarsen_mode=resolve_coarsen_mode(finest, coarsen_mode),
                 min_valid_fraction=min_valid_fraction,
                 mode_kernel=_coarsen_array_mode,
+                valid_fraction=fractions,
             )
         )
         return pyramid

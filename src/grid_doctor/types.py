@@ -1,5 +1,6 @@
 """Special type definitions."""
 
+from collections.abc import Collection, Mapping
 from typing import Any, Callable, Dict, Literal, TypedDict
 
 import numpy as np
@@ -19,6 +20,16 @@ SourceKind = Literal["auto", "regular", "curvilinear", "unstructured", "spectral
 
 CoarsenMode = Literal["mean", "mode", "auto"]
 """Coarsening strategy for HEALPix pyramid construction."""
+
+ValidFraction = (
+    bool | Literal["static"] | Collection[str] | Mapping[str, bool | Literal["static"]]
+)
+"""Which variables get a ``<name>_valid_fraction`` companion, and its shape.
+
+``True``/``"static"`` apply to every variable with a ``cell`` dimension;
+a collection of names selects variables (full shape); a mapping sets the
+shape per variable.  ``"static"`` stores the fraction of the first slice
+along all non-cell dimensions only, for masks that never change."""
 
 BinAgg = Literal["mean", "mode", "min", "max", "count"]
 """Per-cell aggregation methods for point binning."""

@@ -19,8 +19,10 @@ names stay importable from ``grid_doctor`` throughout.
 
 from ._blocks import (
     MeanPartials,
+    coarsen_counts,
     coarsen_mean_steps,
     coarsen_mode_steps,
+    count_valid_steps,
     map_cells,
     rechunk_cells,
 )
@@ -30,18 +32,24 @@ from ._levels import (
     coarse_levels,
     coarsen_dataset,
     resolve_coarsen_mode,
+    resolve_valid_fraction,
+    with_finest_fractions,
 )
 
 __all__ = [
     "assemble_coarse_level",
     "coarse_levels",
+    "coarsen_counts",
     "coarsen_dataset",
     "coarsen_mean",
     "coarsen_mean_steps",
     "coarsen_mode_steps",
+    "count_valid_steps",
     "map_cells",
     "MeanPartials",
     "min_valid_count",
     "rechunk_cells",
     "resolve_coarsen_mode",
+    "resolve_valid_fraction",
+    "with_finest_fractions",
 ]

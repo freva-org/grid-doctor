@@ -137,6 +137,28 @@ class MeanPartials:
         return self.counts / self.n_fine
 
 
+def coarsen_counts(counts: Array, *, cell_chunk: int | None = None) -> Array:
+    """Coarsen per-cell counts by one level."""
+    return rechunk_cells(
+        map_cells(block_sum, counts, factor=STEP, dtype=np.int64), cell_chunk
+    )
+
+
+def count_valid_steps(
+    values: Array,
+    steps: int,
+    *,
+    cell_chunk: int | None = None,
+) -> Array:
+    """Count valid input cells under each cell, ``steps`` levels coarser."""
+    counts = rechunk_cells(
+        map_cells(valid_counts, values, factor=STEP, dtype=np.int64), cell_chunk
+    )
+    for _ in range(steps - 1):
+        counts = coarsen_counts(counts, cell_chunk=cell_chunk)
+    return counts
+
+
 def coarsen_mean_steps(
     values: Array,
     steps: int,
