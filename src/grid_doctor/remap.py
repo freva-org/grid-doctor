@@ -367,8 +367,12 @@ def _resolve_source_dims_for_weight_application(
 # ===================================================================
 
 
-DEFAULT_CELL_CHUNK = 4**11
-"""Default output chunk along ``cell`` (4 Mi cells, 32 MiB as float64)."""
+DEFAULT_CELL_CHUNK = 4**10
+"""Default output chunk along ``cell`` (1 Mi cells, 8 MiB as float64).
+
+Dask-backed regridding runs one serial kernel per chunk, so the chunk
+count is also the parallelism of a single time step (12 tasks at
+level 10)."""
 
 
 def _resolve_cell_chunk(
@@ -571,6 +575,7 @@ def apply_weight_file(
                 row_blocks,
                 missing_policy=missing_policy,
                 backend=backend,
+                parallel=False,
             )
             continue
 
@@ -588,6 +593,9 @@ def apply_weight_file(
                     "n_source_dims": n_src_dims,
                     "missing_policy": missing_policy,
                     "backend": backend,
+                    # dask already runs tasks in parallel threads; nested
+                    # thread teams exhaust the process thread limit.
+                    "parallel": data.chunks is None,
                 },
                 output_dtypes=[np.float64],
                 dask_gufunc_kwargs={"output_sizes": {"cell": n_target}},

@@ -248,3 +248,30 @@ def test_row_blocks_share_weight_buffers() -> None:
     from scipy.sparse import vstack
 
     assert (vstack(blocks) != matrix).nnz == 0
+
+
+@pytest.mark.parametrize(
+    ("chunked", "cell_chunks", "expected"),
+    [(True, 256, False), (True, None, False), (False, None, True)],
+)
+def test_dask_tasks_use_serial_kernels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    chunked: bool,
+    cell_chunks: int | None,
+    expected: bool,
+) -> None:
+    """Dask threads must not start their own thread teams (thread limits)."""
+    seen: list[bool] = []
+    original = remap.apply_weights_nd
+
+    def recording(values: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs["parallel"])
+        return original(values, **kwargs)
+
+    monkeypatch.setattr(remap, "apply_weights_nd", recording)
+    weights = _weight_file(tmp_path / "w.nc")
+    remap.apply_weight_file(
+        _source(chunked), weights, cell_chunks=cell_chunks
+    ).compute()
+    assert seen and set(seen) == {expected}
