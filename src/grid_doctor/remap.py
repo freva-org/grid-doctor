@@ -532,7 +532,7 @@ def apply_weight_file(
         if cell_chunk is not None and data.chunks is not None:
             if row_blocks is None:
                 row_blocks = [
-                    matrix[start : start + cell_chunk]
+                    matrix[start:start + cell_chunk]
                     for start in range(0, n_target, cell_chunk)
                 ]
             regridded[str(name)] = _apply_weights_rowblocked(
