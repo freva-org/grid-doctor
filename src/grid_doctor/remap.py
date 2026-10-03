@@ -24,6 +24,7 @@ from typing import Any, Literal, cast
 import dask.array as da
 import numpy as np
 import xarray as xr
+from dask.base import tokenize
 
 from .remap_apply import (
     apply_weights_nd,
@@ -383,6 +384,28 @@ def _resolve_cell_chunk(
     return size if size < n_target else None
 
 
+def _row_blocks(matrix: Any, size: int) -> list[Any]:
+    """Split a CSR matrix into row blocks that share its data arrays.
+
+    ``matrix[a:b]`` would copy ``data`` and ``indices`` (seconds and
+    gigabytes for large weight files); views keep a single copy.
+    """
+    from scipy.sparse import csr_matrix
+
+    blocks = []
+    for start in range(0, matrix.shape[0], size):
+        stop = min(start + size, matrix.shape[0])
+        lo, hi = matrix.indptr[start], matrix.indptr[stop]
+        # The constructor copies even with copy=False; assigning the
+        # arrays to an empty matrix of the right shape keeps them as views.
+        block = csr_matrix((stop - start, matrix.shape[1]), dtype=matrix.dtype)
+        block.data = matrix.data[lo:hi]
+        block.indices = matrix.indices[lo:hi]
+        block.indptr = matrix.indptr[start:stop + 1] - lo
+        blocks.append(block)
+    return blocks
+
+
 def _apply_weights_rowblocked(
     data: xr.DataArray,
     source_dims: tuple[str, ...],
@@ -401,6 +424,14 @@ def _apply_weights_rowblocked(
     n_batch = len(batch_dims)
     arr = ordered.data.rechunk({i: -1 for i in range(n_batch, ordered.ndim)})
     flat = arr.reshape(*arr.shape[:n_batch], -1)
+    # Name tasks after the source and the block position instead of
+    # letting dask hash every weight block (slow for large matrices).
+    # The blocks are views of one data buffer that stays alive as long as
+    # any task needs it, so its id cannot be reused by another matrix.
+    weights = row_blocks[0].data
+    buffer = weights.base if weights.base is not None else weights
+    matrix_id = (id(buffer), buffer.size, sum(b.nnz for b in row_blocks))
+
     parts = [
         flat.map_blocks(
             apply_weights_nd,
@@ -409,9 +440,11 @@ def _apply_weights_rowblocked(
             chunks=(*flat.chunks[:-1], (block.shape[0],)),
             dtype=np.float64,
             meta=np.empty((0,) * flat.ndim, dtype=np.float64),
+            name="regrid-"
+            + tokenize(flat.name, matrix_id, index, sorted(kwargs.items())),
             **kwargs,
         )
-        for block in row_blocks
+        for index, block in enumerate(row_blocks)
     ]
     coords = {
         str(k): v for k, v in ordered.coords.items() if set(v.dims) <= set(batch_dims)
@@ -531,10 +564,7 @@ def apply_weight_file(
 
         if cell_chunk is not None and data.chunks is not None:
             if row_blocks is None:
-                row_blocks = [
-                    matrix[start:start + cell_chunk]
-                    for start in range(0, n_target, cell_chunk)
-                ]
+                row_blocks = _row_blocks(matrix, cell_chunk)
             regridded[str(name)] = _apply_weights_rowblocked(
                 data,
                 resolved_sd,

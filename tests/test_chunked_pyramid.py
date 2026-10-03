@@ -236,3 +236,15 @@ class TestSavePyramidSingleStore:
         expected = pyramid[LEVEL]["sst"].values
         np.testing.assert_allclose(stored[1:3], expected[1:3], equal_nan=True)
         assert np.isnan(stored[[0, 3]]).all()
+
+
+def test_row_blocks_share_weight_buffers() -> None:
+    from scipy.sparse import random as sparse_random
+
+    matrix = sparse_random(100, 40, density=0.2, format="csr", random_state=0)
+    blocks = remap._row_blocks(matrix, 32)
+    assert [b.shape[0] for b in blocks] == [32, 32, 32, 4]
+    assert all(np.shares_memory(b.data, matrix.data) for b in blocks)
+    from scipy.sparse import vstack
+
+    assert (vstack(blocks) != matrix).nnz == 0
