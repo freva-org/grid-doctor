@@ -12,27 +12,23 @@ Remapping itself lives in [`grid_doctor.remap`][grid_doctor.remap].
 
 from __future__ import annotations
 
-import inspect
 import logging
 from pathlib import Path
-from typing import Any, Dict, Literal, NamedTuple, Union, cast
+from typing import Any, Literal
 
-import dask.array as da
 import numpy as np
 import numpy.typing as npt
 import s3fs
 import xarray as xr
-import zarr
-from xarray.backends.zarr import encode_zarr_variable
 
+from .io import DeferredWrite, deferred_writes, store_all
 from .pyramid import (
-    MeanPartials,
+    coarse_levels,
+    coarsen_dataset,
     coarsen_mean,
-    coarsen_mean_steps,
-    coarsen_mode_steps,
+    resolve_coarsen_mode,
 )
 from .remap import (
-    _make_crs_variable,
     regrid_to_healpix,
     regrid_unstructured_to_healpix,
 )
@@ -51,23 +47,6 @@ materialises coordinate arrays.  At level 10 the two float64 coordinate
 arrays cost ~200 MB per store; one level up they double, and by level 16
 they would reach hundreds of GB while carrying no information that is not
 already implied by the cell index."""
-
-# ``encode_zarr_variable`` gained ``zarr_format`` in recent xarray releases.
-_ENCODE_TAKES_FORMAT = (
-    "zarr_format" in inspect.signature(encode_zarr_variable).parameters
-)
-
-
-def _encode_zarr_variable(
-    var: xr.Variable, *, name: str, zarr_format: Literal[2, 3]
-) -> xr.Variable:
-    """Encode *var* exactly as ``to_zarr`` would, across xarray versions."""
-    kwargs: Dict[str, Union[str, Literal[2, 3]]] = {"name": name}
-    if _ENCODE_TAKES_FORMAT:
-        kwargs["zarr_format"] = zarr_format
-    encoded = encode_zarr_variable(var, **kwargs)  # type: ignore
-    return cast(xr.Variable, encoded)
-
 
 # ===================================================================
 # Resolution estimation
@@ -136,33 +115,6 @@ def resolution_to_healpix_level(resolution_deg: float) -> int:
         raise ValueError("resolution_deg must be positive.")
     level = int(np.round(np.log2(58.6 / resolution_deg)))
     return max(0, level)
-
-
-# ===================================================================
-# HEALPix coordinate helpers
-# ===================================================================
-
-
-def _healpix_coords(
-    level: int,
-    *,
-    nest: bool,
-) -> tuple[FloatArray, FloatArray]:
-    """Return HEALPix cell centres for *level*.
-
-    Delegates to
-    [`_healpix_centres`][grid_doctor.remap._healpix_centres].
-
-    Args:
-        level: HEALPix refinement level.
-        nest: Nested ordering when *True*.
-
-    Returns:
-        ``(lat_deg, lon_deg)`` arrays.
-    """
-    from .remap import _healpix_centres
-
-    return _healpix_centres(level, nest=nest)
 
 
 # ===================================================================
@@ -254,15 +206,6 @@ def _coarsen_array_mode(
     return result
 
 
-def _resolve_coarsen_mode(ds: xr.Dataset, coarsen_mode: CoarsenMode) -> CoarsenMode:
-    """Resolve ``"auto"`` to ``"mean"`` or ``"mode"`` from dataset attributes."""
-    if coarsen_mode != "auto":
-        return coarsen_mode
-    method = str(ds.attrs.get("grid_doctor_method", "conservative"))
-    is_categorical = method == "nearest" or method.endswith("-mode")
-    return "mode" if is_categorical else "mean"
-
-
 def coarsen_healpix(
     ds: xr.Dataset,
     target_level: int,
@@ -338,87 +281,14 @@ def coarsen_healpix(
     if delta_level <= 0:
         raise ValueError("target_level must be lower than the current HEALPix level.")
 
-    resolved_mode = _resolve_coarsen_mode(ds, coarsen_mode)
-    cell_chunk = _cell_chunk_of(ds)
-
-    coarsened_vars: dict[str, xr.DataArray] = {}
-    for name, data in ds.data_vars.items():
-        if "cell" not in data.dims:
-            coarsened_vars[str(name)] = data
-            continue
-        template = data.transpose(..., "cell")
-        if resolved_mode == "mode":
-            out = coarsen_mode_steps(
-                template.data,
-                delta_level,
-                kernel=_coarsen_array_mode,
-                min_valid_fraction=min_valid_fraction,
-                cell_chunk=cell_chunk,
-            )
-        else:
-            out = coarsen_mean_steps(
-                template.data,
-                delta_level,
-                min_valid_fraction=min_valid_fraction,
-                cell_chunk=cell_chunk,
-            )
-        coarsened_vars[str(name)] = _wrap_cells(template, out)
-
-    return _assemble_coarse_level(ds, coarsened_vars, target_level, current_level)
-
-
-def _cell_chunk_of(ds: xr.Dataset) -> int | None:
-    """Cell chunk size of the first dask-backed cell variable, if any."""
-    for data in ds.data_vars.values():
-        if "cell" in data.dims and data.chunks is not None:
-            return int(data.chunks[data.get_axis_num("cell")][0])
-    return None
-
-
-def _wrap_cells(template: xr.DataArray, values: Any) -> xr.DataArray:
-    """Wrap coarsened *values* like *template* (cell last), minus cell coords."""
-    coords = {str(k): v for k, v in template.coords.items() if "cell" not in v.dims}
-    return xr.DataArray(
-        values,
-        dims=template.dims,
-        coords=coords,
-        attrs=template.attrs.copy(),
-        name=template.name,
+    return coarsen_dataset(
+        ds,
+        source_level=current_level,
+        target_level=target_level,
+        coarsen_mode=resolve_coarsen_mode(ds, coarsen_mode),
+        min_valid_fraction=min_valid_fraction,
+        mode_kernel=_coarsen_array_mode,
     )
-
-
-def _assemble_coarse_level(
-    template: xr.Dataset,
-    data_vars: dict[str, xr.DataArray],
-    target_level: int,
-    source_level: int,
-) -> xr.Dataset:
-    """Build a coarse-level dataset with HEALPix coordinates and metadata."""
-    target_nside = 2**target_level
-    npix_target = 12 * target_nside**2
-    result = xr.Dataset(data_vars, attrs=template.attrs.copy())
-    lat_deg, lon_deg = _healpix_coords(target_level, nest=True)
-    result = result.assign_coords(
-        cell=np.arange(npix_target, dtype=np.int64),
-        latitude=("cell", lat_deg),
-        longitude=("cell", lon_deg),
-        crs=_make_crs_variable(
-            level=target_level,
-            nside=target_nside,
-            order="nested",
-        ),
-    )
-
-    # Tag every spatially-mapped data variable.
-    for name in result.data_vars:
-        if "cell" in result[name].dims:
-            result[name].attrs["grid_mapping"] = "crs"
-
-    result.attrs["healpix_nside"] = target_nside
-    result.attrs["healpix_level"] = target_level
-    result.attrs["healpix_order"] = "nested"
-    result.attrs["grid_doctor_coarsened_from_level"] = source_level
-    return result
 
 
 # ===================================================================
@@ -488,12 +358,13 @@ def create_healpix_pyramid(
     is_nested = bool(kwargs.get("nest", True))
     if is_nested:
         pyramid.update(
-            _coarse_levels(
+            coarse_levels(
                 finest,
                 max_level=max_level,
                 min_level=min_level,
-                coarsen_mode=_resolve_coarsen_mode(finest, coarsen_mode),
+                coarsen_mode=resolve_coarsen_mode(finest, coarsen_mode),
                 min_valid_fraction=min_valid_fraction,
+                mode_kernel=_coarsen_array_mode,
             )
         )
         return pyramid
@@ -501,59 +372,6 @@ def create_healpix_pyramid(
     for level in range(max_level - 1, min_level - 1, -1):
         pyramid[level] = regrid_to_healpix(ds, level, **kwargs)
     return pyramid
-
-
-def _coarse_levels(
-    finest: xr.Dataset,
-    *,
-    max_level: int,
-    min_level: int,
-    coarsen_mode: CoarsenMode,
-    min_valid_fraction: float,
-) -> dict[int, xr.Dataset]:
-    """Coarsen *finest* level by level, sharing work between levels.
-
-    Means carry sums and counts of valid finest-level cells, so every
-    level is exact (issue #54) while each step is a chunk-local
-    factor-4 reduction. Each level's graph builds on the previous one,
-    so computing all levels together regrids every chunk only once.
-    """
-    cell_chunk = _cell_chunk_of(finest)
-    templates = {
-        str(name): data.transpose(..., "cell")
-        for name, data in finest.data_vars.items()
-        if "cell" in data.dims
-    }
-    state: dict[str, Any] = {name: t.data for name, t in templates.items()}
-    levels: dict[int, xr.Dataset] = {}
-    for level in range(max_level - 1, min_level - 1, -1):
-        data_vars: dict[str, xr.DataArray] = {}
-        for name, data in finest.data_vars.items():
-            name = str(name)
-            if name not in templates:
-                data_vars[name] = data
-                continue
-            if coarsen_mode == "mode":
-                state[name] = coarsen_mode_steps(
-                    state[name],
-                    1,
-                    kernel=_coarsen_array_mode,
-                    min_valid_fraction=min_valid_fraction,
-                    cell_chunk=cell_chunk,
-                )
-                values = state[name]
-            else:
-                partials = state[name]
-                partials = (
-                    partials.coarsen()
-                    if isinstance(partials, MeanPartials)
-                    else MeanPartials.from_values(partials)
-                ).rechunk(cell_chunk)
-                state[name] = partials
-                values = partials.mean(min_valid_fraction)
-            data_vars[name] = _wrap_cells(templates[name], values)
-        levels[level] = _assemble_coarse_level(finest, data_vars, level, max_level)
-    return levels
 
 
 # ===================================================================
@@ -619,12 +437,9 @@ def save_pyramid(
     """
     is_s3 = path.startswith("s3://")
     fs = s3fs.S3FileSystem(**(s3_options or {})) if is_s3 else None
-    # xarray creates every store (metadata, encodings, NumPy-backed
-    # variables) eagerly; dask-backed data is collected and written by a
-    # single ``da.store``.  Separate ``to_zarr(compute=True)`` calls -- or
-    # separate Delayed objects -- would each rebuild the shared
-    # finest-level graph, regridding every chunk once per level.
-    deferred: list[_DeferredWrite] = []
+    # Stores are initialised per level; the data of all levels is written
+    # in one pass (see grid_doctor.io._zarr for why).
+    deferred: list[DeferredWrite] = []
     for level, dataset in pyramid.items():
         include_coords = (
             write_coords
@@ -673,7 +488,7 @@ def save_pyramid(
             write_region = region
         if compute:
             deferred.extend(
-                _deferred_writes(
+                deferred_writes(
                     written,
                     store,
                     encoding=zarr_options.get("encoding"),
@@ -689,49 +504,7 @@ def save_pyramid(
             coord_options["mode"] = "a"
             dataset[list(dataset.coords)].to_zarr(store, **coord_options)  # type: ignore[call-overload]
 
-    if deferred:
-        da.store(
-            [w.source for w in deferred],
-            [w.target for w in deferred],
-            regions=[w.region for w in deferred],
-            lock=False,
-        )
-
-
-class _DeferredWrite(NamedTuple):
-    source: Any
-    target: Any
-    region: tuple[slice, ...]
-
-
-def _deferred_writes(
-    dataset: xr.Dataset,
-    store: Any,
-    *,
-    encoding: dict[str, dict[str, Any]] | None,
-    region: dict[str, slice] | None,
-    zarr_format: Literal[2, 3],
-) -> list[_DeferredWrite]:
-    """Collect encoded dask sources and zarr targets of an initialised store."""
-    # NumPy-backed variables were already written by ``to_zarr(compute=False)``.
-    lazy = {
-        str(name): var
-        for name, var in dataset.variables.items()
-        if var.chunks is not None
-    }
-    if not lazy:
-        return []
-    group = zarr.open_group(store, mode="r+", zarr_format=zarr_format)
-    writes: list[_DeferredWrite] = []
-    for name, var in lazy.items():
-        var = var.copy(deep=False)
-        var.encoding = {**var.encoding, **(encoding or {}).get(name, {})}
-        encoded = _encode_zarr_variable(var, name=name, zarr_format=zarr_format)
-        target_region = tuple(
-            (region or {}).get(str(dim), slice(None)) for dim in var.dims
-        )
-        writes.append(_DeferredWrite(encoded.data, group[name], target_region))
-    return writes
+    store_all(deferred)
 
 
 # ===================================================================

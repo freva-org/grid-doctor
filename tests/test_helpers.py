@@ -23,6 +23,7 @@ from grid_doctor.helpers import (
     resolution_to_healpix_level,
     save_pyramid,
 )
+from grid_doctor.pyramid import _levels as pyramid_levels
 
 
 class TestGridDetection:
@@ -170,8 +171,8 @@ class TestCoarsenHealpix:
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            helpers,
-            "_healpix_coords",
+            pyramid_levels,
+            "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
@@ -188,8 +189,8 @@ class TestCoarsenHealpix:
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            helpers,
-            "_healpix_coords",
+            pyramid_levels,
+            "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = healpix_ds.assign(scale=xr.DataArray(2.0))
@@ -201,8 +202,8 @@ class TestCoarsenHealpix:
     ) -> None:
         """Auto coarsen_mode with conservative method should use mean."""
         monkeypatch.setattr(
-            helpers,
-            "_healpix_coords",
+            pyramid_levels,
+            "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = healpix_ds.copy()
@@ -217,8 +218,8 @@ class TestCoarsenHealpix:
     ) -> None:
         """Auto coarsen_mode with nearest method should use mode."""
         monkeypatch.setattr(
-            helpers,
-            "_healpix_coords",
+            pyramid_levels,
+            "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = healpix_ds.copy()
@@ -233,8 +234,8 @@ class TestCoarsenHealpix:
     ) -> None:
         """Explicit coarsen_mode='mean' should average even with nearest method."""
         monkeypatch.setattr(
-            helpers,
-            "_healpix_coords",
+            pyramid_levels,
+            "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = healpix_ds.copy()
@@ -248,8 +249,8 @@ class TestCoarsenHealpix:
     ) -> None:
         """Explicit coarsen_mode='mode' takes the mode even with conservative method."""
         monkeypatch.setattr(
-            helpers,
-            "_healpix_coords",
+            pyramid_levels,
+            "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = healpix_ds.copy()
@@ -262,8 +263,8 @@ class TestCoarsenHealpix:
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            helpers,
-            "_healpix_coords",
+            pyramid_levels,
+            "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = healpix_ds.copy()
@@ -279,8 +280,8 @@ class TestCoarsenHealpix:
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            helpers,
-            "_healpix_coords",
+            pyramid_levels,
+            "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
@@ -294,8 +295,8 @@ class TestCoarsenHealpix:
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            helpers,
-            "_healpix_coords",
+            pyramid_levels,
+            "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
@@ -307,8 +308,8 @@ class TestCoarsenHealpix:
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            helpers,
-            "_healpix_coords",
+            pyramid_levels,
+            "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
@@ -416,7 +417,7 @@ class TestPyramidBuilders:
             return {}
 
         monkeypatch.setattr(helpers, "regrid_to_healpix", fake_regrid)
-        monkeypatch.setattr(helpers, "_coarse_levels", fake_coarse_levels)
+        monkeypatch.setattr(helpers, "coarse_levels", fake_coarse_levels)
         create_healpix_pyramid(
             regular_ds,
             max_level=2,
@@ -424,14 +425,12 @@ class TestPyramidBuilders:
             coarsen_mode="mode",
             min_valid_fraction=0.75,
         )
-        assert coarsen_calls == [
-            {
-                "max_level": 2,
-                "min_level": 0,
-                "coarsen_mode": "mode",
-                "min_valid_fraction": 0.75,
-            }
-        ]
+        assert len(coarsen_calls) == 1
+        call = coarsen_calls[0]
+        assert call["max_level"] == 2
+        assert call["min_level"] == 0
+        assert call["coarsen_mode"] == "mode"
+        assert call["min_valid_fraction"] == 0.75
 
 
 class TestSavePyramidToS3:

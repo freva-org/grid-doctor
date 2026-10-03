@@ -8,12 +8,13 @@ finest-level HEALPix field into a multi-resolution pyramid:
 - ``_blocks``: the same reductions applied block-wise along ``cell`` for
   NumPy or dask arrays, including exact chained means via
   [`MeanPartials`][grid_doctor.pyramid.MeanPartials].
+- ``_levels``: the xarray layer that turns those arrays into coarse
+  HEALPix datasets and chains whole pyramids.
 
-The xarray-level functions (``coarsen_healpix``,
+The public entry points (``coarsen_healpix``,
 ``create_healpix_pyramid``) still live in
-[`grid_doctor.helpers`][grid_doctor.helpers] and will move here in a
-later restructuring. Public names stay importable from
-``grid_doctor`` throughout.
+[`grid_doctor.helpers`][grid_doctor.helpers] and delegate here.  Public
+names stay importable from ``grid_doctor`` throughout.
 """
 
 from ._blocks import (
@@ -24,13 +25,23 @@ from ._blocks import (
     rechunk_cells,
 )
 from ._kernels import coarsen_mean, min_valid_count
+from ._levels import (
+    assemble_coarse_level,
+    coarse_levels,
+    coarsen_dataset,
+    resolve_coarsen_mode,
+)
 
 __all__ = [
-    "MeanPartials",
+    "assemble_coarse_level",
+    "coarse_levels",
+    "coarsen_dataset",
     "coarsen_mean",
     "coarsen_mean_steps",
     "coarsen_mode_steps",
     "map_cells",
+    "MeanPartials",
     "min_valid_count",
     "rechunk_cells",
+    "resolve_coarsen_mode",
 ]
