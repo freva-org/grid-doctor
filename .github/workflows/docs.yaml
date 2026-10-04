@@ -1,86 +1,45 @@
 name: Deploy Docs
 
+# Pull requests are covered by the `docs` job in ci.yaml. This workflow only
+# publishes. src/** is included because the API reference is generated from
+# docstrings.
 on:
   push:
     branches: [main]
     paths:
       - "docs/**"
+      - "src/**"
+      - "mkdocs.*.yml"
+      - "pyproject.toml"
       - ".github/workflows/docs.yaml"
-      - "mkdocs.tech.yml"
-      - "mkdocs.data.yml"
-
-  pull_request:
-    paths:
-      - "docs/**"
-      - ".github/workflows/docs.yaml"
-      - "mkdocs.tech.yml"
-      - "mkdocs.data.yml"
-
+      - ".github/workflows/docs-build.yaml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: docs-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v1
-        with:
-          micromamba-version: "latest"
-          environment-name: grid-doctor
-          cache-environment: true
-          create-args: >-
-            python=3.13
-            pip
-          condarc: |
-            channels:
-              - conda-forge
-            channel_priority: strict
-          init-shell: bash
-
-      - name: Install packages
-        shell: bash -l {0}
-        run: |
-          python -m pip install -e ".[dev]"
-          python -m pip install tox
-
-      - name: Build technical docs
-        shell: bash -l {0}
-        env:
-          SOCIAL_CARDS: "true"
-        run: tox -e docs
-
-      - name: Upload technical docs artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site-tech/
+    uses: ./.github/workflows/docs-build.yaml
+    with:
+      social-cards: true
+      upload-pages-artifact: true
 
   deploy:
-    if: >-
-      github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: build
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write
-
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
     steps:
-      - name: Deploy technical docs to GitHub Pages
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

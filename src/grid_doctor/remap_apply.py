@@ -28,6 +28,7 @@ on what is installed and the problem size:
 from __future__ import annotations
 
 import logging
+import types
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
@@ -116,23 +117,16 @@ except ModuleNotFoundError:  # pragma: no cover
     pass
 
 
-def _build_numba_kernels() -> (
-    tuple[
-        "numba.core.registry.CPUDispatcher",
-        "numba.core.registry.CPUDispatcher",
-    ]
-    | None
-):
+def _build_numba_kernels() -> dict[tuple[str, bool], Any] | None:
     """JIT-compile the fused Numba kernels on first use.
 
     Returns:
-        ``(renormalize_kernel, propagate_kernel)`` or ``None`` when
-        Numba is not available.
+        Kernels keyed by ``(missing_policy, parallel)``, or ``None``
+        when Numba is not available.
     """
     if not _HAS_NUMBA:
         return None
 
-    @numba.njit(parallel=True, cache=True)
     def _numba_renormalize(
         indptr: npt.NDArray[np.int32],
         indices: npt.NDArray[np.int32],
@@ -154,7 +148,6 @@ def _build_numba_kernels() -> (
                     sup += w
             out[i] = wsum / sup if sup > 0.0 else np.nan
 
-    @numba.njit(parallel=True, cache=True)
     def _numba_propagate(
         indptr: npt.NDArray[np.int32],
         indices: npt.NDArray[np.int32],
@@ -177,27 +170,43 @@ def _build_numba_kernels() -> (
                     has_nan = True
             out[i] = np.nan if has_nan else wsum
 
-    return _numba_renormalize, _numba_propagate  # type: ignore
+    return {
+        (policy, parallel): _compile(func, parallel=parallel)
+        for policy, func in (
+            ("renormalize", _numba_renormalize),
+            ("propagate", _numba_propagate),
+        )
+        for parallel in (True, False)
+    }
+
+
+def _compile(func: Any, *, parallel: bool) -> Any:
+    """JIT *func* with a parallel (OpenMP/TBB) or serial, GIL-free target.
+
+    Serial kernels are for code that already runs in parallel threads
+    (dask tasks): parallel kernels there start one thread team per task
+    and exhaust the process thread limit.  Each variant gets its own
+    name so numba's on-disk cache keeps them apart.
+    """
+    suffix = "parallel" if parallel else "serial"
+    variant = types.FunctionType(
+        func.__code__,
+        func.__globals__,
+        f"{func.__name__}_{suffix}",
+        func.__defaults__,
+        func.__closure__,
+    )
+    variant.__qualname__ = f"{func.__qualname__}_{suffix}"
+    if parallel:
+        return numba.njit(parallel=True, cache=True)(variant)
+    return numba.njit(nogil=True, cache=True)(variant)
 
 
 # Lazy singleton — compiled on first call.
-_NUMBA_KERNELS: (
-    tuple[
-        "numba.core.registry.CPUDispatcher",
-        "numba.core.registry.CPUDispatcher",
-    ]
-    | None
-    | Literal[False]
-) = False
+_NUMBA_KERNELS: dict[tuple[str, bool], Any] | None | Literal[False] = False
 
 
-def _get_numba_kernels() -> (
-    tuple[
-        "numba.core.registry.CPUDispatcher",
-        "numba.core.registry.CPUDispatcher",
-    ]
-    | None
-):
+def _get_numba_kernels() -> dict[tuple[str, bool], Any] | None:
     """Return the Numba kernels, compiling on first call."""
     global _NUMBA_KERNELS  # noqa: PLW0603
     if _NUMBA_KERNELS is False:
@@ -214,6 +223,7 @@ def _apply_numba_single(
     matrix: csr_matrix,
     values_1d: FloatArray,
     missing_policy: MissingPolicy,
+    parallel: bool = True,
 ) -> FloatArray:
     """Apply weights to a single 1-D field using the Numba kernel.
 
@@ -221,6 +231,8 @@ def _apply_numba_single(
         matrix: CSR weight matrix ``(n_target, n_source)``.
         values_1d: Source field, shape ``(n_source,)``.
         missing_policy: NaN handling strategy.
+        parallel: Use the multi-threaded kernel.  Pass ``False`` when
+            the caller already runs in parallel threads.
 
     Returns:
         Remapped field, shape ``(n_target,)``.
@@ -229,13 +241,10 @@ def _apply_numba_single(
     if kernels is None:
         raise RuntimeError("Numba is not available.")
 
-    renorm_kernel, prop_kernel = kernels
+    policy = "propagate" if missing_policy == "propagate" else "renormalize"
+    kernel = kernels[(policy, parallel)]
     out = np.empty(matrix.shape[0], dtype=np.float64)
-
-    if missing_policy == "propagate":
-        prop_kernel(matrix.indptr, matrix.indices, matrix.data, values_1d, out)
-    else:
-        renorm_kernel(matrix.indptr, matrix.indices, matrix.data, values_1d, out)
+    kernel(matrix.indptr, matrix.indices, matrix.data, values_1d, out)
     return out
 
 
@@ -396,6 +405,7 @@ def apply_weights_nd(
     n_source_dims: int = 1,
     missing_policy: MissingPolicy = "renormalize",
     backend: ApplyBackend = "auto",
+    parallel: bool = True,
 ) -> FloatArray:
     """Apply a sparse weight matrix to an N-dimensional array.
 
@@ -424,11 +434,18 @@ def apply_weights_nd(
             target to NaN if any contributing source cell is NaN.
         backend: Force a specific application backend.  ``"auto"``
             selects the best available.
+        parallel: Let the Numba kernel use its own thread team.  Set
+            ``False`` inside dask tasks, which are already parallel.
 
     Returns:
         Remapped array with shape ``(*batch_dims, n_target)``.
     """
-    arr = np.asarray(values, dtype=np.float64)
+    # float32 sources stay float32: the kernels accumulate in float64
+    # anyway (the weights are float64), and converting would copy the
+    # whole source field in every task that reads it.
+    arr = np.asarray(values)
+    if arr.dtype not in (np.float32, np.float64):
+        arr = arr.astype(np.float64)
     n_target, n_source = matrix.shape
 
     # Flatten source dims into a single trailing dimension.
@@ -457,7 +474,7 @@ def apply_weights_nd(
     if use_cupy:
         result_2d = _apply_cupy_batched(matrix, flat_2d, missing_policy)
     elif use_numba and n_batch == 1:
-        result_2d = _apply_numba_single(matrix, flat_2d[0], missing_policy)[
+        result_2d = _apply_numba_single(matrix, flat_2d[0], missing_policy, parallel)[
             np.newaxis, :
         ]
     elif use_numba and n_batch > 1:
@@ -465,7 +482,9 @@ def apply_weights_nd(
         # Python-level vectorize because the kernel itself is compiled.
         result_2d = np.empty((n_batch, n_target), dtype=np.float64)
         for i in range(n_batch):
-            result_2d[i] = _apply_numba_single(matrix, flat_2d[i], missing_policy)
+            result_2d[i] = _apply_numba_single(
+                matrix, flat_2d[i], missing_policy, parallel
+            )
     else:
         result_2d = _apply_scipy_batched(matrix, flat_2d, missing_policy)
 

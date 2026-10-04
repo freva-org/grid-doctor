@@ -35,13 +35,13 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Atmospheric Science",
     "Topic :: Scientific/Engineering :: GIS",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "numpy",
-    "xarray",
+    "xarray>=2025.1",
     "requests",
     "healpix-geo",
-    "zarr",
+    "zarr>=3",
     "s3fs",
     "scipy",
     "fsspec",

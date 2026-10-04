@@ -263,10 +263,11 @@ gd.save_pyramid(pyramid, "s3://my-bucket/my-l2-product.zarr", ...)
 
 `mean` is the binning analogue of conservative remapping (valid when the
 samples oversample the target cells), `mode` the analogue of
-nearest-neighbour for categorical fields.  All cell geometry stays on the
-perfect sphere — do not index satellite data on the WGS84 ellipsoid, or it
-will be misregistered against every other dataset in the hub.  See the
-point-data recipe in the documentation for details.
+nearest-neighbour for categorical fields.  Cell geometry uses the perfect
+sphere, like remapping.  Indexing on the WGS84 ellipsoid is equally
+accurate but produces a different grid, displaced by up to ~14 km, so
+only compare data that uses the same definition.  See the point-data
+recipe in the documentation for details.
 
 ## 🏥 Grid Rehab Progress
 How are our patients doing? Every dataset starts broken and leaves HEALed.
