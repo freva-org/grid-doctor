@@ -187,7 +187,7 @@ def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
 
 def _key_hash(
     ds: xr.Dataset,
-    level: int | None = None,
+    level: int,
     *,
     method: RemapMethod = "conservative",
     nest: bool = True,
@@ -268,6 +268,9 @@ def cached_weights(
     from .helpers import get_latlon_resolution, resolution_to_healpix_level
     from .remap import compute_healpix_weights
 
+    if level is None:
+        level = resolution_to_healpix_level(get_latlon_resolution(ds))
+
     key = _key_hash(ds, level, method=method, nest=nest, source_units=source_units)[:16]
 
     if cache_path is None:
@@ -280,8 +283,6 @@ def cached_weights(
         return weight_file
 
     logger.info("Generating HEALPix weight file %s", weight_file)
-    if level is None:
-        level = resolution_to_healpix_level(get_latlon_resolution(ds))
 
     return compute_healpix_weights(
         ds,

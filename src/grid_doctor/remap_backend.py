@@ -190,7 +190,6 @@ class TargetDescription:
     level: int
     order: Literal["nest", "ring"]  # TODO: refactor with proper type
     target_mesh: PolygonMesh | None = None
-#    field(init=False)
 
     def __post_init__(self) -> None:
         """Initialize optional PolygonMesh."""
