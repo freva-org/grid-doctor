@@ -161,7 +161,7 @@ class SourceDescription:
     metadata: dict[str, str | int | float | bool]
 
     @classmethod
-    def from_normalized_dataset(cls, ds: xr.Dataset) -> SourceDescription:
+    def from_normalized_dataset(cls, ds: xr.Dataset, **kwargs: Any) -> SourceDescription:
         """Class factory to construct **normalized** description of the input dataset.
 
         Wraps [`decribe_source`][grid_doctor.remap_backend,describe_source]
@@ -170,7 +170,7 @@ class SourceDescription:
         Args:
             ds: Source dataset
         """
-        return describe_source(ds.pipe(normalize_dataset))
+        return describe_source(ds.pipe(normalize_dataset), **kwargs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,13 +216,10 @@ class WeightsDescription:
     method: RemapMethod
     units: SourceUnits  # TODO: use canonical units
 
-    @property
+    @cached_property
     def key(self) -> str:
         """Return hash (sha256) that describes the object."""
-        if not hasattr(self, "_key"):
-            # frozen=True invalidates self._key = self._compute_key()
-            object.__setattr__(self, "_key", self._compute_key())
-        return self._key  # type: ignore
+        return  self._compute_key()
 
     def _compute_key(self) -> str:
         from .utils import _key_hash
@@ -235,8 +232,12 @@ class WeightsDescription:
             source_units=self.units,
         )
 
-    def __repr__(self) -> str:  # noqa: D105
-        return self.key
+    def __hash__(self) -> int:  # noqa: D105
+        return hash(self.key)
+        
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, WeightsDescription) and self.key == other.key
+
 
 
 class SpectralTransformError(RuntimeError):

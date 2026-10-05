@@ -250,7 +250,7 @@ def _replace_values(ds: xr.Dataset, mapping: Mapping[str, np.ndarray | xr.DataAr
 
 def _to_micro(a: FloatArray, scale: int) -> FloatArray:
     a = _to_float64(a)
-    if not np.all(np.isfinite(a)):
+    if np.isinf(a).any():
         raise ValueError("NaN/inf in input")
     return np.rint(a * scale).astype(np.int64)
 
@@ -344,8 +344,6 @@ def normalize_dataset(ds: xr.Dataset) -> xr.Dataset:
     """
     lat_name, lon_name = _get_vertex_names(ds) if _is_unstructured(ds) else _get_spatial_dims(ds)
 
-    if ds[lat_name].ndim > 2 or ds[lon_name].ndim > 2:
-        raise ValueError("Latitude/longitude coordinates must be 1-D or 2-D.")
 
     return _replace_values(
         ds,
