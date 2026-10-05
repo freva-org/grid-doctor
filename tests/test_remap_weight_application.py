@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+from functools import reduce
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -126,26 +126,31 @@ class _FakeESMPy:
 
 
 class TestWeightsDescription:
-    # fmt: off
-    @pytest.mark.parametrize(
-        "method,level,expected",
-        [
-            ("auto",  1, "ab8300d05552cbc7151d4ae4ac06066d1f2859922f26118a07f243c1691e8410"),
-            ("nearest",  1, "82f2662c8eab627f06745a185659bdf1d7a8870b31d5bb3aa0670b76634eb33e"),
-            ("conservative",  1, "befc8d06da47788b5fc9af52e6931f2a67d5238f162e7583b7dd25dce97bfae5"),
-        ],
-    ) # fmt: on
-    def test_hash_key(
-        self, regular_ds: xr.Dataset, method, level, expected
-    ) -> None:
-        weight_desc = WeightsDescription(
-            source=SourceDescription.from_normalized_dataset(regular_ds),
-            target=TargetDescription(level=level, order="nest"),
-            method=method,
-            units="auto",
-        )
-        print(weight_desc.key)
-        assert weight_desc.key == expected
+    def test_hash_unique_properties(self, regular_ds: xr.Dataset) -> None:
+        orders = ('nest', 'ring',)
+        levels = (0,1,)
+        methods = ("nearest", "conservative")
+        _args = [methods, levels, orders]
+
+        from itertools import product
+
+        expected_uniq = reduce(lambda x, y: x * y, map(len, _args), 1)
+        def gen_weight_desc():
+            source = SourceDescription.from_normalized_dataset(regular_ds)
+            for method, level, order in product(*_args):
+                w = WeightsDescription(
+                    source=source,
+                    target=TargetDescription(level=level, order=order),
+                    method=method,
+                    units="auto",
+                )
+                yield w
+
+        weight_descriptions = gen_weight_desc()
+        assert len(set(weight_descriptions)) == expected_uniq
+        assert reduce(lambda a,b: a != b, weight_descriptions, True)
+        assert reduce(lambda a,b: a.key != b.key, weight_descriptions, True)
+        assert reduce(lambda a,b: hash(a) != hash(b), weight_descriptions, True)
 
 
 class TestWeightGeneration:
