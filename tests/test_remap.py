@@ -12,6 +12,13 @@ import pytest
 import xarray as xr
 
 from grid_doctor import remap
+from grid_doctor.misc.dataset import (
+    _get_latlon_arrays,
+    _get_unstructured_dim,
+    _looks_like_radians,
+    _normalize_angle_units,
+)
+
 from grid_doctor import remap_backend as remap_backend_module
 from grid_doctor.remap import (
     _attach_healpix_coords,
@@ -32,7 +39,6 @@ from grid_doctor.remap_backend import (
     _default_offline_enabled,
     _ensure_ccw,
     _get_unstructured_vertices,
-    _get_unstructured_dim,
     _get_spatial_dims,
     _infer_bounds_1d,
     _infer_curvilinear_corners,
@@ -42,7 +48,6 @@ from grid_doctor.remap_backend import (
     _materialise_spectral_source,
     _median_positive_step,
     _mesh_to_polygons,
-    _normalise_angle_units,
     _polygons_to_corner_arrays,
     _regular_grid_mesh,
     _require_esmpy,
@@ -60,7 +65,7 @@ from grid_doctor.remap_backend import (
     run_esmf_regrid_weightgen,
     write_ugrid_mesh_file,
 )
-from .helpers import _FakeHealpixModule
+from .helpers import TEST_DS, _FakeHealpixModule
 
 
 # ===================================================================
@@ -76,9 +81,9 @@ class TestPrimitiveHelpers:
             wrapped, np.array([170.0, -180.0, 0.0, -180.0, -170.0])
         )
 
-    def test_normalise_angle_units_auto_detects_radians(self) -> None:
+    def test_normalize_angle_units_auto_detects_radians(self) -> None:
         values = np.array([0.0, np.pi / 2.0, np.pi])
-        result = _normalise_angle_units(values, "auto")
+        result = _normalize_angle_units(values, "auto")
         np.testing.assert_allclose(result, np.array([0.0, 90.0, 180.0]))
 
     def test_infer_bounds_1d(self) -> None:
@@ -104,6 +109,12 @@ class TestPrimitiveHelpers:
     ) -> None:
         with pytest.raises(ValueError, match="Could not determine"):
             _get_spatial_dims(unstructured_ds)
+
+    @TEST_DS([("unstructured_ds", False), ("unstructured_rad_ds", True)], "is_rad")
+    def test_unstructured_looks_like_radians(self, test_ds: xr.Dataset, is_rad: bool) -> None:
+        latv, lonv = _get_latlon_arrays(test_ds)
+        assert is_rad == _looks_like_radians(latv)
+        assert is_rad == _looks_like_radians(lonv)
 
     def test_unstructured_vertices_resolution(self, unstructured_ds: xr.Dataset) -> None:
         assert _get_unstructured_vertices(unstructured_ds) == (

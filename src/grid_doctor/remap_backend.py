@@ -28,12 +28,23 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Literal, cast, overload
 
 import numpy as np
 import xarray as xr
 
+from .misc import (
+    _canonical_lon,
+    _get_latlon_arrays,
+    _get_spatial_dims,
+    _get_unstructured_dim,
+    _is_unstructured,
+    _normalize_angle_units,
+    _to_float64,
+    normalize_dataset,
+)
 from .types import (
     FloatArray,
     Int64Array,
@@ -44,106 +55,6 @@ from .types import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Well-known coordinate and dimension names
-# ---------------------------------------------------------------------------
-
-_UNSTRUCTURED_DIMS: frozenset[str] = frozenset({"cell", "ncells", "ncell", "nCells"})
-"""Dimension names that signal an unstructured source grid."""
-
-_LAT_NAMES: tuple[str, ...] = (
-    "clat",
-    "lat",
-    "latitude",
-    "LAT",
-    "LATITUDE",
-    "Latitude",
-    "XLAT",
-    "XLAT_M",
-    "XLAT_U",
-    "XLAT_V",
-    "nav_lat",
-    "nav_lat_rho",
-    "lat_rho",
-    "lat_u",
-    "lat_v",
-    "lat_psi",
-    "gridlat_0",
-    "g0_lat_0",
-    "yt_ocean",
-    "yu_ocean",
-    "geolat",
-    "geolat_t",
-    "geolat_c",
-)
-"""Priority-ordered latitude variable names recognised by the backend."""
-
-_LON_NAMES: tuple[str, ...] = (
-    "clon",
-    "lon",
-    "longitude",
-    "LON",
-    "LONGITUDE",
-    "Longitude",
-    "XLONG",
-    "XLONG_M",
-    "XLONG_U",
-    "XLONG_V",
-    "nav_lon",
-    "nav_lon_rho",
-    "lon_rho",
-    "lon_u",
-    "lon_v",
-    "lon_psi",
-    "gridlon_0",
-    "g0_lon_0",
-    "xt_ocean",
-    "xu_ocean",
-    "geolon",
-    "geolon_t",
-    "geolon_c",
-)
-"""Priority-ordered longitude variable names recognised by the backend."""
-
-_Y_CANDIDATES: tuple[str, ...] = (
-    "rlat",
-    "lat",
-    "latitude",
-    "y",
-    "j",
-    "nj",
-    "south_north",
-    "south_north_stag",
-    "eta_rho",
-    "eta_u",
-    "eta_v",
-    "eta_psi",
-    "yh",
-    "yq",
-    "njp1",
-)
-"""Lower-cased dimension names considered as latitude / y axes."""
-
-_X_CANDIDATES: tuple[str, ...] = (
-    "rlon",
-    "lon",
-    "longitude",
-    "x",
-    "i",
-    "ni",
-    "west_east",
-    "west_east_stag",
-    "xi_rho",
-    "xi_u",
-    "xi_v",
-    "xi_psi",
-    "xh",
-    "xq",
-    "nip1",
-)
-"""Lower-cased dimension names considered as longitude / x axes."""
 
 
 # ===================================================================
@@ -250,6 +161,84 @@ class SourceDescription:
     ignore_unmapped: bool
     metadata: dict[str, str | int | float | bool]
 
+    @classmethod
+    def from_normalized_dataset(cls, ds: xr.Dataset, **kwargs: Any) -> SourceDescription:
+        """Class factory to construct **normalized** description of the input dataset.
+
+        Wraps [`decribe_source`][grid_doctor.remap_backend,describe_source]
+        with default arguments but normatzied
+
+        Args:
+            ds: Source dataset
+        """
+        return describe_source(ds.pipe(normalize_dataset), **kwargs)
+
+
+@dataclass(frozen=True, slots=True)
+class TargetDescription:
+    """Resolved description of the target representation.
+
+    To be used by weight-generation entry point.
+
+    Attributes:
+        level: Healpix index resolution (zoom)
+        order: Healpix indexing order ('nest' or 'ring').
+        target: Target mesh storeed as compact node/connectivity
+            arrays.
+    """
+
+    level: int
+    order: Literal["nest", "ring"]  # TODO: refactor with proper type
+    target_mesh: PolygonMesh | None = None
+#    field(init=False)
+
+    def __post_init__(self) -> None:
+        """Initialize optional PolygonMesh."""
+        if self.target_mesh is None:
+            _, m = _target_healpix_mesh(self.level, nest=self.order.startswith('nest'))
+            object.__setattr__(self, 'target_mesh', m)
+
+
+@dataclass(frozen=True, repr=False)
+class WeightsDescription:
+    """Resolved description of the weights representation.
+
+    To be used by weight-generation entry point.
+
+    Attributes:
+        source: Source description.
+        target: Target description.
+        method: Remapping method ('conservative' or 'nearest').
+        units: Source units ('rad' or 'deg').
+    """
+
+    source: SourceDescription
+    target: TargetDescription
+    method: RemapMethod
+    units: SourceUnits  # TODO: use canonical units
+
+    @cached_property
+    def key(self) -> str:
+        """Return hash (sha256) that describes the object."""
+        return self._compute_key()
+
+    def _compute_key(self) -> str:
+        from .utils import _key_hash
+
+        return _key_hash(
+            self.source.dataset,
+            self.target.level,
+            method=self.method,
+            nest=self.target.order.startswith("nest"),
+            source_units=self.units,
+        )
+
+    def __hash__(self) -> int:  # noqa: D105
+        return hash(self.key)
+
+    def __eq__(self, other: object) -> bool:  # noqa: D105
+        return isinstance(other, WeightsDescription) and self.key == other.key
+
 
 class SpectralTransformError(RuntimeError):
     """Raised when a spectral-to-grid transform command fails."""
@@ -314,74 +303,6 @@ def _require_healpix_geo_module(nest: bool) -> tuple[Any, dict[str, str]]:
 # ===================================================================
 # Low-level coordinate helpers (fully vectorised)
 # ===================================================================
-
-
-def _to_float64(values: Any) -> FloatArray:
-    """Cast *values* to a contiguous float64 array.
-
-    Args:
-        values: Anything accepted by :func:`numpy.asarray`.
-
-    Returns:
-        Float64 NumPy array.
-    """
-    return np.asarray(values, dtype=np.float64)
-
-
-def _canonical_lon(lon_deg: FloatArray) -> FloatArray:
-    """Map longitudes into the range ``[-180, 180)``.
-
-    Args:
-        lon_deg: Longitude values in degrees.
-
-    Returns:
-        Canonicalised longitude array (same shape as input).
-    """
-    return ((lon_deg + 180.0) % 360.0) - 180.0
-
-
-def _looks_like_radians(values: FloatArray) -> bool:
-    """Heuristic test whether *values* are in radians.
-
-    The check passes when the maximum absolute finite value is at most
-    ``2 * pi + 1e-6``.
-
-    Args:
-        values: Coordinate array to inspect.
-
-    Returns:
-        *True* when the values appear to be in radians.
-    """
-    finite = values[np.isfinite(values)]
-    if finite.size == 0:
-        return False
-    return bool(float(np.nanmax(np.abs(finite))) <= (2.0 * np.pi + 1e-6))
-
-
-def _normalise_angle_units(
-    values: FloatArray,
-    units: SourceUnits,
-) -> FloatArray:
-    """Convert *values* to degrees according to *units*.
-
-    When ``units="auto"`` the function applies
-    [`_looks_like_radians`][grid_doctor.remap_backend._looks_like_radians]
-    and converts if the heuristic fires.
-
-    Args:
-        values: Coordinate array.
-        units: Unit convention (``"deg"``, ``"rad"``, or ``"auto"``).
-
-    Returns:
-        Coordinate array guaranteed to be in degrees.
-    """
-    if units == "deg":
-        return values.astype(np.float64, copy=False)
-    if units == "rad":
-        return np.rad2deg(values)
-    if _looks_like_radians(values):
-        return np.rad2deg(values)
-    return values.astype(np.float64, copy=False)
 
 
 def _lonlat_to_xyz(lon_deg: FloatArray, lat_deg: FloatArray) -> FloatArray:
@@ -525,66 +446,6 @@ def _ensure_ccw(
 # ===================================================================
 
 
-def _get_latlon_arrays(ds: xr.Dataset) -> tuple[FloatArray, FloatArray]:
-    """Extract latitude and longitude arrays from *ds*.
-
-    The function searches coordinates and data variables using the
-    priority-ordered name lists
-    [`_LAT_NAMES`][grid_doctor.remap_backend._LAT_NAMES] and
-    [`_LON_NAMES`][grid_doctor.remap_backend._LON_NAMES].
-
-    Args:
-        ds: Source dataset.
-
-    Returns:
-        ``(lat, lon)`` as float64 NumPy arrays.
-
-    Raises:
-        ValueError: When no recognised coordinate names are found.
-    """
-    lat: FloatArray | None = None
-    lon: FloatArray | None = None
-
-    for name in _LAT_NAMES:
-        if name in ds.coords or name in ds.data_vars:
-            lat = _to_float64(ds[name].values)
-            break
-    for name in _LON_NAMES:
-        if name in ds.coords or name in ds.data_vars:
-            lon = _to_float64(ds[name].values)
-            break
-
-    if lat is None or lon is None:
-        available = sorted({*map(str, ds.coords), *map(str, ds.data_vars)})
-        raise ValueError(
-            "Could not locate latitude/longitude coordinates. "
-            f"Available names are: {available}."
-        )
-    return lat, lon
-
-
-def _is_unstructured(ds: xr.Dataset) -> bool:
-    """Check whether *ds* looks like an unstructured grid.
-
-    The test succeeds when any dimension name is in
-    [`_UNSTRUCTURED_DIMS`][grid_doctor.remap_backend._UNSTRUCTURED_DIMS]
-    or when any variable carries the ``CDI_grid_type=unstructured``
-    attribute.
-
-    Args:
-        ds: Dataset to test.
-
-    Returns:
-        *True* when the dataset appears to be unstructured.
-    """
-    if _UNSTRUCTURED_DIMS & {str(dim) for dim in ds.dims}:
-        return True
-    return any(
-        var.attrs.get("CDI_grid_type") == "unstructured"
-        for var in ds.data_vars.values()
-    )
-
-
 def _get_unstructured_vertices(ds: xr.Dataset) -> tuple[str | None, str | None]:
     """Return longitude and latitude vertex variable names for *ds*.
 
@@ -614,73 +475,6 @@ def _get_unstructured_vertices(ds: xr.Dataset) -> tuple[str | None, str | None]:
             return lon_bounds, lat_bounds
 
     return None, None
-
-
-def _get_unstructured_dim(ds: xr.Dataset) -> str:
-    """Return the name of the unstructured cell dimension in *ds*.
-
-    Args:
-        ds: Unstructured dataset.
-
-    Returns:
-        Dimension name.
-
-    Raises:
-        ValueError: When the cell dimension cannot be determined.
-    """
-    for dim in _UNSTRUCTURED_DIMS:
-        if dim in ds.dims:
-            return dim
-    lat, _ = _get_latlon_arrays(ds)
-    if lat.ndim == 1:
-        for name in _LAT_NAMES:
-            if name in ds and ds[name].ndim == 1:
-                return str(ds[name].dims[0])
-    raise ValueError(
-        "Could not determine the source cell dimension for the unstructured grid."
-    )
-
-
-def _get_spatial_dims(ds: xr.Dataset) -> tuple[str, str]:
-    """Return the ``(y_dim, x_dim)`` spatial dimension names.
-
-    For curvilinear grids where the dimension names are not standard,
-    the function falls back to inspecting 2-D coordinate shapes.
-
-    Args:
-        ds: Source dataset.
-
-    Returns:
-        ``(y_dim, x_dim)`` names.
-
-    Raises:
-        ValueError: When the spatial dimensions cannot be identified.
-    """
-    y_dim: str | None = None
-    x_dim: str | None = None
-
-    for dim in ds.dims:
-        dim_name = str(dim)
-        dim_lower = dim_name.lower()
-        if y_dim is None and dim_lower in _Y_CANDIDATES:
-            y_dim = dim_name
-        elif x_dim is None and dim_lower in _X_CANDIDATES:
-            x_dim = dim_name
-
-    if y_dim is None or x_dim is None:
-        lat, _ = _get_latlon_arrays(ds)
-        if lat.ndim == 2:
-            for coord in ds.coords.values():
-                if coord.ndim == 2 and coord.shape == lat.shape:
-                    dims = tuple(map(str, coord.dims))
-                    if len(dims) == 2:
-                        return dims[0], dims[1]
-
-    if y_dim is None or x_dim is None:
-        raise ValueError(
-            f"Could not determine spatial dimensions from {list(ds.dims)}."
-        )
-    return y_dim, x_dim
 
 
 # ===================================================================
@@ -864,8 +658,8 @@ def _looks_global(
         *True* when the source appears global.
     """
     lat, lon = _get_latlon_arrays(ds)
-    lat_deg = _normalise_angle_units(lat.ravel(), source_units)
-    lon_deg = _normalise_angle_units(lon.ravel(), source_units)
+    lat_deg = _normalize_angle_units(lat.ravel(), source_units)
+    lon_deg = _normalize_angle_units(lon.ravel(), source_units)
     lon_cov = _lon_coverage_from_centres(lon_deg)
     lat_cov = _lat_coverage_from_centres(lat_deg)
     return bool(lon_cov >= 350.0 and lat_cov >= 170.0)
@@ -918,7 +712,7 @@ def _vectorized_polygon_centres(
 ) -> tuple[FloatArray, FloatArray]:
     """Compute spherical polygon centres from padded corner arrays.
 
-    The centre of each polygon is the normalised mean Cartesian vector
+    The centre of each polygon is the normalized mean Cartesian vector
     of its valid corners, projected back to lon/lat.
 
     Args:
@@ -1301,15 +1095,15 @@ def _source_mesh(
                 "referenced by lon:bounds and lat:bounds."
             )
         lon_v = _canonical_lon(
-            _normalise_angle_units(_to_float64(ds[lon_name].values), source_units)
+            _normalize_angle_units(_to_float64(ds[lon_name].values), source_units)
         )
-        lat_v = _normalise_angle_units(_to_float64(ds[lat_name].values), source_units)
+        lat_v = _normalize_angle_units(_to_float64(ds[lat_name].values), source_units)
         mesh = _corner_mesh_from_arrays(lon_v, lat_v)
         return mesh, (_get_unstructured_dim(ds),)
 
     lat, lon = _get_latlon_arrays(ds)
-    lat = _normalise_angle_units(lat, source_units)
-    lon = _normalise_angle_units(lon, source_units)
+    lat = _normalize_angle_units(lat, source_units)
+    lon = _normalize_angle_units(lon, source_units)
     y_dim, x_dim = _get_spatial_dims(ds)
 
     if lat.ndim == 1:
@@ -1906,13 +1700,6 @@ def compute_healpix_weights_backend(
         raise ValueError("Only 'nearest' and 'conservative' are supported.")
 
     offline_cfg = offline or OfflineWeightConfig()
-    target = (
-        Path(weights_path)
-        if weights_path is not None
-        else Path(tempfile.mkstemp(suffix=".nc")[1])
-    )
-    target.parent.mkdir(parents=True, exist_ok=True)
-
     source_desc = describe_source(
         source,
         grid=grid,
@@ -1922,6 +1709,24 @@ def compute_healpix_weights_backend(
         workdir=offline_cfg.workdir,
     )
     _, target_mesh = _target_healpix_mesh(level, nest=nest)
+
+    desc = WeightsDescription(
+        source=source_desc,
+        target=TargetDescription(
+            level=level,
+            order="nest" if nest else "ring",
+            target_mesh=target_mesh
+        ),
+        method=method,
+        units=source_units,
+    )
+
+    target = (
+        Path(weights_path)
+        if weights_path is not None
+        else Path(tempfile.mkdtemp()) / Path(desc.key + ".nc")
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
 
     use_offline = _default_offline_enabled(
         method=method,
