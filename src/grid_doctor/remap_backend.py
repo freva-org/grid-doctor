@@ -231,6 +231,7 @@ class WeightsDescription:
             method=self.method,
             nest=self.target.order.startswith("nest"),
             source_units=self.units,
+            ellipsoid="sphere",
         )
 
     def __hash__(self) -> int:  # noqa: D105

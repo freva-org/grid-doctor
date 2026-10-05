@@ -14,7 +14,7 @@ from typing import Any, Collection, Literal, cast
 import numpy as np
 import xarray as xr
 
-from .types import RemapMethod, SourceUnits
+from .types import EllipsoidKind, RemapMethod, SourceUnits
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +192,7 @@ def _key_hash(
     method: RemapMethod = "conservative",
     nest: bool = True,
     source_units: SourceUnits = "auto",
+    ellipsoid: EllipsoidKind = "sphere",
 ) -> str:
 
     digest = hashlib.sha256()
@@ -216,7 +217,7 @@ def _key_hash(
                 np.ascontiguousarray(np.asarray(ds[candidate].values)).tobytes()
             )
     digest.update(
-        f"level={level};method={method};nest={nest};units={source_units}".encode()
+        f"level={level};method={method};nest={nest};units={source_units};ellipsoid={ellipsoid}".encode()
     )
     return digest.hexdigest()
 

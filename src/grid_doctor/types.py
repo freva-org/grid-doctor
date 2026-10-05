@@ -17,6 +17,9 @@ SourceUnits = Literal["auto", "deg", "rad"]
 SourceKind = Literal["auto", "regular", "curvilinear", "unstructured", "spectral"]
 """Explicit source grid classification."""
 
+EllipsoidKind = Literal["sphere"]
+"""Ellipsoid type for healpix remapping."""
+
 CoarsenMode = Literal["mean", "mode", "auto"]
 """Coarsening strategy for HEALPix pyramid construction."""
 
