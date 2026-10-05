@@ -344,7 +344,6 @@ def normalize_dataset(ds: xr.Dataset) -> xr.Dataset:
     """
     lat_name, lon_name = _get_vertex_names(ds) if _is_unstructured(ds) else _get_spatial_dims(ds)
 
-
     return _replace_values(
         ds,
         {

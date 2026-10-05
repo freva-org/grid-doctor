@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Literal, cast, overload
 
@@ -219,7 +220,7 @@ class WeightsDescription:
     @cached_property
     def key(self) -> str:
         """Return hash (sha256) that describes the object."""
-        return  self._compute_key()
+        return self._compute_key()
 
     def _compute_key(self) -> str:
         from .utils import _key_hash
@@ -234,10 +235,9 @@ class WeightsDescription:
 
     def __hash__(self) -> int:  # noqa: D105
         return hash(self.key)
-        
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, WeightsDescription) and self.key == other.key
 
+    def __eq__(self, other: object) -> bool:  # noqa: D105
+        return isinstance(other, WeightsDescription) and self.key == other.key
 
 
 class SpectralTransformError(RuntimeError):
