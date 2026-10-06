@@ -418,8 +418,7 @@ def save_pyramid(
     s3_options: dict[str, Any] | None = None,
     *,
     mode: Literal["a", "w", "r+"] = "a",
-    compute: bool = True,
-    region: Literal["auto"] | dict[str, slice] = "auto",
+    region: Literal["auto"] | Literal["init"] | dict[str, slice] = "auto",
     zarr_format: Literal[2, 3] = 2,
     encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
     write_coords: bool | Literal["auto"] = "auto",
@@ -440,14 +439,8 @@ def save_pyramid(
         targets; ignored (and optional) for local paths.
     mode:
         Zarr write mode.
-    compute:
-        Write the data when ``True``.  All levels are written by a
-        single dask computation, so the shared finest level is regridded
-        only once.  ``False`` only initialises the stores (metadata and
-        NumPy-backed variables), e.g. as a template for ``region``
-        writes.
     region:
-        Region writes for partial updates.
+        Region writes for partial updates; "init" for initialising the store.
     zarr_format:
         Zarr format version.
     encoding:
@@ -498,19 +491,26 @@ def save_pyramid(
         if encoding is not None:
             zarr_options["encoding"] = encoding[level]
 
+        if region == "init":
+            zarr_options["mode"] = "w"
+            # Initialise the store with template.
+            template = dataset.chunk().pipe(xr.zeros_like)
+            template.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
+            continue
         if region == "auto":
             dataset.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
             written, write_region = dataset, None
         else:
+            # Fill in the region of data.
             region_keys = set(region)
             to_drop = (
                 {
                     name
                     for name, var in dataset.data_vars.items()
-                    if region_keys.isdisjoint(map(str, var.dims))
+                    if region_keys.isdisjoint(set(var.dims))
                 }
-                | {str(dim) for dim in dataset.dims}
-                | {str(coord) for coord in dataset.coords}
+                | {str(dim) for dim in dataset.dims if str(dim) not in region_keys}
+                | {str(coord) for coord in dataset.coords if str(coord) not in region_keys}
             )
             written = dataset.drop_vars(to_drop, errors="ignore").isel(region)
             written.to_zarr(  # type: ignore[call-overload]
@@ -519,26 +519,16 @@ def save_pyramid(
                 **zarr_options,
             )
             write_region = region
-        if compute:
-            deferred.extend(
-                deferred_writes(
-                    written,
-                    store,
-                    encoding=zarr_options.get("encoding"),
-                    region=write_region,
-                    zarr_format=zarr_format,
-                )
+        deferred.extend(
+            deferred_writes(
+                written,
+                store,
+                encoding=zarr_options.get("encoding"),
+                region=write_region,
+                zarr_format=zarr_format,
             )
-
-        if mode == "w" and not compute:
-            coord_options = dict(zarr_options)
-            # "a", not "w": "w" would replace the store just initialised
-            # above and drop its data variables.
-            coord_options["mode"] = "a"
-            dataset[list(dataset.coords)].to_zarr(store, **coord_options)  # type: ignore[call-overload]
-
+        )
     store_all(deferred)
-
 
 # ===================================================================
 # Convenience aliases

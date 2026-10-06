@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from concurrent.futures import (
+    ALL_COMPLETED,
+    ThreadPoolExecutor,
+    wait,
+)
+import os
 from typing import Any
 from unittest import mock
 
@@ -433,20 +439,26 @@ class TestPyramidBuilders:
         assert call["min_valid_fraction"] == 0.75
 
 
-class TestSavePyramidToS3:
-    def _make_pyramid(self) -> dict[int, xr.Dataset]:
-        return {
-            level: xr.Dataset(
-                {"t": (("cell",), np.zeros(12 * (4**level), dtype=np.float32))},
-                coords={"cell": np.arange(12 * (4**level), dtype=np.int64)},
+class TestSavePyramid:
+    def _make_pyramid(self, chunked: bool = False) -> dict[int, xr.Dataset]:
+        def _create_dataset(level: int, chunked: bool) -> xr.Dataset:
+            ds = xr.Dataset(
+                {"t": (("cell", "time"), np.random.randn(12 * (4**level), 100))},
+                coords={
+                    "cell": np.arange(12 * (4**level), dtype=np.int64),
+                    "time": np.arange(100, dtype=np.int64),
+                },
                 attrs={
                     "healpix_nside": 2**level,
                     "healpix_level": level,
                     "healpix_order": "nested",
                 },
             )
-            for level in (0, 1)
-        }
+            if chunked:
+                return ds.chunk({"time": 5})
+            return ds
+
+        return {level: _create_dataset(level, chunked) for level in (0, 1)}
 
     @mock.patch("grid_doctor.helpers.s3fs.S3FileSystem")
     @mock.patch("grid_doctor.helpers.s3fs.S3Map")
@@ -467,8 +479,140 @@ class TestSavePyramidToS3:
         pyramid = self._make_pyramid()
         mock_s3map.return_value = mock.MagicMock()
         with mock.patch.object(xr.Dataset, "to_zarr") as mock_zarr:
-            save_pyramid(
-                pyramid, "s3://bucket/test", s3_options={}, zarr_format=3
-            )
+            save_pyramid(pyramid, "s3://bucket/test", s3_options={}, zarr_format=3)
             for call in mock_zarr.call_args_list:
                 assert "consolidated" not in call.kwargs
+
+    @pytest.mark.parametrize("chunked", [True, False])
+    def test_save_pyramid_local(self, tmp_path, chunked):
+        pyramid = self._make_pyramid(chunked)
+
+        save_pyramid(
+            pyramid=pyramid,
+            path=str(tmp_path),
+            mode="w",
+        )
+        level0_path = tmp_path / "level_0.zarr"
+        assert os.path.isdir(str(level0_path))
+        level1_path = tmp_path / "level_1.zarr"
+        assert os.path.isdir(str(level1_path))
+
+        ds0 = xr.open_dataset(str(level0_path))
+        ds1 = xr.open_dataset(str(level1_path))
+
+        xr.testing.assert_equal(ds0, pyramid[0])
+        xr.testing.assert_equal(ds1, pyramid[1])
+
+    @pytest.mark.parametrize("chunked", [True, False])
+    def test_save_pyramid_local_region_init(self, tmp_path, chunked):
+        pyramid = self._make_pyramid(chunked)
+
+        save_pyramid(pyramid=pyramid, path=str(tmp_path), region="init")
+
+        level0_path = tmp_path / "level_0.zarr"
+        assert os.path.isdir(str(level0_path))
+        level1_path = tmp_path / "level_1.zarr"
+        assert os.path.isdir(str(level1_path))
+
+        ds0 = xr.open_dataset(str(level0_path))
+        ds1 = xr.open_dataset(str(level1_path))
+
+        # Datasets should have the full coordinates, and data variables.
+        xr.testing.assert_equal(ds0.coords, pyramid[0].coords)
+        xr.testing.assert_equal(ds1.coords, pyramid[1].coords)
+        assert list(ds0.data_vars) == ["t"]
+        assert list(ds1.data_vars) == ["t"]
+        # Confirm that the data is nan.
+        ds0t = ds0.t.data
+        ds1t = ds1.t.data
+        assert len(ds0t[~np.isnan(ds0t)]) == 0
+        assert len(ds1t[~np.isnan(ds1t)]) == 0
+
+    @pytest.mark.parametrize("chunked", [True, False])
+    def test_save_pyramid_local_region_update(self, tmp_path, chunked):
+        pyramid = self._make_pyramid(chunked)
+        # Initialise zarr store
+        save_pyramid(pyramid=pyramid, path=str(tmp_path), region="init")
+
+        # Update region
+        save_pyramid(
+            pyramid=pyramid,
+            path=str(tmp_path),
+            mode="a",
+            region={"time": slice(0, 3)},
+        )
+
+        level0_path = tmp_path / "level_0.zarr"
+        level1_path = tmp_path / "level_1.zarr"
+        ds0 = xr.open_dataset(str(level0_path))
+        ds1 = xr.open_dataset(str(level1_path))
+
+        # Confirm that the coordinates and data variables are unchanged in the datasets.
+        xr.testing.assert_equal(ds0.coords, pyramid[0].coords)
+        xr.testing.assert_equal(ds1.coords, pyramid[1].coords)
+        assert list(ds0.data_vars) == ["t"]
+        assert list(ds1.data_vars) == ["t"]
+
+        # Confirm that the selected region has been written correctly.
+        np.testing.assert_allclose(ds0.t.data[:, 0:3], pyramid[0].t.data[:, 0:3])
+        np.testing.assert_allclose(ds1.t.data[:, 0:3], pyramid[1].t.data[:, 0:3])
+
+        # Confirm that the rest of the data is nan.
+        ds0_rest = ds0.t.data[:, 3:]
+        ds1_rest = ds1.t.data[:, 3:]
+        assert len(ds0_rest[~np.isnan(ds0_rest)]) == 0
+        assert len(ds1_rest[~np.isnan(ds1_rest)]) == 0
+
+        # Update second region
+        save_pyramid(
+            pyramid=pyramid,
+            path=str(tmp_path),
+            mode="a",
+            region={"time": slice(3, 6)},
+        )
+
+        ds0 = xr.open_dataset(str(level0_path))
+        ds1 = xr.open_dataset(str(level1_path))
+        # Confirm that both regions have been written correctly.
+        np.testing.assert_allclose(ds0.t.data[:, 0:6], pyramid[0].t.data[:, 0:6])
+        np.testing.assert_allclose(ds1.t.data[:, 0:6], pyramid[1].t.data[:, 0:6])
+        # Confirm that the rest of the data is still nan.
+        ds0_rest = ds0.t.data[:, 6:]
+        ds1_rest = ds1.t.data[:, 6:]
+        assert len(ds0_rest[~np.isnan(ds0_rest)]) == 0
+        assert len(ds1_rest[~np.isnan(ds1_rest)]) == 0
+
+    def test_save_pyramid_local_region_parallel(self, tmp_path):
+        # Data has to be chunked for parallel  writes, and regions have to
+        # be split along chunks.
+        pyramid = self._make_pyramid(chunked=True)
+        # Initialise zarr store
+        save_pyramid(
+            pyramid=pyramid, path=str(tmp_path), region="init"
+        )
+        region_limits = [(i, i + 20) for i in range(0, 100, 20)]
+        regions = [{"time": slice(*lim)} for lim in region_limits]
+
+        def _save_section(region: dict):
+            save_pyramid(
+                pyramid, str(tmp_path), mode="a", region=region
+            )
+
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_save_section, i) for i in regions]
+            wait(futures, return_when=ALL_COMPLETED)
+
+        level0_path = tmp_path / "level_0.zarr"
+        level1_path = tmp_path / "level_1.zarr"
+        ds0 = xr.open_dataset(str(level0_path))
+        ds1 = xr.open_dataset(str(level1_path))
+
+        # Confirm that the coordinates and data variables are unchanged in the datasets.
+        xr.testing.assert_equal(ds0.coords, pyramid[0].coords)
+        xr.testing.assert_equal(ds1.coords, pyramid[1].coords)
+        assert list(ds0.data_vars) == ["t"]
+        assert list(ds1.data_vars) == ["t"]
+
+        # Confirm that all regions have been written correctly.
+        np.testing.assert_allclose(ds0.t.data, pyramid[0].t.data)
+        np.testing.assert_allclose(ds1.t.data, pyramid[1].t.data)
