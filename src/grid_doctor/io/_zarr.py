@@ -45,6 +45,25 @@ class DeferredWrite(NamedTuple):
     region: tuple[slice, ...]
 
 
+def stored_encodings(
+    store: Any, *, zarr_format: Literal[2, 3]
+) -> dict[str, dict[str, Any]]:
+    """CF encodings of the variables already defined in *store*.
+
+    The encodings are what xarray decodes from the stored attributes
+    (``scale_factor``, ``add_offset``, ``_FillValue``, ``dtype``, time
+    ``units`` and ``calendar``), so encoding new data with them
+    reproduces the values ``to_zarr`` would write into the same arrays.
+    """
+    existing = xr.open_zarr(store, zarr_format=zarr_format, chunks=None)
+    try:
+        return {
+            str(name): dict(var.encoding) for name, var in existing.variables.items()
+        }
+    finally:
+        existing.close()
+
+
 def deferred_writes(
     dataset: xr.Dataset,
     store: Any,
@@ -63,10 +82,17 @@ def deferred_writes(
     if not lazy:
         return []
     group = zarr.open_group(store, mode="r+", zarr_format=zarr_format)
+    stored = stored_encodings(store, zarr_format=zarr_format)
     writes: list[DeferredWrite] = []
     for name, var in lazy.items():
         var = var.copy(deep=False)
-        var.encoding = {**var.encoding, **(encoding or {}).get(name, {})}
+        if name in stored:
+            # Encode exactly as the existing array expects (packing, fill
+            # value, time units), like ``to_zarr`` does for existing
+            # variables.  Region updates usually carry no encoding at all.
+            var.encoding = stored[name]
+        else:
+            var.encoding = {**var.encoding, **(encoding or {}).get(name, {})}
         encoded = encode_zarr_variable(var, name=name, zarr_format=zarr_format)
         target_region = tuple(
             (region or {}).get(str(dim), slice(None)) for dim in var.dims

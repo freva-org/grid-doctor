@@ -237,6 +237,38 @@ class TestSavePyramidSingleStore:
         np.testing.assert_allclose(stored[1:3], expected[1:3], equal_nan=True)
         assert np.isnan(stored[[0, 3]]).all()
 
+    def test_region_write_keeps_stored_packing(self, tmp_path: Path) -> None:
+        """Region updates are packed with the store's scale and offset."""
+        ds = xr.Dataset({"sst": (("time", "cell"), np.full((2, 12), 280.0))})
+        ds = ds.chunk(time=1)
+        packing = {
+            "dtype": "int16",
+            "scale_factor": 0.1,
+            "add_offset": 270.0,
+            "_FillValue": -9999,
+        }
+        save_pyramid({0: ds}, str(tmp_path), mode="w", encoding={0: {"sst": packing}})
+        update = ds.assign(sst=xr.full_like(ds["sst"], 310.0))
+        save_pyramid(
+            {0: update}, str(tmp_path), mode="r+", region={"time": slice(1, 2)}
+        )
+        stored = xr.open_zarr(tmp_path / "level_0.zarr")["sst"].values
+        np.testing.assert_allclose(stored[:, 0], [280.0, 310.0])
+
+    def test_region_write_keeps_stored_time_units(self, tmp_path: Path) -> None:
+        """Datetime variables are written in the units chosen at init."""
+        stamps = np.array(
+            ["2000-01-01", "2000-01-02", "2000-01-03", "2000-01-04"],
+            dtype="datetime64[ns]",
+        )
+        ds = xr.Dataset(
+            {"obs_time": (("time", "cell"), np.repeat(stamps[:, None], 12, axis=1))}
+        ).chunk(time=1)
+        save_pyramid({0: ds}, str(tmp_path), mode="w", compute=False)
+        save_pyramid({0: ds}, str(tmp_path), mode="r+", region={"time": slice(2, 4)})
+        stored = xr.open_zarr(tmp_path / "level_0.zarr")["obs_time"].values
+        np.testing.assert_array_equal(stored[2:, 0], stamps[2:])
+
 
 def test_row_blocks_share_weight_buffers() -> None:
     from scipy.sparse import random as sparse_random
