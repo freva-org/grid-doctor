@@ -24,8 +24,7 @@ or misapplied area weights, simply cannot occur.
     variables, sea ice, observation gaps), a coarse cell can be partly
     valid, and its value is the mean over that valid part only.  Averages
     over coarse levels then need the valid fraction of each cell as a
-    weight; see
-    [Averaging over coarse levels](#averaging-over-coarse-levels-valid-fractions).
+    weight;
 
 ![Equal area comparison](assets/healpix-equal-area.png#only-dark)
 ![Equal area comparison](assets/healpix-equal-area-light.png#only-light)
@@ -476,9 +475,6 @@ across all levels:
 ds = pyramid[3]
 ds.sst.weighted(ds.sst_valid_fraction.fillna(0)).mean("cell")
 ```
-
-Worked examples (global, regional and zonal means, area integrals) are
-in the [Averaging masked fields](recipes/averaging.md) recipe.
 
 The option is opt-in because the fraction has the shape of its variable:
 
