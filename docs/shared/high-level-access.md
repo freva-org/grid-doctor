@@ -149,10 +149,6 @@ berlin["t2m"].mean()
     ds.sst.weighted(ds.sst_valid_fraction.fillna(0)).mean("cell")
     ```
 
-    The [Averaging masked fields](recipes/averaging.md) recipe has
-    worked examples, and
-    [Averaging over coarse levels](technical-decisions.md#averaging-over-coarse-levels-valid-fractions)
-    the background.
 
 ### Circular regions
 
