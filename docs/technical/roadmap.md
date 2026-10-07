@@ -9,7 +9,7 @@ reliable, maintainable, and useful for a broader user community.
 
 The goal is to make the remaining decisions explicit, document the reasoning
 behind them, and identify where extra caution is needed before
-scaling Waterpark from a prototype into a production-ready data hub.
+scaling Waterpark from a prototype into a production-ready service.
 
 ---
 
