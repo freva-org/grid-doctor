@@ -174,7 +174,7 @@ def bin_mode(
             func="sum",
             size=n_cells,
             fill_value=0,
-        ).astype(np.int64)
+        ).astype(np.int64)  # type: ignore[attr-defined]
         wins = count > best_count
         best_value[wins] = cls
         best_count[wins] = count[wins]
