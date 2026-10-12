@@ -27,7 +27,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import Any, Literal, cast, overload
@@ -139,46 +139,74 @@ class SourceDescription:
     """Resolved description of the source representation.
 
     Produced by [`describe_source`][grid_doctor.remap_backend.describe_source]
-    and consumed by the weight-generation entry point.
+    and consumed by the weight-generation entry point. The source mesh is
+    built lazily on first access, so constructing a description (e.g. to
+    look up a cache key) is cheap.
 
     Attributes:
         dataset: Materialised gridpoint dataset used for weight
             generation.
+        geometry: Normalised geometry dataset (coordinates in degrees,
+            longitudes in ``[-180, 180)``) the mesh and key derive from.
         kind: Source representation class.
-        source_dims: Source dimensions in flattening order.
-        source_mesh: Source mesh stored as compact node/connectivity
-            arrays.
         ignore_unmapped: Recommended default for ESMF unmapped
             handling.
-        metadata: Metadata that should be persisted into the output
-            weight file.
     """
 
     dataset: xr.Dataset
+    geometry: xr.Dataset
     kind: SourceKind
-    source_dims: tuple[str, ...]
-    source_mesh: PolygonMesh
-    ignore_unmapped: bool
-    metadata: dict[str, str | int | float | bool]
+    ignore_unmapped: bool = True
+    _mesh: tuple[PolygonMesh, tuple[str, ...]] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     @classmethod
     def from_normalized_dataset(cls, ds: xr.Dataset, **kwargs: Any) -> SourceDescription:
-        """Class factory to construct **normalized** description of the input (non-normalized) dataset.
+        """Alias of [`describe_source`][grid_doctor.remap_backend.describe_source]."""
+        return describe_source(ds, **kwargs)
 
-        Wraps [`decribe_source`][grid_doctor.remap_backend,describe_source]
-        with default arguments but normatzied
+    def _get_mesh(self) -> tuple[PolygonMesh, tuple[str, ...]]:
+        if self._mesh is None:
+            object.__setattr__(self, "_mesh", _source_mesh(self.geometry, source_units="deg"))
+        assert self._mesh is not None
+        return self._mesh
 
-        Args:
-            ds: Source dataset
-            **kwargs: Forwarded to ``describe_source``. ``source_units``
-                applies to the normalisation step only.
-        """
-        source_units = kwargs.pop("source_units", "auto")
-        return describe_source(
-            normalize_dataset(ds, source_units),
-            source_units="deg",  # coordinates are in degrees after normalisation
-            **kwargs,
-        )
+    @property
+    def source_mesh(self) -> PolygonMesh:
+        """Source mesh stored as compact node/connectivity arrays."""
+        return self._get_mesh()[0]
+
+    @property
+    def source_dims(self) -> tuple[str, ...]:
+        """Source dimensions in flattening order."""
+        return self._get_mesh()[1]
+
+    @property
+    def metadata(self) -> dict[str, str | int | float | bool]:
+        """Metadata that should be persisted into the output weight file."""
+        # The HEALPix target is a complete global tessellation. A source that
+        # does not fully tile the sphere -- ocean/land-masked grids, regional
+        # domains, polar gaps -- leaves some destination cells with no
+        # overlapping source cell. Those cells become missing values, which
+        # is why unmapped destinations are ignored by default.
+        #
+        # _looks_global is retained as a diagnostic: a source that *does* look
+        # global yet still leaves cells unmapped may indicate a grid problem
+        # (e.g. NaN coordinates or broken corner inference) rather than a mask.
+        looks_global = _looks_global(self.geometry, source_units="deg")
+        if not looks_global:
+            logger.debug(
+                "Source grid does not look global (lon/lat extent below "
+                "thresholds); unmapped HEALPix destinations are expected."
+            )
+        return {
+            "grid_doctor_source_kind": self.kind,
+            "grid_doctor_source_dims": json.dumps(list(self.source_dims)),
+            "grid_doctor_source_size": self.source_mesh.face_count,
+            "grid_doctor_source_units": "deg",
+            "grid_doctor_source_looks_global": int(looks_global),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,19 +218,22 @@ class TargetDescription:
     Attributes:
         level: Healpix index resolution (zoom)
         order: Healpix indexing order ('nest' or 'ring').
-        target: Target mesh storeed as compact node/connectivity
-            arrays.
+        target_mesh: Optional precomputed target mesh; otherwise built
+            lazily by [`mesh`][grid_doctor.remap_backend.TargetDescription.mesh].
     """
 
     level: int
     order: Literal["nest", "ring"]  # TODO: refactor with proper type
-    target_mesh: PolygonMesh | None = None
+    target_mesh: PolygonMesh | None = field(default=None, compare=False)
 
-    def __post_init__(self) -> None:
-        """Initialize optional PolygonMesh."""
+    @property
+    def mesh(self) -> PolygonMesh:
+        """Target mesh stored as compact node/connectivity arrays."""
         if self.target_mesh is None:
-            _, m = _target_healpix_mesh(self.level, nest=self.order.startswith('nest'))
-            object.__setattr__(self, 'target_mesh', m)
+            _, m = _target_healpix_mesh(self.level, nest=self.order.startswith("nest"))
+            object.__setattr__(self, "target_mesh", m)
+        assert self.target_mesh is not None
+        return self.target_mesh
 
 
 @dataclass(frozen=True, repr=False)
@@ -215,13 +246,11 @@ class WeightsDescription:
         source: Source description.
         target: Target description.
         method: Remapping method ('conservative' or 'nearest').
-        units: Source units ('rad' or 'deg').
     """
 
     source: SourceDescription
     target: TargetDescription
     method: RemapMethod
-    units: SourceUnits  # TODO: use canonical units
 
     @cached_property
     def key(self) -> str:
@@ -232,11 +261,10 @@ class WeightsDescription:
         from .utils import _key_hash
 
         return _key_hash(
-            self.source.dataset,
+            self.source.geometry,
             self.target.level,
             method=self.method,
             nest=self.target.order.startswith("nest"),
-            source_units=self.units,
             ellipsoid="sphere",
         )
 
@@ -1522,18 +1550,16 @@ def describe_source(
         source_kind: Explicit source representation.  Use ``"auto"``
             to infer it from the available coordinates.
         source_units: Angular unit convention of the source
-            coordinates.
+            coordinates, used to normalise the geometry to degrees.
         spectral_transform_command: External command used when
             ``source_kind="spectral"``.  The command may use
             ``{input}`` and ``{output}`` placeholders.
         workdir: Optional working directory for temporary files.
 
     Returns:
-        Fully resolved source description.
+        Source description with normalised geometry. The source mesh is
+        built lazily.
     """
-    if workdir is None:
-        workdir = Path(tempfile.mkdtemp(prefix="grid_doctor_source_"))
-
     if isinstance(source, xr.Dataset):
         dataset = source
     else:
@@ -1541,6 +1567,8 @@ def describe_source(
 
     effective_kind = source_kind
     if effective_kind == "spectral":
+        if workdir is None:
+            workdir = Path(tempfile.mkdtemp(prefix="grid_doctor_source_"))
         dataset = _materialise_spectral_source(
             source,
             transform_command=spectral_transform_command,
@@ -1548,44 +1576,13 @@ def describe_source(
         )
         effective_kind = "auto"
 
-    geometry_ds = grid if grid is not None else dataset
+    geometry_ds = normalize_dataset(grid if grid is not None else dataset, source_units)
     resolved_kind = _classify_source_kind(geometry_ds, explicit_kind=effective_kind)
-    source_mesh, source_dims = _source_mesh(geometry_ds, source_units=source_units)
-
-    # The HEALPix target is a complete global tessellation. A source that
-    # does not fully tile the sphere -- ocean/land-masked grids, regional
-    # domains, polar gaps -- leaves some destination cells with no
-    # overlapping source cell. Those cells must become missing values, not
-    # abort weight generation, so unmapped destinations are ignored by
-    # default. Callers can pass ignore_unmapped=False to require full
-    # coverage (e.g. for a source that is expected to be globally complete).
-    #
-    # _looks_global is retained as a diagnostic: a source that *does* look
-    # global yet still leaves cells unmapped may indicate a grid problem
-    # (e.g. NaN coordinates or broken corner inference) rather than a mask.
-    looks_global = _looks_global(geometry_ds, source_units=source_units)
-    ignore_unmapped = True
-    if not looks_global:
-        logger.debug(
-            "Source grid does not look global (lon/lat extent below "
-            "thresholds); unmapped HEALPix destinations are expected."
-        )
-
-    metadata: dict[str, str | int | float | bool] = {
-        "grid_doctor_source_kind": resolved_kind,
-        "grid_doctor_source_dims": json.dumps(list(source_dims)),
-        "grid_doctor_source_size": source_mesh.face_count,
-        "grid_doctor_source_units": source_units,
-        "grid_doctor_source_looks_global": int(looks_global),
-    }
 
     return SourceDescription(
         dataset=dataset,
+        geometry=geometry_ds,
         kind=resolved_kind,
-        source_dims=source_dims,
-        source_mesh=source_mesh,
-        ignore_unmapped=ignore_unmapped,
-        metadata=metadata,
     )
 
 
@@ -1715,18 +1712,12 @@ def compute_healpix_weights_backend(
         spectral_transform_command=spectral_transform_command,
         workdir=offline_cfg.workdir,
     )
-    _, target_mesh = _target_healpix_mesh(level, nest=nest)
-
     desc = WeightsDescription(
         source=source_desc,
-        target=TargetDescription(
-            level=level,
-            order="nest" if nest else "ring",
-            target_mesh=target_mesh
-        ),
+        target=TargetDescription(level=level, order="nest" if nest else "ring"),
         method=method,
-        units=source_units,
     )
+    target_mesh = desc.target.mesh
 
     target = (
         Path(weights_path)

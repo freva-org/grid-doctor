@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import numpy as np
@@ -316,3 +317,53 @@ class TestKeyHash:
     def test_raises_without_coordinates(self) -> None:
         with pytest.raises(ValueError, match="Could not locate latitude/longitude"):
             _key_hash(xr.Dataset(coords={"x": [0, 1]}), 5)
+
+
+class TestCanonicalWeightsKey:
+    @staticmethod
+    def _grid(lon0: float = 0.0, radians: bool = False) -> xr.Dataset:
+        lat, lon = np.linspace(-80.0, 80.0, 5), np.arange(8) * 45.0 + lon0
+        if radians:
+            lat, lon = np.radians(lat), np.radians(lon)
+        units = "rad" if radians else "degrees"
+        return xr.Dataset(coords={"lat": ("lat", lat, {"units": units}), "lon": ("lon", lon, {"units": units})})
+
+    @staticmethod
+    def _key(ds: xr.Dataset) -> str:
+        from grid_doctor.remap_backend import TargetDescription, WeightsDescription, describe_source
+
+        return WeightsDescription(
+            source=describe_source(ds), target=TargetDescription(level=2, order="nest"), method="conservative"
+        ).key
+
+    def test_same_grid_any_convention_shares_key(self) -> None:
+        ref = self._key(self._grid())
+        assert self._key(self._grid(radians=True)) == ref  # radians vs degrees
+        assert self._key(self._grid(lon0=360.0)) == ref  # lon shifted by a full turn
+
+    def test_description_is_lazy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import grid_doctor.remap_backend as backend
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise AssertionError("mesh built eagerly")
+
+        monkeypatch.setattr(backend, "_source_mesh", boom)
+        monkeypatch.setattr(backend, "_target_healpix_mesh", boom)
+        self._key(self._grid())
+
+    def test_cached_weights_uses_description_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[Path] = []
+
+        def fake_compute(ds: xr.Dataset, level: int, **kwargs: Any) -> Path:
+            calls.append(kwargs["weights_path"])
+            xr.Dataset({"S": ("nnz", np.array([1.0]))}).to_netcdf(kwargs["weights_path"])
+            return kwargs["weights_path"]
+
+        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", fake_compute)
+        path = cached_weights(self._grid(), 2, cache_path=tmp_path)
+        assert path.name == f"weights_{self._key(self._grid())[:16]}.nc"
+        # same grid in radians hits the cache
+        assert cached_weights(self._grid(radians=True), 2, cache_path=tmp_path) == path
+        assert len(calls) == 1

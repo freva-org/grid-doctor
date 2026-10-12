@@ -142,7 +142,6 @@ class TestWeightsDescription:
                     source=source,
                     target=TargetDescription(level=level, order=order),
                     method=method,
-                    units="auto",
                 )
                 yield w
 

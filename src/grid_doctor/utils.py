@@ -192,7 +192,6 @@ def _key_hash(
     *,
     method: RemapMethod = "conservative",
     nest: bool = True,
-    source_units: SourceUnits = "auto",
     ellipsoid: EllipsoidKind = "sphere",
 ) -> str:
 
@@ -209,7 +208,7 @@ def _key_hash(
             digest.update(f"shape={values.shape};".encode())
             digest.update(values.tobytes())
     digest.update(
-        f"level={level};method={method};nest={nest};units={source_units};ellipsoid={ellipsoid}".encode()
+        f"level={level};method={method};nest={nest};ellipsoid={ellipsoid}".encode()
     )
     return digest.hexdigest()
 
@@ -259,11 +258,27 @@ def cached_weights(
     """
     from .helpers import get_latlon_resolution, resolution_to_healpix_level
     from .remap import compute_healpix_weights
+    from .remap_backend import (
+        TargetDescription,
+        WeightsDescription,
+        describe_source,
+    )
 
     if level is None:
         level = resolution_to_healpix_level(get_latlon_resolution(ds))
 
-    key = _key_hash(ds, level, method=method, nest=nest, source_units=source_units)[:16]
+    desc = WeightsDescription(
+        source=describe_source(
+            ds,
+            grid=kwargs.get("grid"),
+            source_kind=kwargs.get("source_kind", "auto"),
+            source_units=source_units,
+            spectral_transform_command=kwargs.get("spectral_transform_command"),
+        ),
+        target=TargetDescription(level=level, order="nest" if nest else "ring"),
+        method=method,
+    )
+    key = desc.key[:16]
 
     if cache_path is None:
         weight_file = cache_dir() / f"weights_{key}.nc"
