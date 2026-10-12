@@ -71,6 +71,31 @@ class TestNormalizeHelpers:
             else:
                 assert dim not in norm_ds.coords
 
+    @pytest.mark.parametrize("with_vertices", [True, False])
+    def test_normalize_unstructured_centres_and_vertices(self, with_vertices):
+        """Centres and (optional) vertices end up in the same lon convention."""
+        clon = np.array([10.0, 190.0, 350.0])
+        clat = np.array([-30.0, 0.0, 30.0])
+        coords = {
+            "clat": ("cell", clat, {"units": "degrees_north"}),
+            "clon": ("cell", clon, {"units": "degrees_east"}),
+        }
+        if with_vertices:
+            offsets = np.array([-1.0, 0.0, 1.0])
+            coords |= {
+                "clat_vertices": (("cell", "nv"), clat[:, None] + offsets, {"units": "degrees_north"}),
+                "clon_vertices": (("cell", "nv"), clon[:, None] + offsets, {"units": "degrees_east"}),
+            }
+        norm_ds = normalize_dataset(xr.Dataset(coords=coords))
+
+        np.testing.assert_allclose(norm_ds["clon"], [10.0, -170.0, -10.0])
+        np.testing.assert_allclose(norm_ds["clat"], clat)
+        if with_vertices:
+            np.testing.assert_allclose(norm_ds["clon_vertices"].mean("nv"), norm_ds["clon"])
+            np.testing.assert_allclose(norm_ds["clat_vertices"].mean("nv"), norm_ds["clat"])
+        else:
+            assert "clon_vertices" not in norm_ds
+
     @pytest.mark.parametrize("set_units", [False, True])
     def test_normalize_unit(self, set_units):
         coords = {"lat": [-90, -45, 0, 45, 90], "lon": [0, 90, 180, 270, 360]}

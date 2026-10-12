@@ -350,7 +350,9 @@ def normalize_degrees(array: xr.DataArray) -> xr.DataArray:
 def normalize_dataset(ds: xr.Dataset) -> xr.Dataset:
     """Return a normalized copy of the input dataset.
 
-    Spatial dimensions and respective units are inferred and normatised.
+    Latitude/longitude coordinates and their units are inferred and
+    normalised. On unstructured grids, the cell vertices are normalised
+    as well when present.
 
     Args:
         ds: Source geometry dataset.
@@ -359,15 +361,17 @@ def normalize_dataset(ds: xr.Dataset) -> xr.Dataset:
         ``xr.Dataset`` .
 
     Raises:
-        ValueError: When the grid type cannot be handled or required
-            vertex coordinates are missing.
+        ValueError: When no latitude/longitude coordinates are present.
     """
-    lat_name, lon_name = _get_vertex_names(ds) if _is_unstructured(ds) else _get_latlon_names(ds)
+    names = [_get_latlon_names(ds)]
+    if _is_unstructured(ds):
+        try:
+            names.append(_get_vertex_names(ds))
+        except ValueError:
+            pass  # vertices are optional
 
-    return _replace_values(
-        ds,
-        {
-            lat_name: normalize_lat(normalize_degrees(ds[lat_name])),
-            lon_name: normalize_lon(normalize_degrees(ds[lon_name])),
-        },
-    )
+    mapping: dict[str, xr.DataArray] = {}
+    for lat_name, lon_name in names:
+        mapping[lat_name] = normalize_lat(normalize_degrees(ds[lat_name]))
+        mapping[lon_name] = normalize_lon(normalize_degrees(ds[lon_name]))
+    return _replace_values(ds, mapping)
