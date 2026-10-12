@@ -3,6 +3,7 @@
 Datasets should come from the shared fixtures in ``conftest.py``;
 """
 
+import logging
 import re
 
 import numpy as np
@@ -107,7 +108,11 @@ class TestNormalizeHelpers:
                 for c in ds.coords:
                     ds[c].attrs["units"] = units
 
-        n_deg_ds, n_rad_ds = normalize_dataset(deg_ds), normalize_dataset(rad_ds)
+        if set_units:
+            n_deg_ds, n_rad_ds = normalize_dataset(deg_ds), normalize_dataset(rad_ds)
+        else:
+            n_deg_ds = normalize_dataset(deg_ds, source_units="deg")
+            n_rad_ds = normalize_dataset(rad_ds, source_units="rad")
         for n_ds in (n_deg_ds, n_rad_ds):
             assert n_ds["lon"].attrs["units"] == "degrees_east"
             assert n_ds["lat"].attrs["units"] == "degrees_north"
@@ -116,6 +121,23 @@ class TestNormalizeHelpers:
         # check lon [-180, 180)
         assert n_deg_ds["lon"].min() == -180
         assert n_deg_ds["lon"].max() < 180
+
+    def test_normalize_missing_units_assumes_degrees(self, caplog):
+        ds = xr.Dataset(coords={"lat": [0.0, 0.5, 1.0], "lon": [0.0, 1.0, 2.0]})
+        with caplog.at_level(logging.WARNING, logger="grid_doctor.misc.dataset"):
+            norm_ds = normalize_dataset(ds)
+        np.testing.assert_allclose(norm_ds["lat"], ds["lat"])
+        np.testing.assert_allclose(norm_ds["lon"], ds["lon"])
+        assert "assuming degrees" in caplog.text
+
+    def test_normalize_source_units_overrides_attrs(self, caplog):
+        ds = xr.Dataset(coords={"lat": [0.0, 0.5], "lon": [0.0, 1.0]})
+        for c in ds.coords:
+            ds[c].attrs["units"] = "degrees"
+        with caplog.at_level(logging.WARNING, logger="grid_doctor.misc.dataset"):
+            norm_ds = normalize_dataset(ds, source_units="rad")
+        np.testing.assert_allclose(norm_ds["lat"], np.degrees([0.0, 0.5]), atol=1e-6)
+        assert not caplog.text
 
     @pytest.mark.parametrize(
         "coords,errmsg",

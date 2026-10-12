@@ -3,6 +3,7 @@
 INTERNAL: NOT TO BE EXPOSED!!!
 """
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -20,6 +21,8 @@ from .constants import (
     _X_CANDIDATES,
     _Y_CANDIDATES,
 )
+
+logger = logging.getLogger(__name__)
 
 # CF-convention unit strings written by the normalisers.
 _LAT_UNITS = "degrees_north"
@@ -328,26 +331,40 @@ def normalize_lat(lat: xr.DataArray) -> xr.DataArray:
     return xr.DataArray(_norm_lat(lat.values), dims=lat.dims, attrs=lat.attrs | {"units": _LAT_UNITS})
 
 
-def normalize_degrees(array: xr.DataArray) -> xr.DataArray:
-    """Extract `units` from `xarray.DataArray` attributes and apply angle normalization (degree)."""
-    d_array = array.copy(deep=True)
-    if _has_degree_unit(array):
-        return d_array
+def normalize_degrees(array: xr.DataArray, source_units: SourceUnits = "auto") -> xr.DataArray:
+    """Return a copy of *array* in degrees.
 
-    source_unit: SourceUnits = "auto"
-    if units := d_array.attrs.get("units"):
+    Args:
+        array: Angular coordinate.
+        source_units: Angular unit convention of *array*. With ``"auto"``
+            the ``units`` attribute decides: values are converted only when
+            it says radians. Missing or unrecognised units are assumed to be
+            degrees, with a warning.
+
+    Returns:
+        ``xr.DataArray`` in degrees.
+    """
+    if source_units == "auto":
+        units = str(array.attrs.get("units", "")).lower()
         if units.startswith("rad"):
-            source_unit = "rad"
+            source_units = "rad"
+        else:
+            if not units.startswith("deg"):
+                logger.warning(
+                    "No angular units found for `%s` (units=%r); assuming degrees.",
+                    array.name,
+                    array.attrs.get("units"),
+                )
+            source_units = "deg"
 
-        elif units.startswith("deg"):
-            source_unit = "deg"
-
-    d_array = d_array.copy(data=_normalize_angle_units(d_array.values, source_unit))
+    d_array = array.copy(deep=True)
+    if source_units == "rad":
+        d_array = d_array.copy(data=np.rad2deg(_to_float64(d_array.values)))
     d_array.attrs["units"] = "degree"
     return d_array
 
 
-def normalize_dataset(ds: xr.Dataset) -> xr.Dataset:
+def normalize_dataset(ds: xr.Dataset, source_units: SourceUnits = "auto") -> xr.Dataset:
     """Return a normalized copy of the input dataset.
 
     Latitude/longitude coordinates and their units are inferred and
@@ -356,6 +373,8 @@ def normalize_dataset(ds: xr.Dataset) -> xr.Dataset:
 
     Args:
         ds: Source geometry dataset.
+        source_units: Angular unit convention of the coordinates; see
+            ``normalize_degrees``.
 
     Returns:
         ``xr.Dataset`` .
@@ -372,6 +391,6 @@ def normalize_dataset(ds: xr.Dataset) -> xr.Dataset:
 
     mapping: dict[str, xr.DataArray] = {}
     for lat_name, lon_name in names:
-        mapping[lat_name] = normalize_lat(normalize_degrees(ds[lat_name]))
-        mapping[lon_name] = normalize_lon(normalize_degrees(ds[lon_name]))
+        mapping[lat_name] = normalize_lat(normalize_degrees(ds[lat_name], source_units))
+        mapping[lon_name] = normalize_lon(normalize_degrees(ds[lon_name], source_units))
     return _replace_values(ds, mapping)

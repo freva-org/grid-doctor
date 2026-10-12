@@ -163,15 +163,22 @@ class SourceDescription:
 
     @classmethod
     def from_normalized_dataset(cls, ds: xr.Dataset, **kwargs: Any) -> SourceDescription:
-        """Class factory to construct **normalized** description of the input dataset.
+        """Class factory to construct **normalized** description of the input (non-normalized) dataset.
 
         Wraps [`decribe_source`][grid_doctor.remap_backend,describe_source]
         with default arguments but normatzied
 
         Args:
             ds: Source dataset
+            **kwargs: Forwarded to ``describe_source``. ``source_units``
+                applies to the normalisation step only.
         """
-        return describe_source(ds.pipe(normalize_dataset), **kwargs)
+        source_units = kwargs.pop("source_units", "auto")
+        return describe_source(
+            normalize_dataset(ds, source_units),
+            source_units="deg",  # coordinates are in degrees after normalisation
+            **kwargs,
+        )
 
 
 @dataclass(frozen=True, slots=True)
