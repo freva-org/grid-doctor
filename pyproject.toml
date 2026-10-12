@@ -77,6 +77,9 @@ tests = [
     "netCDF4",
     "numexpr",
 ]
+bench = [
+    "pytest-benchmark>=4.0",
+]
 docs = [
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.5",
@@ -182,6 +185,15 @@ deps = -e .[tests]
 commands =
     python3 -m pytest -vv --cov=grid_doctor --cov-report=html:coverage_report --junitxml report.xml --cov-report xml tests/
     python3 -m coverage report --fail-under=65 --precision=2
+
+[testenv:bench]
+setenv =
+    VIRTUALENV_SYSTEM_SITE_PACKAGES=true
+description = "Run the performance benchmarks."
+install_command = python -I -m pip install --ignore-installed {opts} {packages}
+deps = -e .[tests,bench]
+commands =
+    python3 -m pytest benchmarks -o addopts= --benchmark-columns=min,mean,stddev,rounds {posargs}
 
 [docs-prep]
 description = Prepare the documentation creation

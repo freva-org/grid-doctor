@@ -1207,3 +1207,42 @@ class TestAttachHealpixCoords:
         assert "longitude" in result.coords
         assert result.attrs["healpix_nside"] == 4
         assert result.attrs["healpix_order"] == "ring"
+
+
+class TestHealpixTargetMesh:
+    @pytest.mark.parametrize("nest", [True, False])
+    def test_mesh_matches_direct_construction(self, nest: bool) -> None:
+        level = 3
+        module, kwargs = remap_backend_module._require_healpix_geo_module(nest)
+        lon, lat = module.vertices(np.arange(12 * 4**level), level, **kwargs)
+        expected = remap_backend_module._corner_mesh_from_arrays(
+            remap_backend_module._canonical_lon(np.asarray(lon, dtype=np.float64)),
+            np.asarray(lat, dtype=np.float64),
+        )
+        _, mesh = remap_backend_module._target_healpix_mesh(level, nest=nest)
+        for name in ("node_lon", "node_lat", "face_nodes", "face_lon", "face_lat"):
+            np.testing.assert_array_equal(getattr(mesh, name), getattr(expected, name), err_msg=name)
+
+    def test_ring_to_nest_matches_healpy(self) -> None:
+        healpy = pytest.importorskip("healpy")
+        level = 4
+        np.testing.assert_array_equal(
+            remap_backend_module._healpix_ring_to_nest(level),
+            healpy.ring2nest(2**level, np.arange(12 * 4**level)),
+        )
+
+    def test_mesh_is_reused_from_disk(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        level = remap_backend_module._HEALPIX_MESH_DISK_CACHE_MIN_LEVEL
+        _, built = remap_backend_module._target_healpix_mesh(level, nest=True)
+        assert remap_backend_module._healpix_mesh_cache_file(level).exists()
+
+        remap_backend_module._nested_healpix_mesh.cache_clear()
+
+        def no_build(nest: bool) -> None:
+            raise AssertionError("mesh rebuilt despite disk cache")
+
+        monkeypatch.setattr(remap_backend_module, "_require_healpix_geo_module", no_build)
+        _, loaded = remap_backend_module._target_healpix_mesh(level, nest=True)
+        np.testing.assert_array_equal(loaded.face_nodes, built.face_nodes)
+        np.testing.assert_array_equal(loaded.node_lon, built.node_lon)
+

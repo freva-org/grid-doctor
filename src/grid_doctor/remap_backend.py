@@ -28,7 +28,7 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Literal, cast, overload
 
@@ -1153,12 +1153,72 @@ def _source_mesh(
 # ===================================================================
 
 
+_HEALPIX_MESH_DISK_CACHE_MIN_LEVEL = 6
+"""Levels below this build in well under a second and are not written to disk."""
+
+_HEALPIX_MESH_CACHE_VERSION = 1
+"""Bump when the mesh construction changes, to invalidate on-disk meshes."""
+
+
+def _healpix_mesh_cache_file(level: int) -> Path:
+    from .utils import cache_dir
+
+    return cache_dir() / f"grid_doctor_healpix_mesh_v{_HEALPIX_MESH_CACHE_VERSION}_L{level}.npz"
+
+
+@lru_cache(maxsize=4)
+def _nested_healpix_mesh(level: int) -> PolygonMesh:
+    """Return the HEALPix mesh in nested order, cached in memory and on disk.
+
+    The mesh depends on *level* only, so it is built once and reused. Callers
+    must not modify the returned arrays.
+    """
+    cache_file = _healpix_mesh_cache_file(level)
+    use_disk = level >= _HEALPIX_MESH_DISK_CACHE_MIN_LEVEL
+    if use_disk and cache_file.exists():
+        try:
+            with np.load(cache_file) as data:
+                return PolygonMesh(**{name: data[name] for name in data.files})
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            logger.warning("Ignoring unreadable HEALPix mesh cache %s: %s", cache_file, exc)
+
+    module, kwargs = _require_healpix_geo_module(True)
+    ipix = np.arange(12 * (4**level), dtype=np.int64)
+    lon_v, lat_v = module.vertices(ipix, level, **kwargs)
+    cell_lon = _canonical_lon(np.asarray(lon_v, dtype=np.float64))
+    cell_lat = np.asarray(lat_v, dtype=np.float64)
+    mesh = _corner_mesh_from_arrays(cell_lon, cell_lat)
+
+    if use_disk:
+        tmp = cache_file.with_suffix(f".{os.getpid()}.tmp.npz")
+        try:
+            np.savez(tmp, **{name: getattr(mesh, name) for name in mesh.__dataclass_fields__})
+            tmp.replace(cache_file)
+        except OSError as exc:
+            logger.warning("Could not write HEALPix mesh cache %s: %s", cache_file, exc)
+            tmp.unlink(missing_ok=True)
+    return mesh
+
+
+@lru_cache(maxsize=4)
+def _healpix_ring_to_nest(level: int) -> Int64Array:
+    """Return the nested index of every ring-ordered HEALPix pixel."""
+    ring, ring_kwargs = _require_healpix_geo_module(False)
+    nested, nested_kwargs = _require_healpix_geo_module(True)
+    ipix = np.arange(12 * (4**level), dtype=np.int64)
+    lon, lat = ring.healpix_to_lonlat(ipix, level, **ring_kwargs)
+    return np.asarray(nested.lonlat_to_healpix(lon, lat, level, **nested_kwargs), dtype=np.int64)
+
+
 def _target_healpix_mesh(
     level: int,
     *,
     nest: bool,
 ) -> tuple[Int64Array, PolygonMesh]:
     """Return the HEALPix destination mesh.
+
+    Both orderings share one cached nested mesh: the ring mesh has the
+    same nodes with its faces reordered.
 
     Args:
         level: HEALPix refinement level.
@@ -1167,12 +1227,18 @@ def _target_healpix_mesh(
     Returns:
         ``(ipix, mesh)`` where *ipix* is the pixel index array.
     """
-    module, kwargs = _require_healpix_geo_module(nest)
     ipix = np.arange(12 * (4**level), dtype=np.int64)
-    lon_v, lat_v = module.vertices(ipix, level, **kwargs)
-    cell_lon = _canonical_lon(np.asarray(lon_v, dtype=np.float64))
-    cell_lat = np.asarray(lat_v, dtype=np.float64)
-    return ipix, _corner_mesh_from_arrays(cell_lon, cell_lat)
+    mesh = _nested_healpix_mesh(level)
+    if not nest:
+        r2n = _healpix_ring_to_nest(level)
+        mesh = PolygonMesh(
+            node_lon=mesh.node_lon,
+            node_lat=mesh.node_lat,
+            face_nodes=mesh.face_nodes[r2n],
+            face_lon=mesh.face_lon[r2n],
+            face_lat=mesh.face_lat[r2n],
+        )
+    return ipix, mesh
 
 
 # ===================================================================

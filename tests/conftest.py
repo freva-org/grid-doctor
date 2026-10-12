@@ -10,6 +10,20 @@ import pytest
 import xarray as xr
 
 
+
+@pytest.fixture(autouse=True)
+def _isolated_healpix_mesh_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch):
+    """Keep cached HEALPix meshes from leaking between tests (several fake the healpix module)."""
+    from grid_doctor import remap_backend
+
+    cache = tmp_path_factory.mktemp("healpix_mesh_cache")
+    monkeypatch.setattr(remap_backend, "_healpix_mesh_cache_file", lambda level: cache / f"mesh_L{level}.npz")
+    remap_backend._nested_healpix_mesh.cache_clear()
+    remap_backend._healpix_ring_to_nest.cache_clear()
+    yield
+    remap_backend._nested_healpix_mesh.cache_clear()
+    remap_backend._healpix_ring_to_nest.cache_clear()
+
 def _xy_to_latlon(
     x: np.ndarray,
     y: np.ndarray,

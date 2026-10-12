@@ -149,3 +149,55 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
+
+  benchmarks:
+    # Base and PR run on the same runner, so their timings are comparable.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup micromamba
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          micromamba-version: "latest"
+          environment-name: grid-doctor
+          cache-environment: true
+          create-args: >-
+            python=3.13
+            netcdf4
+            pip
+          condarc: |
+            channels:
+              - conda-forge
+            channel_priority: strict
+          init-shell: bash
+
+      - name: Install packages
+        shell: bash -l {0}
+        run: python -m pip install -e .[tests,bench]
+
+      - name: Benchmark base branch
+        shell: bash -l {0}
+        # The PR's benchmarks run against the base branch's source. May fail
+        # when they use functions the base does not have yet.
+        continue-on-error: true
+        run: |
+          git checkout origin/${{ github.base_ref }} -- src
+          python -m pytest benchmarks -o addopts= --benchmark-save=base
+          git checkout HEAD -- src
+
+      - name: Benchmark PR and compare
+        shell: bash -l {0}
+        run: |
+          git checkout HEAD -- src
+          if ls .benchmarks/*/*_base.json >/dev/null 2>&1; then
+            python -m pytest benchmarks -o addopts= \
+              --benchmark-compare=0001 --benchmark-compare-fail=min:30% \
+              --benchmark-columns=min,mean,stddev,rounds
+          else
+            python -m pytest benchmarks -o addopts= --benchmark-columns=min,mean,stddev,rounds
+          fi
