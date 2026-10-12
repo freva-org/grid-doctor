@@ -18,6 +18,7 @@ from grid_doctor.utils import (
     get_s3_options,
     chunk_for_target_store_size,
 )
+from grid_doctor.utils import _key_hash
 
 
 class TestChunkSizeEstimator:
@@ -267,3 +268,51 @@ class TestCachedWeights:
         path1 = cached_weights(regular_ds, 1, method="nearest", cache_path=tmp_path)
         path2 = cached_weights(regular_ds, 2, method="nearest", cache_path=tmp_path)
         assert path1 != path2
+
+
+def _wrf_ds(offset: float = 0.0, lat: str = "XLAT", lon: str = "XLONG") -> xr.Dataset:
+    xlong, xlat = np.meshgrid(np.linspace(0.0, 10.0, 4) + offset, np.linspace(40.0, 50.0, 3))
+    return xr.Dataset(coords={lat: (("south_north", "west_east"), xlat), lon: (("south_north", "west_east"), xlong)})
+
+
+class TestKeyHash:
+    def test_different_wrf_grids_differ(self) -> None:
+        assert _key_hash(_wrf_ds(), 5) != _key_hash(_wrf_ds(offset=1.0), 5)
+
+    def test_same_grid_different_names_or_dtype_match(self) -> None:
+        ref = _key_hash(_wrf_ds(), 5)
+        assert _key_hash(_wrf_ds(lat="lat", lon="lon"), 5) == ref
+
+    def test_float32_and_float64_match(self) -> None:
+        f64 = _wrf_ds(offset=0.1)
+        f32 = f64.assign_coords({k: f64[k].astype(np.float32) for k in ("XLAT", "XLONG")})
+        f64 = f32.assign_coords({k: f32[k].astype(np.float64) for k in ("XLAT", "XLONG")})
+        assert _key_hash(f32, 5) == _key_hash(f64, 5)
+
+    def test_lat_lon_order_matters(self) -> None:
+        ds = _wrf_ds()
+        swapped = ds.rename({"XLAT": "tmp"}).rename({"XLONG": "XLAT", "tmp": "XLONG"})
+        assert _key_hash(ds, 5) != _key_hash(swapped, 5)
+
+    def test_shape_is_hashed(self) -> None:
+        ds = _wrf_ds()
+        flat = xr.Dataset(coords={k: ("cell", ds[k].values.ravel()) for k in ("XLAT", "XLONG")})
+        assert _key_hash(ds, 5) != _key_hash(flat, 5)
+
+    def test_vertices_are_hashed(self) -> None:
+        clat, clon = np.array([0.0, 10.0]), np.array([0.0, 20.0])
+        base = {"clat": ("cell", clat), "clon": ("cell", clon)}
+        verts = lambda d: {
+            "clat_vertices": (("cell", "nv"), clat[:, None] + [-d, 0.0, d]),
+            "clon_vertices": (("cell", "nv"), clon[:, None] + [-d, 0.0, d]),
+        }
+        hashes = {
+            _key_hash(xr.Dataset(coords=base), 5),
+            _key_hash(xr.Dataset(coords=base | verts(1.0)), 5),
+            _key_hash(xr.Dataset(coords=base | verts(2.0)), 5),
+        }
+        assert len(hashes) == 3
+
+    def test_raises_without_coordinates(self) -> None:
+        with pytest.raises(ValueError, match="Could not locate latitude/longitude"):
+            _key_hash(xr.Dataset(coords={"x": [0, 1]}), 5)

@@ -14,6 +14,7 @@ from typing import Any, Collection, Literal, cast
 import numpy as np
 import xarray as xr
 
+from .misc.dataset import _get_latlon_names, _get_vertex_names
 from .types import EllipsoidKind, RemapMethod, SourceUnits
 
 logger = logging.getLogger(__name__)
@@ -195,27 +196,18 @@ def _key_hash(
     ellipsoid: EllipsoidKind = "sphere",
 ) -> str:
 
+    names = [_get_latlon_names(ds)]
+    try:
+        names.append(_get_vertex_names(ds))
+    except ValueError:
+        pass  # vertices are optional
+
     digest = hashlib.sha256()
-    for candidate in (
-        "clon_vertices",
-        "clat_vertices",
-        "lon_vertices",
-        "lat_vertices",
-        "clon",
-        "clat",
-        "lon",
-        "lat",
-        "longitude",
-        "latitude",
-        "rlon",
-        "rlat",
-        "X",
-        "Y",
-    ):
-        if candidate in ds:
-            digest.update(
-                np.ascontiguousarray(np.asarray(ds[candidate].values)).tobytes()
-            )
+    for lat_name, lon_name in names:
+        for name in (lat_name, lon_name):
+            values = np.ascontiguousarray(ds[name].values, dtype=np.float64)
+            digest.update(f"shape={values.shape};".encode())
+            digest.update(values.tobytes())
     digest.update(
         f"level={level};method={method};nest={nest};units={source_units};ellipsoid={ellipsoid}".encode()
     )
