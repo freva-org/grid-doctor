@@ -362,7 +362,7 @@ def normalize_dataset(ds: xr.Dataset) -> xr.Dataset:
         ValueError: When the grid type cannot be handled or required
             vertex coordinates are missing.
     """
-    lat_name, lon_name = _get_vertex_names(ds) if _is_unstructured(ds) else _get_spatial_dims(ds)
+    lat_name, lon_name = _get_vertex_names(ds) if _is_unstructured(ds) else _get_latlon_names(ds)
 
     return _replace_values(
         ds,

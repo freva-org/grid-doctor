@@ -43,6 +43,34 @@ class TestNormalizeHelpers:
         assert -180.0 <= lon.min() and lon.max() < 180.0
         assert -90.0 <= lat.min() and lat.max() <= 90.0
 
+    @pytest.mark.parametrize("dims", [("rlat", "rlon"), ("y", "x")])
+    def test_normalize_curvilinear_latlon(self, dims):
+        """Normalize the 2-D lat/lon, not the (rotated) dimension coordinates."""
+        ydim, xdim = dims
+        lon2d, lat2d = np.meshgrid(np.linspace(190.0, 350.0, 4), np.linspace(-20.0, 20.0, 3))
+        coords = {
+            "lat": ((ydim, xdim), lat2d, {"units": "degrees_north"}),
+            "lon": ((ydim, xdim), lon2d, {"units": "degrees_east"}),
+        }
+        if ydim == "rlat":
+            coords |= {
+                "rlat": (ydim, np.linspace(-10.0, 10.0, 3), {"units": "degrees"}),
+                "rlon": (xdim, np.linspace(-20.0, 20.0, 4), {"units": "degrees"}),
+            }
+        ds = xr.Dataset(coords=coords)
+
+        norm_ds = normalize_dataset(ds)
+
+        np.testing.assert_allclose(norm_ds["lon"], lon2d - 360.0)
+        np.testing.assert_allclose(norm_ds["lat"], lat2d)
+        assert norm_ds["lon"].attrs["units"] == "degrees_east"
+        assert norm_ds["lat"].attrs["units"] == "degrees_north"
+        for dim in dims:
+            if dim in ds.coords:
+                xr.testing.assert_identical(norm_ds[dim], ds[dim])
+            else:
+                assert dim not in norm_ds.coords
+
     @pytest.mark.parametrize("set_units", [False, True])
     def test_normalize_unit(self, set_units):
         coords = {"lat": [-90, -45, 0, 45, 90], "lon": [0, 90, 180, 270, 360]}
