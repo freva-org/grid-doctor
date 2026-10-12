@@ -104,14 +104,48 @@ def _normalize_angle_units(
 # Dataset coordinate introspection
 # ===================================================================
 
+def _get_latlon_names(ds: xr.Dataset) -> tuple[str, str]:
+    """Return the names latitude and longitude from *ds*.
+
+    The function searches coordinates and data variables using the
+    priority-ordered name lists
+    [`_LAT_NAMES`][grid_doctor.misc._LAT_NAMES] and
+    [`_LON_NAMES`][grid_doctor.misc._LON_NAMES].
+
+    Args:
+        ds: Source dataset.
+
+    Returns:
+        ``(lat_name, lon_name)`` as strings.
+    Raises:
+        ValueError: When no latidure/longitude coordinates are present.
+    """
+    lat_name: str | None = None
+    lon_name: str | None = None
+    for name in _LAT_NAMES:
+        if name in ds.coords or name in ds.data_vars:
+            lat_name = name
+            break
+
+    for name in _LON_NAMES:
+        if name in ds.coords or name in ds.data_vars:
+            lon_name = name
+            break
+
+    if lat_name is None or lon_name is None:
+        available = sorted({*map(str, ds.coords), *map(str, ds.data_vars)})
+        raise ValueError(f"Could not locate latitude/longitude coordinates. Available names are: {available}.")
+
+    return lat_name, lon_name
+
 
 def _get_latlon_arrays(ds: xr.Dataset) -> tuple[FloatArray, FloatArray]:
     """Extract latitude and longitude arrays from *ds*.
 
     The function searches coordinates and data variables using the
     priority-ordered name lists
-    [`_LAT_NAMES`][grid_doctor.remap_backend._LAT_NAMES] and
-    [`_LON_NAMES`][grid_doctor.remap_backend._LON_NAMES].
+    [`_LAT_NAMES`][grid_doctor.misc._LAT_NAMES] and
+    [`_LON_NAMES`][grid_doctor.misc._LON_NAMES].
 
     Args:
         ds: Source dataset.
@@ -122,22 +156,8 @@ def _get_latlon_arrays(ds: xr.Dataset) -> tuple[FloatArray, FloatArray]:
     Raises:
         ValueError: When no recognised coordinate names are found.
     """
-    lat: FloatArray | None = None
-    lon: FloatArray | None = None
-
-    for name in _LAT_NAMES:
-        if name in ds.coords or name in ds.data_vars:
-            lat = _to_float64(ds[name].values)
-            break
-    for name in _LON_NAMES:
-        if name in ds.coords or name in ds.data_vars:
-            lon = _to_float64(ds[name].values)
-            break
-
-    if lat is None or lon is None:
-        available = sorted({*map(str, ds.coords), *map(str, ds.data_vars)})
-        raise ValueError(f"Could not locate latitude/longitude coordinates. Available names are: {available}.")
-    return lat, lon
+    lat_name, lon_name = _get_latlon_names(ds)
+    return _to_float64(ds[lat_name].values), _to_float64(ds[lon_name].values)
 
 
 def _is_unstructured(ds: xr.Dataset) -> bool:
