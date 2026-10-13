@@ -227,7 +227,7 @@ class TargetDescription:
     level: int
     order: Literal["nest", "ring"]  # TODO: refactor with proper type
     ellipsoid: EllipsoidKind = "sphere"
-    target_mesh: PolygonMesh | None = field(default=None, compare=False)
+    target_mesh: PolygonMesh | None = field(default=None, compare=False, repr=False)
 
     @property
     def mesh(self) -> PolygonMesh:
@@ -241,7 +241,7 @@ class TargetDescription:
         return self.target_mesh
 
 
-@dataclass(frozen=True, repr=False)
+@dataclass(frozen=True, eq=False, repr=False)
 class WeightsDescription:
     """Resolved description of the weights representation.
 

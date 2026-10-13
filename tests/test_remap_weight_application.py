@@ -151,6 +151,29 @@ class TestWeightsDescription:
         assert reduce(lambda a,b: a.key != b.key, weight_descriptions, True)
         assert reduce(lambda a,b: hash(a) != hash(b), weight_descriptions, True)
 
+    def test_eq_and_hash_use_key(self, regular_ds: xr.Dataset) -> None:
+        def make() -> WeightsDescription:
+            return WeightsDescription(
+                source=SourceDescription.from_normalized_dataset(regular_ds),
+                target=TargetDescription(level=1, order="nest"),
+                method="nearest",
+            )
+
+        a, b = make(), make()
+        assert a is not b
+        assert a == b  # no ValueError from comparing datasets
+        assert hash(a) == hash(b) == hash(a.key)  # no TypeError from hashing datasets
+        assert len({a, b}) == 1
+        assert a != "not a description"
+
+    def test_target_mesh_not_compared_or_printed(self) -> None:
+        bare = TargetDescription(level=0, order="nest")
+        with_mesh = TargetDescription(level=0, order="nest")
+        assert with_mesh.mesh is not None  # builds and stores the mesh
+        assert bare.target_mesh is None
+        assert bare == with_mesh
+        assert "target_mesh" not in repr(with_mesh)
+
 
 class TestWeightGeneration:
     def test_compute_healpix_weights_nearest(
