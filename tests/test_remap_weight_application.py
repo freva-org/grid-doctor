@@ -165,12 +165,12 @@ class TestWeightGeneration:
         monkeypatch.setattr(
             remap_backend,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda nest, ellipsoid="sphere": (_FakeHealpixModule(), {}),
         )
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda nest, ellipsoid="sphere": (_FakeHealpixModule(), {}),
         )
         path = tmp_path / "weights.nc"
         result = compute_healpix_weights(
@@ -198,12 +198,12 @@ class TestWeightGeneration:
         monkeypatch.setattr(
             remap_backend,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda nest, ellipsoid="sphere": (_FakeHealpixModule(), {}),
         )
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda nest, ellipsoid="sphere": (_FakeHealpixModule(), {}),
         )
         path = tmp_path / "weights.nc"
         compute_healpix_weights(
@@ -231,12 +231,12 @@ class TestWeightGeneration:
         monkeypatch.setattr(
             remap_backend,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda nest, ellipsoid="sphere": (_FakeHealpixModule(), {}),
         )
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda nest, ellipsoid="sphere": (_FakeHealpixModule(), {}),
         )
         path = tmp_path / "weights.nc"
         compute_healpix_weights(

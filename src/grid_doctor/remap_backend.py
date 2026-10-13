@@ -46,6 +46,7 @@ from .misc import (
     normalize_dataset,
 )
 from .types import (
+    EllipsoidKind,
     FloatArray,
     Int64Array,
     IntArray,
@@ -218,19 +219,23 @@ class TargetDescription:
     Attributes:
         level: Healpix index resolution (zoom)
         order: Healpix indexing order ('nest' or 'ring').
+        ellipsoid: Ellipsoid the cell vertices are computed on.
         target_mesh: Optional precomputed target mesh; otherwise built
             lazily by [`mesh`][grid_doctor.remap_backend.TargetDescription.mesh].
     """
 
     level: int
     order: Literal["nest", "ring"]  # TODO: refactor with proper type
+    ellipsoid: EllipsoidKind = "sphere"
     target_mesh: PolygonMesh | None = field(default=None, compare=False)
 
     @property
     def mesh(self) -> PolygonMesh:
         """Target mesh stored as compact node/connectivity arrays."""
         if self.target_mesh is None:
-            _, m = _target_healpix_mesh(self.level, nest=self.order.startswith("nest"))
+            _, m = _target_healpix_mesh(
+                self.level, nest=self.order.startswith("nest"), ellipsoid=self.ellipsoid
+            )
             object.__setattr__(self, "target_mesh", m)
         assert self.target_mesh is not None
         return self.target_mesh
@@ -265,7 +270,7 @@ class WeightsDescription:
             self.target.level,
             method=self.method,
             nest=self.target.order.startswith("nest"),
-            ellipsoid="sphere",
+            ellipsoid=self.target.ellipsoid,
         )
 
     def __hash__(self) -> int:  # noqa: D105
@@ -302,19 +307,22 @@ def _require_esmpy() -> Any:
     return esmpy
 
 
-def _require_healpix_geo_module(nest: bool) -> tuple[Any, dict[str, str]]:
+def _require_healpix_geo_module(
+    nest: bool, ellipsoid: EllipsoidKind = "sphere"
+) -> tuple[Any, dict[str, str]]:
     """Import and return the appropriate ``healpix_geo`` sub-module.
 
-    All HEALPix geometry is computed on a perfect sphere.  This is
+    HEALPix geometry is computed on a perfect sphere by default. This is
     consistent with ESMF's internal area calculation
     (``CoordSys.SPH_DEG``) and with the geocentric coordinates used
-    by climate models.  The maximum latitude discrepancy relative to
-    WGS84 geodetic coordinates is ~0.19° at 45° latitude, which is
-    well within the tolerance of conservative remapping.
+    by climate models. ``"WGS84"`` places the vertices on the WGS84
+    ellipsoid instead: pixel ids are unchanged, latitudes differ by up to
+    ~0.19 deg at 45 deg latitude. ESMF still treats them as points on a sphere.
 
     Args:
         nest: Select `healpix_geo.nested` when *True*, otherwise
             `healpix_geo.ring`.
+        ellipsoid: Ellipsoid the geometry is computed on.
 
     Returns:
         ``(module, kwargs)`` where *kwargs* should be forwarded to
@@ -332,7 +340,7 @@ def _require_healpix_geo_module(nest: bool) -> tuple[Any, dict[str, str]]:
         raise ImportError(
             "healpix-geo is required to construct HEALPix polygons."
         ) from exc
-    return module, {"ellipsoid": "sphere"}
+    return module, {"ellipsoid": ellipsoid}
 
 
 # ===================================================================
@@ -1161,20 +1169,20 @@ _HEALPIX_MESH_CACHE_VERSION = 1
 """Bump when the mesh construction changes, to invalidate on-disk meshes."""
 
 
-def _healpix_mesh_cache_file(level: int) -> Path:
+def _healpix_mesh_cache_file(level: int, ellipsoid: EllipsoidKind) -> Path:
     from .utils import cache_dir
 
-    return cache_dir() / f"grid_doctor_healpix_mesh_v{_HEALPIX_MESH_CACHE_VERSION}_L{level}.npz"
+    return cache_dir() / f"grid_doctor_healpix_mesh_v{_HEALPIX_MESH_CACHE_VERSION}_{ellipsoid}_L{level}.npz"
 
 
 @lru_cache(maxsize=4)
-def _nested_healpix_mesh(level: int) -> PolygonMesh:
+def _nested_healpix_mesh(level: int, ellipsoid: EllipsoidKind = "sphere") -> PolygonMesh:
     """Return the HEALPix mesh in nested order, cached in memory and on disk.
 
-    The mesh depends on *level* only, so it is built once and reused. Callers
-    must not modify the returned arrays.
+    The mesh depends on *level* and *ellipsoid* only, so it is built once and
+    reused. Callers must not modify the returned arrays.
     """
-    cache_file = _healpix_mesh_cache_file(level)
+    cache_file = _healpix_mesh_cache_file(level, ellipsoid)
     use_disk = level >= _HEALPIX_MESH_DISK_CACHE_MIN_LEVEL
     if use_disk and cache_file.exists():
         try:
@@ -1183,7 +1191,7 @@ def _nested_healpix_mesh(level: int) -> PolygonMesh:
         except (OSError, ValueError, KeyError, TypeError) as exc:
             logger.warning("Ignoring unreadable HEALPix mesh cache %s: %s", cache_file, exc)
 
-    module, kwargs = _require_healpix_geo_module(True)
+    module, kwargs = _require_healpix_geo_module(True, ellipsoid)
     ipix = np.arange(12 * (4**level), dtype=np.int64)
     lon_v, lat_v = module.vertices(ipix, level, **kwargs)
     cell_lon = _canonical_lon(np.asarray(lon_v, dtype=np.float64))
@@ -1203,7 +1211,10 @@ def _nested_healpix_mesh(level: int) -> PolygonMesh:
 
 @lru_cache(maxsize=4)
 def _healpix_ring_to_nest(level: int) -> Int64Array:
-    """Return the nested index of every ring-ordered HEALPix pixel."""
+    """Return the nested index of every ring-ordered HEALPix pixel.
+
+    Pixel ids do not depend on the ellipsoid, so one mapping serves all.
+    """
     ring, ring_kwargs = _require_healpix_geo_module(False)
     nested, nested_kwargs = _require_healpix_geo_module(True)
     ipix = np.arange(12 * (4**level), dtype=np.int64)
@@ -1215,6 +1226,7 @@ def _target_healpix_mesh(
     level: int,
     *,
     nest: bool,
+    ellipsoid: EllipsoidKind = "sphere",
 ) -> tuple[Int64Array, PolygonMesh]:
     """Return the HEALPix destination mesh.
 
@@ -1224,12 +1236,13 @@ def _target_healpix_mesh(
     Args:
         level: HEALPix refinement level.
         nest: Use nested ordering when *True*.
+        ellipsoid: Ellipsoid the cell vertices are computed on.
 
     Returns:
         ``(ipix, mesh)`` where *ipix* is the pixel index array.
     """
     ipix = np.arange(12 * (4**level), dtype=np.int64)
-    mesh = _nested_healpix_mesh(level)
+    mesh = _nested_healpix_mesh(level, ellipsoid)
     if not nest:
         r2n = _healpix_ring_to_nest(level)
         mesh = PolygonMesh(
@@ -1733,6 +1746,7 @@ def compute_healpix_weights_backend(
     large_file: bool = True,
     offline: OfflineWeightConfig | None = None,
     spectral_transform_command: (list[str] | tuple[str, ...] | None) = None,
+    ellipsoid: EllipsoidKind = "sphere",
 ) -> Path:
     """Compute reusable HEALPix weights.
 
@@ -1758,6 +1772,7 @@ def compute_healpix_weights_backend(
         offline: Offline weight-generation configuration.
         spectral_transform_command: External command used when
             ``source_kind="spectral"``.
+        ellipsoid: Ellipsoid the HEALPix cell vertices are computed on.
 
     Returns:
         Path to the generated weight file.
@@ -1781,7 +1796,7 @@ def compute_healpix_weights_backend(
     )
     desc = WeightsDescription(
         source=source_desc,
-        target=TargetDescription(level=level, order="nest" if nest else "ring"),
+        target=TargetDescription(level=level, order="nest" if nest else "ring", ellipsoid=ellipsoid),
         method=method,
     )
     target_mesh = desc.target.mesh
@@ -1829,6 +1844,7 @@ def compute_healpix_weights_backend(
         "grid_doctor_method": method,
         "grid_doctor_level": level,
         "grid_doctor_order": "nested" if nest else "ring",
+        "grid_doctor_ellipsoid": ellipsoid,
         "grid_doctor_backend": ("offline-esmf" if use_offline else "esmpy"),
         "grid_doctor_ignore_unmapped": int(bool(eff_ignore)),
         **source_desc.metadata,

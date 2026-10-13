@@ -275,7 +275,9 @@ def cached_weights(
             source_units=source_units,
             spectral_transform_command=kwargs.get("spectral_transform_command"),
         ),
-        target=TargetDescription(level=level, order="nest" if nest else "ring"),
+        target=TargetDescription(
+            level=level, order="nest" if nest else "ring", ellipsoid=kwargs.get("ellipsoid", "sphere")
+        ),
         method=method,
     )
     key = desc.key[:16]

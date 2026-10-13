@@ -28,6 +28,7 @@ from grid_doctor.remap import (
     _parse_source_dims_attr,
     _resolve_source_dims_for_weight_application,
     apply_weight_file,
+    compute_healpix_weights,
     regrid_to_healpix,
     regrid_unstructured_to_healpix,
 )
@@ -494,7 +495,7 @@ class TestBackendExternalWorkflows:
         monkeypatch.setattr(
             remap_backend_module,
             "_target_healpix_mesh",
-            lambda level, nest: (np.array([0], dtype=np.int64), target_mesh),
+            lambda level, nest, **kwargs: (np.array([0], dtype=np.int64), target_mesh),
         )
 
         def offline(**kwargs: Any) -> Path:
@@ -697,7 +698,7 @@ class TestHealpixCentres:
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda nest, ellipsoid="sphere": (_FakeHealpixModule(), {}),
         )
         lat, lon = _healpix_centres(1, nest=True)
         assert lat.shape == lon.shape
@@ -1259,11 +1260,11 @@ class TestHealpixTargetMesh:
     def test_mesh_is_reused_from_disk(self, monkeypatch: pytest.MonkeyPatch) -> None:
         level = remap_backend_module._HEALPIX_MESH_DISK_CACHE_MIN_LEVEL
         _, built = remap_backend_module._target_healpix_mesh(level, nest=True)
-        assert remap_backend_module._healpix_mesh_cache_file(level).exists()
+        assert remap_backend_module._healpix_mesh_cache_file(level, "sphere").exists()
 
         remap_backend_module._nested_healpix_mesh.cache_clear()
 
-        def no_build(nest: bool) -> None:
+        def no_build(nest: bool, ellipsoid: str = "sphere") -> None:
             raise AssertionError("mesh rebuilt despite disk cache")
 
         monkeypatch.setattr(remap_backend_module, "_require_healpix_geo_module", no_build)
@@ -1271,3 +1272,99 @@ class TestHealpixTargetMesh:
         np.testing.assert_array_equal(loaded.face_nodes, built.face_nodes)
         np.testing.assert_array_equal(loaded.node_lon, built.node_lon)
 
+
+class TestHealpixEllipsoid:
+    def test_key_depends_on_ellipsoid(self, regular_ds: xr.Dataset) -> None:
+        from grid_doctor.remap_backend import TargetDescription, WeightsDescription
+
+        source = describe_source(regular_ds)
+        keys = {
+            WeightsDescription(
+                source=source, target=TargetDescription(level=2, order="nest", ellipsoid=e), method="conservative"
+            ).key
+            for e in ("sphere", "WGS84")
+        }
+        assert len(keys) == 2
+
+    @pytest.mark.parametrize("nest", [True, False])
+    def test_meshes_differ_but_cells_correspond(self, nest: bool) -> None:
+        level = 3
+        _, sphere = remap_backend_module._target_healpix_mesh(level, nest=nest, ellipsoid="sphere")
+        _, wgs84 = remap_backend_module._target_healpix_mesh(level, nest=nest, ellipsoid="WGS84")
+        assert sphere.face_count == wgs84.face_count
+        dlat = np.abs(sphere.face_lat - wgs84.face_lat)
+        assert 0.05 < dlat.max() < 0.2
+        # centres come from the polygon corners, so longitudes shift slightly too
+        np.testing.assert_allclose(sphere.face_lon, wgs84.face_lon, atol=0.01)
+
+    def test_disk_cache_is_per_ellipsoid(self) -> None:
+        level = remap_backend_module._HEALPIX_MESH_DISK_CACHE_MIN_LEVEL
+        remap_backend_module._target_healpix_mesh(level, nest=True, ellipsoid="sphere")
+        assert not remap_backend_module._healpix_mesh_cache_file(level, "WGS84").exists()
+        remap_backend_module._target_healpix_mesh(level, nest=True, ellipsoid="WGS84")
+        assert remap_backend_module._healpix_mesh_cache_file(level, "WGS84").exists()
+
+    def test_cached_weights_separates_ellipsoids(
+        self, regular_ds: xr.Dataset, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from grid_doctor.utils import cached_weights
+
+        def fake_compute(ds: xr.Dataset, level: int, **kwargs: Any) -> Path:
+            xr.Dataset({"S": ("nnz", np.array([1.0]))}).to_netcdf(kwargs["weights_path"])
+            return kwargs["weights_path"]
+
+        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", fake_compute)
+        sphere = cached_weights(regular_ds, 2, cache_path=tmp_path)
+        wgs84 = cached_weights(regular_ds, 2, cache_path=tmp_path, ellipsoid="WGS84")
+        assert sphere != wgs84
+
+
+class TestEllipsoidEndToEnd:
+    """Real ESMF weights: a WGS84 target must not silently reuse sphere geometry."""
+
+    @staticmethod
+    def _source() -> xr.Dataset:
+        lat = np.arange(-89.0, 90.0, 2.0)
+        lon = np.arange(1.0, 360.0, 2.0)
+        return xr.Dataset(
+            {"t": (("lat", "lon"), np.broadcast_to(lat[:, None], (lat.size, lon.size)).copy())},
+            coords={
+                "lat": ("lat", lat, {"units": "degrees_north"}),
+                "lon": ("lon", lon, {"units": "degrees_east"}),
+            },
+        )
+
+    @staticmethod
+    def _weights(path: Path) -> tuple[xr.Dataset, Any]:
+        import scipy.sparse as sp
+
+        with xr.open_dataset(path) as ds:
+            ds = ds.load()
+        matrix = sp.coo_matrix((ds["S"].values, (ds["row"].values - 1, ds["col"].values - 1))).tocsr()
+        return ds, matrix
+
+    @pytest.mark.parametrize("method", ["conservative", "nearest"])
+    def test_sphere_and_wgs84_weights_differ(self, method: str, tmp_path: Path) -> None:
+        pytest.importorskip("esmpy")
+        ds = self._source()
+        level = 3
+        files = {
+            e: compute_healpix_weights(
+                ds, level, method=method, weights_path=tmp_path / f"{e}.nc", ellipsoid=e
+            )
+            for e in ("sphere", "WGS84")
+        }
+        (sphere_ds, sphere), (wgs84_ds, wgs84) = (self._weights(files[e]) for e in ("sphere", "WGS84"))
+
+        assert sphere_ds.attrs["grid_doctor_ellipsoid"] == "sphere"
+        assert wgs84_ds.attrs["grid_doctor_ellipsoid"] == "WGS84"
+        assert sphere.shape == wgs84.shape  # same pixel ids
+        assert abs(sphere - wgs84).max() > 0
+
+        # A field equal to latitude: WGS84 cells sit up to ~0.19 deg from sphere cells.
+        # With nearest, a shifted cell can snap to the neighbouring 2 deg source cell.
+        diff = np.abs(
+            apply_weight_file(ds, files["sphere"])["t"].values - apply_weight_file(ds, files["WGS84"])["t"].values
+        )
+        upper = 1.0 if method == "conservative" else 2.0 + 1e-9
+        assert 0.01 < np.nanmax(diff) <= upper

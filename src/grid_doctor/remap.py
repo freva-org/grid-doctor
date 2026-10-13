@@ -44,6 +44,7 @@ from .remap_backend import (
 )
 from .types import (
     ApplyBackend,
+    EllipsoidKind,
     FloatArray,
     MissingPolicy,
     RemapMethod,
@@ -176,6 +177,7 @@ def compute_healpix_weights(
     keep_intermediates: bool = False,
     workdir: str | Path | None = None,
     spectral_transform_command: list[str] | tuple[str, ...] | None = None,
+    ellipsoid: EllipsoidKind = "sphere",
 ) -> Path:
     """Generate a reusable NetCDF weight file for HEALPix remapping.
 
@@ -213,6 +215,10 @@ def compute_healpix_weights(
         Working directory for offline intermediate files.
     spectral_transform_command:
         External command for ``source_kind="spectral"``.
+    ellipsoid:
+        Ellipsoid the HEALPix cell vertices are computed on (``"sphere"``
+        or ``"WGS84"``). Pixel ids are the same; cell positions differ by
+        up to ~0.19 deg. ESMF still treats the vertices as points on a sphere.
 
     Returns
     -------
@@ -244,6 +250,7 @@ def compute_healpix_weights(
         large_file=large_file,
         offline=offline,
         spectral_transform_command=spectral_transform_command,
+        ellipsoid=ellipsoid,
     )
 
 

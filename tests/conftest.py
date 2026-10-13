@@ -17,7 +17,7 @@ def _isolated_healpix_mesh_cache(tmp_path_factory: pytest.TempPathFactory, monke
     from grid_doctor import remap_backend
 
     cache = tmp_path_factory.mktemp("healpix_mesh_cache")
-    monkeypatch.setattr(remap_backend, "_healpix_mesh_cache_file", lambda level: cache / f"mesh_L{level}.npz")
+    monkeypatch.setattr(remap_backend, "_healpix_mesh_cache_file", lambda level, ellipsoid: cache / f"mesh_{ellipsoid}_L{level}.npz")
     remap_backend._nested_healpix_mesh.cache_clear()
     remap_backend._healpix_ring_to_nest.cache_clear()
     yield
