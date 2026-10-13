@@ -320,9 +320,11 @@ class TestKeyHash:
 
 
 class TestCanonicalWeightsKey:
+    LON = np.arange(8) * 45.0  # 0, 45, ..., 315
+
     @staticmethod
-    def _grid(lon0: float = 0.0, radians: bool = False) -> xr.Dataset:
-        lat, lon = np.linspace(-80.0, 80.0, 5), np.arange(8) * 45.0 + lon0
+    def _grid(lon: np.ndarray = LON, radians: bool = False) -> xr.Dataset:
+        lat = np.linspace(-80.0, 80.0, 5)
         if radians:
             lat, lon = np.radians(lat), np.radians(lon)
         units = "rad" if radians else "degrees"
@@ -339,7 +341,17 @@ class TestCanonicalWeightsKey:
     def test_same_grid_any_convention_shares_key(self) -> None:
         ref = self._key(self._grid())
         assert self._key(self._grid(radians=True)) == ref  # radians vs degrees
-        assert self._key(self._grid(lon0=360.0)) == ref  # lon shifted by a full turn
+        assert self._key(self._grid(self.LON + 360.0)) == ref  # lon shifted by a full turn
+
+    def test_0_360_and_minus180_180_share_key(self) -> None:
+        """The same cells in the same order share weights, whatever the lon convention."""
+        lon_180 = (self.LON + 180.0) % 360.0 - 180.0  # 0, ..., 135, -180, ..., -45
+        assert self._key(self._grid(lon_180)) == self._key(self._grid())
+
+    def test_reordered_cells_get_own_key(self) -> None:
+        """Weight columns follow the data's cell order, so a sorted grid must not reuse weights."""
+        lon_sorted = np.sort((self.LON + 180.0) % 360.0 - 180.0)  # -180, ..., 135
+        assert self._key(self._grid(lon_sorted)) != self._key(self._grid())
 
     def test_description_is_lazy(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import grid_doctor.remap_backend as backend
