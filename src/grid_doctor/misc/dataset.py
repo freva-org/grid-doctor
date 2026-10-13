@@ -271,11 +271,17 @@ def _replace_values(ds: xr.Dataset, mapping: Mapping[str, np.ndarray | xr.DataAr
     return ds
 
 
-def _to_micro(a: FloatArray, scale: int) -> FloatArray:
+def _to_micro(a: FloatArray, scale: int) -> tuple[FloatArray, FloatArray]:
+    """Return *a* as integer multiples of ``1 / scale`` plus its NaN mask.
+
+    NaN (e.g. padding vertices) cannot be cast to an integer, so it is
+    returned as 0 and must be restored by the caller via the mask.
+    """
     a = _to_float64(a)
     if np.isinf(a).any():
-        raise ValueError("NaN/inf in input")
-    return np.rint(a * scale).astype(np.int64)
+        raise ValueError("inf in input")
+    nan = np.isnan(a)
+    return np.rint(np.where(nan, 0.0, a) * scale).astype(np.int64), nan
 
 
 def _has_degree_unit(da: xr.DataArray) -> bool:
@@ -285,10 +291,10 @@ def _has_degree_unit(da: xr.DataArray) -> bool:
 
 def _norm_lon(lon: FloatArray, *, scale: int = _MICRO_SCALE) -> FloatArray:
     """Convention lon: [-180, 180)°."""
-    q = _to_micro(lon, scale)
+    q, nan = _to_micro(lon, scale)
     half = 180 * scale
     q = (q + half) % (2 * half) - half  # exact wrap to [-180, 180)
-    return q / scale
+    return np.where(nan, np.nan, q / scale)
 
 
 def normalize_lon(lon: xr.DataArray) -> xr.DataArray:
@@ -309,10 +315,10 @@ def normalize_lon(lon: xr.DataArray) -> xr.DataArray:
 
 def _norm_lat(lat: FloatArray, *, scale: int = _MICRO_SCALE) -> FloatArray:
     """Convention lat: [-90, 90]°."""
-    q = _to_micro(lat, scale)
+    q, nan = _to_micro(lat, scale)
     if np.any(np.abs(q) > 90 * scale):
         raise ValueError("latitude outside [-90, 90]")
-    return q / scale
+    return np.where(nan, np.nan, q / scale)
 
 
 def normalize_lat(lat: xr.DataArray) -> xr.DataArray:

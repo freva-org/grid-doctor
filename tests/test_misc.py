@@ -97,6 +97,27 @@ class TestNormalizeHelpers:
         else:
             assert "clon_vertices" not in norm_ds
 
+    def test_normalize_unstructured_nan_vertices(self):
+        """NaN-padded vertices (cells with fewer corners) stay NaN; real corners are normalized."""
+        clat_v = np.array([[-1.0, 0.0, 1.0, np.nan], [9.0, 10.0, 11.0, 10.0]])
+        clon_v = np.array([[189.0, 190.0, 191.0, np.nan], [349.0, 350.0, 351.0, 352.0]])
+        ds = xr.Dataset(
+            coords={
+                "clat": ("cell", [0.0, 10.0], {"units": "degrees_north"}),
+                "clon": ("cell", [190.0, 350.0], {"units": "degrees_east"}),
+                "clat_vertices": (("cell", "nv"), clat_v, {"units": "degrees_north"}),
+                "clon_vertices": (("cell", "nv"), clon_v, {"units": "degrees_east"}),
+            }
+        )
+        norm_ds = normalize_dataset(ds)
+
+        lat_v, lon_v = norm_ds["clat_vertices"].values, norm_ds["clon_vertices"].values
+        np.testing.assert_array_equal(np.isnan(lon_v), np.isnan(clon_v))
+        np.testing.assert_array_equal(np.isnan(lat_v), np.isnan(clat_v))
+        np.testing.assert_allclose(lon_v, [[-171.0, -170.0, -169.0, np.nan], [-11.0, -10.0, -9.0, -8.0]])
+        np.testing.assert_allclose(lat_v, clat_v)
+        np.testing.assert_allclose(norm_ds["clon"], [-170.0, -10.0])
+
     @pytest.mark.parametrize("set_units", [False, True])
     def test_normalize_unit(self, set_units):
         coords = {"lat": [-90, -45, 0, 45, 90], "lon": [0, 90, 180, 270, 360]}
