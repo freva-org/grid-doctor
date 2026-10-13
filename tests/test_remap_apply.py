@@ -351,3 +351,13 @@ class TestApplyWeightsNdCupy:
         np.testing.assert_allclose(
             cupy_result, scipy_result, equal_nan=True
         )
+
+
+def test_extract_sparse_weights_explicit_shape() -> None:
+    """Unused trailing cells (e.g. nearest) must not shrink the matrix."""
+    row = np.array([1, 2])
+    col = np.array([1, 1])
+    vals = np.array([1.0, 1.0])
+    matrix, n_target, n_source = extract_sparse_weights(row, col, vals, n_target=4, n_source=3)
+    assert (n_target, n_source) == (4, 3)
+    assert matrix.shape == (4, 3)
