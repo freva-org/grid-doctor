@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import numpy as np
@@ -18,6 +19,7 @@ from grid_doctor.utils import (
     get_s3_options,
     chunk_for_target_store_size,
 )
+from grid_doctor.utils import _key_hash
 
 
 class TestChunkSizeEstimator:
@@ -267,3 +269,113 @@ class TestCachedWeights:
         path1 = cached_weights(regular_ds, 1, method="nearest", cache_path=tmp_path)
         path2 = cached_weights(regular_ds, 2, method="nearest", cache_path=tmp_path)
         assert path1 != path2
+
+
+def _wrf_ds(offset: float = 0.0, lat: str = "XLAT", lon: str = "XLONG") -> xr.Dataset:
+    xlong, xlat = np.meshgrid(np.linspace(0.0, 10.0, 4) + offset, np.linspace(40.0, 50.0, 3))
+    return xr.Dataset(coords={lat: (("south_north", "west_east"), xlat), lon: (("south_north", "west_east"), xlong)})
+
+
+class TestKeyHash:
+    def test_different_wrf_grids_differ(self) -> None:
+        assert _key_hash(_wrf_ds(), 5) != _key_hash(_wrf_ds(offset=1.0), 5)
+
+    def test_same_grid_different_names_or_dtype_match(self) -> None:
+        ref = _key_hash(_wrf_ds(), 5)
+        assert _key_hash(_wrf_ds(lat="lat", lon="lon"), 5) == ref
+
+    def test_float32_and_float64_match(self) -> None:
+        f64 = _wrf_ds(offset=0.1)
+        f32 = f64.assign_coords({k: f64[k].astype(np.float32) for k in ("XLAT", "XLONG")})
+        f64 = f32.assign_coords({k: f32[k].astype(np.float64) for k in ("XLAT", "XLONG")})
+        assert _key_hash(f32, 5) == _key_hash(f64, 5)
+
+    def test_lat_lon_order_matters(self) -> None:
+        ds = _wrf_ds()
+        swapped = ds.rename({"XLAT": "tmp"}).rename({"XLONG": "XLAT", "tmp": "XLONG"})
+        assert _key_hash(ds, 5) != _key_hash(swapped, 5)
+
+    def test_shape_is_hashed(self) -> None:
+        ds = _wrf_ds()
+        flat = xr.Dataset(coords={k: ("cell", ds[k].values.ravel()) for k in ("XLAT", "XLONG")})
+        assert _key_hash(ds, 5) != _key_hash(flat, 5)
+
+    def test_vertices_are_hashed(self) -> None:
+        clat, clon = np.array([0.0, 10.0]), np.array([0.0, 20.0])
+        base = {"clat": ("cell", clat), "clon": ("cell", clon)}
+        verts = lambda d: {
+            "clat_vertices": (("cell", "nv"), clat[:, None] + [-d, 0.0, d]),
+            "clon_vertices": (("cell", "nv"), clon[:, None] + [-d, 0.0, d]),
+        }
+        hashes = {
+            _key_hash(xr.Dataset(coords=base), 5),
+            _key_hash(xr.Dataset(coords=base | verts(1.0)), 5),
+            _key_hash(xr.Dataset(coords=base | verts(2.0)), 5),
+        }
+        assert len(hashes) == 3
+
+    def test_raises_without_coordinates(self) -> None:
+        with pytest.raises(ValueError, match="Could not locate latitude/longitude"):
+            _key_hash(xr.Dataset(coords={"x": [0, 1]}), 5)
+
+
+class TestCanonicalWeightsKey:
+    LON = np.arange(8) * 45.0  # 0, 45, ..., 315
+
+    @staticmethod
+    def _grid(lon: np.ndarray = LON, radians: bool = False) -> xr.Dataset:
+        lat = np.linspace(-80.0, 80.0, 5)
+        if radians:
+            lat, lon = np.radians(lat), np.radians(lon)
+        units = "rad" if radians else "degrees"
+        return xr.Dataset(coords={"lat": ("lat", lat, {"units": units}), "lon": ("lon", lon, {"units": units})})
+
+    @staticmethod
+    def _key(ds: xr.Dataset) -> str:
+        from grid_doctor.remap_backend import TargetDescription, WeightsDescription, describe_source
+
+        return WeightsDescription(
+            source=describe_source(ds), target=TargetDescription(level=2, order="nest"), method="conservative"
+        ).key
+
+    def test_same_grid_any_convention_shares_key(self) -> None:
+        ref = self._key(self._grid())
+        assert self._key(self._grid(radians=True)) == ref  # radians vs degrees
+        assert self._key(self._grid(self.LON + 360.0)) == ref  # lon shifted by a full turn
+
+    def test_0_360_and_minus180_180_share_key(self) -> None:
+        """The same cells in the same order share weights, whatever the lon convention."""
+        lon_180 = (self.LON + 180.0) % 360.0 - 180.0  # 0, ..., 135, -180, ..., -45
+        assert self._key(self._grid(lon_180)) == self._key(self._grid())
+
+    def test_reordered_cells_get_own_key(self) -> None:
+        """Weight columns follow the data's cell order, so a sorted grid must not reuse weights."""
+        lon_sorted = np.sort((self.LON + 180.0) % 360.0 - 180.0)  # -180, ..., 135
+        assert self._key(self._grid(lon_sorted)) != self._key(self._grid())
+
+    def test_description_is_lazy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import grid_doctor.remap_backend as backend
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise AssertionError("mesh built eagerly")
+
+        monkeypatch.setattr(backend, "_source_mesh", boom)
+        monkeypatch.setattr(backend, "_target_healpix_mesh", boom)
+        self._key(self._grid())
+
+    def test_cached_weights_uses_description_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[Path] = []
+
+        def fake_compute(ds: xr.Dataset, level: int, **kwargs: Any) -> Path:
+            calls.append(kwargs["weights_path"])
+            xr.Dataset({"S": ("nnz", np.array([1.0]))}).to_netcdf(kwargs["weights_path"])
+            return kwargs["weights_path"]
+
+        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", fake_compute)
+        path = cached_weights(self._grid(), 2, cache_path=tmp_path)
+        assert path.name == f"weights_{self._key(self._grid())[:16]}.nc"
+        # same grid in radians hits the cache
+        assert cached_weights(self._grid(radians=True), 2, cache_path=tmp_path) == path
+        assert len(calls) == 1

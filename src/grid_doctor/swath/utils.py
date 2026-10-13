@@ -10,11 +10,11 @@ import numpy as np
 import numpy_groupies as npg
 import xarray as xr
 
-from ..remap_backend import (
+from ..misc import (
     _LAT_NAMES,
     _LON_NAMES,
     _canonical_lon,
-    _normalise_angle_units,
+    _normalize_angle_units,
 )
 from ..types import BinAgg, FloatArray, Int64Array, SourceUnits
 
@@ -174,7 +174,7 @@ def bin_mode(
             func="sum",
             size=n_cells,
             fill_value=0,
-        ).astype(np.int64)
+        ).astype(np.int64)  # type: ignore[attr-defined]
         wins = count > best_count
         best_value[wins] = cls
         best_count[wins] = count[wins]
@@ -320,11 +320,11 @@ def resolve_point_coords(
             f"{lat_var.shape} vs {lon_var.shape}."
         )
 
-    lat = _normalise_angle_units(
+    lat = _normalize_angle_units(
         np.asarray(lat_var.values, dtype=np.float64).ravel(), source_units
     )
     lon = _canonical_lon(
-        _normalise_angle_units(
+        _normalize_angle_units(
             np.asarray(lon_var.values, dtype=np.float64).ravel(), source_units
         )
     )

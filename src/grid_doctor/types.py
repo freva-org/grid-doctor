@@ -18,6 +18,12 @@ SourceUnits = Literal["auto", "deg", "rad"]
 SourceKind = Literal["auto", "regular", "curvilinear", "unstructured", "spectral"]
 """Explicit source grid classification."""
 
+EllipsoidKind = Literal["sphere", "WGS84"]
+"""Ellipsoid the HEALPix cell vertices are computed on.
+
+Sphere and WGS84 share pixel ids, but cell positions differ by up to ~0.19 deg.
+"""
+
 CoarsenMode = Literal["mean", "mode", "auto"]
 """Coarsening strategy for HEALPix pyramid construction."""
 

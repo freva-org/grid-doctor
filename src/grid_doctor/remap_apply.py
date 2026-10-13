@@ -52,6 +52,9 @@ def extract_sparse_weights(
     row: FloatArray,
     col: FloatArray,
     values: FloatArray,
+    *,
+    n_target: int | None = None,
+    n_source: int | None = None,
 ) -> tuple["csr_array", int, int]:
     """Build a CSR weight matrix from COO triplets.
 
@@ -62,6 +65,12 @@ def extract_sparse_weights(
         row: Destination (target) indices.
         col: Source indices.
         values: Weight values.
+        n_target: Number of target cells. Inferred from the largest
+            index when omitted, which is too small when the last
+            target cells receive no weights.
+        n_source: Number of source cells. Inferred like *n_target*;
+            too small when the last source cells are never used (e.g.
+            ``nearest``).
 
     Returns:
         ``(matrix, n_target, n_source)``.
@@ -83,8 +92,10 @@ def extract_sparse_weights(
         row_i = row_i - 1
         col_i = col_i - 1
 
-    n_target = int(row_i.max()) + 1
-    n_source = int(col_i.max()) + 1
+    if n_target is None:
+        n_target = int(row_i.max()) + 1
+    if n_source is None:
+        n_source = int(col_i.max()) + 1
     matrix = coo_matrix(
         (values, (row_i, col_i)),
         shape=(n_target, n_source),

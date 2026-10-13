@@ -14,7 +14,8 @@ from typing import Any, Collection, Literal, cast
 import numpy as np
 import xarray as xr
 
-from .types import RemapMethod, SourceUnits
+from .misc.dataset import _get_latlon_names, _get_vertex_names
+from .types import EllipsoidKind, RemapMethod, SourceUnits
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +163,8 @@ def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
         The opened dataset.
     """
     digest = hashlib.sha256()
-    normalised = sorted({str(path) for path in files})
-    digest.update("\0".join(normalised).encode())
+    normalized = sorted({str(path) for path in files})
+    digest.update("\0".join(normalized).encode())
     pickle_file = cache_dir() / f"{digest.hexdigest()}.pickle"
 
     if pickle_file.exists():
@@ -178,11 +179,38 @@ def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
 
     merged_kwargs: dict[str, Any] = {"parallel": True, "chunks": "auto"} | kwargs
     with ProgressBar():
-        dataset = xr.open_mfdataset(normalised, **merged_kwargs)
+        dataset = xr.open_mfdataset(normalized, **merged_kwargs)
 
     with pickle_file.open("wb") as handle:
         pickle.dump(dataset, handle)
     return dataset
+
+
+def _key_hash(
+    ds: xr.Dataset,
+    level: int,
+    *,
+    method: RemapMethod = "conservative",
+    nest: bool = True,
+    ellipsoid: EllipsoidKind = "sphere",
+) -> str:
+
+    names = [_get_latlon_names(ds)]
+    try:
+        names.append(_get_vertex_names(ds))
+    except ValueError:
+        pass  # vertices are optional
+
+    digest = hashlib.sha256()
+    for lat_name, lon_name in names:
+        for name in (lat_name, lon_name):
+            values = np.ascontiguousarray(ds[name].values, dtype=np.float64)
+            digest.update(f"shape={values.shape};".encode())
+            digest.update(values.tobytes())
+    digest.update(
+        f"level={level};method={method};nest={nest};ellipsoid={ellipsoid}".encode()
+    )
+    return digest.hexdigest()
 
 
 def cached_weights(
@@ -230,32 +258,29 @@ def cached_weights(
     """
     from .helpers import get_latlon_resolution, resolution_to_healpix_level
     from .remap import compute_healpix_weights
-
-    digest = hashlib.sha256()
-    for candidate in (
-        "clon_vertices",
-        "clat_vertices",
-        "lon_vertices",
-        "lat_vertices",
-        "clon",
-        "clat",
-        "lon",
-        "lat",
-        "longitude",
-        "latitude",
-        "rlon",
-        "rlat",
-        "X",
-        "Y",
-    ):
-        if candidate in ds:
-            digest.update(
-                np.ascontiguousarray(np.asarray(ds[candidate].values)).tobytes()
-            )
-    digest.update(
-        f"level={level};method={method};nest={nest};units={source_units}".encode()
+    from .remap_backend import (
+        TargetDescription,
+        WeightsDescription,
+        describe_source,
     )
-    key = digest.hexdigest()[:16]
+
+    if level is None:
+        level = resolution_to_healpix_level(get_latlon_resolution(ds))
+
+    desc = WeightsDescription(
+        source=describe_source(
+            ds,
+            grid=kwargs.get("grid"),
+            source_kind=kwargs.get("source_kind", "auto"),
+            source_units=source_units,
+            spectral_transform_command=kwargs.get("spectral_transform_command"),
+        ),
+        target=TargetDescription(
+            level=level, order="nest" if nest else "ring", ellipsoid=kwargs.get("ellipsoid", "sphere")
+        ),
+        method=method,
+    )
+    key = desc.key[:16]
 
     if cache_path is None:
         weight_file = cache_dir() / f"weights_{key}.nc"
@@ -267,8 +292,6 @@ def cached_weights(
         return weight_file
 
     logger.info("Generating HEALPix weight file %s", weight_file)
-    if level is None:
-        level = resolution_to_healpix_level(get_latlon_resolution(ds))
 
     return compute_healpix_weights(
         ds,

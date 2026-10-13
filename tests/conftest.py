@@ -10,6 +10,20 @@ import pytest
 import xarray as xr
 
 
+
+@pytest.fixture(autouse=True)
+def _isolated_healpix_mesh_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch):
+    """Keep cached HEALPix meshes from leaking between tests (several fake the healpix module)."""
+    from grid_doctor import remap_backend
+
+    cache = tmp_path_factory.mktemp("healpix_mesh_cache")
+    monkeypatch.setattr(remap_backend, "_healpix_mesh_cache_file", lambda level, ellipsoid: cache / f"mesh_{ellipsoid}_L{level}.npz")
+    remap_backend._nested_healpix_mesh.cache_clear()
+    remap_backend._healpix_ring_to_nest.cache_clear()
+    yield
+    remap_backend._nested_healpix_mesh.cache_clear()
+    remap_backend._healpix_ring_to_nest.cache_clear()
+
 def _xy_to_latlon(
     x: np.ndarray,
     y: np.ndarray,
@@ -69,8 +83,8 @@ def _make_era5_dataset() -> xr.Dataset:
     )
 
 
-def _make_unstructured_dataset(ncells: int = 4, *, radians: bool = False) -> xr.Dataset:
-    lon_vertices_deg = np.array(
+def _make_unstructured_dataset(ncells: int = 4, cell_size: int = 10, *, radians: bool = False) -> xr.Dataset:
+    lon_vertices_deg = cell_size * np.array(
         [
             [0.0, 1.0, 0.0],
             [1.0, 1.0, 0.0],
@@ -79,7 +93,7 @@ def _make_unstructured_dataset(ncells: int = 4, *, radians: bool = False) -> xr.
         ],
         dtype=np.float64,
     )[:ncells]
-    lat_vertices_deg = np.array(
+    lat_vertices_deg = cell_size * np.array(
         [
             [0.0, 0.0, 1.0],
             [0.0, 1.0, 1.0],
@@ -116,11 +130,11 @@ def _make_unstructured_dataset(ncells: int = 4, *, radians: bool = False) -> xr.
     )
 
 
+# High level fixture to resolve indirect ones; parametrize via ``helpers.TEST_DS``
 @pytest.fixture
 def test_ds(request: pytest.FixtureRequest) -> xr.Dataset:
-    if request.param == "era5":
-        return _make_era5_dataset()
-    return _make_structured_dataset(grid=request.param)
+    """Resolve a fixture name to its dataset; parametrize with ``indirect=True``."""
+    return request.getfixturevalue(request.param)
 
 
 @pytest.fixture

@@ -40,8 +40,8 @@ def flatten_forecast_time(ds: "xr.Dataset") -> "xr.Dataset":
     return ds
 
 
-def normalise_time_axis(ds: "xr.Dataset") -> "xr.Dataset":
-    """Normalise time coordinates to a single monotonic time axis."""
+def normalize_time_axis(ds: "xr.Dataset") -> "xr.Dataset":
+    """Normalize time coordinates to a single monotonic time axis."""
     ds = flatten_forecast_time(ds)
     if "time" in ds.coords and "time" not in ds.dims:
         ds = ds.expand_dims("time")
@@ -59,7 +59,7 @@ def normalise_time_axis(ds: "xr.Dataset") -> "xr.Dataset":
 def prepare_dataset_for_regridding(ds: "xr.Dataset") -> "xr.Dataset":
     """Apply the minimal normalisation needed for regridding."""
     return drop_surface_coords(
-        normalise_time_axis(rename_values_dim(ds)).rename({"values": "cell"})
+        normalize_time_axis(rename_values_dim(ds)).rename({"values": "cell"})
     )
 
 
