@@ -929,22 +929,23 @@ def _collapse_repeated_corners(face_nodes: IntArray) -> IntArray:
     with the data); only repeated corner references are dropped and the
     freed slots re-padded with ``-1``.
     """
-    n_face, max_nodes = face_nodes.shape
-    out = np.full_like(face_nodes, -1)
-    for f in range(n_face):
-        row = face_nodes[f]
-        ids = row[row >= 0]
-        if ids.size == 0:
-            continue
-        kept: list[int] = [int(ids[0])]
-        for node in ids[1:]:
-            if int(node) != kept[-1]:
-                kept.append(int(node))
-        # Drop a closing duplicate (last vertex repeats the first).
-        if len(kept) > 1 and kept[-1] == kept[0]:
-            kept.pop()
-        out[f, : len(kept)] = kept
-    return out
+    def compact(ids: IntArray) -> IntArray:
+        # Stable shift of valid ids (>= 0) to the left of each row.
+        order = np.argsort(ids < 0, axis=1, kind="stable")
+        return np.take_along_axis(ids, order, axis=1)
+
+    ids = compact(face_nodes)
+    repeat = np.zeros(ids.shape, dtype=bool)
+    repeat[:, 1:] = ids[:, 1:] == ids[:, :-1]
+    ids = compact(np.where(repeat, -1, ids))
+
+    # Drop a closing duplicate (last vertex repeats the first).
+    n_kept = (ids >= 0).sum(axis=1)
+    rows = np.flatnonzero(n_kept > 1)
+    last = n_kept[rows] - 1
+    closing = ids[rows, last] == ids[rows, 0]
+    ids[rows[closing], last[closing]] = -1
+    return ids
 
 
 def _corner_mesh_from_arrays(

@@ -1209,7 +1209,32 @@ class TestAttachHealpixCoords:
         assert result.attrs["healpix_order"] == "ring"
 
 
+def _collapse_repeated_corners_reference(face_nodes: np.ndarray) -> np.ndarray:
+    """The original per-face loop, kept as a reference for the vectorised version."""
+    out = np.full_like(face_nodes, -1)
+    for f, row in enumerate(face_nodes):
+        ids = row[row >= 0]
+        if ids.size == 0:
+            continue
+        kept = [int(ids[0])]
+        for node in ids[1:]:
+            if int(node) != kept[-1]:
+                kept.append(int(node))
+        if len(kept) > 1 and kept[-1] == kept[0]:
+            kept.pop()
+        out[f, : len(kept)] = kept
+    return out
+
+
 class TestHealpixTargetMesh:
+    def test_collapse_repeated_corners_matches_reference(self) -> None:
+        rng = np.random.default_rng(0)
+        face_nodes = rng.integers(-1, 4, size=(5000, 6)).astype(np.int32)
+        np.testing.assert_array_equal(
+            remap_backend_module._collapse_repeated_corners(face_nodes),
+            _collapse_repeated_corners_reference(face_nodes),
+        )
+
     @pytest.mark.parametrize("nest", [True, False])
     def test_mesh_matches_direct_construction(self, nest: bool) -> None:
         level = 3
