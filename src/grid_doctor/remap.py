@@ -139,12 +139,14 @@ def _read_weight_file(
         col_name = "col" if "col" in wds else "src_address"
         val_name = "S" if "S" in wds else "remap_matrix"
 
+        level = int(wds.attrs.get("grid_doctor_level", -1))
+        source_size = wds.attrs.get("grid_doctor_source_size")
         matrix, n_target, n_source = extract_sparse_weights(
             row=wds[row_name].values,
             col=wds[col_name].values,
             values=wds[val_name].values,
+            n_source=int(source_size) if source_size is not None else None,
         )
-        level = int(wds.attrs.get("grid_doctor_level", -1))
         order = str(wds.attrs.get("grid_doctor_order", "nested"))
         method_raw = wds.attrs.get("grid_doctor_method")
         method = str(method_raw) if method_raw is not None else None

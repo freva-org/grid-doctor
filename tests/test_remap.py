@@ -900,6 +900,56 @@ class TestResolveSourceDims:
 
 
 class TestApplyWeightFile:
+    @staticmethod
+    def _unused_trailing_sources(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, n_source: int, source_size: int | None
+    ) -> tuple[xr.Dataset, Path]:
+        """Weights where only source cells 1 and 3 are used, like ``nearest`` output."""
+        ds = xr.Dataset(
+            {"t": ("cell", np.arange(1.0, n_source + 1.0))},
+            coords={"cell": np.arange(n_source)},
+        )
+        attrs: dict[str, Any] = {"grid_doctor_level": 0, "grid_doctor_order": "nested"}
+        if source_size is not None:
+            attrs["grid_doctor_source_size"] = source_size
+        path = tmp_path / "weights.nc"
+        xr.Dataset(
+            {
+                "row": ("nnz", np.array([1, 2], dtype=np.int32)),
+                "col": ("nnz", np.array([1, 3], dtype=np.int32)),
+                "S": ("nnz", np.array([1.0, 1.0])),
+            },
+            attrs=attrs,
+        ).to_netcdf(path)
+
+        monkeypatch.setattr(
+            remap,
+            "_source_centre_arrays",
+            lambda ds, source_units="auto": (
+                np.zeros(n_source),
+                np.arange(float(n_source)),
+                ("cell",),
+            ),
+        )
+        monkeypatch.setattr(
+            remap, "_healpix_centres", lambda level, nest: (np.zeros(2), np.array([0.0, 2.0]))
+        )
+        return ds, path
+
+    def test_uses_stored_source_size(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Trailing source cells without weights must not shrink the matrix."""
+        ds, path = self._unused_trailing_sources(tmp_path, monkeypatch, n_source=5, source_size=5)
+        result = apply_weight_file(ds, path)
+        np.testing.assert_array_equal(result["t"].values, [1.0, 3.0])
+
+    def test_infers_source_size_without_attribute(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Older weight files without grid_doctor_source_size still work."""
+        ds, path = self._unused_trailing_sources(tmp_path, monkeypatch, n_source=3, source_size=None)
+        result = apply_weight_file(ds, path)
+        np.testing.assert_array_equal(result["t"].values, [1.0, 3.0])
+
     def test_renormalizes_missing(
         self,
         tmp_path: Path,
