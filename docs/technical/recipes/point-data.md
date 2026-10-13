@@ -124,11 +124,12 @@ binned with ``mean`` and classification products (cloud mask, cloud
 type) binned with ``mode``.  Nothing in the workflow above is
 EarthCARE-specific — the same calls handle any L2 swath product.
 
-!!! warning "Keep the sphere"
-    Satellite geolocation is geodetic (WGS84), and ``healpix_geo``
-    *could* index on the ellipsoid.  grid-doctor deliberately does not:
-    all cell geometry uses a perfect sphere so that every dataset in a
-    hub shares one indexing geometry.  Indexing one dataset on the
-    ellipsoid would shift it by up to ~0.19° (~21 km) relative to all
-    others — dozens of pixels at swath resolutions.  See the
-    [technical decisions](../technical-decisions.md) document.
+!!! warning "Sphere and ellipsoid are different grids"
+    Satellite geolocation is geodetic (WGS84), and ``healpix_geo`` can
+    index on the sphere or on the ellipsoid.  Both are equally accurate,
+    but they are different grids: data indexed on the ellipsoid is
+    shifted by up to ~0.13° (~14 km) relative to data on the sphere,
+    several to dozens of pixels at swath resolutions.  grid-doctor uses
+    the sphere; only compare data that uses the same definition.  See
+    [Sphere or ellipsoid](../technical-decisions.md#sphere-or-ellipsoid)
+    in the technical decisions.

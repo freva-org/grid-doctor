@@ -127,7 +127,7 @@ for lvl, dataset in pyramid.items():
 ## Access
 
 Regional stores at typical CORDEX levels (≤ 10) are completely ordinary
-hub datasets: coordinates are materialised, the viewer renders them,
+HEALPix datasets: coordinates are materialised, the viewer renders them,
 and any HEALPix-aware tool works unchanged.  NaN outside the domain is
 the expected state, not an error.
 
@@ -140,6 +140,13 @@ import xarray as xr
 ds9 = xr.open_zarr("s3://.../cordex-eur11-tas.zarr/level_9.zarr", chunks=None)
 domain_mean = ds9["tas"].mean("cell", skipna=True)   # area-weighted by construction
 ```
+
+This holds at the finest level of the pyramid, where every cell is
+either inside or outside the domain.  On coarser levels, cells along the
+domain edge are only partly covered, and a plain mean gives them full
+weight.  Store the valid fractions (`valid_fraction=True` when building
+the pyramid) and weight by them there, as shown in
+[Averaging masked fields](averaging.md).
 
 Sub-domain extraction uses the same selectors as everything else —
 they read only the chunks the box touches:

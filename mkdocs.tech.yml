@@ -25,6 +25,7 @@ nav:
       - Unstructured Grids (ICON): recipes/icon.md
       - Limited Area/Regional grids: recipes/regional.md
       - Point Data: recipes/point-data.md
+      - Averaging masked fields: recipes/averaging.md
       - Working with the data: high-level-access.md
 
 

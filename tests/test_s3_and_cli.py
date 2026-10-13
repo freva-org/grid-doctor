@@ -112,6 +112,7 @@ class TestSavePyramidToS3Remote:
     def test_uses_s3_map_store_for_s3_path(self) -> None:
         class _FakeDataset:
             store: object = None
+            variables: dict[str, object] = {}
 
             def to_zarr(self, store: object, **kwargs: object) -> None:
                 self.store = store
