@@ -24,10 +24,7 @@ or misapplied area weights, simply cannot occur.
     variables, sea ice, observation gaps), a coarse cell can be partly
     valid, and its value is the mean over that valid part only.  Averages
     over coarse levels then need the valid fraction of each cell as a
-    weight.  See [Storage and averaging of complete and masked
-    variables](#storage-and-averaging-of-complete-and-masked-variables)
-    for the storage and weighting rules, including physical ocean and land
-    fractions.
+    weight;
 
 ![Equal area comparison](assets/healpix-equal-area.png#only-dark)
 ![Equal area comparison](assets/healpix-equal-area-light.png#only-light)
@@ -397,16 +394,13 @@ $$
 Every level is therefore identical to coarsening directly from the
 finest level, while each step stays a local reduction of 4 neighbouring
 cells. `create_healpix_pyramid` keeps these sums and counts internally while
-building its chain. For one level, `coarsen_healpix(finest,
-target_level=level)` reduces directly from the highest-resolution dataset and
-gives the same result.
+building its chain.
 
-!!! note "Manually chained mean coarsening"
-    A manually chained call operates on the reconstructed public means, not on
-    the internal sums and counts. It is exact when all intermediate children
-    have equal valid support, as for a complete field, but can differ when
-    NaNs give children unequal support. In that case, coarsen directly from
-    `finest` or use `create_healpix_pyramid`.
+!!! note "Be careful with manually chained mean coarsening"
+    Chaining averages works for complete fields. With missing data,
+    intermediate cells can represent different numbers of finest-level
+    cells, but the next average weights them equally. Coarsen directly
+    from `finest`, or use `create_healpix_pyramid`, instead.
 
 ### Mode coarsening (categorical fields)
 
@@ -460,283 +454,51 @@ The threshold is configurable with `min_valid_fraction`.  Set it to `0`
 to keep every cell that contains any valid data, for instance when the
 coarse levels are only used for weighted aggregates.
 
-### Storage and averaging of complete and masked variables
+### Averaging over coarse levels: valid fractions
 
-HEALPix cells at a given level have equal spherical area. Consequently, a
-complete global continuous field needs neither a `cos(latitude)` term nor an
-explicit cell-area weight: `var.mean("cell")` is its spatial mean. Fractions
-are needed only when a variable represents less than a whole cell, such as
-ocean, land, valid observations, or a basin. They describe physical or valid
-support, not a correction to HEALPix geometry.
+Because every coarse value is a mean over its valid area, a plain mean
+over coarse cells weights a coastal cell that is 10% ocean as much as an
+open-ocean cell.  The level-to-level consistency of the pyramid only
+holds for means weighted by the number of valid finest-level cells:
+with two coarse cells, one fully valid at 10 °C (4 valid cells) and one
+with a single valid cell at 20 °C, the finest-level mean is
+(4 × 10 + 20) / 5 = 12 °C, while the plain mean of the two coarse values
+is 15 °C.  Both coarse values are correct; the plain average is not.
 
-| Input field | Store at each level | Spatial mean over cells |
-|:--|:--|:--|
-| Complete global field, e.g. `tas` | `tas` | `tas.mean("cell")` |
-| Global field with gaps | `tas`, `tas_valid_fraction` | `tas.weighted(tas_valid_fraction).mean("cell")` |
-| Surface ocean field, e.g. `ice_u` | `ice_u`, physical and valid ocean fractions | `ice_u.weighted(ice_u_valid_fraction).mean("cell")` |
-| 3-D ocean field, e.g. `to`, `so`, `u` | Value plus matching depth fraction | Weight by matching depth fraction |
-| Land-only field | Value plus land/valid fraction | Weight by matching land fraction |
-
-Fluxes, amounts, and integrals require a per-variable decision: they may need
-an area integral or sum rather than a mean.
-
-#### Complete global fields
-
-For a genuinely global field with finite values in every cell, use the
-ordinary mean pyramid and store the field itself:
+The weights cannot be folded into the stored values without losing their
+meaning (a coastal cell would no longer hold the SST of its ocean
+part).  Instead, the pyramid can store them alongside:
 
 ```python
-pyramid = gd.create_healpix_pyramid(
-    ds,
-    max_level=7,
-    min_level=0,
-    coarsen_mode="mean",
-)
+pyramid = gd.create_healpix_pyramid(ds, valid_fraction=True)
 ```
 
-`ds.tas.mean("cell", skipna=True)` is the spatial mean at any level.
-
-#### Global fields with NaNs or observation gaps
-
-For a conceptually global field with missing values, request a valid fraction
-for the field:
+adds `<name>_valid_fraction` (float32, fraction of valid finest-level
+cells, linked through the CF `ancillary_variables` attribute) to every
+level, including the finest one.  Global or regional means then agree
+across all levels:
 
 ```python
-pyramid = gd.create_healpix_pyramid(
-    ds,
-    max_level=7,
-    min_level=0,
-    coarsen_mode="mean",
-    valid_fraction={"tas": True},
-)
+ds = pyramid[3]
+ds.sst.weighted(ds.sst_valid_fraction.fillna(0)).mean("cell")
 ```
 
-Each level stores `tas`, the mean over valid finest-level values, and
-`tas_valid_fraction`, the valid finest-level area divided by the full cell
-area. `True` preserves the fraction's full shape, for example
-`tas_valid_fraction(time, cell)`, and is required when the pattern of missing
-values varies over time, height, or another dimension. Use `"static"` only
-for a genuinely fixed mask: it stores one cell-only fraction from the first
-non-cell slice and is smaller, but is wrong if gaps vary.
+The option is opt-in because the fraction has the shape of its variable:
 
-```python
-valid_fraction={"tas": "static"}
-```
+- `True` stores a fraction for every cell variable, with its full shape.
+  This is correct for masks that change over time or height (sea ice,
+  clouds, orography on pressure levels).
+- `"static"` stores a single `cell`-only fraction taken from the first
+  time step / level.  It is tiny, but only correct when the mask never
+  changes, as for a land-sea mask.
+- A list of names, or a mapping such as `{"sst": "static", "ice": True}`,
+  restricts the fractions to selected variables.
 
-For a multi-cell mean, weight by the stored valid support:
+Fractions are mostly exactly 0 or 1 and compress well; in a test with 8
+time steps the full-shape fractions added about 7% to the store, the
+static ones under 1%.  This mirrors the `ocean_fraction` variables of
+the nextGEMS HEALPix output.
 
-```python
-ds.tas.weighted(ds.tas_valid_fraction.fillna(0)).mean("cell")
-```
-
-This avoids giving a partly valid coarse cell the same influence as a fully
-valid one. A parent with four valid 10 °C samples and a parent with one valid
-20 °C sample have the finest-level mean
-
-$$
-(4 \times 10 + 20) / 5 = 12\ \mathrm{°C},
-$$
-
-not the unweighted mean of their two values, $(10 + 20) / 2 = 15\ \mathrm{°C}$.
-The support must remain separate from the stored value; folding it into the
-value would make a coastal cell cease to represent the value of its valid part.
-
-Valid fractions are opt-in and stored as float32 `<name>_valid_fraction`
-companion variables, linked through the CF `ancillary_variables` attribute.
-`True` stores fractions for every cell variable; `"static"` stores one
-cell-only fraction; a list of names or a mapping such as
-`{"sst": "static", "ice": True}` selects per-variable behaviour. Fractions
-are mostly zero or one and compress well: in an eight-time-step test,
-full-shape fractions added about 7% to the store and static fractions under 1%.
-
-#### Ocean and land fields with physical partial-cell coverage
-
-##### Ocean variables
-
-Generic valid fractions count finite children equally. They do not encode that
-an otherwise valid child represents, for example, only 20% ocean. Ocean and
-land variables must therefore retain a physical coverage field in addition to
-their valid support.
-
-For parent cells with differing ocean coverage, an ocean mean is
-
-$$
-\mu_{\mathrm{ocean}} = \frac{\sum_p v_p f_p}{\sum_p f_p}.
-$$
-
-Here $p$ is a parent cell, $v_p$ is its ocean-only value (for example,
-`ice_u`), and $f_p$ is its physical ocean fraction
-(`ocean_fraction_surface`). This physical fraction is the correct spatial
-weight when `ice_u` is valid throughout the ocean, as in the
-[NextGEMS examples](https://easy.gems.dkrz.de/Processing/healpix/ocean_averaging.html).
-
-To create parent $p$, let $i$ denote each finest-level child cell inside it.
-For each child, $v_i$ is its `ice_u` value, $f_i$ is its
-`ocean_fraction_surface`, and $w_i$ is its valid ocean fraction:
-
-$$
-w_i =
-\begin{cases}
-f_i, & \text{when } v_i \text{ is valid} \\
-0, & \text{when } v_i \text{ is missing.}
-\end{cases}
-$$
-
-Thus $w_i$ differs from $f_i$ only for missing values within ocean. For a
-parent with $k$ children, coarsen the numeric numerator $v_i w_i$ and coverage
-$w_i$ separately. In a chained nested HEALPix step, $k = 4$; a direct
-reduction over $d$ levels has $k = 4^d$:
-
-$$
-\mathrm{numerator}_p = \frac{1}{k}\sum_{i \in p} v_i w_i,
-\qquad
-\mathrm{coverage}_p = \frac{1}{k}\sum_{i \in p} w_i.
-$$
-
-Here $i \in p$ means every child cell whose parent is $p$. Reconstruct the
-parent's valid-ocean mean as $v_p = \mathrm{numerator}_p /
-\mathrm{coverage}_p$ where coverage is positive. A missing value has $w_i = 0$,
-so it contributes zero numerator and zero coverage. It is still one of the
-$k$ child positions in both means, and that common child-count factor cancels
-in the ratio.
-
-!!! note "Ocean fraction is coverage, not a categorical label"
-    `ocean_fraction_surface` may contain only `0` and `1` at the finest level,
-    but it represents continuous area coverage. Coarsen it with
-    `coarsen_mode="mean"`: the mean of its children is the physical ocean
-    fraction of the parent. `mode` would reduce a partial-ocean parent to land
-    or ocean and discard the coverage needed for later spatial averages.
-
-For a surface-ocean field such as `ice_u`, construct numeric accumulators
-with zero for land and missing contributions at the finest level:
-
-```python
-ice = finest.ice_u
-ocean_fraction = finest.ocean_fraction_surface.fillna(0)
-valid_ocean_fraction = ocean_fraction.where(ice.notnull(), 0).fillna(0)
-
-state = xr.Dataset(
-    {
-        "ice_u_numerator": (ice * valid_ocean_fraction).fillna(0),
-        "ice_u_coverage": valid_ocean_fraction,
-        "ocean_fraction_surface": ocean_fraction,
-    },
-    attrs=finest.attrs.copy(),
-)
-```
-
-At every level, the public `ice_u` field is reconstructed as
-
-$$
-\mathrm{ice\_u} =
-\frac{\mathrm{ice\_u\_numerator}}{\mathrm{ice\_u\_coverage}}
-= \frac{\sum_i \mathrm{ice\_u}_i\,
-\mathrm{ice\_u\_valid\_fraction}_i}
-{\sum_i \mathrm{ice\_u\_valid\_fraction}_i}.
-$$
-
-It is the mean velocity over the valid ocean part of the cell, not a
-fraction-multiplied velocity. A cell that is 20% ocean with a velocity of
-0.8 m/s stores 0.8 m/s, not 0.16 m/s. The same reconstruction is used at the
-finest level and after every coarsening step; at the finest level it simply
-returns `ice_u` wherever the value is valid.
-
-```python
-def reconstruct(state):
-    coverage = state.ice_u_coverage
-    return xr.Dataset(
-        {
-            "ice_u": state.ice_u_numerator / coverage.where(coverage > 0),
-            "ocean_fraction_surface": state.ocean_fraction_surface,
-            "ice_u_valid_fraction": coverage,
-        },
-        attrs=state.attrs.copy(),
-    )
-
-# Each entry is the public dataset for that HEALPix level.
-levels = {max_level: reconstruct(state)}
-for level in range(max_level - 1, min_level - 1, -1):
-    state = gd.coarsen_healpix(
-        state,
-        target_level=level,
-        coarsen_mode="mean",
-        min_valid_fraction=0.0,
-    )
-    levels[level] = reconstruct(state)
-```
-
-Thus every `levels[level]` contains these public variables:
-
-```text
-ice_u                         mean over valid ocean area in the cell
-ocean_fraction_surface        physical ocean fraction
-ice_u_valid_fraction          valid ocean fraction
-```
-
-The public `ice_u` and `ice_u_valid_fraction` fields retain enough information
-to coarsen a saved level again: rebuild `ice_u_numerator` as
-`ice_u * ice_u_valid_fraction` and use `ice_u_valid_fraction` as coverage.
-Keeping `ice_u_numerator` and `ice_u_coverage` in an internal or provenance
-Zarr group avoids that reconstruction but is optional. If
-`ice_u_valid_fraction` is omitted, missing ocean support cannot be recovered
-from the reconstructed `ice_u` and physical ocean fraction alone. A coastal
-value remains the correct ocean-only value, while spatial averages weight
-partial-ocean cells by the ocean area they represent.
-
-For a 3-D ocean field, use the fraction for its vertical grid. NextGEMS
-provides one `ocean_fraction_*` variable per vertical grid type. When selecting
-a depth slice, select the identical slice from the fraction before averaging:
-
-```python
-to = ds.to.isel(time=0, depth_full=0)
-weights = ds.ocean_fraction_depth_full.isel(depth_full=0)
-ocean_mean = to.weighted(weights).mean("cell")
-```
-
-For example, a field on `depth_full` uses `ocean_fraction_depth_full`. Do not
-leave the weights three-dimensional while the field is a single depth slice:
-xarray can broadcast the arrays and return a plausible but incorrect result.
-See [NextGEMS: Be careful with 3D data](https://easy.gems.dkrz.de/Processing/healpix/ocean_averaging.html#be-careful-with-3d-data).
-
-##### Land-only variables
-
-Land-only variables follow the same pattern. Retain a continuous physical land
-fraction, such as a remapped ERA5-Land land-sea mask, as
-`land_fraction_surface`; coarsen it with `mean`, never `mode`. For a land-only
-field `v`, use `land_fraction_surface` in place of `ocean_fraction_surface`,
-construct `v_numerator` and `v_coverage`, and publish:
-
-```text
-v                       mean over valid land area in the cell
-land_fraction_surface   physical land fraction
-v_valid_fraction        valid land fraction
-```
-
-Do not infer the production land fraction from whether a variable happens to
-be non-NaN. That validity-derived mask is at most a fallback diagnostic; it
-cannot distinguish physical land support from missing data.
-
-#### Analysis after storage
-
-For maps, cell time series, and transects, use the reconstructed public field
-directly. For an ocean spatial mean, weight by valid ocean support:
-
-```python
-ds.ice_u.weighted(ds.ice_u_valid_fraction.fillna(0)).mean("cell")
-```
-
-If the value is valid everywhere that is physically ocean, weight by the
-physical fraction instead:
-
-```python
-ds.ice_u.weighted(ds.ocean_fraction_surface).mean("cell")
-```
-
-The within-cell division normalises the pointwise value. The later weighted
-mean is still required when combining cells, because a 20%-ocean cell
-represents one fifth as much ocean area as a fully ocean cell. For an area
-integral, use both the support fraction and the level-specific HEALPix cell
-area; a raw `sum("cell")` is not resolution independent.
 
 ## Output metadata and CRS convention
 

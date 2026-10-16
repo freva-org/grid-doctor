@@ -13,6 +13,7 @@ types.  Each one follows the same three-step pattern:
 | [Unstructured Grids (ICON)](icon.md) | Triangular mesh | ICON-DREAM |
 | [Point Data](point-data.md) | Swaths, stations, trajectories | EarthCARE MSI, surface networks |
 
-For working with the converted data, [Averaging masked fields](averaging.md)
+For coarsening and working with masked or partial-coverage data,
+[Coarsening and averaging masked fields](averaging.md)
 shows how to compute means and area integrals of fields with missing
 values consistently across pyramid levels.
