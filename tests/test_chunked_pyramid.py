@@ -15,6 +15,7 @@ from grid_doctor import remap
 from grid_doctor.helpers import (
     coarsen_healpix,
     create_healpix_pyramid,
+    init_pyramid_store,
     save_pyramid,
 )
 from grid_doctor.pyramid import MeanPartials, coarsen_mean, coarsen_mean_steps
@@ -225,7 +226,7 @@ class TestSavePyramidSingleStore:
 
     def test_region_write(self, tmp_path: Path) -> None:
         pyramid = self._pyramid()
-        save_pyramid(pyramid, str(tmp_path), mode="w", region="init")
+        init_pyramid_store(pyramid, str(tmp_path))
         save_pyramid(
             pyramid,
             str(tmp_path),
