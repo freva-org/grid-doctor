@@ -32,7 +32,7 @@ def _make_structured_dataset(
     ny: int = 12,
     nx: int = 24,
 ) -> xr.Dataset:
-    dims = {"time": 2, "level": 2, "y": ny, "x": nx}
+    dims = {"time": 4, "level": 2, "y": ny, "x": nx}
     shape = tuple(dims.values())
     y = np.linspace(-90.0, 90.0, ny)
     x = np.linspace(0.0, 360.0, nx, endpoint=False)
