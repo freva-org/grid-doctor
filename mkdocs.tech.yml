@@ -10,7 +10,7 @@ nav:
   - Overview: index.md
   - Technical decisions: technical-decisions.md
   - Grid-doctor software: getting-started.md
-  - Discussion: roadmap.md
+  # - Discussion: roadmap.md ## kept here in case we want to resurrect it in the future
   - API Reference:
       - High Level API: api/helpers.md
       - Regridding: api/remap.md
@@ -25,7 +25,7 @@ nav:
       - Unstructured Grids (ICON): recipes/icon.md
       - Limited Area/Regional grids: recipes/regional.md
       - Point Data: recipes/point-data.md
-      - Averaging masked fields: recipes/averaging.md
+      - Coarsening and averaging masked fields: recipes/averaging.md
       - Working with the data: high-level-access.md
 
 

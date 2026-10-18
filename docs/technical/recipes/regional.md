@@ -146,7 +146,7 @@ either inside or outside the domain.  On coarser levels, cells along the
 domain edge are only partly covered, and a plain mean gives them full
 weight.  Store the valid fractions (`valid_fraction=True` when building
 the pyramid) and weight by them there, as shown in
-[Averaging masked fields](averaging.md).
+[Coarsening and averaging masked fields](averaging.md).
 
 Sub-domain extraction uses the same selectors as everything else —
 they read only the chunks the box touches:
