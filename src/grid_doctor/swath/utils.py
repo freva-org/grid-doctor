@@ -121,7 +121,7 @@ def bin_simple(
         group_idx,
         values,
         axis=-1,
-        func=func,
+        func=func,  # type: ignore[arg-type]
         size=n_cells,
         fill_value=np.nan,
     )
