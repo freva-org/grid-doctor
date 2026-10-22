@@ -476,7 +476,7 @@ def init_pyramid_store(
     zarr_format: Literal[2, 3] = 2,
     encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
     write_coords: bool | Literal["auto"] = "auto",
-    region_coords: list[str] | None = None,
+    materialise: list[str] | None = None,
 ) -> None:
     """Write a HEALPix pyramid to Zarr stores on S3 or local disk.
 
@@ -511,9 +511,8 @@ def init_pyramid_store(
         ([`select_bbox`][grid_doctor.select_bbox],
         [`select_cells`][grid_doctor.select_cells]), which reconstruct
         coordinates for exactly the cells they return.
-    region_coords: list of coordinates along which the dataset will be split when
-        writing in subsequent steps. Any variables that do not depend on those coordinates
-        will not be written with the regions, so need to be computed and written here.
+    materialise: list of coordinates which will be computed and written
+        as part of the template.
     """
     fs = _get_filesystem(path, s3_options)
     for level, dataset in pyramid.items():
@@ -522,13 +521,9 @@ def init_pyramid_store(
         store = _get_store(path, store_name, fs)
         # Initialise the store with template.
         lazy_vars = set(dataset.keys())
-        if region_coords:
-            for key in list(dataset.keys()):
-                if not any(
-                    region_coord in list(dataset[key].coords)
-                    for region_coord in region_coords
-                ):
-                    lazy_vars.remove(key)
+
+        if materialise:
+            lazy_vars = {v for v in lazy_vars if v not in materialise}
 
         template = dataset.copy()
         template.update(dataset.drop_vars(lazy_vars).compute())

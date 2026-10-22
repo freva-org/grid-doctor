@@ -680,8 +680,8 @@ class TestSavePyramid:
         init_pyramid_store(
             pyramid=pyramid,
             path=str(tmp_path),
-            region_coords=[
-                "time",
+            materialise=[
+                "static",
             ],
         )
 
