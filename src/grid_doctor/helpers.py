@@ -16,6 +16,7 @@ import logging
 from pathlib import Path
 from typing import Any, Literal
 
+import dask
 import numpy as np
 import numpy.typing as npt
 import s3fs
@@ -412,13 +413,156 @@ def create_healpix_pyramid(
 # ===================================================================
 
 
+def _get_zarr_options(
+    mode: Literal["a", "w", "r+"],
+    zarr_format: Literal[2, 3],
+    encoding: dict[str, dict[str, Any]] | None,
+) -> ZarrOptions:
+
+    zarr_options = ZarrOptions(compute=False, mode=mode, zarr_format=zarr_format)
+    if zarr_format == 2:
+        zarr_options["consolidated"] = True
+    if encoding is not None:
+        zarr_options["encoding"] = encoding
+    return zarr_options
+
+
+def _get_filesystem(
+    path: str,
+    s3_options: dict[str, Any] | None,
+) -> s3fs.S3FileSystem | None:
+    is_s3 = path.startswith("s3://")
+    fs = s3fs.S3FileSystem(**(s3_options or {})) if is_s3 else None
+    return fs
+
+
+def _get_store(path: str, store_name: str, fs: s3fs.S3FileSystem | None) -> Any:
+    root_path = f"{path}/{store_name}.zarr"
+    logger.info("Writing HEALPix to %s", root_path)
+    store: Any
+    if fs:
+        store = s3fs.S3Map(root=root_path, s3=fs)
+    else:
+        Path(root_path).parent.mkdir(parents=True, exist_ok=True)
+        store = root_path
+    return store
+
+
+def _maybe_drop_coordinates(
+    level: int,
+    dataset: xr.Dataset,
+    write_coords: bool | Literal["auto"] = "auto",
+) -> xr.Dataset:
+    include_coords = (
+        write_coords
+        if isinstance(write_coords, bool)
+        else level <= WRITE_COORDS_MAX_LEVEL
+    )
+    if not include_coords:
+        dataset = dataset.drop_vars(["latitude", "longitude", "cell"], errors="ignore")
+        dataset.attrs["grid_doctor_implicit_coords"] = 1
+    return dataset
+
+
+def _raise_template_error() -> None:
+    raise ValueError("cannot compute array values")
+
+
+def init_pyramid_store(
+    pyramid: dict[int, xr.Dataset],
+    path: str,
+    s3_options: dict[str, Any] | None = None,
+    *,
+    zarr_format: Literal[2, 3] = 2,
+    encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
+    write_coords: bool | Literal["auto"] = "auto",
+    materialise: list[str] | None = None,
+) -> None:
+    """Write a HEALPix pyramid to Zarr stores on S3 or local disk.
+
+    Each level is stored below ``"<path>/level_<level>.zarr"``.
+
+    Parameters
+    ----------
+    pyramid:
+        Mapping of HEALPix level to dataset.
+    path:
+        Target prefix.  An ``"s3://bucket/pyramid"`` URL writes to S3; any
+        other value is treated as a local directory path.
+    s3_options:
+        Options forwarded to :class:`s3fs.S3FileSystem`.  Only used for S3
+        targets; ignored (and optional) for local paths.
+    zarr_format:
+        Zarr format version.
+    encoding:
+        Per-level encoding dictionaries.
+    write_coords:
+        Whether to materialise the ``cell``/``latitude``/``longitude``
+        coordinate arrays in the store.  HEALPix coordinates are a pure
+        function of the cell index, and above roughly level 10 the
+        arrays dwarf regional payloads (hundreds of GB at level 16 —
+        they are never fill values, so chunk elision cannot help).
+        ``"auto"`` (default) writes coordinates for levels up to
+        :data:`WRITE_COORDS_MAX_LEVEL` and omits them above; ``True`` /
+        ``False`` force either behaviour for all levels.  Coordinate-
+        less stores keep the ``crs`` variable and all ``healpix_*``
+        attributes, carry ``grid_doctor_implicit_coords = 1``, and are
+        meant to be accessed through the region selectors
+        ([`select_bbox`][grid_doctor.select_bbox],
+        [`select_cells`][grid_doctor.select_cells]), which reconstruct
+        coordinates for exactly the cells they return.
+    materialise: list of coordinates which will be computed and written
+        as part of the template.
+    """
+    fs = _get_filesystem(path, s3_options)
+    for level, dataset in pyramid.items():
+        dataset = _maybe_drop_coordinates(level, dataset, write_coords)
+        store_name = f"level_{level}"
+        store = _get_store(path, store_name, fs)
+        # Initialise the store with template.
+        lazy_vars = set(dataset.keys())
+
+        if materialise:
+            lazy_vars = {v for v in lazy_vars if v not in materialise}
+
+        template = dataset.copy()
+        template.update(dataset.drop_vars(lazy_vars).compute())
+
+        delayed = dask.delayed(_raise_template_error)()  # type: ignore[attr-defined]
+        for k, v in dataset.variables.items():
+            if k in lazy_vars:
+                # names of dask arrays are used for keeping track of results, so arrays
+                # with the same name cannot have different shape or dtype
+                name = f"template_{'x'.join(map(str, v.shape))}_{v.dtype}"
+                template[k].data = dask.array.from_delayed(
+                    delayed, v.shape, v.dtype, name=name
+                )
+
+        # Create regular chunks
+        zarr_chunks = {}
+        for var_name, variable in dataset.variables.items():
+            chunksizes = variable.chunksizes
+            zarr_chunks[var_name] = {"chunks": tuple(c[0] for c in chunksizes.values())}
+        # Remove old chunk encoding.
+        for var in template.variables.values():
+            if "chunks" in var.encoding:
+                del var.encoding["chunks"]
+
+        encoding = encoding or {}
+        combined_encoding = {
+            str(k): encoding.get(level, {}).get(k, {}) | zarr_chunks.get(k, {})  # type: ignore[call-overload]
+            for k in template.variables
+        }
+        zarr_options = _get_zarr_options("w", zarr_format, combined_encoding)
+        template.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
+
+
 def save_pyramid(
     pyramid: dict[int, xr.Dataset],
     path: str,
     s3_options: dict[str, Any] | None = None,
     *,
     mode: Literal["a", "w", "r+"] = "a",
-    compute: bool = True,
     region: Literal["auto"] | dict[str, slice] = "auto",
     zarr_format: Literal[2, 3] = 2,
     encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
@@ -440,12 +584,6 @@ def save_pyramid(
         targets; ignored (and optional) for local paths.
     mode:
         Zarr write mode.
-    compute:
-        Write the data when ``True``.  All levels are written by a
-        single dask computation, so the shared finest level is regridded
-        only once.  ``False`` only initialises the stores (metadata and
-        NumPy-backed variables), e.g. as a template for ``region``
-        writes.
     region:
         Region writes for partial updates.
     zarr_format:
@@ -468,50 +606,37 @@ def save_pyramid(
         [`select_cells`][grid_doctor.select_cells]), which reconstruct
         coordinates for exactly the cells they return.
     """
-    is_s3 = path.startswith("s3://")
-    fs = s3fs.S3FileSystem(**(s3_options or {})) if is_s3 else None
+    fs = _get_filesystem(path, s3_options)
     # Stores are initialised per level; the data of all levels is written
     # in one pass (see grid_doctor.io._zarr for why).
     deferred: list[DeferredWrite] = []
+    encoding = encoding or {}
     for level, dataset in pyramid.items():
-        include_coords = (
-            write_coords
-            if isinstance(write_coords, bool)
-            else level <= WRITE_COORDS_MAX_LEVEL
-        )
-        if not include_coords:
-            dataset = dataset.drop_vars(
-                ["latitude", "longitude", "cell"], errors="ignore"
-            )
-            dataset.attrs["grid_doctor_implicit_coords"] = 1
-        level_path = f"{path}/level_{level}.zarr"
-        logger.info("Writing HEALPix level %s to %s", level, level_path)
-        store: Any
-        if is_s3:
-            store = s3fs.S3Map(root=level_path, s3=fs)
-        else:
-            Path(level_path).parent.mkdir(parents=True, exist_ok=True)
-            store = level_path
-        zarr_options = ZarrOptions(compute=False, mode=mode, zarr_format=zarr_format)
-        if zarr_format == 2:
-            zarr_options["consolidated"] = True
-        if encoding is not None:
-            zarr_options["encoding"] = encoding[level]
+        dataset = _maybe_drop_coordinates(level, dataset, write_coords)
+        store_name = f"level_{level}"
+        store = _get_store(path, store_name, fs)
+        zarr_options = _get_zarr_options(mode, zarr_format, encoding.get(level, None))
 
         if region == "auto":
             dataset.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
             written, write_region = dataset, None
         else:
+            # Fill in the region of data.
             region_keys = set(region)
             to_drop = (
                 {
                     name
                     for name, var in dataset.data_vars.items()
-                    if region_keys.isdisjoint(map(str, var.dims))
+                    if region_keys.isdisjoint(set(var.dims))
                 }
-                | {str(dim) for dim in dataset.dims}
-                | {str(coord) for coord in dataset.coords}
+                | {str(dim) for dim in dataset.dims if str(dim) not in region_keys}
+                | {
+                    str(coord)
+                    for coord in dataset.coords
+                    if str(coord) not in region_keys
+                }
             )
+
             written = dataset.drop_vars(to_drop, errors="ignore").isel(region)
             written.to_zarr(  # type: ignore[call-overload]
                 store,
@@ -519,24 +644,15 @@ def save_pyramid(
                 **zarr_options,
             )
             write_region = region
-        if compute:
-            deferred.extend(
-                deferred_writes(
-                    written,
-                    store,
-                    encoding=zarr_options.get("encoding"),
-                    region=write_region,
-                    zarr_format=zarr_format,
-                )
+        deferred.extend(
+            deferred_writes(
+                written,
+                store,
+                encoding=zarr_options.get("encoding"),
+                region=write_region,
+                zarr_format=zarr_format,
             )
-
-        if mode == "w" and not compute:
-            coord_options = dict(zarr_options)
-            # "a", not "w": "w" would replace the store just initialised
-            # above and drop its data variables.
-            coord_options["mode"] = "a"
-            dataset[list(dataset.coords)].to_zarr(store, **coord_options)  # type: ignore[call-overload]
-
+        )
     store_all(deferred)
 
 

@@ -15,6 +15,7 @@ from grid_doctor import remap
 from grid_doctor.helpers import (
     coarsen_healpix,
     create_healpix_pyramid,
+    init_pyramid_store,
     save_pyramid,
 )
 from grid_doctor.pyramid import MeanPartials, coarsen_mean, coarsen_mean_steps
@@ -225,7 +226,7 @@ class TestSavePyramidSingleStore:
 
     def test_region_write(self, tmp_path: Path) -> None:
         pyramid = self._pyramid()
-        save_pyramid(pyramid, str(tmp_path), mode="w", compute=False)
+        init_pyramid_store(pyramid, str(tmp_path))
         save_pyramid(
             pyramid,
             str(tmp_path),
@@ -264,7 +265,7 @@ class TestSavePyramidSingleStore:
         ds = xr.Dataset(
             {"obs_time": (("time", "cell"), np.repeat(stamps[:, None], 12, axis=1))}
         ).chunk(time=1)
-        save_pyramid({0: ds}, str(tmp_path), mode="w", compute=False)
+        save_pyramid({0: ds}, str(tmp_path), mode="w")
         save_pyramid({0: ds}, str(tmp_path), mode="r+", region={"time": slice(2, 4)})
         stored = xr.open_zarr(tmp_path / "level_0.zarr")["obs_time"].values
         np.testing.assert_array_equal(stored[2:, 0], stamps[2:])
