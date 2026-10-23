@@ -12,6 +12,13 @@ import pytest
 import xarray as xr
 
 from grid_doctor import remap
+from grid_doctor.misc.dataset import (
+    _get_latlon_arrays,
+    _get_unstructured_dim,
+    _looks_like_radians,
+    _normalize_angle_units,
+)
+
 from grid_doctor import remap_backend as remap_backend_module
 from grid_doctor.remap import (
     _attach_healpix_coords,
@@ -21,6 +28,7 @@ from grid_doctor.remap import (
     _parse_source_dims_attr,
     _resolve_source_dims_for_weight_application,
     apply_weight_file,
+    compute_healpix_weights,
     regrid_to_healpix,
     regrid_unstructured_to_healpix,
 )
@@ -32,7 +40,6 @@ from grid_doctor.remap_backend import (
     _default_offline_enabled,
     _ensure_ccw,
     _get_unstructured_vertices,
-    _get_unstructured_dim,
     _get_spatial_dims,
     _infer_bounds_1d,
     _infer_curvilinear_corners,
@@ -42,7 +49,6 @@ from grid_doctor.remap_backend import (
     _materialise_spectral_source,
     _median_positive_step,
     _mesh_to_polygons,
-    _normalise_angle_units,
     _polygons_to_corner_arrays,
     _regular_grid_mesh,
     _require_esmpy,
@@ -60,7 +66,7 @@ from grid_doctor.remap_backend import (
     run_esmf_regrid_weightgen,
     write_ugrid_mesh_file,
 )
-from .helpers import _FakeHealpixModule
+from .helpers import TEST_DS, _FakeHealpixModule
 
 
 # ===================================================================
@@ -76,9 +82,9 @@ class TestPrimitiveHelpers:
             wrapped, np.array([170.0, -180.0, 0.0, -180.0, -170.0])
         )
 
-    def test_normalise_angle_units_auto_detects_radians(self) -> None:
+    def test_normalize_angle_units_auto_detects_radians(self) -> None:
         values = np.array([0.0, np.pi / 2.0, np.pi])
-        result = _normalise_angle_units(values, "auto")
+        result = _normalize_angle_units(values, "auto")
         np.testing.assert_allclose(result, np.array([0.0, 90.0, 180.0]))
 
     def test_infer_bounds_1d(self) -> None:
@@ -104,6 +110,12 @@ class TestPrimitiveHelpers:
     ) -> None:
         with pytest.raises(ValueError, match="Could not determine"):
             _get_spatial_dims(unstructured_ds)
+
+    @TEST_DS([("unstructured_ds", False), ("unstructured_rad_ds", True)], "is_rad")
+    def test_unstructured_looks_like_radians(self, test_ds: xr.Dataset, is_rad: bool) -> None:
+        latv, lonv = _get_latlon_arrays(test_ds)
+        assert is_rad == _looks_like_radians(latv)
+        assert is_rad == _looks_like_radians(lonv)
 
     def test_unstructured_vertices_resolution(self, unstructured_ds: xr.Dataset) -> None:
         assert _get_unstructured_vertices(unstructured_ds) == (
@@ -483,7 +495,7 @@ class TestBackendExternalWorkflows:
         monkeypatch.setattr(
             remap_backend_module,
             "_target_healpix_mesh",
-            lambda level, nest: (np.array([0], dtype=np.int64), target_mesh),
+            lambda level, nest, **kwargs: (np.array([0], dtype=np.int64), target_mesh),
         )
 
         def offline(**kwargs: Any) -> Path:
@@ -686,7 +698,7 @@ class TestHealpixCentres:
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda nest, ellipsoid="sphere": (_FakeHealpixModule(), {}),
         )
         lat, lon = _healpix_centres(1, nest=True)
         assert lat.shape == lon.shape
@@ -888,6 +900,56 @@ class TestResolveSourceDims:
 
 
 class TestApplyWeightFile:
+    @staticmethod
+    def _unused_trailing_sources(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, n_source: int, source_size: int | None
+    ) -> tuple[xr.Dataset, Path]:
+        """Weights where only source cells 1 and 3 are used, like ``nearest`` output."""
+        ds = xr.Dataset(
+            {"t": ("cell", np.arange(1.0, n_source + 1.0))},
+            coords={"cell": np.arange(n_source)},
+        )
+        attrs: dict[str, Any] = {"grid_doctor_level": 0, "grid_doctor_order": "nested"}
+        if source_size is not None:
+            attrs["grid_doctor_source_size"] = source_size
+        path = tmp_path / "weights.nc"
+        xr.Dataset(
+            {
+                "row": ("nnz", np.array([1, 2], dtype=np.int32)),
+                "col": ("nnz", np.array([1, 3], dtype=np.int32)),
+                "S": ("nnz", np.array([1.0, 1.0])),
+            },
+            attrs=attrs,
+        ).to_netcdf(path)
+
+        monkeypatch.setattr(
+            remap,
+            "_source_centre_arrays",
+            lambda ds, source_units="auto": (
+                np.zeros(n_source),
+                np.arange(float(n_source)),
+                ("cell",),
+            ),
+        )
+        monkeypatch.setattr(
+            remap, "_healpix_centres", lambda level, nest: (np.zeros(2), np.array([0.0, 2.0]))
+        )
+        return ds, path
+
+    def test_uses_stored_source_size(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Trailing source cells without weights must not shrink the matrix."""
+        ds, path = self._unused_trailing_sources(tmp_path, monkeypatch, n_source=5, source_size=5)
+        result = apply_weight_file(ds, path)
+        np.testing.assert_array_equal(result["t"].values, [1.0, 3.0])
+
+    def test_infers_source_size_without_attribute(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Older weight files without grid_doctor_source_size still work."""
+        ds, path = self._unused_trailing_sources(tmp_path, monkeypatch, n_source=3, source_size=None)
+        result = apply_weight_file(ds, path)
+        np.testing.assert_array_equal(result["t"].values, [1.0, 3.0])
+
     def test_renormalizes_missing(
         self,
         tmp_path: Path,
@@ -1196,3 +1258,163 @@ class TestAttachHealpixCoords:
         assert "longitude" in result.coords
         assert result.attrs["healpix_nside"] == 4
         assert result.attrs["healpix_order"] == "ring"
+
+
+def _collapse_repeated_corners_reference(face_nodes: np.ndarray) -> np.ndarray:
+    """The original per-face loop, kept as a reference for the vectorised version."""
+    out = np.full_like(face_nodes, -1)
+    for f, row in enumerate(face_nodes):
+        ids = row[row >= 0]
+        if ids.size == 0:
+            continue
+        kept = [int(ids[0])]
+        for node in ids[1:]:
+            if int(node) != kept[-1]:
+                kept.append(int(node))
+        if len(kept) > 1 and kept[-1] == kept[0]:
+            kept.pop()
+        out[f, : len(kept)] = kept
+    return out
+
+
+class TestHealpixTargetMesh:
+    def test_collapse_repeated_corners_matches_reference(self) -> None:
+        rng = np.random.default_rng(0)
+        face_nodes = rng.integers(-1, 4, size=(5000, 6)).astype(np.int32)
+        np.testing.assert_array_equal(
+            remap_backend_module._collapse_repeated_corners(face_nodes),
+            _collapse_repeated_corners_reference(face_nodes),
+        )
+
+    @pytest.mark.parametrize("nest", [True, False])
+    def test_mesh_matches_direct_construction(self, nest: bool) -> None:
+        level = 3
+        module, kwargs = remap_backend_module._require_healpix_geo_module(nest)
+        lon, lat = module.vertices(np.arange(12 * 4**level), level, **kwargs)
+        expected = remap_backend_module._corner_mesh_from_arrays(
+            remap_backend_module._canonical_lon(np.asarray(lon, dtype=np.float64)),
+            np.asarray(lat, dtype=np.float64),
+        )
+        _, mesh = remap_backend_module._target_healpix_mesh(level, nest=nest)
+        for name in ("node_lon", "node_lat", "face_nodes", "face_lon", "face_lat"):
+            np.testing.assert_array_equal(getattr(mesh, name), getattr(expected, name), err_msg=name)
+
+    def test_ring_to_nest_matches_healpy(self) -> None:
+        healpy = pytest.importorskip("healpy")
+        level = 4
+        np.testing.assert_array_equal(
+            remap_backend_module._healpix_ring_to_nest(level),
+            healpy.ring2nest(2**level, np.arange(12 * 4**level)),
+        )
+
+    def test_mesh_is_reused_from_disk(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        level = remap_backend_module._HEALPIX_MESH_DISK_CACHE_MIN_LEVEL
+        _, built = remap_backend_module._target_healpix_mesh(level, nest=True)
+        assert remap_backend_module._healpix_mesh_cache_file(level, "sphere").exists()
+
+        remap_backend_module._nested_healpix_mesh.cache_clear()
+
+        def no_build(nest: bool, ellipsoid: str = "sphere") -> None:
+            raise AssertionError("mesh rebuilt despite disk cache")
+
+        monkeypatch.setattr(remap_backend_module, "_require_healpix_geo_module", no_build)
+        _, loaded = remap_backend_module._target_healpix_mesh(level, nest=True)
+        np.testing.assert_array_equal(loaded.face_nodes, built.face_nodes)
+        np.testing.assert_array_equal(loaded.node_lon, built.node_lon)
+
+
+class TestHealpixEllipsoid:
+    def test_key_depends_on_ellipsoid(self, regular_ds: xr.Dataset) -> None:
+        from grid_doctor.remap_backend import TargetDescription, WeightsDescription
+
+        source = describe_source(regular_ds)
+        keys = {
+            WeightsDescription(
+                source=source, target=TargetDescription(level=2, order="nest", ellipsoid=e), method="conservative"
+            ).key
+            for e in ("sphere", "WGS84")
+        }
+        assert len(keys) == 2
+
+    @pytest.mark.parametrize("nest", [True, False])
+    def test_meshes_differ_but_cells_correspond(self, nest: bool) -> None:
+        level = 3
+        _, sphere = remap_backend_module._target_healpix_mesh(level, nest=nest, ellipsoid="sphere")
+        _, wgs84 = remap_backend_module._target_healpix_mesh(level, nest=nest, ellipsoid="WGS84")
+        assert sphere.face_count == wgs84.face_count
+        dlat = np.abs(sphere.face_lat - wgs84.face_lat)
+        assert 0.05 < dlat.max() < 0.2
+        # centres come from the polygon corners, so longitudes shift slightly too
+        np.testing.assert_allclose(sphere.face_lon, wgs84.face_lon, atol=0.01)
+
+    def test_disk_cache_is_per_ellipsoid(self) -> None:
+        level = remap_backend_module._HEALPIX_MESH_DISK_CACHE_MIN_LEVEL
+        remap_backend_module._target_healpix_mesh(level, nest=True, ellipsoid="sphere")
+        assert not remap_backend_module._healpix_mesh_cache_file(level, "WGS84").exists()
+        remap_backend_module._target_healpix_mesh(level, nest=True, ellipsoid="WGS84")
+        assert remap_backend_module._healpix_mesh_cache_file(level, "WGS84").exists()
+
+    def test_cached_weights_separates_ellipsoids(
+        self, regular_ds: xr.Dataset, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from grid_doctor.utils import cached_weights
+
+        def fake_compute(ds: xr.Dataset, level: int, **kwargs: Any) -> Path:
+            xr.Dataset({"S": ("nnz", np.array([1.0]))}).to_netcdf(kwargs["weights_path"])
+            return kwargs["weights_path"]
+
+        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", fake_compute)
+        sphere = cached_weights(regular_ds, 2, cache_path=tmp_path)
+        wgs84 = cached_weights(regular_ds, 2, cache_path=tmp_path, ellipsoid="WGS84")
+        assert sphere != wgs84
+
+
+class TestEllipsoidEndToEnd:
+    """Real ESMF weights: a WGS84 target must not silently reuse sphere geometry."""
+
+    @staticmethod
+    def _source() -> xr.Dataset:
+        lat = np.arange(-89.0, 90.0, 2.0)
+        lon = np.arange(1.0, 360.0, 2.0)
+        return xr.Dataset(
+            {"t": (("lat", "lon"), np.broadcast_to(lat[:, None], (lat.size, lon.size)).copy())},
+            coords={
+                "lat": ("lat", lat, {"units": "degrees_north"}),
+                "lon": ("lon", lon, {"units": "degrees_east"}),
+            },
+        )
+
+    @staticmethod
+    def _weights(path: Path) -> tuple[xr.Dataset, Any]:
+        import scipy.sparse as sp
+
+        with xr.open_dataset(path) as ds:
+            ds = ds.load()
+        matrix = sp.coo_matrix((ds["S"].values, (ds["row"].values - 1, ds["col"].values - 1))).tocsr()
+        return ds, matrix
+
+    @pytest.mark.parametrize("method", ["conservative", "nearest"])
+    def test_sphere_and_wgs84_weights_differ(self, method: str, tmp_path: Path) -> None:
+        pytest.importorskip("esmpy")
+        ds = self._source()
+        level = 3
+        files = {
+            e: compute_healpix_weights(
+                ds, level, method=method, weights_path=tmp_path / f"{e}.nc", ellipsoid=e
+            )
+            for e in ("sphere", "WGS84")
+        }
+        (sphere_ds, sphere), (wgs84_ds, wgs84) = (self._weights(files[e]) for e in ("sphere", "WGS84"))
+
+        assert sphere_ds.attrs["grid_doctor_ellipsoid"] == "sphere"
+        assert wgs84_ds.attrs["grid_doctor_ellipsoid"] == "WGS84"
+        assert sphere.shape == wgs84.shape  # same pixel ids
+        assert abs(sphere - wgs84).max() > 0
+
+        # A field equal to latitude: WGS84 cells sit up to ~0.19 deg from sphere cells.
+        # With nearest, a shifted cell can snap to the neighbouring 2 deg source cell.
+        diff = np.abs(
+            apply_weight_file(ds, files["sphere"])["t"].values - apply_weight_file(ds, files["WGS84"])["t"].values
+        )
+        upper = 1.0 if method == "conservative" else 2.0 + 1e-9
+        assert 0.01 < np.nanmax(diff) <= upper

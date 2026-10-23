@@ -26,24 +26,27 @@ import numpy as np
 import xarray as xr
 from dask.base import tokenize
 
-from .remap_apply import (
-    apply_weights_nd,
-    extract_sparse_weights,
-)
-from .remap_backend import (
+from .misc import (
     _UNSTRUCTURED_DIMS,
-    OfflineWeightConfig,
     _canonical_lon,
     _get_latlon_arrays,
     _get_spatial_dims,
     _get_unstructured_dim,
     _is_unstructured,
-    _normalise_angle_units,
+    _normalize_angle_units,
+)
+from .remap_apply import (
+    apply_weights_nd,
+    extract_sparse_weights,
+)
+from .remap_backend import (
+    OfflineWeightConfig,
     _require_healpix_geo_module,
     compute_healpix_weights_backend,
 )
 from .types import (
     ApplyBackend,
+    EllipsoidKind,
     FloatArray,
     MissingPolicy,
     RemapMethod,
@@ -74,8 +77,8 @@ def _source_centre_arrays(
         ``(lat, lon, source_dims)``.
     """
     lat, lon = _get_latlon_arrays(ds)
-    lat = _normalise_angle_units(lat, source_units)
-    lon = _canonical_lon(_normalise_angle_units(lon, source_units))
+    lat = _normalize_angle_units(lat, source_units)
+    lon = _canonical_lon(_normalize_angle_units(lon, source_units))
 
     if _is_unstructured(ds):
         spatial_dim = _get_unstructured_dim(ds)
@@ -138,12 +141,14 @@ def _read_weight_file(
         col_name = "col" if "col" in wds else "src_address"
         val_name = "S" if "S" in wds else "remap_matrix"
 
+        level = int(wds.attrs.get("grid_doctor_level", -1))
+        source_size = wds.attrs.get("grid_doctor_source_size")
         matrix, n_target, n_source = extract_sparse_weights(
             row=wds[row_name].values,
             col=wds[col_name].values,
             values=wds[val_name].values,
+            n_source=int(source_size) if source_size is not None else None,
         )
-        level = int(wds.attrs.get("grid_doctor_level", -1))
         order = str(wds.attrs.get("grid_doctor_order", "nested"))
         method_raw = wds.attrs.get("grid_doctor_method")
         method = str(method_raw) if method_raw is not None else None
@@ -176,6 +181,7 @@ def compute_healpix_weights(
     keep_intermediates: bool = False,
     workdir: str | Path | None = None,
     spectral_transform_command: list[str] | tuple[str, ...] | None = None,
+    ellipsoid: EllipsoidKind = "sphere",
 ) -> Path:
     """Generate a reusable NetCDF weight file for HEALPix remapping.
 
@@ -213,6 +219,10 @@ def compute_healpix_weights(
         Working directory for offline intermediate files.
     spectral_transform_command:
         External command for ``source_kind="spectral"``.
+    ellipsoid:
+        Ellipsoid the HEALPix cell vertices are computed on (``"sphere"``
+        or ``"WGS84"``). Pixel ids are the same; cell positions differ by
+        up to ~0.19 deg. ESMF still treats the vertices as points on a sphere.
 
     Returns
     -------
@@ -244,6 +254,7 @@ def compute_healpix_weights(
         large_file=large_file,
         offline=offline,
         spectral_transform_command=spectral_transform_command,
+        ellipsoid=ellipsoid,
     )
 
 

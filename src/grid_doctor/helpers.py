@@ -23,6 +23,11 @@ import s3fs
 import xarray as xr
 
 from .io import DeferredWrite, deferred_writes, store_all
+from .misc import (
+    _get_latlon_arrays,
+    _get_unstructured_dim,
+    _is_unstructured,
+)
 from .pyramid import (
     coarse_levels,
     coarsen_dataset,
@@ -34,11 +39,6 @@ from .pyramid import (
 from .remap import (
     regrid_to_healpix,
     regrid_unstructured_to_healpix,
-)
-from .remap_backend import (
-    _get_latlon_arrays,
-    _get_unstructured_dim,
-    _is_unstructured,
 )
 from .types import CoarsenMode, FloatArray, ValidFraction, ZarrOptions
 
