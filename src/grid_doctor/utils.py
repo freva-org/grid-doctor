@@ -14,7 +14,7 @@ from typing import Any, Collection, Literal, cast
 import numpy as np
 import xarray as xr
 
-from .misc.dataset import _get_latlon_names, _get_vertex_names
+from .remap_backend import _get_latlon_names, _get_vertex_names
 from .types import EllipsoidKind, RemapMethod, SourceUnits
 
 logger = logging.getLogger(__name__)

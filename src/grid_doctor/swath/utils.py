@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import cast
+from typing import Literal, cast
 
 import numpy as np
 import numpy_groupies as npg
 import xarray as xr
 
-from ..misc import (
+from ..remap_backend import (
     _LAT_NAMES,
     _LON_NAMES,
     _canonical_lon,
@@ -32,7 +32,10 @@ AGG_TO_METHOD: dict[str, str] = {
 }
 """Mapping from aggregation name to the ``grid_doctor_method`` attribute."""
 
-NPG_FUNC: dict[str, str] = {
+NpgFunc = Literal["nanmean", "nanmin", "nanmax"]
+"""numpy-groupies reductions used by :func:`bin_simple`."""
+
+NPG_FUNC: dict[str, NpgFunc] = {
     "mean": "nanmean",
     "min": "nanmin",
     "max": "nanmax",
@@ -114,7 +117,7 @@ def bin_simple(
     values: FloatArray,
     *,
     n_cells: int,
-    func: str,
+    func: NpgFunc,
 ) -> FloatArray:
     """Apply a NaN-aware numpy-groupies reduction along the last axis."""
     result = npg.aggregate(
@@ -174,7 +177,7 @@ def bin_mode(
             func="sum",
             size=n_cells,
             fill_value=0,
-        ).astype(np.int64)  # type: ignore[attr-defined]
+        ).astype(np.int64)
         wins = count > best_count
         best_value[wins] = cls
         best_count[wins] = count[wins]
