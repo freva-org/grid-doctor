@@ -183,23 +183,6 @@ commands =
     python3 -m pytest -vv --cov=grid_doctor --cov-report=html:coverage_report --junitxml report.xml --cov-report xml tests/
     python3 -m coverage report --fail-under=65 --precision=2
 
-[docs-prep]
-description = Prepare the documentation creation
-static =
-    rm -rf .build site-tech site-data
-    mkdir -p .build/tech
-    cp -a docs/technical/. .build/tech/
-    cp -a docs/shared/. .build/tech/
-    cp -a docs/assets .build/tech/
-
-serve =
-    rm -rf .build
-    mkdir -p .build/tech
-    cp -as {toxinidir}/docs/technical/. .build/tech/
-    cp -as {toxinidir}/docs/shared/. .build/tech/
-    mkdir -p .build/tech/assets .build/data/assets
-    cp -as {toxinidir}/docs/assets/. .build/tech/assets/
-
 [testenv:docs]
 description = Build docs. Usage: tox -e docs
 allowlist_externals =
@@ -207,13 +190,12 @@ allowlist_externals =
     cp
     ln
     mkdir
-commands_pre = {[docs-prep]static}
 deps =
     -e .[docs]
     codespell
 commands =
     codespell {posargs: --quiet-level=2} docs
-    mkdocs build --strict -f mkdocs.tech.yml
+    mkdocs build --strict -f mkdocs.yml
 
 [testenv:docs-serve]
 description = Serve docs locally. Usage: tox -e docs-serve
@@ -224,12 +206,10 @@ allowlist_externals =
     mkdir
 deps =
     {[testenv:docs]deps}
-commands_pre =
-    {[docs-prep]serve}
 commands =
     python docs/scripts/build_stac_browser_docs.py tech
     codespell --quiet-level=2 docs
-    mkdocs serve -f mkdocs.tech.yml --strict -a localhost:8000 --watch docs
+    mkdocs serve -f mkdocs.yml --strict -a localhost:8000 --watch docs
 
 [testenv:types]
 description = Run mypy in strict mode
