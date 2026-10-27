@@ -246,18 +246,35 @@ def _get_spatial_dims(ds: xr.Dataset) -> tuple[str, str]:
 
 
 def _get_vertex_names(ds: xr.Dataset) -> tuple[str, str]:
-    """Return the names of the per-cell vertex coordinates of an unstructured grid.
+    """Return ``(lat_name, lon_name)`` of the per-cell vertex coordinates.
+
+    Recognises ICON-style names, ``lat_bnds``/``lon_bnds`` and CF bounds
+    variables referenced from the cell-centre coordinates. Names are
+    always returned as a matching pair.
 
     Raises:
         ValueError: When no vertex coordinates are present.
     """
-    lat_name = "clat_vertices" if "clat_vertices" in ds else "lat_vertices"
-    lon_name = "clon_vertices" if "clon_vertices" in ds else "lon_vertices"
-    if lat_name not in ds or lon_name not in ds:
-        raise ValueError(
-            "Unstructured grids require per-cell vertex coordinates such as 'clat_vertices'/'clon_vertices'/."
-        )
-    return lat_name, lon_name
+    for lat_name, lon_name in (
+        ("clat_vertices", "clon_vertices"),
+        ("lat_vertices", "lon_vertices"),
+        ("lat_bnds", "lon_bnds"),
+    ):
+        if lat_name in ds and lon_name in ds:
+            return lat_name, lon_name
+
+    for lat_c, lon_c in (("lat", "lon"), ("clat", "clon")):
+        if lat_c not in ds or lon_c not in ds:
+            continue
+        lat_b = ds[lat_c].attrs.get("bounds")
+        lon_b = ds[lon_c].attrs.get("bounds")
+        if isinstance(lat_b, str) and isinstance(lon_b, str) and lat_b in ds and lon_b in ds:
+            return lat_b, lon_b
+
+    raise ValueError(
+        "Could not find per-cell vertex coordinates "
+        "(e.g. 'clat_vertices'/'clon_vertices' or CF 'bounds')."
+    )
 
 
 def _replace_values(ds: xr.Dataset, mapping: Mapping[str, np.ndarray | xr.DataArray]) -> xr.Dataset:

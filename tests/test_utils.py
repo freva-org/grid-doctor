@@ -275,6 +275,15 @@ def _wrf_ds(offset: float = 0.0, lat: str = "XLAT", lon: str = "XLONG") -> xr.Da
     xlong, xlat = np.meshgrid(np.linspace(0.0, 10.0, 4) + offset, np.linspace(40.0, 50.0, 3))
     return xr.Dataset(coords={lat: (("south_north", "west_east"), xlat), lon: (("south_north", "west_east"), xlong)})
 
+def rename_vertices(ds: Any, scheme: str) -> tuple[Any, str, str]:
+    """Rename ICON-style vertices to ``lat_bnds`` or CF ``bounds``; return ``(ds, lat, lon)``."""
+    lat_v, lon_v = ("lat_bnds", "lon_bnds") if scheme == "bnds" else ("my_lat_b", "my_lon_b")
+    ds = ds.rename({"clat_vertices": lat_v, "clon_vertices": lon_v})
+    if scheme == "cf-bounds":
+        ds["clat"].attrs["bounds"] = lat_v
+        ds["clon"].attrs["bounds"] = lon_v
+    return ds, lat_v, lon_v
+
 
 class TestKeyHash:
     def test_different_wrf_grids_differ(self) -> None:
@@ -313,6 +322,13 @@ class TestKeyHash:
             _key_hash(xr.Dataset(coords=base | verts(2.0)), 5),
         }
         assert len(hashes) == 3
+
+    @pytest.mark.parametrize("scheme", ["bnds", "cf-bounds"])
+    def test_vertices_are_hashed_for_all_names(self, unstructured_ds: xr.Dataset, scheme: str) -> None:
+        ds, lat_v, _ = rename_vertices(unstructured_ds, scheme)
+        shifted = ds.assign({lat_v: ds[lat_v] + 1.0})
+        assert _key_hash(ds, 5) != _key_hash(shifted, 5)
+        assert _key_hash(ds, 5) == _key_hash(unstructured_ds, 5)
 
     def test_raises_without_coordinates(self) -> None:
         with pytest.raises(ValueError, match="Could not locate latitude/longitude"):
