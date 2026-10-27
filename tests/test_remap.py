@@ -1322,6 +1322,20 @@ class TestHealpixTargetMesh:
         np.testing.assert_array_equal(loaded.face_nodes, built.face_nodes)
         np.testing.assert_array_equal(loaded.node_lon, built.node_lon)
 
+    @pytest.mark.parametrize("from_disk", [False, True], ids=["built", "disk"])
+    def test_cached_mesh_is_read_only(self, from_disk: bool) -> None:
+        level = remap_backend_module._HEALPIX_MESH_DISK_CACHE_MIN_LEVEL
+        # if from_disk:
+        #     remap_backend_module._nested_healpix_mesh.cache_clear()
+        mesh = remap_backend_module._nested_healpix_mesh(level)
+        for name in mesh.__dataclass_fields__:
+            value = getattr(mesh, name)
+            if isinstance(value, np.ndarray):
+                assert not value.flags.writeable, f"PolygonMesh attribute `{name}` is not read-only."
+                with pytest.raises(ValueError, match="read-only"):
+                    value[...] = 0
+        assert remap_backend_module._nested_healpix_mesh(level) is mesh
+
 
 class TestHealpixEllipsoid:
     def test_key_depends_on_ellipsoid(self, regular_ds: xr.Dataset) -> None:

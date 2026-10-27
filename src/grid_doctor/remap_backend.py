@@ -1175,6 +1175,15 @@ def _healpix_mesh_cache_file(level: int, ellipsoid: EllipsoidKind) -> Path:
     return cache_dir() / f"grid_doctor_healpix_mesh_v{_HEALPIX_MESH_CACHE_VERSION}_{ellipsoid}_L{level}.npz"
 
 
+def _readonly_mesh(mesh: PolygonMesh) -> PolygonMesh:
+    """Mark the mesh arrays read-only; the mesh is shared via ``lru_cache``."""
+    for name in mesh.__dataclass_fields__:
+        value = getattr(mesh, name)
+        if isinstance(value, np.ndarray):
+            value.flags.writeable = False
+    return mesh
+
+
 @lru_cache(maxsize=4)
 def _nested_healpix_mesh(level: int, ellipsoid: EllipsoidKind = "sphere") -> PolygonMesh:
     """Return the HEALPix mesh in nested order, cached in memory and on disk.
@@ -1206,7 +1215,7 @@ def _nested_healpix_mesh(level: int, ellipsoid: EllipsoidKind = "sphere") -> Pol
         except OSError as exc:
             logger.warning("Could not write HEALPix mesh cache %s: %s", cache_file, exc)
             tmp.unlink(missing_ok=True)
-    return mesh
+    return _readonly_mesh(mesh)
 
 
 @lru_cache(maxsize=4)
