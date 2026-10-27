@@ -240,6 +240,15 @@ class TargetDescription:
         assert self.target_mesh is not None
         return self.target_mesh
 
+    def _identity(self) -> tuple[int, str, str]:
+        return (self.level, self.order, self.ellipsoid)
+
+    def __hash__(self) -> int:  # noqa: D105
+        return hash(self._identity())
+
+    def __eq__(self, other: object) -> bool:  # noqa: D105
+        return isinstance(other, TargetDescription) and self._identity() == other._identity()
+
 
 @dataclass(frozen=True, eq=False, repr=False)
 class WeightsDescription:
