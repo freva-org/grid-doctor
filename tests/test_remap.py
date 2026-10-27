@@ -1336,6 +1336,25 @@ class TestHealpixTargetMesh:
                     value[...] = 0
         assert remap_backend_module._nested_healpix_mesh(level) is mesh
 
+    @pytest.mark.parametrize("offset", [-1, 0], ids=["memory-only", "cache-miss"])
+    def test_mesh_build_does_not_warn(self, offset: int, caplog: pytest.LogCaptureFixture) -> None:
+        level = remap_backend_module._HEALPIX_MESH_DISK_CACHE_MIN_LEVEL + offset
+        with caplog.at_level("WARNING", logger="grid_doctor.remap_backend"):
+            remap_backend_module._nested_healpix_mesh(level)
+        assert not caplog.records
+        assert remap_backend_module._healpix_mesh_cache_file(level, "sphere").exists() == (offset == 0)
+
+    def test_unreadable_disk_cache_is_rebuilt(self, caplog: pytest.LogCaptureFixture) -> None:
+        level = remap_backend_module._HEALPIX_MESH_DISK_CACHE_MIN_LEVEL
+        cache_file = remap_backend_module._healpix_mesh_cache_file(level, "sphere")
+        cache_file.write_bytes(b"not an npz file")
+        with caplog.at_level("WARNING", logger="grid_doctor.remap_backend"):
+            mesh = remap_backend_module._nested_healpix_mesh(level)
+        assert "Ignoring unreadable HEALPix mesh cache" in caplog.text
+        assert mesh.face_count == 12 * 4**level
+        with np.load(cache_file) as data:
+            np.testing.assert_array_equal(data["face_nodes"], mesh.face_nodes)
+
 
 class TestHealpixEllipsoid:
     def test_key_depends_on_ellipsoid(self, regular_ds: xr.Dataset) -> None:

@@ -1193,37 +1193,49 @@ def _readonly_mesh(mesh: PolygonMesh) -> PolygonMesh:
     return mesh
 
 
+def _load_mesh_cache(cache_file: Path) -> PolygonMesh | None:
+    """Return the cached mesh, or ``None`` when absent or unreadable."""
+    if not cache_file.exists():
+        return None
+    try:
+        with np.load(cache_file) as data:
+            return PolygonMesh(**{name: data[name] for name in data.files})
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        logger.warning("Ignoring unreadable HEALPix mesh cache %s: %s", cache_file, exc)
+        return None
+
+
+def _save_mesh_cache(mesh: PolygonMesh, cache_file: Path) -> None:
+    """Write *mesh* atomically; a failed write only logs a warning."""
+    tmp = cache_file.with_suffix(f".{os.getpid()}.tmp.npz")
+    try:
+        np.savez(tmp, **{name: getattr(mesh, name) for name in mesh.__dataclass_fields__})
+        tmp.replace(cache_file)
+    except OSError as exc:
+        logger.warning("Could not write HEALPix mesh cache %s: %s", cache_file, exc)
+        tmp.unlink(missing_ok=True)
+
+
 @lru_cache(maxsize=4)
 def _nested_healpix_mesh(level: int, ellipsoid: EllipsoidKind = "sphere") -> PolygonMesh:
     """Return the HEALPix mesh in nested order, cached in memory and on disk.
 
     The mesh depends on *level* and *ellipsoid* only, so it is built once and
-    reused. Callers must not modify the returned arrays.
+    reused. The returned arrays are read-only.
     """
-    cache_file = _healpix_mesh_cache_file(level, ellipsoid)
     use_disk = level >= _HEALPIX_MESH_DISK_CACHE_MIN_LEVEL
-    if use_disk and cache_file.exists():
-        try:
-            with np.load(cache_file) as data:
-                return PolygonMesh(**{name: data[name] for name in data.files})
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            logger.warning("Ignoring unreadable HEALPix mesh cache %s: %s", cache_file, exc)
-
-    module, kwargs = _require_healpix_geo_module(True, ellipsoid)
-    ipix = np.arange(12 * (4**level), dtype=np.int64)
-    lon_v, lat_v = module.vertices(ipix, level, **kwargs)
-    cell_lon = _canonical_lon(np.asarray(lon_v, dtype=np.float64))
-    cell_lat = np.asarray(lat_v, dtype=np.float64)
-    mesh = _corner_mesh_from_arrays(cell_lon, cell_lat)
-
-    if use_disk:
-        tmp = cache_file.with_suffix(f".{os.getpid()}.tmp.npz")
-        try:
-            np.savez(tmp, **{name: getattr(mesh, name) for name in mesh.__dataclass_fields__})
-            tmp.replace(cache_file)
-        except OSError as exc:
-            logger.warning("Could not write HEALPix mesh cache %s: %s", cache_file, exc)
-            tmp.unlink(missing_ok=True)
+    cache_file = _healpix_mesh_cache_file(level, ellipsoid)
+    mesh = _load_mesh_cache(cache_file) if use_disk else None
+    if mesh is None:
+        module, kwargs = _require_healpix_geo_module(True, ellipsoid)
+        ipix = np.arange(12 * (4**level), dtype=np.int64)
+        lon_v, lat_v = module.vertices(ipix, level, **kwargs)
+        mesh = _corner_mesh_from_arrays(
+            _canonical_lon(np.asarray(lon_v, dtype=np.float64)),
+            np.asarray(lat_v, dtype=np.float64),
+        )
+        if use_disk:
+            _save_mesh_cache(mesh, cache_file)
     return _readonly_mesh(mesh)
 
 
