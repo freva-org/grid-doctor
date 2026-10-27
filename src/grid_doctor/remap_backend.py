@@ -210,7 +210,7 @@ class SourceDescription:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class TargetDescription:
     """Resolved description of the target representation.
 

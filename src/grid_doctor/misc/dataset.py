@@ -305,7 +305,7 @@ def normalize_lon(lon: xr.DataArray) -> xr.DataArray:
     Args:
         lon: xr.DataArray - longitude coordinate in degree
     Return:
-        xr.DataArray with values and `unit` attribute adjusted (`degree_west`)
+        xr.DataArray with values and `unit` attribute adjusted (`degrees_east`)
     """
     if not _has_degree_unit(lon) and _looks_like_radians(lon.values):
         raise ValueError(f"`{lon.name}` DataArray is not in degrees (try applying `normalize_degrees()`.")
@@ -389,11 +389,10 @@ def normalize_dataset(ds: xr.Dataset, source_units: SourceUnits = "auto") -> xr.
         ValueError: When no latitude/longitude coordinates are present.
     """
     names = [_get_latlon_names(ds)]
-    if _is_unstructured(ds):
-        try:
-            names.append(_get_vertex_names(ds))
-        except ValueError:
-            pass  # vertices are optional
+    try:
+        names.append(_get_vertex_names(ds))
+    except ValueError:
+        pass  # vertices are optional
 
     mapping: dict[str, xr.DataArray] = {}
     for lat_name, lon_name in names:
