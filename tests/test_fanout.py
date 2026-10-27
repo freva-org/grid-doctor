@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import dataclasses
+import itertools
 import json
 import logging
+import random
 import shutil
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import pytest
@@ -31,7 +33,7 @@ from grid_doctor.io import (
 )
 from grid_doctor.io import _fanout as fanout
 from grid_doctor.io._fanout import IncompleteStoreError
-from grid_doctor.io._manifest import plan_tasks
+from grid_doctor.io._manifest import Region, plan_tasks
 
 from .test_chunked_pyramid import _weight_file
 
@@ -652,12 +654,14 @@ class TestValidation:
 
     def test_overlapping_regions(self, manifest_dict: dict[str, Any]) -> None:
         _timed(manifest_dict)[1]["region"] = {"time": [2, 8]}
-        with pytest.raises(ManifestError, match="tasks overlap along 'time'"):
+        with pytest.raises(
+            ManifestError, match="intervals along 'time' overlap at index 2"
+        ):
             PyramidManifest.from_dict(manifest_dict)
 
     def test_gap_between_regions(self, manifest_dict: dict[str, Any]) -> None:
         manifest_dict["tasks"].remove(_timed(manifest_dict)[1])
-        with pytest.raises(ManifestError, match="tasks gap along 'time' at index 4"):
+        with pytest.raises(ManifestError, match="gap along 'time' at index 4"):
             PyramidManifest.from_dict(manifest_dict)
 
     def test_duplicate_region(self, manifest_dict: dict[str, Any]) -> None:
@@ -814,7 +818,10 @@ class TestIfExists:
         ("kwargs", "message"),
         [
             ({"split": {"time": 2}}, "split"),
-            ({"split": {"time": 4}, "variables_per_task": 1}, "tasks: 4 stored, 7 planned"),
+            (
+                {"split": {"time": 4}, "variables_per_task": 1},
+                "tasks: 4 stored, 7 planned",
+            ),
             ({"split": {"time": 4}, "materialise": ["lsm"]}, "materialise"),
             ({"split": {"time": 4}, "zarr_format": 3}, "zarr_format 2 != 3"),
         ],
@@ -914,3 +921,133 @@ class TestIfExists:
         with pytest.raises(StaleTaskError, match="re-initialised while"):
             gd.write_pyramid_task(pyramid, manifest.tasks[0])
         assert gd.check_pyramid_store(str(tmp_path)).done_tasks == ()
+
+
+# ----------------------------------------------------------------------
+# Multi-dimensional splits: the partition check in detail
+# ----------------------------------------------------------------------
+
+# Manifest order deliberately differs from alphabetical order.
+_DIMS = ("time", "lev", "ens")
+
+
+def _grid_manifest(
+    sizes: dict[str, int], cuts: dict[str, list[int]]
+) -> tuple[PyramidManifest, list[Region]]:
+    """A store-less manifest whose tasks form the grid given by *cuts*."""
+    dims = tuple(sizes)
+    spec = ArraySpec(
+        "v", (*dims, "cell"), (*sizes.values(), 12), (*(1 for _ in dims), 12), "f4"
+    )
+    level = LevelSpec(0, "level_0.zarr", (), (spec,))
+    per_dim = [
+        [(a, b) for a, b in zip([0, *cuts[d]], [*cuts[d], sizes[d]])] for d in dims
+    ]
+    regions = [
+        tuple((d, a, b) for d, (a, b) in zip(dims, combo))
+        for combo in itertools.product(*per_dim)
+    ]
+    return _manifest_for(level, dims, regions), regions
+
+
+def _manifest_for(
+    level: LevelSpec, dims: tuple[str, ...], regions: list[Region]
+) -> PyramidManifest:
+    tasks = tuple(
+        WriteTask(f"task-{i:04d}", "m1", "/x", 2, ("v",), r, (0,))
+        for i, r in enumerate(regions)
+    )
+    return PyramidManifest(
+        "m1", "/x", 2, "now", "test", tuple((d, 1) for d in dims), (level,), tasks
+    )
+
+
+class TestMultiDimensionalPartition:
+    sizes: ClassVar[dict[str, int]] = {"time": 6, "lev": 4, "ens": 3}
+    cuts: ClassVar[dict[str, list[int]]] = {
+        "time": [2, 4],
+        "lev": [1, 3],
+        "ens": [1, 2],
+    }
+
+    def test_planner_grid_is_accepted(self) -> None:
+        manifest, _ = _grid_manifest(self.sizes, self.cuts)
+        assert len(manifest.tasks) == 3 * 3 * 3
+
+    def test_entry_order_inside_regions_is_irrelevant(self) -> None:
+        manifest, regions = _grid_manifest(self.sizes, self.cuts)
+        shuffled = [tuple(reversed(r)) for r in regions]
+        _manifest_for(manifest.levels[0], _DIMS, shuffled)
+
+    @pytest.mark.parametrize("dim", _DIMS)
+    def test_overlap_in_any_dimension(self, dim: str) -> None:
+        manifest, regions = _grid_manifest(self.sizes, self.cuts)
+        index = _DIMS.index(dim)
+        first = list(regions[-1])
+        name, start, stop = first[index]
+        first[index] = (name, start - 1, stop)  # reach into the neighbour
+        regions[-1] = tuple(first)
+        with pytest.raises(ManifestError, match=f"along '{dim}' overlap"):
+            _manifest_for(manifest.levels[0], _DIMS, regions)
+
+    @pytest.mark.parametrize("dim", _DIMS)
+    def test_gap_in_any_dimension(self, dim: str) -> None:
+        manifest, regions = _grid_manifest(self.sizes, self.cuts)
+        cut = self.cuts[dim][0]
+        kept = [r for r in regions if {d: a for d, a, _ in r}[dim] != cut]
+        with pytest.raises(ManifestError, match=f"gap along '{dim}'"):
+            _manifest_for(manifest.levels[0], _DIMS, kept)
+
+    def test_missing_combination(self) -> None:
+        manifest, regions = _grid_manifest(self.sizes, self.cuts)
+        with pytest.raises(ManifestError, match="26 task region.*full grid of 27"):
+            _manifest_for(manifest.levels[0], _DIMS, regions[:5] + regions[6:])
+
+    def test_duplicate_region_with_reordered_entries(self) -> None:
+        manifest, regions = _grid_manifest(self.sizes, self.cuts)
+        regions.append(tuple(reversed(regions[4])))
+        with pytest.raises(ManifestError, match="more than one task"):
+            _manifest_for(manifest.levels[0], _DIMS, regions)
+
+    def test_never_accepts_an_invalid_tiling(self) -> None:
+        """Randomised: every accepted manifest writes each element exactly once."""
+        rng = random.Random(54)
+        accepted = 0
+        for _ in range(3000):
+            ndim = rng.randint(1, 3)
+            dims = _DIMS[:ndim]
+            sizes = {d: rng.randint(1, 5) for d in dims}
+            cuts = {
+                d: sorted(rng.sample(range(1, n), rng.randint(0, n - 1)))
+                for d, n in sizes.items()
+            }
+            manifest, regions = _grid_manifest(sizes, cuts)
+            for _ in range(rng.randint(0, 2)):  # random damage
+                i = rng.randrange(len(regions))
+                entries = list(regions[i])
+                op = rng.choice(["drop", "dup", "widen", "shift", "reorder"])
+                if op == "drop" and len(regions) > 1:
+                    regions.pop(i)
+                elif op == "dup":
+                    regions.append(regions[i])
+                elif op == "reorder":
+                    rng.shuffle(entries)
+                    regions[i] = tuple(entries)
+                elif op in ("widen", "shift"):
+                    k = rng.randrange(ndim)
+                    d, a, b = entries[k]
+                    a, b = (a - 1, b + 1) if op == "widen" else (a + 1, b + 1)
+                    if 0 <= a <= b <= sizes[d]:
+                        entries[k] = (d, a, b)
+                        regions[i] = tuple(entries)
+            count = np.zeros(tuple(sizes.values()), int)
+            for region in regions:
+                bounds = {d: slice(a, b) for d, a, b in region}
+                count[tuple(bounds[d] for d in dims)] += 1
+            try:
+                _manifest_for(manifest.levels[0], dims, regions)
+            except ManifestError:
+                continue
+            accepted += 1
+            assert (count == 1).all(), (sizes, regions)
+        assert accepted > 500  # the undamaged grids and harmless reorders

@@ -245,8 +245,12 @@ is the property parallel writes depend on:
 - every region lies inside the array and starts and ends on write-unit
   boundaries (or at the array end);
 - for each data variable on each level, the task regions **tile the
-  array exactly**: no gaps, no overlaps, no duplicates, and every data
-  variable is written by at least one task.
+  array exactly as a grid**: per split dimension the intervals cover
+  the dimension end to end without overlap, every combination of
+  intervals occurs exactly once, and every data variable is written by
+  at least one task.  The order of the entries inside a region does not
+  matter.  Irregular tilings that are not grids are rejected even if
+  they do not overlap, since the planner never produces them.
 
 The tiling check is linear in the number of tasks; a manifest for ten
 years of hourly data in daily tasks (3650 tasks, 4 variables, 10 levels)
@@ -264,7 +268,7 @@ example:
 ```text
 ManifestError: tasks[3]: missing field 'levels'
 ManifestError: task 'task-000004': region start 3 is not a multiple of the write unit 24 of 'tas' on level 9 along 'time'
-ManifestError: manifest: 'pr' on level 7: tasks overlap along 'time' at index 48
+ManifestError: manifest: 'pr' on level 7: task intervals along 'time' overlap at index 48; ...
 ```
 
 `schema_version` remains the compatibility contract.  It is checked
@@ -711,7 +715,7 @@ apply there.
 | `StoreExistsError: cannot resume …: … planned differently (…)` | The parameters or the source layout changed since the init. | Restore the parameters, or overwrite. |
 | `StoreExistsError: cannot resume …: there is no readable manifest (… has not finished …)` | The previous init was killed, or the path holds a store not written by `init_pyramid_store`. | Overwrite. |
 | `ManifestError: tasks[3]: missing field '…'` or `… must be …` | The manifest file (or a task passed through JSON) is truncated or was edited. | Re-initialise, or fix the named field. |
-| `ManifestError: … tasks overlap / gap along 'time'` or `… not a multiple of the write unit` | A manifest whose tasks no longer tile the arrays, typically after hand-editing. | Re-initialise; never edit regions by hand. |
+| `ManifestError: … intervals along 'time' overlap` / `… gap along 'time'` or `… not a multiple of the write unit` | A manifest whose tasks no longer tile the arrays, typically after hand-editing. | Re-initialise; never edit regions by hand. |
 | `ManifestError: task-… differs from the task stored in the manifest` | The worker received a task that is not the one the manifest planned. | Pass the tasks from `manifest.tasks` unchanged. |
 | `ManifestError: cannot split along 'cell'` | `split` contains a spatial dimension. | Split along a non-spatial dimension. |
 | `ManifestError: dimension 'time' has different lengths across variables/levels` | Levels or variables disagree on the split dimension. | All levels of a pyramid must share it; check the source. |

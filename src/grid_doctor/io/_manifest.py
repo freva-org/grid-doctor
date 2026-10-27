@@ -921,7 +921,12 @@ def _check_consistency(manifest: PyramidManifest) -> None:
                     "written by any task",
                 )
     for (level, name), regions in coverage.items():
-        _check_partition(level, levels[level].array(name), regions)
+        _check_partition(
+            level,
+            levels[level].array(name),
+            regions,
+            [dim for dim, _ in manifest.split],
+        )
 
 
 def _check_task_region(where: str, level: int, spec: ArraySpec, region: Region) -> None:
@@ -947,37 +952,59 @@ def _check_task_region(where: str, level: int, spec: ArraySpec, region: Region) 
             )
 
 
-def _check_partition(level: int, spec: ArraySpec, regions: list[Region]) -> None:
-    """Check that the regions writing one array tile it exactly once.
+def _check_partition(
+    level: int,
+    spec: ArraySpec,
+    regions: list[Region],
+    split_order: Sequence[str],
+) -> None:
+    """Check that the regions writing one array form a grid that tiles it once.
 
-    Each region is a box: one interval per split dimension, the full
-    extent elsewhere.  The boxes tile the array without overlap exactly
-    when (1) all regions split the same dimensions, (2) per dimension the
-    distinct intervals tile ``[0, size)`` end to end, and (3) the regions
-    are pairwise distinct and as many as the product of interval counts,
-    i.e. every combination of intervals occurs once.  This is linear in
-    the number of tasks, so it stays cheap for tens of thousands of them.
+    Each region is a box: one ``[start, stop)`` interval per split
+    dimension, the full extent elsewhere.  Regions are read as
+    ``{dim: interval}`` mappings, so the order of the entries inside a
+    region does not matter, and dimensions are checked in the order of
+    the manifest's ``split``.
+
+    Accepted are exactly the grids the planner produces:
+
+    1. all regions split the same dimensions,
+    2. per dimension, the distinct intervals tile ``[0, size)`` end to
+       end without overlap, and
+    3. every combination of those intervals occurs exactly once.
+
+    Together these imply that every element is written by exactly one
+    task.  The check is deliberately stricter than "exact tiling": an
+    irregular tiling that is not a grid (e.g. different ``lev`` cuts for
+    different time ranges) is rejected even though it does not overlap,
+    because the planner never produces one.  It is linear in the number
+    of tasks.
     """
     where = f"manifest: {spec.name!r} on level {level}"
-    normalised = [tuple(sorted(r)) for r in regions]
-    dim_sets = {tuple(dim for dim, _, _ in r) for r in normalised}
+    boxes = [{dim: (start, stop) for dim, start, stop in region} for region in regions]
+    dim_sets = {frozenset(box) for box in boxes}
     if len(dim_sets) > 1:
         raise ManifestError(
             f"{where} is split along different dimensions by different "
-            f"tasks: {sorted(dim_sets)}"
+            f"tasks: {sorted(sorted(d) for d in dim_sets)}"
         )
-    dims = dim_sets.pop()
+    present = dim_sets.pop()
+    dims = [dim for dim in split_order if dim in present]
     expected = 1
-    for index, dim in enumerate(dims):
+    for dim in dims:
         size = spec.size(dim)
-        intervals = sorted({(r[index][1], r[index][2]) for r in normalised})
+        intervals = sorted({box[dim] for box in boxes})
         position = 0
         for start, stop in intervals:
-            if start != position:
-                problem = "overlap" if start < position else "gap"
+            if start < position:
                 raise ManifestError(
-                    f"{where}: tasks {problem} along {dim!r} at index "
-                    f"{min(start, position)}"
+                    f"{where}: task intervals along {dim!r} overlap at index "
+                    f"{start}; regions must form a grid of non-overlapping "
+                    "intervals per dimension"
+                )
+            if start > position:
+                raise ManifestError(
+                    f"{where}: tasks leave a gap along {dim!r} at index {position}"
                 )
             position = stop
         if position != size and not (size == 0 and intervals == [(0, 0)]):
@@ -985,8 +1012,9 @@ def _check_partition(level: int, spec: ArraySpec, regions: list[Region]) -> None
                 f"{where}: tasks cover {dim!r} up to {position}, not its length {size}"
             )
         expected *= len(intervals)
-    distinct = len(set(normalised))
-    if distinct != len(normalised):
+    cells = [tuple(box[dim] for dim in dims) for box in boxes]
+    distinct = len(set(cells))
+    if distinct != len(cells):
         raise ManifestError(
             f"{where} is written by more than one task in the same region"
         )
