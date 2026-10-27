@@ -33,4 +33,4 @@ jobs:
         if: inputs.upload-pages-artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: site-tech/
+          path: site/
