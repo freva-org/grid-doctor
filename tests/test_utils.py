@@ -330,6 +330,13 @@ class TestKeyHash:
         assert _key_hash(ds, 5) != _key_hash(shifted, 5)
         assert _key_hash(ds, 5) == _key_hash(unstructured_ds, 5)
 
+    def test_signed_zero_matches(self) -> None:
+        ds = _wrf_ds()
+        lon = ds["XLONG"].values.copy()
+        lon[lon == 0.0] = -0.0
+        signed = ds.assign_coords(XLONG=(ds["XLONG"].dims, lon))
+        assert _key_hash(ds, 5) == _key_hash(signed, 5)
+
     def test_raises_without_coordinates(self) -> None:
         with pytest.raises(ValueError, match="Could not locate latitude/longitude"):
             _key_hash(xr.Dataset(coords={"x": [0, 1]}), 5)

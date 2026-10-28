@@ -402,7 +402,7 @@ def _key_hash(
     digest = hashlib.sha256()
     for lat_name, lon_name in names:
         for name in (lat_name, lon_name):
-            values = np.ascontiguousarray(ds[name].values, dtype=np.float64)
+            values = np.ascontiguousarray(ds[name].values, dtype=np.float64) + 0.0  # -0.0 -> 0.0
             digest.update(f"shape={values.shape};".encode())
             digest.update(values.tobytes())
     digest.update(
