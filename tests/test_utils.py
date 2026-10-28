@@ -19,7 +19,7 @@ from grid_doctor.utils import (
     get_s3_options,
     chunk_for_target_store_size,
 )
-from grid_doctor.utils import _key_hash
+from grid_doctor.remap_backend import _key_hash
 
 
 class TestChunkSizeEstimator:

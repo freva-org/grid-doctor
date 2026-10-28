@@ -14,8 +14,7 @@ from typing import Any, Collection, Literal, cast
 import numpy as np
 import xarray as xr
 
-from .remap_backend import _get_latlon_names, _get_vertex_names
-from .types import EllipsoidKind, RemapMethod, SourceUnits
+from .types import  RemapMethod, SourceUnits
 
 logger = logging.getLogger(__name__)
 
@@ -184,33 +183,6 @@ def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
     with pickle_file.open("wb") as handle:
         pickle.dump(dataset, handle)
     return dataset
-
-
-def _key_hash(
-    ds: xr.Dataset,
-    level: int,
-    *,
-    method: RemapMethod = "conservative",
-    nest: bool = True,
-    ellipsoid: EllipsoidKind = "sphere",
-) -> str:
-
-    names = [_get_latlon_names(ds)]
-    try:
-        names.append(_get_vertex_names(ds))
-    except ValueError:
-        pass  # vertices are optional
-
-    digest = hashlib.sha256()
-    for lat_name, lon_name in names:
-        for name in (lat_name, lon_name):
-            values = np.ascontiguousarray(ds[name].values, dtype=np.float64)
-            digest.update(f"shape={values.shape};".encode())
-            digest.update(values.tobytes())
-    digest.update(
-        f"level={level};method={method};nest={nest};ellipsoid={ellipsoid}".encode()
-    )
-    return digest.hexdigest()
 
 
 def cached_weights(

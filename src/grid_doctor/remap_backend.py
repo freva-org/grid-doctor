@@ -21,6 +21,7 @@ Two weight-generation paths are available:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -369,8 +370,6 @@ class WeightsDescription:
         return self._compute_key()
 
     def _compute_key(self) -> str:
-        from .utils import _key_hash
-
         return _key_hash(
             self.source.geometry,
             self.target.level,
@@ -384,6 +383,32 @@ class WeightsDescription:
 
     def __eq__(self, other: object) -> bool:  # noqa: D105
         return isinstance(other, WeightsDescription) and self.key == other.key
+
+
+def _key_hash(
+    ds: xr.Dataset,
+    level: int,
+    *,
+    method: RemapMethod = "conservative",
+    nest: bool = True,
+    ellipsoid: EllipsoidKind = "sphere",
+) -> str:
+    names = [_get_latlon_names(ds)]
+    try:
+        names.append(_get_vertex_names(ds))
+    except ValueError:
+        pass  # vertices are optional
+
+    digest = hashlib.sha256()
+    for lat_name, lon_name in names:
+        for name in (lat_name, lon_name):
+            values = np.ascontiguousarray(ds[name].values, dtype=np.float64)
+            digest.update(f"shape={values.shape};".encode())
+            digest.update(values.tobytes())
+    digest.update(
+        f"level={level};method={method};nest={nest};ellipsoid={ellipsoid}".encode()
+    )
+    return digest.hexdigest()
 
 
 class SpectralTransformError(RuntimeError):
