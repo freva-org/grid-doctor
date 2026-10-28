@@ -388,13 +388,41 @@ they write identical data into identical, chunk-aligned regions.
 A moved or copied store cannot be resumed (its manifest records the old
 path, which is where workers would write).  Use `"overwrite"` there.
 
-**Overwrite** must not be used while another conversion into the same
-path is running.  Workers of the old run that have not started fail with
-`StaleTaskError`.  A worker that was already writing cannot be stopped
-from writing into the new stores, but it re-checks the manifest after
-writing and fails with `StaleTaskError` ("re-initialised while
-task-… was writing") instead of reporting success.  If you ever see that
-message, overwrite once more and let only one run write.
+**Overwrite** discards the store and starts a new manifest.  Use it
+only when nothing else is writing into the path.
+
+!!! danger "One conversion per path at a time"
+    grid-doctor does not lock a store.  It assumes that **only one
+    conversion writes into a path at any time**, and it cannot enforce
+    that on a shared file system or object store.
+
+    What grid-doctor does guard against:
+
+    - a second init on an existing path is refused unless you pass
+      `if_exists` (`"error"` is the default),
+    - `"resume"` only continues a store that was planned the same way
+      and has the same coordinate values,
+    - workers refuse tasks of an older manifest, edited tasks, and
+      pyramids whose coordinates differ from the stored ones.
+
+    What it **cannot** prevent: an `"overwrite"` while workers of the
+    previous run are still writing.  A worker that already passed its
+    checks keeps writing, into the new stores.  It notices afterwards
+    and fails with `StaleTaskError` ("re-initialised while task-… was
+    writing"), but by then its data may sit in regions the new run has
+    already marked as done, and `check_pyramid_store` of the new run can
+    still report the store as complete.
+
+    So, before overwriting:
+
+    1. make sure the previous run into that path has finished or is
+       cancelled (`status` / `cancel` in reflow, or the scheduler);
+    2. if you ever see the "re-initialised while … was writing" error,
+       overwrite once more, with nothing else running.
+
+    When several people or runs convert at the same time, give each
+    conversion its own path, or let the workflow tool allow only one
+    active run per target.
 
 The `_grid_doctor/` directory is not part of any zarr store and does not
 disturb readers.  Once a store is complete and published you may delete
@@ -682,7 +710,9 @@ outputs) it has seen before.  Two things to know:
   identical, reflow finds the write elements that succeeded last time in
   its cache and skips them; only failed or timed-out elements run again.
   `retry <run-id> --task write` does the same within one run.  To start
-  over deliberately, submit with `--overwrite`.
+  over deliberately, submit with `--overwrite`, but only after the
+  previous run into the same target has finished or been cancelled (see
+  [one conversion per path](#when-the-target-already-exists)).
 - **`verify=gd.is_task_done` on the array job.**  A write element is
   cached by its task, and every task carries the manifest id, so a
   re-initialised store never reuses old results.  On a cache hit with
@@ -719,7 +749,7 @@ apply there.
 | A task ran twice | Nothing.  Writes are idempotent. |
 | You want a different `split` or `variables_per_task` | Run the init with `if_exists="overwrite"` (`--overwrite`).  All written data is discarded and a new manifest is created.  `"resume"` refuses and lists what changed. |
 | The source data changed | Overwrite.  Resume notices changed layouts (shapes, chunks, variables) and changed coordinate labels (another time range), not changed values under the same labels. |
-| Workers from an old run are still in the queue after a re-init | They fail with `StaleTaskError` without writing anything.  Cancel them. |
+| Workers from an old run are still in the queue after a re-init | Those that have not started fail with `StaleTaskError` without writing anything.  Cancel them, and next time cancel the old run *before* overwriting: workers that were already writing may have written into the new stores (see [one conversion per path](#when-the-target-already-exists)). |
 | The store was deleted | `check_pyramid_store` reports problems; `is_current` returns `False`.  Run the init again. |
 | You want to publish the finished store | Optionally delete `<path>/_grid_doctor/`.  Readers never look at it. |
 
@@ -754,8 +784,13 @@ apply there.
   For very large static fields at high levels that task is
   correspondingly large; `materialise` or a separate run are the
   options.
+- grid-doctor does not lock stores: only one conversion may write into
+  a path at a time (see
+  [one conversion per path](#when-the-target-already-exists)).
 - The manifest describes data variables only.  Coordinates are written
-  completely by the init and are not re-checked beyond their existence.
+  completely by the init; resume and workers compare their values (not
+  those along `cell`), but changed data under unchanged labels is not
+  detected.
 
 See the [Parallel writes API reference](../api/parallel.md) for all
 parameters.

@@ -582,7 +582,10 @@ def init_pyramid_store(
         - ``"overwrite"``: re-initialise.  All data is discarded, the
           result gets a new ``manifest_id``, and tasks and markers of the
           previous manifest become invalid; workers still running for
-          it fail with ``StaleTaskError``.
+          it fail with ``StaleTaskError``.  Only overwrite when no
+          worker of a previous run may still be writing: grid-doctor
+          does not lock the store, and a worker that is already writing
+          can put its data into the new stores before it notices.
 
     Returns
     -------
