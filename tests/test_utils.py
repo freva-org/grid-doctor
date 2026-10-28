@@ -337,6 +337,16 @@ class TestKeyHash:
         signed = ds.assign_coords(XLONG=(ds["XLONG"].dims, lon))
         assert _key_hash(ds, 5) == _key_hash(signed, 5)
 
+    def test_key_is_pinned(self) -> None:
+        """The same grid gets the same key on any host byte order.
+
+        Update *expected* only when the key scheme changes on purpose.
+        """
+        ds = _wrf_ds()
+        big = ds.assign_coords({k: ds[k].astype(">f8") for k in ("XLAT", "XLONG")})
+        expected = "3503913424d6b61bd49fe7cdcfc6c4d556d99f1ff5a7606e4050694ce330ec97"
+        assert _key_hash(ds, 5) == _key_hash(big, 5) == expected
+
     def test_raises_without_coordinates(self) -> None:
         with pytest.raises(ValueError, match="Could not locate latitude/longitude"):
             _key_hash(xr.Dataset(coords={"x": [0, 1]}), 5)
