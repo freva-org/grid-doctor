@@ -337,6 +337,32 @@ class TestKeyHash:
         signed = ds.assign_coords(XLONG=(ds["XLONG"].dims, lon))
         assert _key_hash(ds, 5) == _key_hash(signed, 5)
 
+    def test_nan_payloads_match(self) -> None:
+        """NaNs with different bit patterns must not change the key.
+
+        A float64 NaN is any value with all exponent bits set and a non-zero
+        mantissa, so many bit patterns are NaN, e.g.:
+
+            np.nan          0x7ff8000000000000
+            payload | 1     0x7ff8000000000001
+
+        They compare as NaN but their bytes differ, so hashing raw bytes
+        would give the same grid two different keys.
+        """
+        ds = _wrf_ds()
+        lat = ds["XLAT"].values.copy()
+        lat.flat[0] = np.nan  # 0x7ff8000000000000
+        quiet = ds.assign_coords(XLAT=(ds["XLAT"].dims, lat))
+
+        lat = lat.copy()
+        lat.view(np.uint64).flat[0] |= 1  # 0x7ff8000000000001, still valid NaN
+        payload = ds.assign_coords(XLAT=(ds["XLAT"].dims, lat))
+
+        # Same grid apart from the NaN bits: the raw bytes differ, the keys must not.
+        assert np.isnan(payload["XLAT"].values.flat[0])
+        assert quiet["XLAT"].values.tobytes() != payload["XLAT"].values.tobytes()
+        assert _key_hash(quiet, 5) == _key_hash(payload, 5)
+
     def test_key_is_pinned(self) -> None:
         """The same grid gets the same key on any host byte order.
 

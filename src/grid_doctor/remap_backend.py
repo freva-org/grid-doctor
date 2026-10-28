@@ -403,6 +403,7 @@ def _key_hash(
     for lat_name, lon_name in names:
         for name in (lat_name, lon_name):
             values = np.asarray(ds[name].values, dtype=np.float64) + 0.0  # -0.0 -> 0.0
+            values[np.isnan(values)] = np.nan  # one NaN bit pattern
             values = np.ascontiguousarray(values, dtype="<f8")  # same bytes on any host
             digest.update(f"shape={values.shape};".encode())
             digest.update(values.tobytes())
