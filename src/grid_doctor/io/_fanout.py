@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import dask.array as da
+import numpy as np
 import s3fs
 import xarray as xr
 import zarr
@@ -49,6 +50,7 @@ from ._manifest import (
     DONE_DIR,
     INIT_FILE,
     MANIFEST_FILE,
+    SPATIAL_DIMS,
     STATE_DIR,
     ArraySpec,
     LevelSpec,
@@ -434,7 +436,10 @@ def resume_init(
     written) and the chunking of the stores that already exist, and
     compared with the stored manifest: path, zarr format, levels, array
     layouts, split, materialised variables and every task's variables,
-    region and levels.  Nothing is written.
+    region and levels.  The coordinate values the init wrote are
+    compared too (see `coordinate_differences`), so a pyramid of another
+    time range with the same shape is not resumed into the store.
+    Nothing is written.
 
     Raises
     ------
@@ -481,6 +486,15 @@ def resume_init(
                     level, template, spec, target.store(name), zarr_format
                 )
             )
+            differences.extend(
+                f"level {level}: {problem}"
+                for problem in coordinate_differences(
+                    template,
+                    target.store(name),
+                    existing.level(level).coords,
+                    zarr_format=zarr_format,
+                )
+            )
             levels.append(spec)
 
     if not differences:
@@ -510,6 +524,143 @@ def resume_init(
         len(existing.tasks),
     )
     return existing
+
+
+def coordinate_differences(
+    dataset: xr.Dataset,
+    store: Any,
+    names: Iterable[str],
+    *,
+    zarr_format: Literal[2, 3],
+    region: Mapping[str, tuple[int, int]] | None = None,
+) -> list[str]:
+    """Compare *dataset*'s coordinates with the ones the init stored.
+
+    The init writes coordinates completely; workers only write data
+    variables and trust that their labels match.  A pyramid built from
+    another time range (or other levels, members, ...) with the same
+    shape would otherwise put its values under the stored labels.
+
+    Checked are the arrays in *names* (a level's ``coords``) that exist in
+    both *dataset* and the store and do not span a spatial dimension:
+    ``cell``, ``latitude`` and ``longitude`` are a pure function of the
+    HEALPix index and can be very large.  Values are encoded exactly as
+    they would be stored (same units, dtype, packing) and compared with
+    the stored bytes, so the check is exact for times, integers and
+    floats alike and independent of the in-memory dtype.
+
+    Parameters
+    ----------
+    dataset:
+        One pyramid level.  Along a dimension in *region* it may cover
+        the full stored length or exactly the region.
+    store:
+        The level store.
+    names:
+        Arrays to compare.
+    zarr_format:
+        Zarr format of the store.
+    region:
+        ``{dim: (start, stop)}``; only this part is compared.  ``None``
+        compares everything.
+
+    Returns
+    -------
+    list[str]
+        One human-readable line per mismatching coordinate.
+    """
+    region = dict(region or {})
+    group = zarr.open_group(store, mode="r", zarr_format=zarr_format)
+    members = set(group.array_keys())
+    encodings: dict[str, dict[str, Any]] | None = None
+    decoded: xr.Dataset | None = None
+    problems: list[str] = []
+    for name in names:
+        if name not in dataset.variables or name not in members:
+            continue
+        var = dataset.variables[name]
+        if set(var.dims) & set(SPATIAL_DIMS):
+            continue
+        stored = group[name]
+        if not isinstance(stored, zarr.Array):
+            continue
+        stored_dims = _array_dims(stored)
+        if stored_dims is not None and set(stored_dims) != set(var.dims):
+            problems.append(
+                f"coordinate {name!r}: dims {var.dims} != stored {stored_dims}"
+            )
+            continue
+        if stored_dims is not None and tuple(stored_dims) != var.dims:
+            var = var.transpose(*stored_dims)
+        selection: dict[str, slice] = {}
+        stored_index: list[slice] = []
+        for dim, have, full in zip(var.dims, var.shape, stored.shape):
+            start, stop = region.get(str(dim), (0, int(full)))
+            if have == full and (start, stop) != (0, full):
+                selection[str(dim)] = slice(start, stop)
+            elif have not in (full, stop - start):
+                problems.append(
+                    f"coordinate {name!r}: length {have} along {dim!r}, store "
+                    f"has {full}"
+                    + (f", task region {stop - start}" if dim in region else "")
+                )
+                break
+            stored_index.append(slice(start, stop))
+        else:
+            if encodings is None:
+                encodings = stored_encodings(store, zarr_format=zarr_format)
+            mine = var.isel(selection) if selection else var
+            mine = mine.copy(deep=False)
+            mine.encoding = dict(encodings.get(name, {}))
+            raw_mine = np.asarray(
+                encode_zarr_variable(mine, name=name, zarr_format=zarr_format).values
+            )
+            raw_stored = np.asarray(stored[tuple(stored_index)])
+            if raw_mine.shape != raw_stored.shape:
+                problems.append(
+                    f"coordinate {name!r}: shape {raw_mine.shape} != stored "
+                    f"{raw_stored.shape}"
+                )
+                continue
+            equal = _equal_elements(raw_mine, raw_stored)
+            if equal.all():
+                continue
+            position = tuple(int(i) for i in np.argwhere(~equal)[0])
+            if decoded is None:
+                decoded = xr.open_zarr(store, zarr_format=zarr_format, chunks=None)
+            theirs = (
+                decoded[name]
+                .isel({d: s for d, s in zip(var.dims, stored_index)})
+                .values[position]
+            )
+            ours = mine.values[position]
+            where = ", ".join(
+                f"{d}={s.start + i}"
+                for d, s, i in zip(var.dims, stored_index, position)
+            )
+            problems.append(
+                f"coordinate {name!r} differs at {where or 'its only element'}: "
+                f"pyramid has {ours}, store has {theirs}"
+            )
+    if decoded is not None:
+        decoded.close()
+    return problems
+
+
+def _array_dims(array: Any) -> tuple[str, ...] | None:
+    names = getattr(array.metadata, "dimension_names", None)
+    if names:
+        return tuple(str(n) for n in names)
+    dims = array.attrs.get("_ARRAY_DIMENSIONS")
+    return tuple(str(d) for d in dims) if dims is not None else None
+
+
+def _equal_elements(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Elementwise equality that treats NaN == NaN (and NaT == NaT)."""
+    equal = np.asarray(a == b)
+    if a.dtype.kind in "fcmM" and b.dtype.kind in "fcmM":
+        equal = equal | (np.isnan(a) & np.isnan(b))
+    return equal
 
 
 def _layout_difference(old: LevelSpec, new: LevelSpec) -> str:
@@ -663,7 +814,9 @@ def write_pyramid_task(
         *task* is not identical to the task of the same id in the stored
         manifest (only tasks the manifest validated are written), or
         *pyramid* does not match the manifest (missing level or variable,
-        different dimension lengths, a region the data cannot cover).
+        different dimension lengths, a region the data cannot cover), or
+        its coordinate values in the task region differ from the ones the
+        init stored (e.g. another time range of the same length).
     """
     started = time.monotonic()
     target = _Target(task.path, s3_options)
@@ -716,6 +869,22 @@ def write_pyramid_task(
                 slice(off, off + n) for off, n in zip(offsets, encoded.shape)
             )
             writes.append(DeferredWrite(source, group[name], region))
+
+        mismatches = coordinate_differences(
+            pyramid[level],
+            store,
+            spec.coords,
+            zarr_format=task.zarr_format,
+            region={dim: (start, stop) for dim, start, stop in task.region},
+        )
+        if mismatches:
+            raise ManifestError(
+                f"{task.task_id}: the pyramid does not match the coordinates "
+                f"stored by the init on level {level} ("
+                + "; ".join(mismatches)
+                + ").  It was built from other data than the store; nothing "
+                "was written."
+            )
 
     store_all(writes)
     # The manifest was checked before writing.  If the store was

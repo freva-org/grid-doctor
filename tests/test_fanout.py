@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import numpy as np
+import pandas as pd
 import pytest
 import s3fs
 import xarray as xr
@@ -1051,3 +1052,111 @@ class TestMultiDimensionalPartition:
             accepted += 1
             assert (count == 1).all(), (sizes, regions)
         assert accepted > 500  # the undamaged grids and harmless reorders
+
+
+# ----------------------------------------------------------------------
+# Coordinate values: resume and workers must not relabel data
+# ----------------------------------------------------------------------
+
+
+def _labelled(
+    start: int, *, ntime: int = 4, time_chunk: int = 2, **coords: Any
+) -> dict[int, xr.Dataset]:
+    ds = xr.Dataset(
+        {"t": (("time", "cell"), np.full((ntime, 12), float(start)))},
+        coords={"time": np.arange(start, start + ntime), **coords},
+    )
+    return {0: ds.chunk(time=time_chunk, cell=12)}
+
+
+def _hourly(start: str, ntime: int = 6) -> dict[int, xr.Dataset]:
+    time = pd.date_range(start, periods=ntime, freq="h")
+    ds = xr.Dataset(
+        {"t": (("time", "cell"), np.arange(ntime * 12, dtype="f4").reshape(ntime, 12))},
+        coords={"time": time},
+    )
+    ds["time"].encoding = {"units": "hours since 2000-01-01", "dtype": "int32"}
+    return {0: ds.chunk(time=2, cell=12)}
+
+
+class TestCoordinateValues:
+    def test_review_case_resume_refuses_other_time_range(self, tmp_path: Path) -> None:
+        old, new = _labelled(0), _labelled(100)
+        manifest = gd.init_pyramid_store(old, str(tmp_path), split={"time": 2})
+        gd.write_pyramid_task(old, manifest.tasks[0])
+        with pytest.raises(
+            StoreExistsError, match="coordinate 'time' differs at time=0"
+        ):
+            gd.init_pyramid_store(
+                new, str(tmp_path), split={"time": 2}, if_exists="resume"
+            )
+
+    def test_review_case_worker_refuses_other_time_range(self, tmp_path: Path) -> None:
+        old, new = _labelled(0), _labelled(100)
+        manifest = gd.init_pyramid_store(old, str(tmp_path), split={"time": 2})
+        gd.write_pyramid_task(old, manifest.tasks[0])
+        with pytest.raises(ManifestError, match="pyramid has 102, store has 2"):
+            gd.write_pyramid_task(new, manifest.tasks[1])
+        stored = xr.open_zarr(tmp_path / "level_0.zarr")["t"][:, 0].values
+        np.testing.assert_array_equal(stored, [0.0, 0.0, np.nan, np.nan])
+        assert not gd.check_pyramid_store(manifest).complete
+
+    def test_non_split_coordinate_is_checked(self, tmp_path: Path) -> None:
+        lev = xr.DataArray([1000.0, 850.0], dims="lev")
+        pyramid = {
+            0: xr.Dataset(
+                {"t": (("time", "lev", "cell"), np.zeros((4, 2, 12)))},
+                coords={"time": np.arange(4), "lev": lev},
+            ).chunk(time=2, lev=2, cell=12)
+        }
+        manifest = gd.init_pyramid_store(pyramid, str(tmp_path), split={"time": 2})
+        other = {0: pyramid[0].assign_coords(lev=[925.0, 850.0])}
+        with pytest.raises(ManifestError, match="coordinate 'lev' differs at lev=0"):
+            gd.write_pyramid_task(other, manifest.tasks[0])
+        with pytest.raises(StoreExistsError, match="coordinate 'lev'"):
+            gd.init_pyramid_store(
+                other, str(tmp_path), split={"time": 2}, if_exists="resume"
+            )
+
+    def test_encoded_times_resume_and_presubset_workers(self, tmp_path: Path) -> None:
+        """CF-encoded int32 hours: same dates pass, shifted dates fail."""
+        pyramid = _hourly("2020-01-01")
+        manifest = gd.init_pyramid_store(pyramid, str(tmp_path), split={"time": 2})
+        source = pyramid[0]
+        for task in manifest.tasks:
+            gd.write_pyramid_task({0: source.isel(task.isel())}, task)
+        resumed = gd.init_pyramid_store(
+            _hourly("2020-01-01"), str(tmp_path), split={"time": 2}, if_exists="resume"
+        )
+        assert resumed == manifest and gd.check_pyramid_store(resumed).complete
+
+        shifted = _hourly("2020-01-01T01")
+        with pytest.raises(ManifestError, match="coordinate 'time' differs at time=2"):
+            gd.write_pyramid_task(
+                {0: shifted[0].isel(manifest.tasks[1].isel())}, manifest.tasks[1]
+            )
+        with pytest.raises(StoreExistsError, match="2020-01-01T01"):
+            gd.init_pyramid_store(
+                shifted, str(tmp_path), split={"time": 2}, if_exists="resume"
+            )
+
+    def test_downcast_and_nan_coordinates_compare_as_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """float64 labels stored as float32, with a NaN label, still match."""
+        depth = xr.DataArray([0.1, np.nan, 1 / 3], dims="depth")
+        ds = xr.Dataset(
+            {"t": (("time", "depth", "cell"), np.zeros((4, 3, 12)))},
+            coords={"time": np.arange(4), "depth": depth},
+        ).chunk(time=2, depth=3, cell=12)
+        ds["depth"].encoding = {"dtype": "float32"}
+        pyramid = {0: ds}
+        manifest = gd.init_pyramid_store(pyramid, str(tmp_path), split={"time": 2})
+        _run_all(pyramid, manifest.tasks)
+        assert (
+            gd.init_pyramid_store(
+                pyramid, str(tmp_path), split={"time": 2}, if_exists="resume"
+            )
+            == manifest
+        )
+        assert gd.check_pyramid_store(manifest).complete

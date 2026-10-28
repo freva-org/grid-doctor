@@ -356,7 +356,10 @@ the target first and lets you choose with `if_exists`:
 chunking of the stores that already exist, and compares the result with
 the stored manifest: path, zarr format, levels, array names, dims,
 shapes, chunks and dtypes, `materialise`, the effective `split` and every
-task's variables, region and levels.  If everything matches it returns
+task's variables, region and levels.  It also compares the **coordinate
+values** the init wrote (time, vertical levels, members, ...), so a
+pyramid of another time range with the same length is refused rather
+than resumed under the old labels.  If everything matches it returns
 the stored manifest **unchanged, with its `manifest_id`**, and writes
 nothing.  Tasks that already finished keep their markers.  If anything
 differs, it raises and lists the differences:
@@ -365,7 +368,16 @@ differs, it raises and lists the differences:
 StoreExistsError: cannot resume /scratch/project/era5: the stored
 manifest d28efd88… was planned differently (split {'time': 72} !=
 {'time': 48}). Use if_exists='overwrite' to discard it and start over.
+
+StoreExistsError: cannot resume /scratch/project/era5: the stored
+manifest d28efd88… was planned differently (level 9: coordinate 'time'
+differs at time=0: pyramid has 2021-01-01T00:00:00, store has
+2020-01-01T00:00:00). Use if_exists='overwrite' ...
 ```
+
+What resume cannot see is a change in the *data* under unchanged labels
+(the same time steps re-processed with a fixed input file, say).  In
+that case overwrite.
 
 That makes re-submitting a conversion after a time-out safe and cheap:
 same parameters resume where the last run stopped, different parameters
@@ -430,6 +442,13 @@ they are ignored.
 4. Dimension names match the store (dimension order may differ; the
    data is transposed).
 5. Non-split dimensions have exactly the stored length.
+6. The coordinate values in the task region match the ones the init
+   stored.  Workers never write coordinates, so a pyramid built from
+   another time range of the same length would otherwise put its data
+   under the stored labels.  Values are encoded the way they are stored
+   (units, dtype, packing) and compared exactly; arrays along `cell`
+   (`cell`, `latitude`, `longitude`) are skipped, since they follow from
+   the HEALPix index.
 
 After the data is stored and before the completion marker is written,
 the worker reads the manifest id once more.  If the store was
@@ -699,7 +718,7 @@ apply there.
 | The init job hit its time limit | There is no manifest, only `init.json` and partial stores; nothing else ran.  Give the init more time and `submit --overwrite`. |
 | A task ran twice | Nothing.  Writes are idempotent. |
 | You want a different `split` or `variables_per_task` | Run the init with `if_exists="overwrite"` (`--overwrite`).  All written data is discarded and a new manifest is created.  `"resume"` refuses and lists what changed. |
-| The source data changed | Overwrite.  Resume only notices changes in layout (shapes, chunks, variables), not in values. |
+| The source data changed | Overwrite.  Resume notices changed layouts (shapes, chunks, variables) and changed coordinate labels (another time range), not changed values under the same labels. |
 | Workers from an old run are still in the queue after a re-init | They fail with `StaleTaskError` without writing anything.  Cancel them. |
 | The store was deleted | `check_pyramid_store` reports problems; `is_current` returns `False`.  Run the init again. |
 | You want to publish the finished store | Optionally delete `<path>/_grid_doctor/`.  Readers never look at it. |
@@ -716,6 +735,7 @@ apply there.
 | `StoreExistsError: cannot resume …: there is no readable manifest (… has not finished …)` | The previous init was killed, or the path holds a store not written by `init_pyramid_store`. | Overwrite. |
 | `ManifestError: tasks[3]: missing field '…'` or `… must be …` | The manifest file (or a task passed through JSON) is truncated or was edited. | Re-initialise, or fix the named field. |
 | `ManifestError: … intervals along 'time' overlap` / `… gap along 'time'` or `… not a multiple of the write unit` | A manifest whose tasks no longer tile the arrays, typically after hand-editing. | Re-initialise; never edit regions by hand. |
+| `ManifestError: task-…: the pyramid does not match the coordinates stored by the init …` | The worker built its pyramid from other data than the init (another time range, other levels), or subset it differently from `task.isel()`. | Build workers from the same source as the init, subset with `task.isel()`. |
 | `ManifestError: task-… differs from the task stored in the manifest` | The worker received a task that is not the one the manifest planned. | Pass the tasks from `manifest.tasks` unchanged. |
 | `ManifestError: cannot split along 'cell'` | `split` contains a spatial dimension. | Split along a non-spatial dimension. |
 | `ManifestError: dimension 'time' has different lengths across variables/levels` | Levels or variables disagree on the split dimension. | All levels of a pyramid must share it; check the source. |
