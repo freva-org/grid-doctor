@@ -1,0 +1,71 @@
+# Hooks delegate to the tox envs in pyproject.toml, so local checks match CI.
+#
+# pre-commit: fast checks restricted to the staged files.
+# pre-push:   the full CI suite (lint, types, docs, tests) on the whole code.
+#
+# Commit hooks pass --skip-pkg-install: the envs already hold an editable
+# install via `deps = -e .`, so rebuilding the package only costs time.
+#
+# Install with: pre-commit install
+default_install_hook_types: [pre-commit, pre-push]
+repos:
+  - repo: local
+    hooks:
+      # --- pre-commit: staged files only ---------------------------------
+      - id: lint
+        name: lint (staged files)
+        entry: tox -q -e lint --skip-pkg-install --
+        language: system
+        types: [python]
+        files: ^src/grid_doctor/
+        require_serial: true
+        stages: [pre-commit]
+      # mypy follows imports anyway, so checking only the staged files is not
+      # faster and would miss breakage in importing modules; its cache keeps
+      # the full run incremental.
+      - id: types
+        name: types (tox -e types, if src changed)
+        entry: tox -q -e types --skip-pkg-install
+        language: system
+        types: [python]
+        files: ^src/grid_doctor/
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: docs-spell
+        name: docs spelling (staged files)
+        entry: tox -q -e docs-spell --
+        language: system
+        types: [text]
+        files: ^docs/
+        require_serial: true
+        stages: [pre-commit]
+
+      # --- pre-push: full suite on the whole code ------------------------
+      - id: lint-full
+        name: lint (tox -e lint)
+        entry: tox -q -e lint
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: types-full
+        name: types (tox -e types)
+        entry: tox -q -e types
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: docs-full
+        name: docs (tox -e docs)
+        entry: tox -q -e docs
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: test
+        name: test (tox -e test)
+        entry: tox -q -e test
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
