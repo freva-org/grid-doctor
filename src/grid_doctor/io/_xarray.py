@@ -35,7 +35,7 @@ def get_common_coordinates(
     common_coords = []
     coordinates = [ds.coords for ds in pyramid.values()]
     for c in coordinates[0]:
-        if all(coordinates[0][c].equals(cs[c]) for cs in coordinates):
+        if all(c in cs and coordinates[0][c].equals(cs[c]) for cs in coordinates):
             common_coords.append(str(c))
     return common_coords
 
@@ -66,8 +66,7 @@ def pyramid_to_multiscales_tree(
         "/": root,
     }
     for level, ds in pyramid.items():
-        ds_mod = ds.copy()
-        ds_mod.assign_attrs(
+        ds_mod = ds.assign_attrs(
             healpix_level=int(level),
         )
         tree[f"level_{level}"] = ds_mod
@@ -80,6 +79,7 @@ def prepare_template(
     dataset: xr.Dataset,
     level: int,
     write_coords: bool | Literal["auto"] = "auto",
+    max_level_to_auto_write_coords: int = 10,
     encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
     materialise: list[str] | None = None,
 ) -> tuple[xr.Dataset, dict[str, Any]]:
@@ -88,7 +88,12 @@ def prepare_template(
     Parameters listed under `materialise` will be written,
     all other left empty.
     """
-    dataset = maybe_drop_coordinates(dataset, level, write_coords)
+    dataset = maybe_drop_coordinates(
+        dataset,
+        level,
+        write_coords,
+        max_level_to_auto_write=max_level_to_auto_write_coords,
+    )
     lazy_vars = set(dataset.keys())
     if materialise:
         lazy_vars = {v for v in lazy_vars if v not in materialise}

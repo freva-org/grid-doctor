@@ -482,6 +482,7 @@ def init_pyramid_store(
             dataset,
             level,
             write_coords=write_coords,
+            max_level_to_auto_write_coords=WRITE_COORDS_MAX_LEVEL,
             encoding=encoding,
             materialise=materialise,
         )
@@ -489,7 +490,7 @@ def init_pyramid_store(
         if structure == "flat":
             root_path = f"{path}/level_{level}.zarr"
             store = get_store(root_path, fs)
-            logger.info("Writing HEALPix to %s", store)
+            logger.info("Writing HEALPix to %s", root_path)
             zarr_options = get_zarr_options("w", zarr_format, combined_encoding)
             template.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
         else:
@@ -654,6 +655,7 @@ def _save_multiscale(
     # Deferred writes not yet implemented for multiscales regions
     zarr_options["compute"] = True
     logger.info("Writing HEALPix to %s", store)
+    print(f"[DEBUG] template:\n{template}\n")
     template.to_zarr(  # type: ignore[call-overload]
         store,
         region=write_region,

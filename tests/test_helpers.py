@@ -817,6 +817,9 @@ class TestSavePyramidMultiscales:
         ds0 = dt["/level_7"].dataset
         ds1 = dt["/level_11"].dataset
 
+        assert ds0.attrs["healpix_level"] == 7
+        assert ds1.attrs["healpix_level"] == 11
+
         xr.testing.assert_allclose(ds0.compute(), pyramid[7].compute())
         xr.testing.assert_allclose(
             ds1.compute(), pyramid[11].compute().drop_vars(["cell", "latitude"])
