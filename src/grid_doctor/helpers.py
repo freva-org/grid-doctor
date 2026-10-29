@@ -13,16 +13,26 @@ Remapping itself lives in [`grid_doctor.remap`][grid_doctor.remap].
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any, Literal
 
-import dask
 import numpy as np
 import numpy.typing as npt
 import s3fs
 import xarray as xr
 
-from .io import DeferredWrite, deferred_writes, store_all
+from .io import (
+    DeferredWrite,
+    deferred_writes,
+    get_common_coordinates,
+    get_filesystem,
+    get_store,
+    get_zarr_options,
+    maybe_drop_coordinates,
+    prepare_region_dataset,
+    prepare_template,
+    pyramid_to_multiscales_tree,
+    store_all,
+)
 from .pyramid import (
     coarse_levels,
     coarsen_dataset,
@@ -40,7 +50,7 @@ from .remap_backend import (
     _get_unstructured_dim,
     _is_unstructured,
 )
-from .types import CoarsenMode, FloatArray, ValidFraction, ZarrOptions
+from .types import CoarsenMode, FloatArray, ValidFraction
 
 logger = logging.getLogger(__name__)
 
@@ -413,61 +423,6 @@ def create_healpix_pyramid(
 # ===================================================================
 
 
-def _get_zarr_options(
-    mode: Literal["a", "w", "r+"],
-    zarr_format: Literal[2, 3],
-    encoding: dict[str, dict[str, Any]] | None,
-) -> ZarrOptions:
-
-    zarr_options = ZarrOptions(compute=False, mode=mode, zarr_format=zarr_format)
-    if zarr_format == 2:
-        zarr_options["consolidated"] = True
-    if encoding is not None:
-        zarr_options["encoding"] = encoding
-    return zarr_options
-
-
-def _get_filesystem(
-    path: str,
-    s3_options: dict[str, Any] | None,
-) -> s3fs.S3FileSystem | None:
-    is_s3 = path.startswith("s3://")
-    fs = s3fs.S3FileSystem(**(s3_options or {})) if is_s3 else None
-    return fs
-
-
-def _get_store(path: str, store_name: str, fs: s3fs.S3FileSystem | None) -> Any:
-    root_path = f"{path}/{store_name}.zarr"
-    logger.info("Writing HEALPix to %s", root_path)
-    store: Any
-    if fs:
-        store = s3fs.S3Map(root=root_path, s3=fs)
-    else:
-        Path(root_path).parent.mkdir(parents=True, exist_ok=True)
-        store = root_path
-    return store
-
-
-def _maybe_drop_coordinates(
-    level: int,
-    dataset: xr.Dataset,
-    write_coords: bool | Literal["auto"] = "auto",
-) -> xr.Dataset:
-    include_coords = (
-        write_coords
-        if isinstance(write_coords, bool)
-        else level <= WRITE_COORDS_MAX_LEVEL
-    )
-    if not include_coords:
-        dataset = dataset.drop_vars(["latitude", "longitude", "cell"], errors="ignore")
-        dataset.attrs["grid_doctor_implicit_coords"] = 1
-    return dataset
-
-
-def _raise_template_error() -> None:
-    raise ValueError("cannot compute array values")
-
-
 def init_pyramid_store(
     pyramid: dict[int, xr.Dataset],
     path: str,
@@ -477,6 +432,7 @@ def init_pyramid_store(
     encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
     write_coords: bool | Literal["auto"] = "auto",
     materialise: list[str] | None = None,
+    structure: Literal["flat", "multiscales"] = "flat",
 ) -> None:
     """Write a HEALPix pyramid to Zarr stores on S3 or local disk.
 
@@ -513,48 +469,49 @@ def init_pyramid_store(
         coordinates for exactly the cells they return.
     materialise: list of coordinates which will be computed and written
         as part of the template.
+    structure: Specify whether to write the datasets in the pyramid to
+        separate stores ('flat'), or combine them into a datatree
+        ('multiscales').
     """
-    fs = _get_filesystem(path, s3_options)
+    fs = get_filesystem(path, s3_options)
+    templates = {}
+    encodings = {}
+    common_coords = get_common_coordinates(pyramid)
     for level, dataset in pyramid.items():
-        dataset = _maybe_drop_coordinates(level, dataset, write_coords)
-        store_name = f"level_{level}"
-        store = _get_store(path, store_name, fs)
-        # Initialise the store with template.
-        lazy_vars = set(dataset.keys())
+        template, combined_encoding = prepare_template(
+            dataset,
+            level,
+            write_coords=write_coords,
+            max_level_to_auto_write_coords=WRITE_COORDS_MAX_LEVEL,
+            encoding=encoding,
+            materialise=materialise,
+        )
 
-        if materialise:
-            lazy_vars = {v for v in lazy_vars if v not in materialise}
+        if structure == "flat":
+            root_path = f"{path}/level_{level}.zarr"
+            store = get_store(root_path, fs)
+            logger.info("Writing HEALPix to %s", root_path)
+            zarr_options = get_zarr_options("w", zarr_format, combined_encoding)
+            template.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
+        else:
+            templates[level] = template
+            encodings[f"/level_{level}"] = combined_encoding
 
-        template = dataset.copy()
-        template.update(dataset.drop_vars(lazy_vars).compute())
+    if structure == "multiscales":
+        # Remove duplicate encoding for common variables
+        common_encodings = {}
+        for enc in encodings.values():
+            for c in common_coords:
+                common_encodings[c] = enc.pop(c)
+        encodings.update({"/": common_encodings})
 
-        delayed = dask.delayed(_raise_template_error)()  # type: ignore[attr-defined]
-        for k, v in dataset.variables.items():
-            if k in lazy_vars:
-                # names of dask arrays are used for keeping track of results, so arrays
-                # with the same name cannot have different shape or dtype
-                name = f"template_{'x'.join(map(str, v.shape))}_{v.dtype}"
-                template[k].data = dask.array.from_delayed(
-                    delayed, v.shape, v.dtype, name=name
-                )
-
-        # Create regular chunks
-        zarr_chunks = {}
-        for var_name, variable in dataset.variables.items():
-            chunksizes = variable.chunksizes
-            zarr_chunks[var_name] = {"chunks": tuple(c[0] for c in chunksizes.values())}
-        # Remove old chunk encoding.
-        for var in template.variables.values():
-            if "chunks" in var.encoding:
-                del var.encoding["chunks"]
-
-        encoding = encoding or {}
-        combined_encoding = {
-            str(k): encoding.get(level, {}).get(k, {}) | zarr_chunks.get(k, {})  # type: ignore[call-overload]
-            for k in template.variables
-        }
-        zarr_options = _get_zarr_options("w", zarr_format, combined_encoding)
-        template.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
+        tree_template = pyramid_to_multiscales_tree(
+            templates, common_coords=common_coords
+        )
+        zarr_options = get_zarr_options("w", zarr_format, encodings)
+        store = get_store(path, fs)
+        logger.info("Writing HEALPix to %s", store)
+        tree_template.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
 
 
 def save_pyramid(
@@ -567,6 +524,7 @@ def save_pyramid(
     zarr_format: Literal[2, 3] = 2,
     encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
     write_coords: bool | Literal["auto"] = "auto",
+    structure: Literal["flat", "multiscales"] = "flat",
 ) -> None:
     """Write a HEALPix pyramid to Zarr stores on S3 or local disk.
 
@@ -605,39 +563,44 @@ def save_pyramid(
         ([`select_bbox`][grid_doctor.select_bbox],
         [`select_cells`][grid_doctor.select_cells]), which reconstruct
         coordinates for exactly the cells they return.
+    structure: Specify whether to write the datasets in the pyramid to
+        separate stores ('flat'), or combine them into a datatree
+        ('multiscales').
     """
-    fs = _get_filesystem(path, s3_options)
+    fs = get_filesystem(path, s3_options)
+
+    if structure == "multiscales":
+        _save_multiscale(
+            pyramid,
+            path,
+            fs,
+            mode,
+            region,
+            zarr_format,
+            encoding,
+            write_coords,
+        )
+        return
     # Stores are initialised per level; the data of all levels is written
     # in one pass (see grid_doctor.io._zarr for why).
     deferred: list[DeferredWrite] = []
     encoding = encoding or {}
     for level, dataset in pyramid.items():
-        dataset = _maybe_drop_coordinates(level, dataset, write_coords)
+        dataset = maybe_drop_coordinates(
+            dataset, level, write_coords, WRITE_COORDS_MAX_LEVEL
+        )
         store_name = f"level_{level}"
-        store = _get_store(path, store_name, fs)
-        zarr_options = _get_zarr_options(mode, zarr_format, encoding.get(level, None))
+        root_path = f"{path}/{store_name}.zarr"
+        store = get_store(root_path, fs)
+        logger.info("Writing HEALPix to %s", store)
+        zarr_options = get_zarr_options(mode, zarr_format, encoding.get(level, None))
 
         if region == "auto":
             dataset.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
             written, write_region = dataset, None
         else:
             # Fill in the region of data.
-            region_keys = set(region)
-            to_drop = (
-                {
-                    name
-                    for name, var in dataset.data_vars.items()
-                    if region_keys.isdisjoint(set(var.dims))
-                }
-                | {str(dim) for dim in dataset.dims if str(dim) not in region_keys}
-                | {
-                    str(coord)
-                    for coord in dataset.coords
-                    if str(coord) not in region_keys
-                }
-            )
-
-            written = dataset.drop_vars(to_drop, errors="ignore").isel(region)
+            written = prepare_region_dataset(dataset, region)
             written.to_zarr(  # type: ignore[call-overload]
                 store,
                 region=region,
@@ -654,6 +617,50 @@ def save_pyramid(
             )
         )
     store_all(deferred)
+
+
+def _save_multiscale(
+    pyramid: dict[int, xr.Dataset],
+    path: str,
+    fs: s3fs.S3FileSystem | None,
+    mode: Literal["a", "w", "r+"],
+    region: Literal["auto"] | dict[str, slice],
+    zarr_format: Literal[2, 3],
+    encoding: dict[int, dict[str, dict[str, Any]]] | None,
+    write_coords: bool | Literal["auto"],
+) -> None:
+    store = get_store(path, fs)
+    encoding = encoding or {}
+
+    dropped_pyramid = {
+        lev: maybe_drop_coordinates(ds, lev, write_coords, WRITE_COORDS_MAX_LEVEL)
+        for lev, ds in pyramid.items()
+    }
+    if region == "auto":
+        template = pyramid_to_multiscales_tree(dropped_pyramid)
+        write_region = None
+    else:
+        # Fill in the region of data.
+        templates = {}
+        for level, dataset in pyramid.items():
+            templates[level] = prepare_region_dataset(dataset, region)
+
+        template = pyramid_to_multiscales_tree(
+            templates, common_coords=list(region.keys())
+        )
+        write_region = region
+
+    encodings = {f"/level_{level}": enc for level, enc in encoding.items()}
+    zarr_options = get_zarr_options(mode, zarr_format, encodings)
+    # Deferred writes not yet implemented for multiscales regions
+    zarr_options["compute"] = True
+    logger.info("Writing HEALPix to %s", store)
+    print(f"[DEBUG] template:\n{template}\n")
+    template.to_zarr(  # type: ignore[call-overload]
+        store,
+        region=write_region,
+        **zarr_options,
+    )
 
 
 # ===================================================================
