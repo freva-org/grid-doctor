@@ -19,6 +19,7 @@ nav:
       - Point Binning: api/swath.md
       - Parallel Writes: api/parallel.md
       - Helper Utilities: api/utils.md
+      - Configuration: api/config.md
       - Logging: api/log.md
       - CLI: api/cli.md
       - Data selection: api/select.md

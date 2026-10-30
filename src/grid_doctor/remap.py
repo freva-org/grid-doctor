@@ -26,6 +26,7 @@ import numpy as np
 import xarray as xr
 from dask.base import tokenize
 
+from . import config
 from .remap_apply import (
     apply_weights_nd,
     extract_sparse_weights,
@@ -162,7 +163,7 @@ def compute_healpix_weights(
     ds: xr.Dataset | str | Path,
     level: int,
     *,
-    method: RemapMethod = "nearest",
+    method: RemapMethod | None = None,
     nest: bool = True,
     source_units: SourceUnits = "auto",
     weights_path: str | Path | None = None,
@@ -186,7 +187,7 @@ def compute_healpix_weights(
     level:
         HEALPix refinement level.  ``nside = 2**level``.
     method:
-        ``"nearest"`` or ``"conservative"``.
+        ``"nearest"`` or ``"conservative"``. Defaults to ``config.remap.method``.
     nest:
         Use nested HEALPix ordering when `True`.
     source_units:
@@ -224,6 +225,8 @@ def compute_healpix_weights(
     [`apply_weight_file`][grid_doctor.remap.apply_weight_file]:
         Apply a previously generated weight file.
     """
+    if method is None:
+        method = config.remap.method
     offline = OfflineWeightConfig(
         enabled=bool(prefer_offline) if prefer_offline is not None else False,
         nproc=nproc,
@@ -708,7 +711,7 @@ def regrid_to_healpix(
     level: int,
     *,
     nest: bool = True,
-    method: RemapMethod = "conservative",
+    method: RemapMethod | None = None,
     source_units: SourceUnits = "auto",
     weights_path: str | Path | None = None,
     missing_policy: MissingPolicy = "renormalize",
@@ -736,7 +739,7 @@ def regrid_to_healpix(
     nest:
         Use nested HEALPix ordering when ``True``.
     method:
-        ``"nearest"`` or ``"conservative"``.
+        ``"nearest"`` or ``"conservative"``. Defaults to ``config.remap.method``.
     source_units:
         Coordinate units for the source grid.
     weights_path:
@@ -818,12 +821,15 @@ def regrid_unstructured_to_healpix(
     level: int,
     *,
     nest: bool = True,
-    method: RemapMethod = "conservative",
+    method: RemapMethod | None = None,
     source_units: SourceUnits = "auto",
     weights_path: str | Path | None = None,
     missing_policy: MissingPolicy = "renormalize",
 ) -> xr.Dataset:
-    """Compatibility wrapper around [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix]."""
+    """Compatibility wrapper around [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix].
+
+    ``method`` defaults to ``config.remap.method``.
+    """
     if not _is_unstructured(ds):
         raise ValueError("Expected an unstructured source grid.")
     return regrid_to_healpix(

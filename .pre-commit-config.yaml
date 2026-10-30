@@ -1,0 +1,32 @@
+# Hooks delegate to the tox envs in pyproject.toml, so local checks match CI.
+# Install with: pre-commit install --hook-type pre-commit --hook-type pre-push
+repos:
+  - repo: local
+    hooks:
+      - id: lint
+        name: lint (tox -e lint, staged files only)
+        entry: tox -q -e lint --
+        language: system
+        types: [python]
+        files: ^src/grid_doctor/
+        require_serial: true
+      - id: types
+        name: types (tox -e types)
+        entry: tox -q -e types
+        language: system
+        types: [python]
+        files: ^src/grid_doctor/
+        pass_filenames: false
+      - id: docs
+        name: docs (tox -e docs)
+        entry: tox -q -e docs
+        language: system
+        files: ^(docs/|mkdocs\.yml$|src/grid_doctor/)
+        pass_filenames: false
+      - id: test
+        name: test (tox -e test)
+        entry: tox -q -e test
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

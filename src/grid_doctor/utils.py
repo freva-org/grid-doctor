@@ -14,6 +14,7 @@ from typing import Any, Collection, Literal, cast
 import numpy as np
 import xarray as xr
 
+from . import config
 from .types import RemapMethod, SourceUnits
 
 logger = logging.getLogger(__name__)
@@ -189,7 +190,7 @@ def cached_weights(
     ds: xr.Dataset,
     level: int | None = None,
     *,
-    method: RemapMethod = "conservative",
+    method: RemapMethod | None = None,
     nest: bool = True,
     source_units: SourceUnits = "auto",
     cache_path: str | Path | None = None,
@@ -205,7 +206,7 @@ def cached_weights(
         HEALPix level.
     method:
         Weight-generation method. Supported values are `"nearest"` and
-        `"conservative"`.
+        `"conservative"`. Defaults to `config.remap.method`.
     nest:
         Use nested HEALPix ordering when `True`.
     source_units:
@@ -231,6 +232,8 @@ def cached_weights(
     from .helpers import get_latlon_resolution, resolution_to_healpix_level
     from .remap import compute_healpix_weights
 
+    if method is None:
+        method = config.remap.method
     digest = hashlib.sha256()
     for candidate in (
         "clon_vertices",
