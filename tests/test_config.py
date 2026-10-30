@@ -3,9 +3,11 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
+import grid_doctor as gd
 from grid_doctor.config import RemapConfig
 
 
@@ -31,7 +33,8 @@ class TestRemapConfig:
             RemapConfig().metod = "nearest"  # type: ignore[attr-defined]
 
     def test_env_var_is_read_at_import(self) -> None:
-        env = {**os.environ, "GRID_DOCTOR_REMAP__METHOD": "conservative"}
+        src = str(Path(gd.__file__).parents[1])
+        env = {**os.environ, "GRID_DOCTOR_REMAP__METHOD": "conservative", "PYTHONPATH": src}
         code = "import grid_doctor as gd; print(gd.config.remap.method)"
         result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
         assert result.stdout.strip() == "conservative"
