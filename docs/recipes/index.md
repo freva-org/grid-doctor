@@ -17,3 +17,8 @@ For coarsening and working with masked or partial-coverage data,
 [Coarsening and averaging masked fields](averaging.md)
 shows how to compute means and area integrals of fields with missing
 values consistently across pyramid levels.
+
+For sources too large for a single job,
+[Parallel writes](parallel-writes.md) splits the conversion into
+independent array-job elements driven by a serialisable manifest, with
+a complete [reflow](https://reflow-hpc.org) workflow.

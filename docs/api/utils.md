@@ -14,6 +14,9 @@ cloud-native access and downstream analysis.
       show_root_heading: true
       show_root_full_path: false
 
+To split the write across many jobs (one array-job element per time
+range, say), see [Parallel writes](parallel.md).
+
 ## Storage configuration
 
 These utilities simplify access to S3-compatible object storage by
