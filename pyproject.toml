@@ -77,6 +77,8 @@ tests = [
     "netCDF4",
     "numexpr",
     "reflow-hpc",
+    "jsonschema",
+    "xdggs; python_version >= '3.12'",
 ]
 docs = [
     "mkdocs>=1.6,<2",
@@ -114,7 +116,7 @@ allow_untyped_calls = true
 
 [[tool.mypy.overrides]]
 # New code: no explicit Any.  Use the aliases in grid_doctor.types.
-module = ["grid_doctor.io.*"]
+module = ["grid_doctor.io.*", "grid_doctor.metadata.*"]
 disallow_any_explicit = true
 
 [tool.isort]

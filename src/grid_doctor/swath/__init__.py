@@ -33,7 +33,7 @@ ellipsoid, but the two are different grids (cells displaced by up to
 offsets only when both use the same definition.
 
 The output of the dense path carries the full grid-doctor metadata
-(``crs`` variable, ``healpix_*`` and ``grid_doctor_*`` attributes) so that
+(see [`grid_doctor.metadata`][grid_doctor.metadata]) so that
 [`coarsen_healpix`][grid_doctor.helpers.coarsen_healpix],
 [`save_pyramid`][grid_doctor.helpers.save_pyramid], and CF-aware viewers
 work unchanged.
@@ -64,6 +64,17 @@ from collections.abc import Mapping
 import numpy as np
 import xarray as xr
 
+from ..metadata import (
+    CELL_DIM,
+    LAT_VAR,
+    LON_VAR,
+    HealpixGrid,
+    HealpixMetadata,
+    Provenance,
+    has_healpix_metadata,
+    variable_method,
+    variable_method_attrs,
+)
 from ..remap import _attach_healpix_coords
 from ..remap_backend import (
     _canonical_lon,
@@ -265,7 +276,7 @@ def bin_to_healpix(
         attrs = {
             key: value for key, value in da.attrs.items() if key not in FILL_ATTR_NAMES
         }
-        attrs["grid_doctor_method"] = AGG_TO_METHOD[method]
+        attrs.update(variable_method_attrs(AGG_TO_METHOD[method]))
         binned[var_name] = xr.DataArray(result, dims=(*batch_dims, "cell"), attrs=attrs)
         if with_counts and method != "count":
             counts[f"{var_name}_count"] = xr.DataArray(
@@ -284,11 +295,15 @@ def bin_to_healpix(
         if not set(sample_dims) & set(map(str, ds.coords[coord].dims))
     }
     result_ds = result_ds.assign_coords(keep_coords)
-    result_ds.attrs["grid_doctor_method"] = _dominant_method(result_ds)
+    method = _dominant_method(result_ds)
 
     if dense:
-        return _scatter_to_dense(result_ds, unique_cells, level=level, nest=nest)
-    return _attach_sparse_coords(result_ds, unique_cells, level=level, nest=nest)
+        return _scatter_to_dense(
+            result_ds, unique_cells, level=level, nest=nest, method=method
+        )
+    return _attach_sparse_coords(
+        result_ds, unique_cells, level=level, nest=nest, method=method
+    )
 
 
 def sparse_to_dense(ds: xr.Dataset) -> xr.Dataset:
@@ -311,15 +326,19 @@ def sparse_to_dense(ds: xr.Dataset) -> xr.Dataset:
     ValueError
         When *ds* does not look like a sparse binned dataset.
     """
-    if int(ds.attrs.get("grid_doctor_sparse", 0)) != 1:
+    if not has_healpix_metadata(ds):
         raise ValueError("Dataset is not a sparse binned dataset.")
-    level = int(ds.attrs["healpix_level"])
-    nest = str(ds.attrs.get("healpix_order", "nested")) in {"nested", "nest"}
-    cell_ids = np.asarray(ds["cell"].values, dtype=np.int64)
-    stripped = ds.drop_vars(
-        [name for name in ("latitude", "longitude", "crs", "cell") if name in ds]
+    metadata = HealpixMetadata.from_dataset(ds)
+    if not metadata.sparse:
+        raise ValueError("Dataset is not a sparse binned dataset.")
+    cell_ids = np.asarray(ds[CELL_DIM].values, dtype=np.int64)
+    return _scatter_to_dense(
+        ds.drop_vars([CELL_DIM, LAT_VAR, LON_VAR], errors="ignore"),
+        cell_ids,
+        level=metadata.grid.level,
+        nest=metadata.grid.nest,
+        method=metadata.provenance.method or "binned-mean",
     )
-    return _scatter_to_dense(stripped, cell_ids, level=level, nest=nest)
 
 
 # ===================================================================
@@ -328,7 +347,7 @@ def sparse_to_dense(ds: xr.Dataset) -> xr.Dataset:
 
 
 def _dominant_method(ds: xr.Dataset) -> str:
-    """Return the dataset-level ``grid_doctor_method`` attribute.
+    """Return the dataset-level production method.
 
     ``"binned-mode"`` wins when *all* binned variables are categorical,
     so that ``coarsen_healpix(..., coarsen_mode="auto")`` selects mode
@@ -337,9 +356,9 @@ def _dominant_method(ds: xr.Dataset) -> str:
     ``coarsen_mode``.
     """
     methods = {
-        str(da.attrs.get("grid_doctor_method"))
+        method
         for da in ds.data_vars.values()
-        if "grid_doctor_method" in da.attrs
+        if (method := variable_method(da.attrs)) is not None
     }
     if methods == {"binned-mode"}:
         return "binned-mode"
@@ -352,6 +371,7 @@ def _scatter_to_dense(
     *,
     level: int,
     nest: bool,
+    method: str,
 ) -> xr.Dataset:
     """Scatter compact per-cell arrays onto the full HEALPix grid."""
     npix = 12 * 4**level
@@ -375,8 +395,6 @@ def _scatter_to_dense(
             if "cell" not in ds.coords[coord].dims and str(coord) != "cell"
         }
     )
-    dense.attrs.pop("grid_doctor_sparse", None)
-    method = str(dense.attrs.pop("grid_doctor_method", "binned-mean"))
     return _attach_healpix_coords(dense, level=level, nest=nest, method=method)
 
 
@@ -386,39 +404,32 @@ def _attach_sparse_coords(
     *,
     level: int,
     nest: bool,
+    method: str,
 ) -> xr.Dataset:
     """Attach coordinates and metadata to a compact binned dataset.
 
     The ``cell`` coordinate holds the *actual* HEALPix indices of the
     touched cells (unlike the dense representation, where ``cell`` is a
-    positional ``arange``).  The dataset is marked with
-    ``grid_doctor_sparse = 1``.
+    positional ``arange``), and the dataset is marked sparse.
     """
     module, kwargs = _require_healpix_geo_module(nest)
     lon_deg, lat_deg = module.healpix_to_lonlat(cell_ids, level, **kwargs)
-
-    from ..remap import _make_crs_variable
-
     result = ds.assign_coords(
-        cell=cell_ids,
-        latitude=("cell", np.asarray(lat_deg, dtype=np.float64)),
-        longitude=("cell", _canonical_lon(np.asarray(lon_deg, dtype=np.float64))),
-        crs=_make_crs_variable(
-            level=level, nside=2**level, order="nested" if nest else "ring"
-        ),
+        {
+            CELL_DIM: cell_ids,
+            LAT_VAR: (CELL_DIM, np.asarray(lat_deg, dtype=np.float64)),
+            LON_VAR: (
+                CELL_DIM,
+                _canonical_lon(np.asarray(lon_deg, dtype=np.float64)),
+            ),
+        }
     )
-    for name in result.data_vars:
-        if "cell" in result[name].dims:
-            result[name].attrs["grid_mapping"] = "crs"
-
-    import grid_doctor as _gd
-
-    result.attrs["healpix_level"] = level
-    result.attrs["healpix_nside"] = 2**level
-    result.attrs["healpix_order"] = "nested" if nest else "ring"
-    result.attrs["grid_doctor_version"] = _gd.__version__
-    result.attrs["grid_doctor_sparse"] = 1
-    return result
+    metadata = HealpixMetadata(
+        HealpixGrid.from_nest(level, nest=nest),
+        Provenance(method=method),
+        sparse=True,
+    )
+    return metadata.apply(result)
 
 
 __all__ = [

@@ -16,7 +16,15 @@ from typing import Literal
 import numpy as np
 import xarray as xr
 
-from ..remap import _healpix_centres, _make_crs_variable
+from ..metadata import (
+    CELL_DIM,
+    LAT_VAR,
+    LON_VAR,
+    HealpixGrid,
+    HealpixMetadata,
+    Provenance,
+)
+from ..remap import _healpix_centres
 from ..types import CoarsenMode, FloatArray, NumberArray, ValidFraction
 from ._blocks import (
     Array,
@@ -43,7 +51,7 @@ def resolve_coarsen_mode(ds: xr.Dataset, coarsen_mode: CoarsenMode) -> CoarsenMo
     """Resolve ``"auto"`` to ``"mean"`` or ``"mode"`` from dataset attributes."""
     if coarsen_mode != "auto":
         return coarsen_mode
-    method = str(ds.attrs.get("grid_doctor_method", "conservative"))
+    method = Provenance.from_attrs(ds.attrs).method or "conservative"
     is_categorical = method == "nearest" or method.endswith("-mode")
     return "mode" if is_categorical else "mean"
 
@@ -83,33 +91,23 @@ def assemble_coarse_level(
     coarsening mode and the minimum valid fraction, so that readers can
     tell masked cells from missing data.
     """
-    target_nside = 2**target_level
-    npix_target = 12 * target_nside**2
-    result = xr.Dataset(data_vars, attrs=template.attrs.copy())
+    grid = HealpixGrid(level=target_level)
     lat_deg, lon_deg = healpix_coords(target_level, nest=True)
-    result = result.assign_coords(
-        cell=np.arange(npix_target, dtype=np.int64),
-        latitude=("cell", lat_deg),
-        longitude=("cell", lon_deg),
-        crs=_make_crs_variable(
-            level=target_level,
-            nside=target_nside,
-            order="nested",
-        ),
+    result = xr.Dataset(data_vars, attrs=template.attrs.copy()).assign_coords(
+        {
+            CELL_DIM: np.arange(grid.npix, dtype=np.int64),
+            LAT_VAR: (CELL_DIM, lat_deg),
+            LON_VAR: (CELL_DIM, lon_deg),
+        }
     )
-
-    # Tag every spatially-mapped data variable.
-    for name in result.data_vars:
-        if "cell" in result[name].dims:
-            result[name].attrs["grid_mapping"] = "crs"
-
-    result.attrs["healpix_nside"] = target_nside
-    result.attrs["healpix_level"] = target_level
-    result.attrs["healpix_order"] = "nested"
-    result.attrs["grid_doctor_coarsened_from_level"] = source_level
-    result.attrs["grid_doctor_coarsen_mode"] = str(coarsen_mode)
-    result.attrs["grid_doctor_min_valid_fraction"] = float(min_valid_fraction)
-    return result
+    source = Provenance.from_attrs(template.attrs)
+    provenance = Provenance(
+        method=source.method,
+        coarsened_from_level=source_level,
+        coarsen_mode=str(coarsen_mode),
+        min_valid_fraction=float(min_valid_fraction),
+    )
+    return HealpixMetadata(grid, provenance).apply(result)
 
 
 def resolve_valid_fraction(

@@ -9,6 +9,8 @@ import xarray as xr
 from grid_doctor.helpers import coarsen_healpix, create_healpix_pyramid
 from grid_doctor.pyramid import coarsen_mean, min_valid_count
 
+from .helpers import with_healpix_metadata
+
 
 class TestCoarsenMean:
     def test_issue_54_example(self) -> None:
@@ -44,16 +46,11 @@ class TestPyramidConsistency:
         # clustered NaNs, like a coastline: mask whole and partial blocks
         data[:, : npix // 3] = np.nan
         data[:, rng.random(npix) < 0.3] = np.nan
-        return xr.Dataset(
+        ds = xr.Dataset(
             {"tos": (("time", "cell"), data)},
             coords={"time": np.arange(2), "cell": np.arange(npix)},
-            attrs={
-                "healpix_nside": 2**level,
-                "healpix_level": level,
-                "healpix_order": "nested",
-                "grid_doctor_method": "conservative",
-            },
         )
+        return with_healpix_metadata(ds, level, method="conservative")
 
     def test_pyramid_levels_match_direct_coarsening(
         self, monkeypatch: pytest.MonkeyPatch

@@ -897,7 +897,9 @@ class TestApplyWeightFile:
             {"t": ("cell", np.arange(1.0, n_source + 1.0))},
             coords={"cell": np.arange(n_source)},
         )
-        attrs: dict[str, Any] = {"grid_doctor_level": 0, "grid_doctor_order": "nested"}
+        # Toy weights with 2 targets are no real HEALPix grid: leave the
+        # level unset so no coordinates are attached.
+        attrs: dict[str, Any] = {}
         if source_size is not None:
             attrs["grid_doctor_source_size"] = source_size
         path = tmp_path / "weights.nc"
@@ -918,9 +920,6 @@ class TestApplyWeightFile:
                 np.arange(float(n_source)),
                 ("cell",),
             ),
-        )
-        monkeypatch.setattr(
-            remap, "_healpix_centres", lambda level, nest: (np.zeros(2), np.array([0.0, 2.0]))
         )
         return ds, path
 
@@ -969,10 +968,6 @@ class TestApplyWeightFile:
                 "col": ("nnz", np.array([1, 2, 3], dtype=np.int32)),
                 "S": ("nnz", np.array([0.5, 0.5, 1.0], dtype=np.float64)),
             },
-            attrs={
-                "grid_doctor_level": 1,
-                "grid_doctor_order": "nested",
-            },
         )
         path = tmp_path / "weights.nc"
         weights.to_netcdf(path)
@@ -986,15 +981,6 @@ class TestApplyWeightFile:
                 ("cell",),
             ),
         )
-        monkeypatch.setattr(
-            remap,
-            "_healpix_centres",
-            lambda level, nest: (
-                np.array([0.0, 1.0], dtype=np.float64),
-                np.array([2.0, 3.0], dtype=np.float64),
-            ),
-        )
-
         result = apply_weight_file(ds, path, missing_policy="renormalize")
 
         assert "cell" in result.dims
@@ -1023,23 +1009,10 @@ class TestApplyWeightFile:
                 "col": ("nnz", np.array([1, 2, 3], dtype=np.int32)),
                 "S": ("nnz", np.array([0.5, 0.5, 1.0], dtype=np.float64)),
             },
-            attrs={
-                "grid_doctor_level": 1,
-                "grid_doctor_order": "nested",
-                "grid_doctor_source_dims": json.dumps(["cell"]),
-            },
+            attrs={"grid_doctor_source_dims": json.dumps(["cell"])},
         )
         path = tmp_path / "weights.nc"
         weights.to_netcdf(path)
-
-        monkeypatch.setattr(
-            remap,
-            "_healpix_centres",
-            lambda level, nest: (
-                np.array([0.0, 1.0], dtype=np.float64),
-                np.array([2.0, 3.0], dtype=np.float64),
-            ),
-        )
 
         result = apply_weight_file(
             ds,
@@ -1228,21 +1201,22 @@ class TestPublicRegridding:
 
 
 class TestAttachHealpixCoords:
-    def test_attach_coords(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr(
-            remap,
-            "_healpix_centres",
-            lambda level, nest: (
-                np.array([10.0, 20.0]),
-                np.array([30.0, 40.0]),
-            ),
-        )
-        ds = xr.Dataset({"t": ("cell", np.array([1.0, 2.0]))})
-        result = _attach_healpix_coords(ds, level=2, nest=False)
+    def test_attach_coords(self) -> None:
+        ds = xr.Dataset({"t": ("cell", np.arange(12.0))})
+        result = _attach_healpix_coords(ds, level=0, nest=False, method="nearest")
         assert "latitude" in result.coords
         assert "longitude" in result.coords
-        assert result.attrs["healpix_nside"] == 4
-        assert result.attrs["healpix_order"] == "ring"
+        np.testing.assert_array_equal(result["cell"].values, np.arange(12))
+        assert result["cell"].attrs["standard_name"] == "healpix_index"
+        assert result["crs"].attrs == {
+            "grid_mapping_name": "healpix",
+            "indexing_scheme": "ring",
+            "refinement_level": 0,
+        }
+        assert result["t"].attrs["grid_mapping"] == "crs"
+        assert result.attrs["grid_doctor_method"] == "nearest"
+
+    def test_rejects_wrong_cell_count(self) -> None:
+        ds = xr.Dataset({"t": ("cell", np.arange(2.0))})
+        with pytest.raises(ValueError, match="conflicting sizes|cells"):
+            _attach_healpix_coords(ds, level=2, nest=True)
