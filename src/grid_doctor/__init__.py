@@ -14,6 +14,7 @@ __version__ = "2604.0.0"
 _SUBMODULES: dict[str, str] = {
     "helpers": ".helpers",
     "log": ".log",
+    "metadata": ".metadata",
     "remap": ".remap",
     "select": ".select",
     "swath": ".swath",
@@ -57,7 +58,7 @@ _ATTRS: dict[str, str] = {
 
 
 if TYPE_CHECKING:
-    from . import helpers, log, remap, select, swath, utils
+    from . import helpers, log, metadata, remap, select, swath, utils
     from .helpers import (
         coarsen_healpix,
         create_healpix_pyramid,
@@ -127,6 +128,7 @@ __all__ = [
     "__version__",
     "helpers",
     "log",
+    "metadata",
     "remap",
     "select",
     "swath",

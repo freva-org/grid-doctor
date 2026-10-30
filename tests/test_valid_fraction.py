@@ -12,6 +12,8 @@ import xarray as xr
 from grid_doctor import helpers
 from grid_doctor.helpers import coarsen_healpix, create_healpix_pyramid, save_pyramid
 
+from .helpers import with_healpix_metadata
+
 LEVEL = 3
 NPIX = 12 * 4**LEVEL
 
@@ -32,13 +34,8 @@ def _finest(chunked: bool = True) -> xr.Dataset:
             "flag": (("time", "cell"), np.where(np.isnan(sst), np.nan, 1.0)),
         },
         coords={"time": np.arange(3), "cell": np.arange(NPIX)},
-        attrs={
-            "healpix_nside": 2**LEVEL,
-            "healpix_level": LEVEL,
-            "healpix_order": "nested",
-            "grid_doctor_method": "conservative",
-        },
     )
+    ds = with_healpix_metadata(ds, LEVEL, method="conservative")
     return ds.chunk(time=1, cell=192) if chunked else ds
 
 

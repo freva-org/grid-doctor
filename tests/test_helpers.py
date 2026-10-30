@@ -28,7 +28,10 @@ from grid_doctor.helpers import (
     resolution_to_healpix_level,
     save_pyramid,
 )
+from grid_doctor.metadata import HealpixMetadata
 from grid_doctor.pyramid import _levels as pyramid_levels
+
+from .helpers import with_healpix_metadata
 
 
 class TestGridDetection:
@@ -182,11 +185,10 @@ class TestCoarsenHealpix:
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
         assert coarse.sizes["cell"] == 48
-        assert coarse.attrs["healpix_level"] == 1
+        assert HealpixMetadata.from_dataset(coarse).grid.level == 1
 
     def test_rejects_ring_order(self, healpix_ds: xr.Dataset) -> None:
-        ds = healpix_ds.copy()
-        ds.attrs["healpix_order"] = "ring"
+        ds = with_healpix_metadata(healpix_ds, 3, nest=False)
         with pytest.raises(ValueError, match="only supports nested"):
             coarsen_healpix(ds, target_level=1)
 
@@ -211,8 +213,7 @@ class TestCoarsenHealpix:
             "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
-        ds = healpix_ds.copy()
-        ds.attrs["grid_doctor_method"] = "conservative"
+        ds = with_healpix_metadata(healpix_ds.copy(), 3, method="conservative")
         # Pattern repeats every 4 cells; groups of 16 contain 4 copies → mean = 3
         ds["temperature"].values[:] = np.tile([0.0, 2.0, 4.0, 6.0], 192)
         coarse = coarsen_healpix(ds, target_level=1, coarsen_mode="auto")
@@ -227,8 +228,7 @@ class TestCoarsenHealpix:
             "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
-        ds = healpix_ds.copy()
-        ds.attrs["grid_doctor_method"] = "nearest"
+        ds = with_healpix_metadata(healpix_ds.copy(), 3, method="nearest")
         # Groups of 16: twelve 7s and four 3s → mode = 7
         ds["temperature"].values[:] = np.tile([7.0, 7.0, 7.0, 3.0], 192)
         coarse = coarsen_healpix(ds, target_level=1, coarsen_mode="auto")
@@ -243,8 +243,7 @@ class TestCoarsenHealpix:
             "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
-        ds = healpix_ds.copy()
-        ds.attrs["grid_doctor_method"] = "nearest"
+        ds = with_healpix_metadata(healpix_ds.copy(), 3, method="nearest")
         ds["temperature"].values[:] = np.tile([0.0, 2.0, 4.0, 6.0], 192)
         coarse = coarsen_healpix(ds, target_level=1, coarsen_mode="mean")
         np.testing.assert_allclose(coarse["temperature"].values, 3.0)
@@ -258,8 +257,7 @@ class TestCoarsenHealpix:
             "healpix_coords",
             lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
-        ds = healpix_ds.copy()
-        ds.attrs["grid_doctor_method"] = "conservative"
+        ds = with_healpix_metadata(healpix_ds.copy(), 3, method="conservative")
         ds["temperature"].values[:] = np.tile([5.0, 5.0, 5.0, 9.0], 192)
         coarse = coarsen_healpix(ds, target_level=1, coarsen_mode="mode")
         np.testing.assert_array_equal(coarse["temperature"].values, 5.0)
@@ -291,10 +289,12 @@ class TestCoarsenHealpix:
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
         assert "crs" in coarse.coords
-        assert coarse.coords["crs"].attrs["grid_mapping_name"] == "healpix"
-        assert coarse.coords["crs"].attrs["healpix_nside"] == 2
-        assert coarse.coords["crs"].attrs["healpix_level"] == 1
-        assert coarse.coords["crs"].attrs["healpix_order"] == "nested"
+        assert coarse.coords["crs"].attrs == {
+            "grid_mapping_name": "healpix",
+            "indexing_scheme": "nested",
+            "refinement_level": 1,
+        }
+        assert coarse["cell"].attrs["standard_name"] == "healpix_index"
 
     def test_data_vars_have_grid_mapping(
         self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
@@ -328,28 +328,23 @@ class TestPyramidBuilders:
         def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
             del kwargs
             npix = 12 * (4**level)
-            return xr.Dataset(
-                {"t": (("cell",), np.zeros(npix))},
-                attrs=ds.attrs
-                | {
-                    "healpix_nside": 2**level,
-                    "healpix_level": level,
-                    "healpix_order": "nested",
-                },
+            return with_healpix_metadata(
+                xr.Dataset(
+                    {"t": (("cell",), np.zeros(npix))},
+                    attrs=ds.attrs,
+                ),
+                level,
             )
 
         monkeypatch.setattr(helpers, "regrid_to_healpix", fake_regrid)
         monkeypatch.setattr(
             helpers,
             "coarsen_healpix",
-            lambda ds, level, **kwargs: xr.Dataset(
-                {"t": (("cell",), np.zeros(12 * (4**level)))},
-                attrs=ds.attrs
-                | {
-                    "healpix_level": level,
-                    "healpix_nside": 2**level,
-                    "healpix_order": "nested",
-                },
+            lambda ds, level, **kwargs: with_healpix_metadata(
+                xr.Dataset(
+                    {"t": (("cell",), np.zeros(12 * (4**level)))}, attrs=ds.attrs
+                ),
+                level,
             ),
         )
         pyramid = create_healpix_pyramid(regular_ds, max_level=3, min_level=1)
@@ -362,14 +357,12 @@ class TestPyramidBuilders:
 
         def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
             calls.append(level)
-            return xr.Dataset(
-                {"t": (("cell",), np.zeros(12 * (4**level)))},
-                attrs=ds.attrs
-                | {
-                    "healpix_level": level,
-                    "healpix_nside": 2**level,
-                    "healpix_order": "ring",
-                },
+            return with_healpix_metadata(
+                xr.Dataset(
+                    {"t": (("cell",), np.zeros(12 * (4**level)))},
+                    attrs=ds.attrs,
+                ),
+                level, nest=False,
             )
 
         monkeypatch.setattr(helpers, "regrid_to_healpix", fake_regrid)
@@ -405,14 +398,12 @@ class TestPyramidBuilders:
 
         def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
             npix = 12 * (4**level)
-            return xr.Dataset(
-                {"t": (("cell",), np.zeros(npix))},
-                attrs=ds.attrs
-                | {
-                    "healpix_nside": 2**level,
-                    "healpix_level": level,
-                    "healpix_order": "nested",
-                },
+            return with_healpix_metadata(
+                xr.Dataset(
+                    {"t": (("cell",), np.zeros(npix))},
+                    attrs=ds.attrs,
+                ),
+                level,
             )
 
         def fake_coarse_levels(
@@ -441,17 +432,15 @@ class TestPyramidBuilders:
 class TestSavePyramid:
     def _make_pyramid(self, chunked: bool = False) -> dict[int, xr.Dataset]:
         def _create_dataset(level: int, chunked: bool) -> xr.Dataset:
-            ds = xr.Dataset(
-                {"t": (("cell", "time"), np.random.randn(12 * (4**level), 100))},
-                coords={
-                    "cell": np.arange(12 * (4**level), dtype=np.int64),
-                    "time": np.arange(100, dtype=np.int64),
-                },
-                attrs={
-                    "healpix_nside": 2**level,
-                    "healpix_level": level,
-                    "healpix_order": "nested",
-                },
+            ds = with_healpix_metadata(
+                xr.Dataset(
+                    {"t": (("cell", "time"), np.random.randn(12 * (4**level), 100))},
+                    coords={
+                        "cell": np.arange(12 * (4**level), dtype=np.int64),
+                        "time": np.arange(100, dtype=np.int64),
+                    },
+                ),
+                level,
             )
             if chunked:
                 return ds.chunk({"time": 5})
@@ -817,8 +806,8 @@ class TestSavePyramidMultiscales:
         ds0 = dt["/level_7"].dataset
         ds1 = dt["/level_11"].dataset
 
-        assert ds0.attrs["healpix_level"] == 7
-        assert ds1.attrs["healpix_level"] == 11
+        assert dt.attrs["grid_doctor_level_min"] == 7
+        assert dt.attrs["grid_doctor_level_max"] == 11
 
         xr.testing.assert_allclose(ds0.compute(), pyramid[7].compute())
         xr.testing.assert_allclose(

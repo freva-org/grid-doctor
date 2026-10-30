@@ -43,6 +43,7 @@ from .io._fanout import (
     resume_init,
 )
 from .io._manifest import LevelSpec, PyramidManifest
+from .metadata import HealpixMetadata
 from .pyramid import (
     coarse_levels,
     coarsen_dataset,
@@ -252,15 +253,15 @@ def coarsen_healpix(
     Parameters
     ----------
     ds:
-        HEALPix dataset containing a ``cell`` dimension and the
-        attributes ``healpix_nside`` and ``healpix_order``.
+        HEALPix dataset with a ``cell`` dimension and grid-doctor
+        metadata (see [`grid_doctor.metadata`][grid_doctor.metadata]).
     target_level:
         Target HEALPix level (must be lower than the current level).
     coarsen_mode:
         ``"mean"`` — NaN-aware averaging for continuous fields.
         ``"mode"`` — most-frequent-value for categorical fields.
-        ``"auto"`` — infer from ``grid_doctor_method`` in dataset
-        attributes: ``"nearest"`` → mode, everything else → mean.
+        ``"auto"`` — infer from the recorded production method:
+        ``"nearest"`` → mode, everything else → mean.
     min_valid_fraction:
         Minimum fraction of valid (non-NaN) children required to
         produce a valid parent cell.  Parents with fewer valid
@@ -301,22 +302,15 @@ def coarsen_healpix(
         When the ordering is not nested, or *target_level* is not
         lower than the current level.
     """
-    current_nside = int(ds.attrs["healpix_nside"])
-    target_nside = 2**target_level
-    if target_nside >= current_nside:
-        raise ValueError("target_level must be lower than the current HEALPix level.")
-
-    is_nested = str(ds.attrs.get("healpix_order", "nested")) in {"nested", "nest"}
-    if not is_nested:
+    grid = HealpixMetadata.from_dataset(ds).grid
+    if not grid.nest:
         raise ValueError(
             "coarsen_healpix only supports nested HEALPix ordering. "
             "Use create_healpix_pyramid(..., nest=False) to "
             "regenerate ring levels directly."
         )
-
-    current_level = int(ds.attrs.get("healpix_level", int(np.log2(current_nside))))
-    delta_level = current_level - target_level
-    if delta_level <= 0:
+    current_level = grid.level
+    if target_level >= current_level:
         raise ValueError("target_level must be lower than the current HEALPix level.")
 
     return coarsen_dataset(
@@ -538,8 +532,9 @@ def init_pyramid_store(
         ``"auto"`` (default) writes coordinates for levels up to
         :data:`WRITE_COORDS_MAX_LEVEL` and omits them above; ``True`` /
         ``False`` force either behaviour for all levels.  Coordinate-
-        less stores keep the ``crs`` variable and all ``healpix_*``
-        attributes, carry ``grid_doctor_implicit_coords = 1``, and are
+        less stores keep the ``crs`` grid mapping, are marked as having
+        implicit coordinates (see
+        [`HealpixMetadata`][grid_doctor.metadata.HealpixMetadata]), and are
         meant to be accessed through the region selectors
         ([`select_bbox`][grid_doctor.select_bbox],
         [`select_cells`][grid_doctor.select_cells]), which reconstruct
@@ -814,8 +809,9 @@ def save_pyramid(
         ``"auto"`` (default) writes coordinates for levels up to
         :data:`WRITE_COORDS_MAX_LEVEL` and omits them above; ``True`` /
         ``False`` force either behaviour for all levels.  Coordinate-
-        less stores keep the ``crs`` variable and all ``healpix_*``
-        attributes, carry ``grid_doctor_implicit_coords = 1``, and are
+        less stores keep the ``crs`` grid mapping, are marked as having
+        implicit coordinates (see
+        [`HealpixMetadata`][grid_doctor.metadata.HealpixMetadata]), and are
         meant to be accessed through the region selectors
         ([`select_bbox`][grid_doctor.select_bbox],
         [`select_cells`][grid_doctor.select_cells]), which reconstruct

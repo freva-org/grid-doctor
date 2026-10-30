@@ -20,6 +20,8 @@ from grid_doctor.helpers import (
 )
 from grid_doctor.pyramid import MeanPartials, coarsen_mean, coarsen_mean_steps
 
+from .helpers import with_healpix_metadata
+
 LEVEL = 3
 NPIX = 12 * 4**LEVEL
 NLAT, NLON = 8, 16
@@ -93,14 +95,12 @@ class TestMeanPartials:
 
 class TestCoarsenHealpixChunked:
     def test_dask_matches_numpy(self) -> None:
-        ds = xr.Dataset(
-            {"sst": (("time", "cell"), _values_with_nans((2, NPIX)))},
-            coords={"time": [0, 1], "cell": np.arange(NPIX)},
-            attrs={
-                "healpix_nside": 2**LEVEL,
-                "healpix_level": LEVEL,
-                "healpix_order": "nested",
-            },
+        ds = with_healpix_metadata(
+            xr.Dataset(
+                {"sst": (("time", "cell"), _values_with_nans((2, NPIX)))},
+                coords={"time": [0, 1], "cell": np.arange(NPIX)},
+            ),
+            LEVEL,
         )
         eager = coarsen_healpix(ds, 1, coarsen_mode="mean")
         lazy = coarsen_healpix(ds.chunk(cell=64), 1, coarsen_mode="mean")

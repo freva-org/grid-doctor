@@ -6,14 +6,16 @@ import numpy as np
 import pytest
 import xarray as xr
 
+import grid_doctor
 from grid_doctor import coarsen_healpix
+from grid_doctor.metadata import HealpixGrid, HealpixMetadata
 from grid_doctor.swath import (
     bin_to_healpix,
     sparse_to_dense,
 )
 from grid_doctor.swath.utils import (
-    bin_mode,
     _declared_fill_value,
+    bin_mode,
     masked_float64,
     resolve_point_coords,
 )
@@ -224,13 +226,13 @@ class TestBinToHealpixDense:
 
     def test_standard_metadata(self, swath_ds: xr.Dataset) -> None:
         result = bin_to_healpix(swath_ds, LEVEL)
-        assert result.attrs["healpix_level"] == LEVEL
-        assert result.attrs["healpix_nside"] == 2**LEVEL
-        assert result.attrs["healpix_order"] == "nested"
-        assert result.attrs["grid_doctor_method"] == "binned-mean"
-        assert "grid_doctor_version" in result.attrs
-        assert "crs" in result.coords
+        metadata = HealpixMetadata.from_dataset(result)
+        assert metadata.grid == HealpixGrid(level=LEVEL)
+        assert metadata.provenance.method == "binned-mean"
+        assert metadata.provenance.version == grid_doctor.__version__
+        assert not metadata.sparse
         assert result["crs"].attrs["grid_mapping_name"] == "healpix"
+        assert result["cell"].attrs["standard_name"] == "healpix_index"
         assert result["field"].attrs["grid_mapping"] == "crs"
         assert {"latitude", "longitude"} <= set(result.coords)
 
@@ -383,8 +385,9 @@ class TestCoarsenIntegration:
     def test_binned_mean_output_coarsens(self, swath_ds: xr.Dataset) -> None:
         dense = bin_to_healpix(swath_ds, LEVEL)
         coarse = coarsen_healpix(dense, LEVEL - 1, min_valid_fraction=0.25)
-        assert coarse.attrs["healpix_level"] == LEVEL - 1
-        assert coarse.attrs["grid_doctor_coarsened_from_level"] == LEVEL
+        metadata = HealpixMetadata.from_dataset(coarse)
+        assert metadata.grid.level == LEVEL - 1
+        assert metadata.provenance.coarsened_from_level == LEVEL
         assert np.isfinite(coarse["field"].values).any()
 
     def test_binned_mode_selects_mode_coarsening(self) -> None:

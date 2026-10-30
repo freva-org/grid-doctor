@@ -22,6 +22,7 @@ nav:
       - Logging: api/log.md
       - CLI: api/cli.md
       - Data selection: api/select.md
+      - Metadata: api/metadata.md
       - Types: api/types.md
   - Recipes:
       - Overview: recipes/index.md

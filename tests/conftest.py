@@ -9,6 +9,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from .helpers import with_healpix_metadata
+
 
 def _xy_to_latlon(
     x: np.ndarray,
@@ -167,7 +169,7 @@ def healpix_ds() -> xr.Dataset:
     lat = np.linspace(-90.0, 90.0, npix)
     lon = np.linspace(-180.0, 180.0, npix, endpoint=False)
     rng = np.random.default_rng(99)
-    return xr.Dataset(
+    ds = xr.Dataset(
         {"temperature": (("time", "cell"), rng.random((2, npix)).astype("float32"))},
         coords={
             "time": np.arange(2),
@@ -175,5 +177,5 @@ def healpix_ds() -> xr.Dataset:
             "latitude": ("cell", lat),
             "longitude": ("cell", lon),
         },
-        attrs={"healpix_nside": 2**level, "healpix_level": level, "healpix_order": "nested"},
     )
+    return with_healpix_metadata(ds, level)

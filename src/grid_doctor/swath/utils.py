@@ -30,7 +30,7 @@ AGG_TO_METHOD: dict[str, str] = {
     "max": "binned-max",
     "count": "binned-count",
 }
-"""Mapping from aggregation name to the ``grid_doctor_method`` attribute."""
+"""Mapping from aggregation name to the recorded production method."""
 
 NPG_FUNC: dict[str, str] = {
     "mean": "nanmean",

@@ -343,8 +343,8 @@ analogue of a valid-area fraction for coarsened grids.
 
 ### Pyramids from binned data
 
-Binned datasets carry the full standard metadata (``crs`` variable,
-``healpix_*`` and ``grid_doctor_*`` attributes) and dense cell layout, so
+Binned datasets carry the full standard metadata (``crs`` grid mapping
+and ``grid_doctor_*`` attributes) and dense cell layout, so
 pyramid construction reuses the ordinary coarsening machinery unchanged,
 including the 50% minimum-valid-fraction rule.  The recorded method
 (``grid_doctor_method = "binned-mean"`` or ``"binned-mode"``) drives the
@@ -502,40 +502,67 @@ the nextGEMS HEALPix output.
 
 ## Output metadata and CRS convention
 
-Every output dataset carries a standardised set of metadata.
+Every output dataset carries the same metadata, written and read in one
+place: the `grid_doctor.metadata` package.  Code that produces
+data builds a `HealpixMetadata` and calls its `apply` method; code that
+reads data calls `HealpixMetadata.from_dataset`.  Attribute names are
+spelled out nowhere else, so changing the stored layout never touches
+the code that writes or reads values.
 
-### Global attributes
+### CF grid mapping
+
+The grid is described with the `healpix` grid mapping introduced in
+CF-1.13:
+
+```
+crs: float64                      # scalar grid mapping variable
+    grid_mapping_name: healpix
+    indexing_scheme: nested       # or ring
+    refinement_level: 10          # always written, level 0 included
+cell: int64 (cell)                # HEALPix index coordinate
+    standard_name: healpix_index
+    units: 1
+latitude, longitude: float64 (cell)
+    standard_name: latitude / longitude
+    units: degrees_north / degrees_east
+```
+
+Every variable along `cell` carries `grid_mapping = "crs"`, and the
+global `Conventions` attribute names `CF-1.13` (any other convention in
+the source's `Conventions`, such as `CMIP-6.2`, is kept).
+`nside = 2**refinement_level` is not stored; it follows from the level.
+
+CF identifies the index coordinate by its `standard_name`, not by its
+name, so the dimension stays `cell`, the name used across the HEALPix
+tooling of the km-scale hackathons.  The standard name `healpix_index`
+was accepted in standard name table v94
+([cf-convention/vocabularies#290](https://github.com/cf-convention/vocabularies/issues/290)).
+A generic name for all discrete global grid systems was proposed in
+that discussion and moved to
+[cf-convention discussion #447](https://github.com/orgs/cf-convention/discussions/447),
+which is still open; should it be adopted, only one constant changes.
+
+[xdggs](https://xdggs.readthedocs.io/) reads this layout with
+`xdggs.decode(ds, convention="cf")`.  The geometry is spherical, which is
+also what xdggs and healpix-geo assume when no `earth_radius` is given.
+
+### grid-doctor attributes
 
 | Attribute                          | Description |
 |:-----------------------------------|:------------|
-| `healpix_level`                    | HEALPix refinement level |
-| `healpix_nside`                    | $2^\ell$ |
-| `healpix_order`                    | `nested` or `ring` |
+| `grid_doctor_metadata_version`     | Version of this metadata layout (currently 1) |
 | `grid_doctor_version`              | Package version that produced the data |
-| `grid_doctor_method`               | `conservative` or `nearest` |
+| `grid_doctor_method`               | `conservative`, `nearest`, `binned-mean`, ... (also per variable for binned data) |
 | `grid_doctor_coarsened_from_level` | Level the values were coarsened from: the finest level for pyramids, the input level for `coarsen_healpix` (coarsened levels only) |
 | `grid_doctor_coarsen_mode`         | `mean` or `mode` (coarsened levels only) |
 | `grid_doctor_min_valid_fraction`   | Threshold below which cells were set to NaN: cumulative over finest-level cells for `mean`, per coarsening step for `mode` (coarsened levels only) |
+| `grid_doctor_sparse`               | `1` when `cell` holds a subset of cell indices (region selections, sparse binning) |
+| `grid_doctor_implicit_coords`      | `1` when `cell`/`latitude`/`longitude` were omitted (see below) |
 
-### CRS variable
-
-A scalar coordinate variable named `crs` follows the CF `grid_mapping`
-convention.  It carries attributes that describe the coordinate
-reference system:
-
-```
-crs: float64
-    grid_mapping_name: healpix
-    healpix_nside: 1024
-    healpix_level: 10
-    healpix_order: nested
-```
-
-Every spatially-dimensioned data variable carries
-`grid_mapping = "crs"` so that CF-aware tools can discover the
-projection automatically.  This convention is validated against the
-[gridlook](https://gridlook.pages.dev/) viewer, which uses
-`grid_mapping_name == "healpix"` to detect and render HEALPix datasets.
+The `crs` convention is also what the
+[gridlook](https://gridlook.pages.dev/) viewer uses
+(`grid_mapping_name == "healpix"`) to detect and render HEALPix
+datasets.
 
 
 ## Storage format
@@ -565,9 +592,12 @@ materialising what the index already implies.  Above level
 float64 arrays would cost ~800 GB while the regional payload is
 megabytes, and unlike the data variables they are never fill values, so
 empty-chunk elision cannot help.  Such stores carry
-`grid_doctor_implicit_coords = 1`, retain the `crs` variable and all
-`healpix_*` attributes, and remain byte-identical in layout to an
-ordinary dense store.
+`grid_doctor_implicit_coords = 1`, retain the `crs` grid mapping, and
+remain byte-identical in layout to an ordinary dense store.  Without
+the `cell` coordinate they lack the variable CF identifies by
+`standard_name = "healpix_index"`, so generic CF tools cannot recognise
+them as HEALPix; grid-doctor's selectors can.  Sparse datasets (region
+selections) always keep `cell`, since it records which cells they hold.
 
 Access is region-driven through range selection.  Nested ordering
 guarantees that every coarse-level parent corresponds to one contiguous
