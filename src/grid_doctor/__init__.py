@@ -7,7 +7,7 @@ pyramids and reusable HEALPix weight files.
 from __future__ import annotations
 
 from importlib import import_module
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 __version__ = "2604.0.0"
 
@@ -99,8 +99,11 @@ if TYPE_CHECKING:
     )
 
 
-def __getattr__(name: str) -> Any:
-    """Lazily load public submodules and exported attributes."""
+def __getattr__(name: str) -> object:
+    """Lazily load public submodules and exported attributes.
+
+    Type checkers read the real types from ``__init__.pyi``.
+    """
     if name in _SUBMODULES:
         module = import_module(_SUBMODULES[name], __name__)
         globals()[name] = module

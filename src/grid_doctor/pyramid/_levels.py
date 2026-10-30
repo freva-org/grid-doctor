@@ -10,15 +10,16 @@ once).  The public entry points stay in
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from typing import Any, Literal
+from collections.abc import Callable, Iterable, Mapping
+from typing import Literal
 
 import numpy as np
 import xarray as xr
 
 from ..remap import _healpix_centres, _make_crs_variable
-from ..types import CoarsenMode, FloatArray, ValidFraction
+from ..types import CoarsenMode, FloatArray, NumberArray, ValidFraction
 from ._blocks import (
+    Array,
     MeanPartials,
     coarsen_counts,
     coarsen_mean_steps,
@@ -26,7 +27,7 @@ from ._blocks import (
     count_valid_steps,
 )
 
-ModeKernel = Callable[..., np.ndarray]
+ModeKernel = Callable[..., NumberArray]
 """Array kernel ``f(values, *, factor, min_valid_fraction)`` for mode coarsening."""
 
 FractionShape = Literal["full", "static"]
@@ -55,7 +56,7 @@ def cell_chunk_of(ds: xr.Dataset) -> int | None:
     return None
 
 
-def wrap_cells(template: xr.DataArray, values: Any) -> xr.DataArray:
+def wrap_cells(template: xr.DataArray, values: Array) -> xr.DataArray:
     """Wrap coarsened *values* like *template* (cell last), minus cell coords."""
     coords = {str(k): v for k, v in template.coords.items() if "cell" not in v.dims}
     return xr.DataArray(
@@ -116,7 +117,7 @@ def resolve_valid_fraction(
 ) -> dict[str, FractionShape]:
     """Map variable name to fraction shape for the requested variables."""
     cell_vars = [str(n) for n, v in ds.data_vars.items() if "cell" in v.dims]
-    items: Any
+    items: Iterable[tuple[str, bool | Literal["static"]]]
     if spec is False:
         return {}
     if spec is True or spec == "static":
@@ -157,7 +158,7 @@ def add_fraction(
     data_vars: dict[str, xr.DataArray],
     name: str,
     template: xr.DataArray,
-    counts: Any,
+    counts: Array,
     *,
     n_fine: int,
     shape: FractionShape,
@@ -299,9 +300,12 @@ def coarse_levels(
         if "cell" in data.dims
     }
     fractions = valid_fraction or {}
-    state: dict[str, Any] = {name: t.data for name, t in templates.items()}
+    # Mode coarsening carries the coarsened values from level to level,
+    # mean coarsening its running sums and counts.
+    state: dict[str, Array] = {name: t.data for name, t in templates.items()}
+    partials: dict[str, MeanPartials] = {}
     # Mode coarsening has no counts of its own; keep a separate chain.
-    count_state: dict[str, Any] = {name: t.data for name, t in templates.items()}
+    count_state: dict[str, Array] = {name: t.data for name, t in templates.items()}
     levels: dict[int, xr.Dataset] = {}
     for level in range(max_level - 1, min_level - 1, -1):
         data_vars: dict[str, xr.DataArray] = {}
@@ -327,15 +331,14 @@ def coarse_levels(
                     )
                 counts = count_state[name]
             else:
-                partials = state[name]
-                partials = (
-                    partials.coarsen()
-                    if isinstance(partials, MeanPartials)
-                    else MeanPartials.from_values(partials)
+                current = (
+                    partials[name].coarsen()
+                    if name in partials
+                    else MeanPartials.from_values(state[name])
                 ).rechunk(cell_chunk)
-                state[name] = partials
-                values = partials.mean(min_valid_fraction)
-                counts = partials.counts
+                partials[name] = current
+                values = current.mean(min_valid_fraction)
+                counts = current.counts
             data_vars[name] = wrap_cells(templates[name], values)
             if name in fractions:
                 add_fraction(

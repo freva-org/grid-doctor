@@ -85,6 +85,36 @@ as cache checks, e.g. reflow's ``verify=`` hook.
       show_root_heading: true
       show_root_full_path: false
 
+## JSON layout
+
+The `to_dict()` methods return these typed dictionaries, so the layout
+of `manifest.json` and of a serialised task is spelled out in the types.
+
+::: grid_doctor.io.ManifestDict
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+
+::: grid_doctor.io.LevelSpecDict
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+
+::: grid_doctor.io.ArraySpecDict
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+
+::: grid_doctor.io.TaskEntryDict
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+
+::: grid_doctor.io.WriteTaskDict
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+
 ## Exceptions
 
 ::: grid_doctor.io.ManifestError

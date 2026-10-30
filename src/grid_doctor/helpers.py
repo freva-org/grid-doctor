@@ -14,10 +14,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, overload
+from typing import Literal, Unpack, overload
 
 import numpy as np
-import numpy.typing as npt
 import s3fs
 import xarray as xr
 
@@ -61,7 +60,15 @@ from .remap_backend import (
     _get_unstructured_dim,
     _is_unstructured,
 )
-from .types import CoarsenMode, FloatArray, ValidFraction
+from .types import (
+    CoarsenMode,
+    FloatArray,
+    FloatingArray,
+    PyramidEncoding,
+    RegridOptions,
+    S3Options,
+    ValidFraction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +154,7 @@ def resolution_to_healpix_level(resolution_deg: float) -> int:
 
 
 def _coarsen_array(
-    values: npt.NDArray[np.floating[Any]],
+    values: FloatingArray,
     *,
     factor: int,
     min_valid_fraction: float = 0.5,
@@ -176,7 +183,7 @@ def _coarsen_array(
 
 
 def _coarsen_array_mode(
-    values: npt.NDArray[np.floating[Any]],
+    values: FloatingArray,
     *,
     factor: int,
     min_valid_fraction: float = 0.5,
@@ -336,7 +343,7 @@ def create_healpix_pyramid(
     coarsen_mode: CoarsenMode = "auto",
     min_valid_fraction: float = 0.5,
     valid_fraction: ValidFraction = False,
-    **kwargs: Any,
+    **kwargs: Unpack[RegridOptions],
 ) -> dict[int, xr.Dataset]:
     """Create a multi-resolution HEALPix pyramid.
 
@@ -438,10 +445,10 @@ def create_healpix_pyramid(
 def init_pyramid_store(
     pyramid: dict[int, xr.Dataset],
     path: str,
-    s3_options: dict[str, Any] | None = None,
+    s3_options: S3Options | None = None,
     *,
     zarr_format: Literal[2, 3] = 2,
-    encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
+    encoding: PyramidEncoding | None = None,
     write_coords: bool | Literal["auto"] = "auto",
     materialise: list[str] | None = None,
     structure: Literal["flat"] = "flat",
@@ -455,10 +462,10 @@ def init_pyramid_store(
 def init_pyramid_store(
     pyramid: dict[int, xr.Dataset],
     path: str,
-    s3_options: dict[str, Any] | None = None,
+    s3_options: S3Options | None = None,
     *,
     zarr_format: Literal[2, 3] = 2,
-    encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
+    encoding: PyramidEncoding | None = None,
     write_coords: bool | Literal["auto"] = "auto",
     materialise: list[str] | None = None,
     structure: Literal["multiscales"],
@@ -471,10 +478,10 @@ def init_pyramid_store(
 def init_pyramid_store(
     pyramid: dict[int, xr.Dataset],
     path: str,
-    s3_options: dict[str, Any] | None = None,
+    s3_options: S3Options | None = None,
     *,
     zarr_format: Literal[2, 3] = 2,
-    encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
+    encoding: PyramidEncoding | None = None,
     write_coords: bool | Literal["auto"] = "auto",
     materialise: list[str] | None = None,
     structure: Literal["flat", "multiscales"] = "flat",
@@ -726,10 +733,10 @@ def init_pyramid_store(
 def _init_multiscales(
     pyramid: dict[int, xr.Dataset],
     path: str,
-    s3_options: dict[str, Any] | None,
+    s3_options: S3Options | None,
     *,
     zarr_format: Literal[2, 3],
-    encoding: dict[int, dict[str, dict[str, Any]]] | None,
+    encoding: PyramidEncoding | None,
     write_coords: bool | Literal["auto"],
     materialise: list[str],
 ) -> None:
@@ -767,12 +774,12 @@ def _init_multiscales(
 def save_pyramid(
     pyramid: dict[int, xr.Dataset],
     path: str,
-    s3_options: dict[str, Any] | None = None,
+    s3_options: S3Options | None = None,
     *,
     mode: Literal["a", "w", "r+"] = "a",
     region: Literal["auto"] | dict[str, slice] = "auto",
     zarr_format: Literal[2, 3] = 2,
-    encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
+    encoding: PyramidEncoding | None = None,
     write_coords: bool | Literal["auto"] = "auto",
     structure: Literal["flat", "multiscales"] = "flat",
 ) -> None:
@@ -876,7 +883,7 @@ def _save_multiscale(
     mode: Literal["a", "w", "r+"],
     region: Literal["auto"] | dict[str, slice],
     zarr_format: Literal[2, 3],
-    encoding: dict[int, dict[str, dict[str, Any]]] | None,
+    encoding: PyramidEncoding | None,
     write_coords: bool | Literal["auto"],
 ) -> None:
     store = get_store(path, fs)
@@ -922,7 +929,7 @@ def latlon_to_healpix_pyramid(
     *,
     min_level: int = 0,
     max_level: int | None = None,
-    **kwargs: Any,
+    **kwargs: Unpack[RegridOptions],
 ) -> dict[int, xr.Dataset]:
     """Convert a source dataset into a HEALPix pyramid.
 

@@ -21,6 +21,7 @@ Two weight-generation paths are available:
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import os
@@ -29,10 +30,15 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast, overload
+from types import ModuleType
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 import numpy as np
+import numpy.typing as npt
 import xarray as xr
+
+if TYPE_CHECKING:
+    from esmpy import Mesh
 
 from .types import (
     FloatArray,
@@ -260,14 +266,14 @@ class SpectralTransformError(RuntimeError):
 # ===================================================================
 
 
-def _require_esmpy() -> Any:
+def _require_esmpy() -> ModuleType:
     """Import and return the ``esmpy`` module.
 
     Raises:
         ImportError: When ESMPy is not installed.
     """
     try:
-        import esmpy
+        esmpy = importlib.import_module("esmpy")
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "ESMPy is required for in-memory weight generation. "
@@ -278,7 +284,7 @@ def _require_esmpy() -> Any:
     return esmpy
 
 
-def _require_healpix_geo_module(nest: bool) -> tuple[Any, dict[str, str]]:
+def _require_healpix_geo_module(nest: bool) -> tuple[ModuleType, dict[str, str]]:
     """Import and return the appropriate ``healpix_geo`` sub-module.
 
     All HEALPix geometry is computed on a perfect sphere.  This is
@@ -316,7 +322,7 @@ def _require_healpix_geo_module(nest: bool) -> tuple[Any, dict[str, str]]:
 # ===================================================================
 
 
-def _to_float64(values: Any) -> FloatArray:
+def _to_float64(values: npt.ArrayLike) -> FloatArray:
     """Cast *values* to a contiguous float64 array.
 
     Args:
@@ -1354,8 +1360,8 @@ def _target_healpix_mesh(
 def _mesh_from_polygon_mesh(
     mesh: PolygonMesh,
     *,
-    esmpy_mod: Any,
-) -> Any:
+    esmpy_mod: ModuleType,
+) -> Mesh:
     """Construct an ESMPy :class:`Mesh` from a compact polygon mesh.
 
     Args:
@@ -1498,7 +1504,7 @@ def write_ugrid_mesh_file(
         attrs={"Conventions": "UGRID-1.0"},
     )
     face_node_var = f"{mesh_name}_face_nodes"
-    encoding: dict[str, dict[str, Any]] = {
+    encoding: dict[str, dict[str, object]] = {
         str(var): {"_FillValue": None}
         for var in ds.data_vars
         if str(var) != face_node_var
@@ -1829,7 +1835,7 @@ def _compute_weights_in_memory(
         if method == "nearest"
         else esmpy_mod.RegridMethod.CONSERVE
     )
-    kwargs: dict[str, Any] = {
+    kwargs: dict[str, object] = {
         "filename": str(weights_path),
         "regrid_method": regrid_method,
         "unmapped_action": (

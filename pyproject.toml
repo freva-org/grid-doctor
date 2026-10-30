@@ -96,7 +96,7 @@ Homepage = "https://github.com/freva-org/grid-doctor"
 Repository = "https://github.com/freva-org/grid-doctor"
 
 [tool.mypy]
-files = "freva-*/src"
+files = ["src/grid_doctor"]
 strict = true
 warn_unused_ignores = true
 warn_unreachable = true
@@ -111,6 +111,11 @@ disallow_untyped_decorators = true
 warn_redundant_casts = true
 ignore_missing_imports = true
 allow_untyped_calls = true
+
+[[tool.mypy.overrides]]
+# New code: no explicit Any.  Use the aliases in grid_doctor.types.
+module = ["grid_doctor.io.*"]
+disallow_any_explicit = true
 
 [tool.isort]
 known_first_party = [

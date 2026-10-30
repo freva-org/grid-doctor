@@ -9,12 +9,13 @@ import pickle
 import tempfile
 from os import environ
 from pathlib import Path
-from typing import Any, Collection, Literal, cast
+from typing import Any, Collection, Literal, Unpack, cast
 
 import numpy as np
+import numpy.typing as npt
 import xarray as xr
 
-from .types import RemapMethod, SourceUnits
+from .types import RemapMethod, SourceUnits, WeightOptions
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 def chunk_for_target_store_size(
     *,
     level: int,
-    dtype: str | np.dtype[Any] = "float32",
+    dtype: npt.DTypeLike = "float32",
     target_stored_mib: float = 16.0,
     compression_ratio: float = 2.0,
     access: Literal["time_series", "map"] = "map",
@@ -176,6 +177,7 @@ def cached_open_dataset(files: Collection[str], **kwargs: Any) -> xr.Dataset:
 
     from dask.diagnostics.progress import ProgressBar
 
+    # Passed through to xarray unchanged, so typed like its ``**kwargs``.
     merged_kwargs: dict[str, Any] = {"parallel": True, "chunks": "auto"} | kwargs
     with ProgressBar():
         dataset = xr.open_mfdataset(normalised, **merged_kwargs)
@@ -193,7 +195,7 @@ def cached_weights(
     nest: bool = True,
     source_units: SourceUnits = "auto",
     cache_path: str | Path | None = None,
-    **kwargs: Any,
+    **kwargs: Unpack[WeightOptions],
 ) -> Path:
     """Compute or load a cached HEALPix weight file.
 
