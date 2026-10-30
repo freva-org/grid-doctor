@@ -23,6 +23,15 @@ from typing import (
 
 from .types import RemapMethod
 
+_HINTS: dict[type, dict[str, Any]] = {}
+
+
+def _type_hints(cls: type) -> dict[str, Any]:
+    """Return the resolved annotations of ``cls``, computed once per class."""
+    if cls not in _HINTS:
+        _HINTS[cls] = get_type_hints(cls)
+    return _HINTS[cls]
+
 
 class _Namespace:
     """Base for a group of settings; subclasses are slotted dataclasses.
@@ -36,7 +45,7 @@ class _Namespace:
 
     def __setattr__(self, name: str, value: Any) -> None:
         """Validate ``Literal`` settings before assigning them."""
-        hint = get_type_hints(type(self)).get(name)
+        hint = _type_hints(type(self)).get(name)
         if get_origin(hint) is Literal and value not in get_args(hint):
             raise ValueError(f"{self.namespace}.{name} must be one of {get_args(hint)}, got {value!r}")
         object.__setattr__(self, name, value)
