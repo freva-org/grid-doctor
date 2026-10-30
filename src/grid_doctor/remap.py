@@ -19,12 +19,15 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
 import dask.array as da
 import numpy as np
 import xarray as xr
 from dask.base import tokenize
+
+if TYPE_CHECKING:
+    from scipy.sparse import csr_array, csr_matrix
 
 from .remap_apply import (
     apply_weights_nd,
@@ -124,15 +127,20 @@ def _healpix_centres(
 # ===================================================================
 
 
-def _read_weight_file(
-    weights_path: str | Path,
-) -> tuple[Any, int, int, int, str, str | None, tuple[str, ...] | None]:
-    """Read a weight file and return matrix plus metadata.
+class _WeightFile(NamedTuple):
+    """Contents of a weight file, as returned by `_read_weight_file`."""
 
-    Returns:
-        ``(matrix, n_target, n_source, level, order, method,
-        stored_source_dims)``.
-    """
+    matrix: csr_array
+    n_target: int
+    n_source: int
+    level: int
+    order: str
+    method: str | None
+    stored_source_dims: tuple[str, ...] | None
+
+
+def _read_weight_file(weights_path: str | Path) -> _WeightFile:
+    """Read a weight file and return matrix plus metadata."""
     with xr.open_dataset(weights_path) as wds:
         row_name = "row" if "row" in wds else "dst_address"
         col_name = "col" if "col" in wds else "src_address"
@@ -150,7 +158,9 @@ def _read_weight_file(
         stored_source_dims = _parse_source_dims_attr(
             wds.attrs.get("grid_doctor_source_dims")
         )
-    return matrix, n_target, n_source, level, order, method, stored_source_dims
+    return _WeightFile(
+        matrix, n_target, n_source, level, order, method, stored_source_dims
+    )
 
 
 # ===================================================================
@@ -388,7 +398,7 @@ def _resolve_cell_chunk(
     return size if size < n_target else None
 
 
-def _row_blocks(matrix: Any, size: int) -> list[Any]:
+def _row_blocks(matrix: csr_array, size: int) -> list[csr_matrix]:
     """Split a CSR matrix into row blocks that share its data arrays.
 
     ``matrix[a:b]`` would copy ``data`` and ``indices`` (seconds and
@@ -413,8 +423,11 @@ def _row_blocks(matrix: Any, size: int) -> list[Any]:
 def _apply_weights_rowblocked(
     data: xr.DataArray,
     source_dims: tuple[str, ...],
-    row_blocks: list[Any],
-    **kwargs: Any,
+    row_blocks: list[csr_matrix],
+    *,
+    missing_policy: MissingPolicy,
+    backend: ApplyBackend,
+    parallel: bool,
 ) -> xr.DataArray:
     """Apply weights to dask-backed *data*, one output chunk per row block.
 
@@ -423,6 +436,11 @@ def _apply_weights_rowblocked(
     chunk, but every task only produces (and carries the weights for)
     its own slice of HEALPix cells.
     """
+    kwargs: dict[str, str | bool] = {
+        "missing_policy": missing_policy,
+        "backend": backend,
+        "parallel": parallel,
+    }
     batch_dims = [str(d) for d in data.dims if d not in source_dims]
     ordered = data.transpose(*batch_dims, *source_dims)
     n_batch = len(batch_dims)
@@ -558,7 +576,7 @@ def apply_weight_file(
     )
     n_src_dims = len(resolved_sd)
     cell_chunk = _resolve_cell_chunk(cell_chunks, n_target)
-    row_blocks: list[Any] | None = None
+    row_blocks: list[csr_matrix] | None = None
 
     regridded: dict[str, xr.DataArray] = {}
     for name, data in ds.data_vars.items():

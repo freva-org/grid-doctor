@@ -10,21 +10,23 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TypeAlias, TypeGuard
 
 import dask.array as da
 import numpy as np
+import numpy.typing as npt
 
+from ..types import NumberArray
 from ._kernels import block_sum, finalize_mean, valid_counts, valid_sums
 
-Array = Any
+Array: TypeAlias = da.Array | NumberArray
 """A NumPy or dask array with the HEALPix cell axis last."""
 
 STEP = 4
 """Children per parent for one HEALPix level."""
 
 
-def is_dask(arr: Array) -> bool:
+def is_dask(arr: Array) -> TypeGuard[da.Array]:
     """Whether *arr* is a dask array."""
     return isinstance(arr, da.Array)
 
@@ -38,40 +40,47 @@ def rechunk_cells(arr: Array, cell_chunk: int | None) -> Array:
 
     NumPy arrays and ``cell_chunk=None`` are returned unchanged.
     """
-    if not is_dask(arr) or cell_chunk is None:
+    if not isinstance(arr, da.Array) or cell_chunk is None:
         return arr
+    return _rechunk_dask(arr, cell_chunk)
+
+
+def _rechunk_dask(arr: da.Array, cell_chunk: int) -> da.Array:
     size = min(_round_down(cell_chunk, STEP), arr.shape[-1])
     if all(c == size for c in arr.chunks[-1][:-1]) and arr.chunks[-1][-1] <= size:
         return arr
-    return arr.rechunk({arr.ndim - 1: size})
+    rechunked: da.Array = arr.rechunk({arr.ndim - 1: size})
+    return rechunked
 
 
 def map_cells(
-    func: Callable[..., np.ndarray],
+    func: Callable[..., NumberArray],
     arr: Array,
     *,
     factor: int,
-    dtype: Any,
-    **kwargs: Any,
+    dtype: npt.DTypeLike,
+    **kwargs: object,
 ) -> Array:
     """Apply a reducing kernel ``func(block, factor=...)`` along cells.
 
     Each output block covers exactly the parents of its input block.
     Dask chunks that are not multiples of *factor* are realigned first.
     """
-    if not is_dask(arr):
+    if not isinstance(arr, da.Array):
         return func(arr, factor=factor, **kwargs)
     if any(c % factor for c in arr.chunks[-1]):
-        arr = rechunk_cells(arr, _round_down(arr.chunks[-1][0], factor))
+        arr = _rechunk_dask(arr, _round_down(arr.chunks[-1][0], factor))
     out_chunks = (*arr.chunks[:-1], tuple(c // factor for c in arr.chunks[-1]))
-    return arr.map_blocks(
+    out: da.Array = da.map_blocks(
         func,
+        arr,
         factor=factor,
         chunks=out_chunks,
         dtype=dtype,
         meta=np.empty((0,) * arr.ndim, dtype=dtype),
         **kwargs,
     )
+    return out
 
 
 @dataclass(frozen=True)
@@ -116,7 +125,7 @@ class MeanPartials:
     def mean(self, min_valid_fraction: float) -> Array:
         """Mean over valid finest-level cells, masked by cumulative fraction."""
         if is_dask(self.sums):
-            return da.map_blocks(
+            out: da.Array = da.map_blocks(
                 finalize_mean,
                 self.sums,
                 self.counts,
@@ -125,6 +134,7 @@ class MeanPartials:
                 n_fine=self.n_fine,
                 min_valid_fraction=min_valid_fraction,
             )
+            return out
         return finalize_mean(
             self.sums,
             self.counts,
@@ -134,7 +144,10 @@ class MeanPartials:
 
     def valid_fraction(self) -> Array:
         """Fraction of finest-level cells under each cell that are valid."""
-        return self.counts / self.n_fine
+        if isinstance(self.counts, da.Array):
+            fraction: da.Array = self.counts / self.n_fine
+            return fraction
+        return np.true_divide(self.counts, self.n_fine)
 
 
 def coarsen_counts(counts: Array, *, cell_chunk: int | None = None) -> Array:
@@ -180,7 +193,7 @@ def coarsen_mode_steps(
     values: Array,
     steps: int,
     *,
-    kernel: Callable[..., np.ndarray],
+    kernel: Callable[..., NumberArray],
     min_valid_fraction: float,
     cell_chunk: int | None = None,
 ) -> Array:

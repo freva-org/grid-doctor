@@ -34,7 +34,7 @@ slice in O(selection).
 from __future__ import annotations
 
 import logging
-from typing import Any
+from collections.abc import Hashable, Mapping
 
 import numpy as np
 import xarray as xr
@@ -293,7 +293,7 @@ def attach_cell_coords(
     cells: Int64Array,
     *,
     level: int,
-    attrs: Any = None,
+    attrs: Mapping[Hashable, object] | None = None,
 ) -> xr.Dataset:
     """Attach computed cell coordinates to a compact subset.
 

@@ -29,13 +29,17 @@ from __future__ import annotations
 
 import logging
 import types
-from typing import TYPE_CHECKING, Any, Literal, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
 from scipy.sparse import coo_matrix, csr_matrix
 
-from .types import ApplyBackend, FloatArray, MissingPolicy
+from .types import ApplyBackend, FloatArray, IntArray, MissingPolicy
+
+#: A fused sparse-apply kernel: ``(indptr, indices, data, values, out)``.
+_Kernel = Callable[[IntArray, IntArray, FloatArray, FloatArray, FloatArray], None]
 
 if TYPE_CHECKING:
     from scipy.sparse import csr_array
@@ -117,7 +121,7 @@ except ModuleNotFoundError:  # pragma: no cover
     pass
 
 
-def _build_numba_kernels() -> dict[tuple[str, bool], Any] | None:
+def _build_numba_kernels() -> dict[tuple[str, bool], _Kernel] | None:
     """JIT-compile the fused Numba kernels on first use.
 
     Returns:
@@ -180,7 +184,7 @@ def _build_numba_kernels() -> dict[tuple[str, bool], Any] | None:
     }
 
 
-def _compile(func: Any, *, parallel: bool) -> Any:
+def _compile(func: _Kernel, *, parallel: bool) -> _Kernel:
     """JIT *func* with a parallel (OpenMP/TBB) or serial, GIL-free target.
 
     Serial kernels are for code that already runs in parallel threads
@@ -188,6 +192,8 @@ def _compile(func: Any, *, parallel: bool) -> Any:
     and exhaust the process thread limit.  Each variant gets its own
     name so numba's on-disk cache keeps them apart.
     """
+    if not isinstance(func, types.FunctionType):
+        raise TypeError(f"cannot compile {func!r}: not a plain function")
     suffix = "parallel" if parallel else "serial"
     variant = types.FunctionType(
         func.__code__,
@@ -203,10 +209,10 @@ def _compile(func: Any, *, parallel: bool) -> Any:
 
 
 # Lazy singleton — compiled on first call.
-_NUMBA_KERNELS: dict[tuple[str, bool], Any] | None | Literal[False] = False
+_NUMBA_KERNELS: dict[tuple[str, bool], _Kernel] | None | Literal[False] = False
 
 
-def _get_numba_kernels() -> dict[tuple[str, bool], Any] | None:
+def _get_numba_kernels() -> dict[tuple[str, bool], _Kernel] | None:
     """Return the Numba kernels, compiling on first call."""
     global _NUMBA_KERNELS  # noqa: PLW0603
     if _NUMBA_KERNELS is False:
@@ -312,9 +318,9 @@ class _GpuMatrixCache:
     """
 
     def __init__(self) -> None:
-        self._cache: dict[int, Any] = {}
+        self._cache: dict[int, cp_csr_matrix] = {}
 
-    def get(self, matrix: csr_matrix) -> Any:
+    def get(self, matrix: csr_matrix) -> cp_csr_matrix:
         """Return the GPU-side CSR matrix, transferring if needed.
 
         Args:

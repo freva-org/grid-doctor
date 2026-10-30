@@ -38,7 +38,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 import dask.array as da
 import numpy as np
@@ -46,6 +46,15 @@ import s3fs
 import xarray as xr
 import zarr
 
+from ..types import (
+    BoolArray,
+    EncodingDict,
+    GenericArray,
+    IndexSlice,
+    S3Options,
+    ZarrArray,
+    ZarrStore,
+)
 from ._manifest import (
     DONE_DIR,
     INIT_FILE,
@@ -62,6 +71,7 @@ from ._manifest import (
 from ._zarr import (
     DeferredWrite,
     encode_zarr_variable,
+    get_array,
     store_all,
     stored_encodings,
 )
@@ -96,7 +106,7 @@ class IncompleteStoreError(RuntimeError):
 class _Target:
     """Pyramid root on local disk or S3, plus the state directory."""
 
-    def __init__(self, path: str, s3_options: Mapping[str, Any] | None) -> None:
+    def __init__(self, path: str, s3_options: S3Options | None) -> None:
         self.path = path.rstrip("/")
         self.fs: s3fs.S3FileSystem | None = (
             s3fs.S3FileSystem(**dict(s3_options or {}))
@@ -106,10 +116,11 @@ class _Target:
 
     # -- zarr stores ---------------------------------------------------
 
-    def store(self, name: str) -> Any:
+    def store(self, name: str) -> ZarrStore:
         root = f"{self.path}/{name}"
         if self.fs is not None:
-            return s3fs.S3Map(root=root, s3=self.fs)
+            store: ZarrStore = s3fs.S3Map(root=root, s3=self.fs)
+            return store
         return root
 
     # -- plain files below the root -------------------------------------
@@ -197,7 +208,7 @@ class _Target:
 
 
 def load_manifest(
-    path: str, s3_options: Mapping[str, Any] | None = None
+    path: str, s3_options: S3Options | None = None
 ) -> PyramidManifest:
     """Read the manifest that the init step stored below *path*.
 
@@ -228,7 +239,7 @@ def load_manifest(
 
 
 def is_current(
-    item: PyramidManifest | WriteTask, s3_options: Mapping[str, Any] | None = None
+    item: PyramidManifest | WriteTask, s3_options: S3Options | None = None
 ) -> bool:
     """Whether the store at ``item.path`` still holds ``item``'s manifest.
 
@@ -254,7 +265,7 @@ def is_current(
     return bool(stored_id == item.manifest_id)
 
 
-def is_task_done(task: WriteTask, s3_options: Mapping[str, Any] | None = None) -> bool:
+def is_task_done(task: WriteTask, s3_options: S3Options | None = None) -> bool:
     """Whether *task* has a completion marker for the current manifest.
 
     Equivalent to ``task.task_id in check_pyramid_store(...).done_tasks``
@@ -290,7 +301,7 @@ def is_task_done(task: WriteTask, s3_options: Mapping[str, Any] | None = None) -
 # ======================================================================
 
 
-def write_unit(array: Any) -> tuple[int, ...]:
+def write_unit(array: ZarrArray) -> tuple[int, ...]:
     """Smallest independently writable block of a zarr array."""
     shards = getattr(array, "shards", None)
     return tuple(int(n) for n in (shards or array.chunks))
@@ -299,7 +310,7 @@ def write_unit(array: Any) -> tuple[int, ...]:
 def describe_level(
     level: int,
     store_name: str,
-    store: Any,
+    store: ZarrStore,
     template: xr.Dataset,
     task_vars: Sequence[str],
     *,
@@ -332,7 +343,7 @@ def describe_level(
     )
 
 
-def begin_init(path: str, s3_options: Mapping[str, Any] | None) -> None:
+def begin_init(path: str, s3_options: S3Options | None) -> None:
     """Invalidate an existing manifest and its markers before re-initialising.
 
     Removing the manifest first means workers of an earlier run fail
@@ -402,7 +413,7 @@ class ExistingTarget:
 
 
 def inspect_target(
-    path: str, s3_options: Mapping[str, Any] | None, store_names: Iterable[str]
+    path: str, s3_options: S3Options | None, store_names: Iterable[str]
 ) -> ExistingTarget:
     """Look for a manifest, level stores and an unfinished init at *path*."""
     target = _Target(path, s3_options)
@@ -423,7 +434,7 @@ def resume_init(
     path: str,
     templates: Mapping[int, xr.Dataset],
     task_vars: Mapping[int, Sequence[str]],
-    s3_options: Mapping[str, Any] | None,
+    s3_options: S3Options | None,
     *,
     zarr_format: Literal[2, 3],
     split: Mapping[str, int] | None,
@@ -528,7 +539,7 @@ def resume_init(
 
 def coordinate_differences(
     dataset: xr.Dataset,
-    store: Any,
+    store: ZarrStore,
     names: Iterable[str],
     *,
     zarr_format: Literal[2, 3],
@@ -572,7 +583,7 @@ def coordinate_differences(
     region = dict(region or {})
     group = zarr.open_group(store, mode="r", zarr_format=zarr_format)
     members = set(group.array_keys())
-    encodings: dict[str, dict[str, Any]] | None = None
+    encodings: EncodingDict | None = None
     decoded: xr.Dataset | None = None
     problems: list[str] = []
     for name in names:
@@ -592,8 +603,8 @@ def coordinate_differences(
             continue
         if stored_dims is not None and tuple(stored_dims) != var.dims:
             var = var.transpose(*stored_dims)
-        selection: dict[str, slice] = {}
-        stored_index: list[slice] = []
+        selection: dict[str, IndexSlice] = {}
+        stored_index: list[slice[int, int, None]] = []
         for dim, have, full in zip(var.dims, var.shape, stored.shape):
             start, stop = region.get(str(dim), (0, int(full)))
             if have == full and (start, stop) != (0, full):
@@ -647,15 +658,15 @@ def coordinate_differences(
     return problems
 
 
-def _array_dims(array: Any) -> tuple[str, ...] | None:
+def _array_dims(array: ZarrArray) -> tuple[str, ...] | None:
     names = getattr(array.metadata, "dimension_names", None)
     if names:
         return tuple(str(n) for n in names)
     dims = array.attrs.get("_ARRAY_DIMENSIONS")
-    return tuple(str(d) for d in dims) if dims is not None else None
+    return tuple(str(d) for d in dims) if isinstance(dims, list) else None
 
 
-def _equal_elements(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+def _equal_elements(a: GenericArray, b: GenericArray) -> BoolArray:
     """Elementwise equality that treats NaN == NaN (and NaT == NaT)."""
     equal = np.asarray(a == b)
     if a.dtype.kind in "fcmM" and b.dtype.kind in "fcmM":
@@ -680,7 +691,7 @@ def _chunk_differences(
     level: int,
     template: xr.Dataset,
     spec: LevelSpec,
-    store: Any,
+    store: ZarrStore,
     zarr_format: Literal[2, 3],
 ) -> list[str]:
     """Chunks the init would now choose vs. the chunks already stored.
@@ -710,7 +721,7 @@ def _chunk_differences(
 
 def finish_init(
     path: str,
-    s3_options: Mapping[str, Any] | None,
+    s3_options: S3Options | None,
     levels: Sequence[LevelSpec],
     *,
     zarr_format: Literal[2, 3],
@@ -770,7 +781,7 @@ def finish_init(
 def write_pyramid_task(
     pyramid: Mapping[int, xr.Dataset],
     task: WriteTask,
-    s3_options: Mapping[str, Any] | None = None,
+    s3_options: S3Options | None = None,
 ) -> WriteTask:
     """Write one task's region of *pyramid* into an initialised store.
 
@@ -868,7 +879,7 @@ def write_pyramid_task(
             region = tuple(
                 slice(off, off + n) for off, n in zip(offsets, encoded.shape)
             )
-            writes.append(DeferredWrite(source, group[name], region))
+            writes.append(DeferredWrite(source, get_array(group, name), region))
 
         mismatches = coordinate_differences(
             pyramid[level],
@@ -930,7 +941,7 @@ def _select_region(var: xr.Variable, spec: ArraySpec, task: WriteTask) -> xr.Var
     if var.dims != spec.dims:
         var = var.transpose(*spec.dims)
     region = {dim: (start, stop) for dim, start, stop in task.region}
-    selection: dict[str, slice] = {}
+    selection: dict[str, IndexSlice] = {}
     for dim in spec.dims:
         have, full = var.sizes[dim], spec.size(dim)
         if dim in region:
@@ -957,7 +968,10 @@ def _region_offsets(spec: ArraySpec, task: WriteTask) -> tuple[int, ...]:
 
 
 def _aligned(
-    data: Any, units: tuple[int, ...], offsets: tuple[int, ...], name: str
+    data: da.Array | GenericArray,
+    units: tuple[int, ...],
+    offsets: tuple[int, ...],
+    name: str,
 ) -> da.Array:
     """Return *data* as dask array whose blocks never split a write unit.
 
@@ -1080,7 +1094,7 @@ class StoreReport:
 
 def check_pyramid_store(
     manifest: PyramidManifest | str,
-    s3_options: Mapping[str, Any] | None = None,
+    s3_options: S3Options | None = None,
     *,
     inspect_chunks: bool = False,
 ) -> StoreReport:
@@ -1140,7 +1154,7 @@ def check_pyramid_store(
                 f"not {manifest.manifest_id}"
             )
 
-    groups: dict[int, Any] = {}
+    groups: dict[int, zarr.Group] = {}
     for spec in manifest.levels:
         try:
             group = zarr.open_group(
@@ -1197,11 +1211,11 @@ def check_pyramid_store(
 
 
 def _check_array(
-    level: int, group: Any, members: set[str], spec: ArraySpec
+    level: int, group: zarr.Group, members: set[str], spec: ArraySpec
 ) -> list[str]:
     if spec.name not in members:
         return [f"level {level}: array {spec.name!r} missing"]
-    array = group[spec.name]
+    array = get_array(group, spec.name)
     problems = []
     if tuple(array.shape) != spec.shape:
         problems.append(
@@ -1224,7 +1238,7 @@ def _check_array(
 def _absent_chunks(
     manifest: PyramidManifest,
     target: _Target,
-    groups: Mapping[int, Any],
+    groups: Mapping[int, zarr.Group],
     tasks: Iterable[WriteTask],
 ) -> list[tuple[str, int, int]]:
     listings: dict[tuple[int, str], set[str]] = {}
@@ -1241,7 +1255,7 @@ def _absent_chunks(
                 key = (level, name)
                 if key not in listings:
                     listings[key] = target.find(spec.store, name)
-                array = groups[level][name]
+                array = get_array(groups[level], name)
                 ranges = []
                 for dim, size, unit in zip(
                     array_spec.dims, array_spec.shape, array_spec.chunks

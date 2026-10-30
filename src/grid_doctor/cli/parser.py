@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any
+from typing import TypedDict, Unpack
 
 try:
     from rich_argparse import ArgumentDefaultsRichHelpFormatter as ArgFormatter
@@ -61,7 +61,17 @@ def get_parser(name: str, description: str | None = None) -> argparse.ArgumentPa
     return parser
 
 
-def setup_logging_from_args(args: argparse.Namespace, **kwargs: Any) -> None:
+class LoggingOptions(TypedDict, total=False):
+    """Options of [`grid_doctor.setup_logging`][grid_doctor.log.setup_logging]."""
+
+    level: int | str | None
+    fmt: str
+    datefmt: str
+
+
+def setup_logging_from_args(
+    args: argparse.Namespace, **kwargs: Unpack[LoggingOptions]
+) -> None:
     """Initialise logging from parsed CLI arguments.
 
     Parameters

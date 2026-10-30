@@ -14,12 +14,12 @@ grid-doctor issue #54).
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import cast
 
 import numpy as np
 import numpy.typing as npt
 
-from ..types import FloatArray, Int64Array
+from ..types import FloatArray, FloatingArray, Int64Array, NumberArray
 
 # Guards ``ceil`` against float round-off, e.g. 0.3 * 10 -> 3.0000000000000004.
 _EPS = 1e-9
@@ -30,7 +30,7 @@ def min_valid_count(min_valid_fraction: float, n_children: int) -> int:
     return max(1, int(np.ceil(min_valid_fraction * n_children - _EPS)))
 
 
-def _grouped(values: npt.ArrayLike, factor: int) -> npt.NDArray[Any]:
+def _grouped(values: npt.ArrayLike, factor: int) -> NumberArray:
     arr = np.asarray(values)
     n_cells = arr.shape[-1]
     if factor < 1 or n_cells % factor:
@@ -38,7 +38,7 @@ def _grouped(values: npt.ArrayLike, factor: int) -> npt.NDArray[Any]:
     return arr.reshape(*arr.shape[:-1], n_cells // factor, factor)
 
 
-def block_sum(values: npt.ArrayLike, *, factor: int) -> npt.NDArray[Any]:
+def block_sum(values: npt.ArrayLike, *, factor: int) -> NumberArray:
     """Sum groups of ``factor`` nested children, preserving the dtype."""
     return _grouped(values, factor).sum(axis=-1)
 
@@ -83,7 +83,7 @@ def finalize_mean(
 
 
 def coarsen_mean(
-    values: npt.NDArray[np.floating[Any]],
+    values: FloatingArray,
     *,
     factor: int,
     min_valid_fraction: float = 0.5,

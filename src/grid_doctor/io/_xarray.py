@@ -1,9 +1,11 @@
 """Helper functions for preparing HEALPix pyramids for writing to zarr."""
 
-from typing import Any, Literal
+from typing import Literal
 
 import dask
 import xarray as xr
+
+from ..types import EncodingDict, IndexSlice, PyramidEncoding
 
 
 def maybe_drop_coordinates(
@@ -80,9 +82,9 @@ def prepare_template(
     level: int,
     write_coords: bool | Literal["auto"] = "auto",
     max_level_to_auto_write_coords: int = 10,
-    encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
+    encoding: PyramidEncoding | None = None,
     materialise: list[str] | None = None,
-) -> tuple[xr.Dataset, dict[str, Any]]:
+) -> tuple[xr.Dataset, EncodingDict]:
     """Create empty template based on dataset.
 
     Parameters listed under `materialise` will be written,
@@ -116,20 +118,23 @@ def prepare_template(
         if "chunks" in var.encoding:
             del var.encoding["chunks"]
     # Create regular chunks
-    zarr_chunks = {}
+    zarr_chunks: dict[str, tuple[int, ...]] = {}
     for var_name, variable in dataset.variables.items():
         chunksizes = variable.chunksizes
-        zarr_chunks[var_name] = {"chunks": tuple(c[0] for c in chunksizes.values())}
+        zarr_chunks[str(var_name)] = tuple(c[0] for c in chunksizes.values())
 
-    encoding = encoding or {}
-    combined_encoding = {
-        str(k): encoding.get(level, {}).get(k, {}) | zarr_chunks.get(k, {})  # type: ignore[call-overload]
-        for k in template.variables
-    }
+    level_encoding = (encoding or {}).get(level, {})
+    combined_encoding: EncodingDict = {}
+    for k in template.variables:
+        name = str(k)
+        var_encoding = dict(level_encoding.get(name, {}))
+        if name in zarr_chunks:
+            var_encoding["chunks"] = zarr_chunks[name]
+        combined_encoding[name] = var_encoding
     return template, combined_encoding
 
 
-def prepare_region_dataset(dataset: xr.Dataset, region: dict[str, slice]) -> xr.Dataset:
+def prepare_region_dataset(dataset: xr.Dataset, region: dict[str, IndexSlice]) -> xr.Dataset:
     """Select given reqion from dataset.
 
     Variables that do not depend on the region keys are dropped.

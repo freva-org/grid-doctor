@@ -36,11 +36,15 @@ import json
 import logging
 import math
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, NoReturn, cast
+from typing import Literal, NoReturn, TypedDict, TypeVar
+
+from ..types import IndexSlice, JSONValue
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 #: Version of the manifest JSON layout.  Bumped on incompatible changes.
 MANIFEST_SCHEMA_VERSION = 1
@@ -71,6 +75,66 @@ Region = tuple[tuple[str, int, int], ...]
 
 class ManifestError(ValueError):
     """The manifest cannot be built, read, or does not match the store."""
+
+
+# ----------------------------------------------------------------------
+# JSON layout
+# ----------------------------------------------------------------------
+
+
+class ArraySpecDict(TypedDict):
+    """JSON form of an [`ArraySpec`][grid_doctor.io.ArraySpec]."""
+
+    name: str
+    dims: list[str]
+    shape: list[int]
+    chunks: list[int]
+    dtype: str
+
+
+class LevelSpecDict(TypedDict):
+    """JSON form of a [`LevelSpec`][grid_doctor.io.LevelSpec]."""
+
+    level: int
+    store: str
+    coords: list[str]
+    data_vars: list[ArraySpecDict]
+
+
+class TaskEntryDict(TypedDict):
+    """JSON form of a task inside a manifest (shared fields omitted)."""
+
+    task_id: str
+    variables: list[str]
+    region: dict[str, list[int]]
+    levels: list[int]
+
+
+class WriteTaskDict(TypedDict):
+    """JSON form of a stand-alone [`WriteTask`][grid_doctor.WriteTask]."""
+
+    task_id: str
+    manifest_id: str
+    path: str
+    zarr_format: Literal[2, 3]
+    variables: list[str]
+    region: dict[str, list[int]]
+    levels: list[int]
+
+
+class ManifestDict(TypedDict):
+    """JSON form of a [`PyramidManifest`][grid_doctor.PyramidManifest]."""
+
+    schema_version: int
+    manifest_id: str
+    path: str
+    zarr_format: Literal[2, 3]
+    created: str
+    grid_doctor_version: str
+    split: dict[str, int]
+    materialised: list[str]
+    levels: list[LevelSpecDict]
+    tasks: list[TaskEntryDict]
 
 
 @dataclass(frozen=True)
@@ -128,7 +192,7 @@ class ArraySpec:
         """Write-unit size along *dim*."""
         return self.chunks[self.dims.index(dim)]
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> ArraySpecDict:
         """JSON-compatible representation."""
         return {
             "name": self.name,
@@ -139,18 +203,22 @@ class ArraySpec:
         }
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any], *, where: str = "array") -> ArraySpec:
+    def from_dict(
+        cls, data: Mapping[str, object], *, where: str = "array"
+    ) -> ArraySpec:
         """Inverse of [`to_dict`][grid_doctor.io.ArraySpec.to_dict].
 
         *where* names the location in error messages.
         """
-        data = _mapping(data, where)
+        fields = _mapping(data, where)
         return cls(
-            name=_field(data, "name", where),
-            dims=_field(data, "dims", where),
-            shape=_field(data, "shape", where),
-            chunks=_field(data, "chunks", where),
-            dtype=_field(data, "dtype", where),
+            name=_name(_field(fields, "name", where), where, "name"),
+            dims=_str_tuple(_field(fields, "dims", where), where, "dims"),
+            shape=_int_tuple(_field(fields, "shape", where), where, "shape", minimum=0),
+            chunks=_int_tuple(
+                _field(fields, "chunks", where), where, "chunks", minimum=1
+            ),
+            dtype=_as_str(_field(fields, "dtype", where), where, "dtype"),
         )
 
 
@@ -182,14 +250,9 @@ class LevelSpec:
         """Validate and normalise the fields (lists become tuples)."""
         where = f"level {self.level!r}"
         coords = _str_tuple(self.coords, where, "coords", unique=True)
-        data_vars = _as_tuple(self.data_vars, where, "data_vars")
-        for spec in data_vars:
-            if not isinstance(spec, ArraySpec):
-                _fail(
-                    where,
-                    "data_vars must contain ArraySpec objects, got "
-                    f"{type(spec).__name__}",
-                )
+        data_vars = _instances(
+            _as_tuple(self.data_vars, where, "data_vars"), ArraySpec, where, "data_vars"
+        )
         names = [spec.name for spec in data_vars]
         duplicates = sorted({n for n in names if names.count(n) > 1})
         if duplicates:
@@ -212,7 +275,7 @@ class LevelSpec:
                 return spec
         raise KeyError(f"level {self.level} has no data variable {name!r}")
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> LevelSpecDict:
         """JSON-compatible representation."""
         return {
             "level": self.level,
@@ -222,19 +285,24 @@ class LevelSpec:
         }
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any], *, where: str = "level") -> LevelSpec:
+    def from_dict(
+        cls, data: Mapping[str, object], *, where: str = "level"
+    ) -> LevelSpec:
         """Inverse of [`to_dict`][grid_doctor.io.LevelSpec.to_dict].
 
         *where* names the location in error messages.
         """
-        data = _mapping(data, where)
-        raw_vars = _as_tuple(_field(data, "data_vars", where), where, "data_vars")
+        fields = _mapping(data, where)
+        raw_vars = _as_tuple(_field(fields, "data_vars", where), where, "data_vars")
         return cls(
-            level=_field(data, "level", where),
-            store=_field(data, "store", where),
-            coords=_field(data, "coords", where),
+            level=_as_int(_field(fields, "level", where), where, "level"),
+            store=_as_str(_field(fields, "store", where), where, "store", safe=True),
+            coords=_str_tuple(_field(fields, "coords", where), where, "coords"),
             data_vars=tuple(
-                ArraySpec.from_dict(v, where=f"{where}.data_vars[{i}]")
+                ArraySpec.from_dict(
+                    _mapping(v, f"{where}.data_vars[{i}]"),
+                    where=f"{where}.data_vars[{i}]",
+                )
                 for i, v in enumerate(raw_vars)
             ),
         )
@@ -306,11 +374,11 @@ class WriteTask:
             _name(name, where, "variables")
 
     @property
-    def slices(self) -> dict[str, slice]:
+    def slices(self) -> dict[str, IndexSlice]:
         """The region as an ``isel``-ready mapping, e.g. ``{"time": slice(0, 24)}``."""
         return {dim: slice(start, stop) for dim, start, stop in self.region}
 
-    def isel(self) -> dict[str, slice]:
+    def isel(self) -> dict[str, IndexSlice]:
         """Return the region as a mapping for ``Dataset.isel``.
 
         Same as [`slices`][grid_doctor.WriteTask.slices]; use it as
@@ -318,7 +386,7 @@ class WriteTask:
         """
         return self.slices
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> WriteTaskDict:
         """JSON-compatible representation with all fields."""
         return {
             "task_id": self.task_id,
@@ -330,12 +398,21 @@ class WriteTask:
             "levels": list(self.levels),
         }
 
+    def to_entry(self) -> TaskEntryDict:
+        """JSON form inside a manifest, without the fields it shares with it."""
+        return {
+            "task_id": self.task_id,
+            "variables": list(self.variables),
+            "region": _region_to_json(self.region),
+            "levels": list(self.levels),
+        }
+
     @classmethod
     def from_dict(
         cls,
-        data: Mapping[str, Any],
+        data: Mapping[str, object],
         *,
-        defaults: Mapping[str, Any] | None = None,
+        defaults: Mapping[str, object] | None = None,
         where: str = "task",
     ) -> WriteTask:
         """Inverse of [`to_dict`][grid_doctor.WriteTask.to_dict].
@@ -344,15 +421,19 @@ class WriteTask:
         when they are absent, as inside a manifest file.  *where* names
         the location in error messages.
         """
-        merged = {**(defaults or {}), **_mapping(data, where)}
+        merged: dict[str, object] = {**(defaults or {}), **_mapping(data, where)}
         return cls(
-            task_id=_field(merged, "task_id", where),
-            manifest_id=_field(merged, "manifest_id", where),
-            path=_field(merged, "path", where),
-            zarr_format=_field(merged, "zarr_format", where),
-            variables=_field(merged, "variables", where),
-            region=_field(merged, "region", where),
-            levels=_field(merged, "levels", where),
+            task_id=_as_str(_field(merged, "task_id", where), where, "task_id", safe=True),
+            manifest_id=_as_str(
+                _field(merged, "manifest_id", where), where, "manifest_id", safe=True
+            ),
+            path=_as_str(_field(merged, "path", where), where, "path"),
+            zarr_format=_zarr_format(_field(merged, "zarr_format", where), where),
+            variables=_str_tuple(
+                _field(merged, "variables", where), where, "variables"
+            ),
+            region=_region(_field(merged, "region", where), where),
+            levels=_int_tuple(_field(merged, "levels", where), where, "levels", minimum=0),
         )
 
     def to_json(self, *, indent: int | None = None) -> str:
@@ -362,7 +443,7 @@ class WriteTask:
     @classmethod
     def from_json(cls, text: str | bytes) -> WriteTask:
         """Parse a task written by [`to_json`][grid_doctor.WriteTask.to_json]."""
-        return cls.from_dict(_loads(text, "task"))
+        return cls.from_dict(_mapping(_loads(text, "task"), "task"))
 
 
 @dataclass(frozen=True)
@@ -425,19 +506,12 @@ class PyramidManifest:
         """
         where = "manifest"
         _check_schema_version(self.schema_version)
-        levels = _as_tuple(self.levels, where, "levels")
-        tasks = _as_tuple(self.tasks, where, "tasks")
-        for item, cls, name in (
-            (levels, LevelSpec, "levels"),
-            (tasks, WriteTask, "tasks"),
-        ):
-            for obj in item:
-                if not isinstance(obj, cls):
-                    _fail(
-                        where,
-                        f"{name} must contain {cls.__name__} objects, got "
-                        f"{type(obj).__name__}",
-                    )
+        levels = _instances(
+            _as_tuple(self.levels, where, "levels"), LevelSpec, where, "levels"
+        )
+        tasks = _instances(
+            _as_tuple(self.tasks, where, "tasks"), WriteTask, where, "tasks"
+        )
         _set(
             self,
             manifest_id=_as_str(self.manifest_id, where, "manifest_id", safe=True),
@@ -493,13 +567,12 @@ class PyramidManifest:
     # Serialisation
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> ManifestDict:
         """JSON-compatible representation.
 
         Tasks are written without the fields they share with the
         manifest (``manifest_id``, ``path``, ``zarr_format``).
         """
-        shared = {"manifest_id", "path", "zarr_format"}
         return {
             "schema_version": self.schema_version,
             "manifest_id": self.manifest_id,
@@ -510,14 +583,11 @@ class PyramidManifest:
             "split": dict(self.split),
             "materialised": list(self.materialised),
             "levels": [spec.to_dict() for spec in self.levels],
-            "tasks": [
-                {k: v for k, v in task.to_dict().items() if k not in shared}
-                for task in self.tasks
-            ],
+            "tasks": [task.to_entry() for task in self.tasks],
         }
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> PyramidManifest:
+    def from_dict(cls, data: Mapping[str, object]) -> PyramidManifest:
         """Inverse of [`to_dict`][grid_doctor.PyramidManifest.to_dict].
 
         The schema version is checked first, so a manifest from an
@@ -525,34 +595,48 @@ class PyramidManifest:
         with a missing field.
         """
         where = "manifest"
-        data = _mapping(data, where)
-        _check_schema_version(data.get("schema_version"))
+        fields = _mapping(data, where)
+        _check_schema_version(fields.get("schema_version"))
         defaults = {
-            key: _field(data, key, where)
+            key: _field(fields, key, where)
             for key in ("manifest_id", "path", "zarr_format")
         }
-        raw_split = _field(data, "split", where)
+        raw_split = _field(fields, "split", where)
         if not isinstance(raw_split, Mapping):
             _fail(where, f"split must be an object, got {type(raw_split).__name__}")
-        raw_levels = _as_tuple(_field(data, "levels", where), where, "levels")
-        raw_tasks = _as_tuple(_field(data, "tasks", where), where, "tasks")
+        raw_levels = _as_tuple(_field(fields, "levels", where), where, "levels")
+        raw_tasks = _as_tuple(_field(fields, "tasks", where), where, "tasks")
         return cls(
-            manifest_id=defaults["manifest_id"],
-            path=defaults["path"],
-            zarr_format=defaults["zarr_format"],
-            created=_field(data, "created", where),
-            grid_doctor_version=_field(data, "grid_doctor_version", where),
-            split=tuple(raw_split.items()),
-            materialised=data.get("materialised", ()),
+            manifest_id=_as_str(
+                defaults["manifest_id"], where, "manifest_id", safe=True
+            ),
+            path=_as_str(defaults["path"], where, "path"),
+            zarr_format=_zarr_format(defaults["zarr_format"], where),
+            created=_as_str(_field(fields, "created", where), where, "created"),
+            grid_doctor_version=_as_str(
+                _field(fields, "grid_doctor_version", where),
+                where,
+                "grid_doctor_version",
+            ),
+            split=_split(tuple(raw_split.items()), where),
+            materialised=_str_tuple(
+                fields.get("materialised", ()), where, "materialised"
+            ),
             levels=tuple(
-                LevelSpec.from_dict(lvl, where=f"levels[{i}]")
+                LevelSpec.from_dict(
+                    _mapping(lvl, f"levels[{i}]"), where=f"levels[{i}]"
+                )
                 for i, lvl in enumerate(raw_levels)
             ),
             tasks=tuple(
-                WriteTask.from_dict(task, defaults=defaults, where=f"tasks[{i}]")
+                WriteTask.from_dict(
+                    _mapping(task, f"tasks[{i}]"),
+                    defaults=defaults,
+                    where=f"tasks[{i}]",
+                )
                 for i, task in enumerate(raw_tasks)
             ),
-            schema_version=data["schema_version"],
+            schema_version=MANIFEST_SCHEMA_VERSION,
         )
 
     def to_json(self, *, indent: int | None = 2) -> str:
@@ -562,7 +646,7 @@ class PyramidManifest:
     @classmethod
     def from_json(cls, text: str | bytes) -> PyramidManifest:
         """Parse a manifest written by [`to_json`][grid_doctor.PyramidManifest.to_json]."""
-        return cls.from_dict(_loads(text, "manifest"))
+        return cls.from_dict(_mapping(_loads(text, "manifest"), "manifest"))
 
 
 # ======================================================================
@@ -710,32 +794,33 @@ def _fail(where: str, message: str) -> NoReturn:
     raise ManifestError(f"{where}: {message}")
 
 
-def _set(obj: object, **values: Any) -> None:
+def _set(obj: object, **values: object) -> None:
     """Assign normalised values on a frozen dataclass."""
     for key, value in values.items():
         object.__setattr__(obj, key, value)
 
 
-def _loads(text: str | bytes, where: str) -> Any:
+def _loads(text: str | bytes, where: str) -> JSONValue:
     try:
-        return json.loads(text)
+        value: JSONValue = json.loads(text)
+        return value
     except json.JSONDecodeError as error:
         _fail(where, f"invalid JSON ({error})")
 
 
-def _mapping(data: Any, where: str) -> Mapping[str, Any]:
+def _mapping(data: object, where: str) -> Mapping[str, object]:
     if not isinstance(data, Mapping):
         _fail(where, f"expected an object, got {type(data).__name__}")
     return data
 
 
-def _field(data: Mapping[str, Any], key: str, where: str) -> Any:
+def _field(data: Mapping[str, object], key: str, where: str) -> object:
     if key not in data:
         _fail(where, f"missing field {key!r}")
     return data[key]
 
 
-def _as_str(value: Any, where: str, name: str, *, safe: bool = False) -> str:
+def _as_str(value: object, where: str, name: str, *, safe: bool = False) -> str:
     if not isinstance(value, str) or not value:
         _fail(where, f"{name} must be a non-empty string, got {value!r}")
     if safe and not _SAFE_NAME.fullmatch(value):
@@ -747,7 +832,7 @@ def _as_str(value: Any, where: str, name: str, *, safe: bool = False) -> str:
     return str(value)
 
 
-def _name(value: Any, where: str, name: str) -> str:
+def _name(value: object, where: str, name: str) -> str:
     """Variable names: any string that is a single zarr key."""
     text = _as_str(value, where, name)
     if "/" in text or "\\" in text or text in {".", ".."}:
@@ -755,7 +840,7 @@ def _name(value: Any, where: str, name: str) -> str:
     return text
 
 
-def _as_int(value: Any, where: str, name: str, *, minimum: int = 0) -> int:
+def _as_int(value: object, where: str, name: str, *, minimum: int = 0) -> int:
     # bool is an int subclass; True as a shape entry is always a bug.
     if not isinstance(value, int) or isinstance(value, bool):
         _fail(where, f"{name} must be an integer, got {value!r}")
@@ -764,15 +849,31 @@ def _as_int(value: Any, where: str, name: str, *, minimum: int = 0) -> int:
     return value
 
 
-def _as_tuple(value: Any, where: str, name: str) -> tuple[Any, ...]:
+def _instances(
+    items: tuple[object, ...], cls: type[_T], where: str, name: str
+) -> tuple[_T, ...]:
+    """Check that every item is a *cls* instance (e.g. ``LevelSpec``)."""
+    result: list[_T] = []
+    for item in items:
+        if not isinstance(item, cls):
+            _fail(
+                where,
+                f"{name} must contain {cls.__name__} objects, got "
+                f"{type(item).__name__}",
+            )
+        result.append(item)
+    return tuple(result)
+
+
+def _as_tuple(value: object, where: str, name: str) -> tuple[object, ...]:
     # A str is a sequence too; "time" must not become ("t", "i", "m", "e").
     if not isinstance(value, (list, tuple)):
         _fail(where, f"{name} must be a list, got {type(value).__name__}")
     return tuple(value)
 
 
-def _unique(items: tuple[Any, ...], where: str, name: str) -> None:
-    seen: set[Any] = set()
+def _unique(items: tuple[Hashable, ...], where: str, name: str) -> None:
+    seen: set[Hashable] = set()
     repeated: set[str] = set()
     for item in items:
         if item in seen:
@@ -784,7 +885,7 @@ def _unique(items: tuple[Any, ...], where: str, name: str) -> None:
 
 
 def _str_tuple(
-    value: Any,
+    value: object,
     where: str,
     name: str,
     *,
@@ -801,7 +902,7 @@ def _str_tuple(
 
 
 def _int_tuple(
-    value: Any,
+    value: object,
     where: str,
     name: str,
     *,
@@ -820,13 +921,16 @@ def _int_tuple(
     return result
 
 
-def _zarr_format(value: Any, where: str) -> Literal[2, 3]:
-    if isinstance(value, bool) or value not in (2, 3):
-        _fail(where, f"zarr_format must be 2 or 3, got {value!r}")
-    return cast(Literal[2, 3], value)
+def _zarr_format(value: object, where: str) -> Literal[2, 3]:
+    if not isinstance(value, bool):
+        if value == 2:
+            return 2
+        if value == 3:
+            return 3
+    _fail(where, f"zarr_format must be 2 or 3, got {value!r}")
 
 
-def _check_schema_version(value: Any) -> None:
+def _check_schema_version(value: object) -> None:
     if isinstance(value, bool) or value != MANIFEST_SCHEMA_VERSION:
         raise ManifestError(
             f"manifest schema version {value!r} is not supported "
@@ -835,10 +939,10 @@ def _check_schema_version(value: Any) -> None:
         )
 
 
-def _region(value: Any, where: str) -> Region:
+def _region(value: object, where: str) -> Region:
     """Accept ``((dim, start, stop), ...)`` or the JSON ``{dim: [start, stop]}``."""
+    entries: list[tuple[object, ...]] = []
     if isinstance(value, Mapping):
-        entries = []
         for dim, bounds in value.items():
             pair = _as_tuple(bounds, where, f"region[{dim!r}]")
             if len(pair) != 2:
@@ -863,7 +967,7 @@ def _region(value: Any, where: str) -> Region:
     return tuple(region)
 
 
-def _split(value: Any, where: str) -> tuple[tuple[str, int], ...]:
+def _split(value: object, where: str) -> tuple[tuple[str, int], ...]:
     result: list[tuple[str, int]] = []
     for entry in _as_tuple(value, where, "split"):
         pair = _as_tuple(entry, where, "split entry")

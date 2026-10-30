@@ -22,6 +22,7 @@ nav:
       - Logging: api/log.md
       - CLI: api/cli.md
       - Data selection: api/select.md
+      - Types: api/types.md
   - Recipes:
       - Overview: recipes/index.md
       - Structured Grids (ERA5, CMIP): recipes/structured.md
