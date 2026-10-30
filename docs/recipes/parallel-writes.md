@@ -777,6 +777,10 @@ apply there.
 
 ## Limitations
 
+- Fan-out writes need one store per level (`structure="flat"`, the
+  default).  `init_pyramid_store(..., structure="multiscales")` writes
+  the template of a single datatree store and returns `None`; tasks,
+  `split` and `if_exists="resume"` are not supported for it yet.
 - Splitting is supported along non-spatial dimensions only.
 - All levels of the pyramid must share the length of every split
   dimension.

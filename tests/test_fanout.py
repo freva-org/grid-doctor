@@ -1160,3 +1160,30 @@ class TestCoordinateValues:
             == manifest
         )
         assert gd.check_pyramid_store(manifest).complete
+
+
+class TestMultiscalesStructure:
+    """``structure="multiscales"`` writes a datatree template, no tasks yet."""
+
+    def test_returns_none_and_writes_one_store(self, tmp_path: Path) -> None:
+        pyramid = _pyramid()
+        result = gd.init_pyramid_store(
+            pyramid, str(tmp_path / "tree.zarr"), structure="multiscales"
+        )
+        assert result is None
+        tree = xr.open_datatree(tmp_path / "tree.zarr", engine="zarr")
+        assert {f"level_{level}" for level in pyramid} <= set(tree.children)
+        assert not (tmp_path / "tree.zarr" / "_grid_doctor").exists()
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{"split": {"time": 2}}, {"variables_per_task": 1}, {"if_exists": "resume"}],
+    )
+    def test_fan_out_options_are_rejected(
+        self, tmp_path: Path, kwargs: dict[str, Any]
+    ) -> None:
+        with pytest.raises(NotImplementedError, match="multiscales"):
+            gd.init_pyramid_store(
+                _pyramid(), str(tmp_path / "tree.zarr"), structure="multiscales", **kwargs
+            )
+        assert not (tmp_path / "tree.zarr").exists()
