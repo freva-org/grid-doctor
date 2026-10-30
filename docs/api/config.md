@@ -15,6 +15,9 @@ this order, later ones winning:
 import grid_doctor as gd
 
 gd.config.healpix.ellipsoid = "WGS84"
+
+with gd.config.healpix.set(ellipsoid="sphere"):  # restored after the block
+    ...
 ```
 
 ::: grid_doctor.config
@@ -23,3 +26,5 @@ gd.config.healpix.ellipsoid = "WGS84"
       members_order: source
       members: [HealpixConfig, healpix]
       show_bases: false
+      inherited_members: true
+      filters: ["!^_"]
