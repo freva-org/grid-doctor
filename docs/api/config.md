@@ -14,7 +14,7 @@ this order, later ones winning:
 ```python
 import grid_doctor as gd
 
-gd.config.healpix.ellipsoid = "WGS84"
+gd.config.healpix.ellipsoid = "WGS84"  # HEALPix geometry on WGS84
 
 with gd.config.healpix.set(ellipsoid="sphere"):  # restored after the block
     ...

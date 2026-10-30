@@ -40,6 +40,7 @@ import xarray as xr
 if TYPE_CHECKING:
     from esmpy import Mesh
 
+from . import config
 from .types import (
     FloatArray,
     Int64Array,
@@ -287,8 +288,9 @@ def _require_esmpy() -> ModuleType:
 def _require_healpix_geo_module(nest: bool) -> tuple[ModuleType, dict[str, str]]:
     """Import and return the appropriate ``healpix_geo`` sub-module.
 
-    All HEALPix geometry is computed on a perfect sphere.  This is
-    consistent with ESMF's internal area calculation
+    HEALPix geometry is computed on the ellipsoid set by
+    ``grid_doctor.config.healpix.ellipsoid``.  The default, a perfect
+    sphere, is consistent with ESMF's internal area calculation
     (``CoordSys.SPH_DEG``) and with the geocentric coordinates used
     by climate models.  The maximum latitude discrepancy relative to
     WGS84 geodetic coordinates is ~0.19° at 45° latitude, which is
@@ -314,7 +316,7 @@ def _require_healpix_geo_module(nest: bool) -> tuple[ModuleType, dict[str, str]]
         raise ImportError(
             "healpix-geo is required to construct HEALPix polygons."
         ) from exc
-    return module, {"ellipsoid": "sphere"}
+    return module, {"ellipsoid": config.healpix.ellipsoid}
 
 
 # ===================================================================

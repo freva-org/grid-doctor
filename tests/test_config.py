@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Literal
 
+import numpy as np
 import pytest
+import xarray as xr
 
 import grid_doctor as gd
 from grid_doctor.config import HealpixConfig, _Namespace
@@ -129,3 +131,11 @@ class TestHealpixConfig:
         code = "import grid_doctor as gd; print(gd.config.healpix.ellipsoid)"
         result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
         assert result.stdout.strip() == "WGS84"
+
+    def test_geometry_uses_configured_ellipsoid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        cells = np.array([0, 1, 2], dtype=np.int64)
+        ds = xr.Dataset({"t": ("cell", np.zeros(3))})
+        sphere = gd.attach_cell_coords(ds, cells, level=1)["latitude"].values
+        monkeypatch.setattr(gd.config.healpix, "ellipsoid", "WGS84")
+        wgs84 = gd.attach_cell_coords(ds, cells, level=1)["latitude"].values
+        assert np.all(np.abs(wgs84) > np.abs(sphere))
