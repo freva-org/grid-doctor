@@ -17,11 +17,23 @@ from grid_doctor.config import HealpixConfig, _Namespace
 class _ExampleConfig(_Namespace):
     namespace: ClassVar[str] = "toy"
     mode: Literal["a", "b", "c"] = "a"
+    label: str = "x"
 
 
 
 class TestNamespace:
     """Behaviour shared by every settings namespace."""
+
+    def test_precedence_default_env_assignment(self) -> None:
+        assert _ExampleConfig.from_env({}).mode == "a"
+        cfg = _ExampleConfig.from_env({"GRID_DOCTOR_TOY__MODE": "b"})
+        assert cfg.mode == "b"
+        cfg.mode = "c"
+        assert cfg.mode == "c"
+
+    def test_env_values_are_stripped(self) -> None:
+        cfg = _ExampleConfig.from_env({"GRID_DOCTOR_TOY__MODE": " b ", "GRID_DOCTOR_TOY__LABEL": " y "})
+        assert (cfg.mode, cfg.label) == ("b", "y")
 
     def test_invalid_env_var_is_named_in_error(self) -> None:
         with pytest.raises(ValueError, match="GRID_DOCTOR_TOY__MODE.*'z'"):
@@ -33,18 +45,18 @@ class TestNamespace:
             cfg.mode = "z"  # type: ignore[assignment]
         assert cfg.mode == "a"
 
+    def test_unknown_setting_is_rejected(self) -> None:
+        with pytest.raises(AttributeError):
+            _ExampleConfig().mod = "a"  # type: ignore[attr-defined]
+
 
 class TestHealpixConfig:
     def test_default_ellipsoid_is_sphere(self) -> None:
         assert HealpixConfig.from_env({}).ellipsoid == "sphere"
 
-    def test_env_var_overrides_default(self) -> None:
-        env = {"GRID_DOCTOR_HEALPIX__ELLIPSOID": " WGS84 "}
+    def test_env_var_name(self) -> None:
+        env = {"GRID_DOCTOR_HEALPIX__ELLIPSOID": "WGS84"}
         assert HealpixConfig.from_env(env).ellipsoid == "WGS84"
-
-    def test_unknown_setting_is_rejected(self) -> None:
-        with pytest.raises(AttributeError):
-            HealpixConfig().elipsoid = "WGS84"  # type: ignore[attr-defined]
 
     def test_env_var_is_read_at_import(self) -> None:
         src = str(Path(gd.__file__).parents[1])
