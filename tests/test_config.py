@@ -67,6 +67,53 @@ class TestNamespace:
         assert (cfg.mode, cfg.label) == ("b", "x")
 
 
+class TestConfigSet:
+    """``grid_doctor.config.set`` across namespaces."""
+
+    @pytest.fixture
+    def toy(self, monkeypatch: pytest.MonkeyPatch) -> _ExampleConfig:
+        cfg = _ExampleConfig(mode="b", label="y")
+        monkeypatch.setattr(gd.config, "toy", cfg, raising=False)
+        return cfg
+
+    def test_keyword_mapping_changes_only_named_settings(self, toy: _ExampleConfig) -> None:
+        with gd.config.set(toy={"mode": "c"}):
+            inside = (toy.mode, toy.label)
+        assert inside == ("c", "y")
+        assert (toy.mode, toy.label) == ("b", "y")
+
+    def test_keyword_namespace_replaces_all_settings(self, toy: _ExampleConfig) -> None:
+        with gd.config.set(toy=_ExampleConfig(mode="c")):
+            inside = (toy.mode, toy.label)
+        assert inside == ("c", "x")
+        assert (toy.mode, toy.label) == ("b", "y")
+
+    def test_positional_mapping(self, toy: _ExampleConfig) -> None:
+        with gd.config.set({"toy": _ExampleConfig(mode="c")}):
+            inside = toy.mode
+        assert (inside, toy.mode) == ("c", "b")
+
+    def test_keeps_namespace_identity(self, toy: _ExampleConfig) -> None:
+        with gd.config.set(toy=_ExampleConfig(mode="c")):
+            assert gd.config.toy is toy  # type: ignore[attr-defined]
+
+    def test_unknown_namespace_is_rejected(self) -> None:
+        with pytest.raises(AttributeError, match="remp"), gd.config.set(remp={"method": "nearest"}):
+            pass
+
+    def test_wrong_namespace_type_is_rejected(self, toy: _ExampleConfig) -> None:
+        with pytest.raises(TypeError), gd.config.set(toy=RemapConfig()):
+            pass
+
+    def test_invalid_value_restores_earlier_namespaces(self, toy: _ExampleConfig) -> None:
+        previous = gd.config.remap.method
+        other = "conservative" if previous == "nearest" else "nearest"
+        with pytest.raises(ValueError), gd.config.set(remap={"method": other}, toy={"mode": "z"}):
+            pass
+        assert gd.config.remap.method == previous
+        assert toy.mode == "b"
+
+
 class TestRemapConfig:
     def test_default_method_is_nearest(self) -> None:
         assert RemapConfig.from_env({}).method == "nearest"

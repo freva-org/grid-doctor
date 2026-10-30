@@ -21,13 +21,19 @@ gd.regrid_to_healpix(ds, 8, method="nearest")  # explicit argument wins
 
 with gd.config.remap.set(method="nearest"):   # restored after the block
     gd.regrid_to_healpix(ds, 8)                # nearest
+
+with gd.config.set(remap={"method": "nearest"}):  # several namespaces at once
+    ...
 ```
+
+Passing a whole namespace object, e.g. `gd.config.set(remap=RemapConfig())`,
+applies all of its settings, defaults included.
 
 ::: grid_doctor.config
     options:
       show_root_heading: true
       members_order: source
-      members: [RemapConfig, remap]
+      members: [set, RemapConfig, remap]
       show_bases: false
       inherited_members: true
       filters: ["!^_"]
