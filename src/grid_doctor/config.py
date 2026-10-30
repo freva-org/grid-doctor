@@ -101,7 +101,7 @@ class RemapConfig(_Namespace):
     """
 
     namespace: ClassVar[str] = "remap"
-    method: RemapMethod = "nearest"
+    method: RemapMethod = "conservative"
 
 
 remap = RemapConfig.from_env()

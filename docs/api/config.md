@@ -10,17 +10,17 @@ this order, later ones winning:
 
 | Setting | Default | Environment variable |
 |---|---|---|
-| `remap.method` | `"nearest"` | `GRID_DOCTOR_REMAP__METHOD` |
+| `remap.method` | `"conservative"` | `GRID_DOCTOR_REMAP__METHOD` |
 
 ```python
 import grid_doctor as gd
 
-gd.config.remap.method = "conservative"
-gd.regrid_to_healpix(ds, 8)                    # conservative
-gd.regrid_to_healpix(ds, 8, method="nearest")  # explicit argument wins
+gd.config.remap.method = "nearest"
+gd.regrid_to_healpix(ds, 8)                         # nearest
+gd.regrid_to_healpix(ds, 8, method="conservative")  # explicit argument wins
 
-with gd.config.remap.set(method="nearest"):   # restored after the block
-    gd.regrid_to_healpix(ds, 8)                # nearest
+with gd.config.remap.set(method="conservative"):  # restored after the block
+    gd.regrid_to_healpix(ds, 8)                    # conservative
 
 with gd.config.set(remap={"method": "nearest"}):  # several namespaces at once
     ...

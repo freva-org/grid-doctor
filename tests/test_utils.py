@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
+import grid_doctor as gd
 from grid_doctor.utils import (
     cache_dir,
     cached_open_dataset,
@@ -267,3 +268,19 @@ class TestCachedWeights:
         path1 = cached_weights(regular_ds, 1, method="nearest", cache_path=tmp_path)
         path2 = cached_weights(regular_ds, 2, method="nearest", cache_path=tmp_path)
         assert path1 != path2
+
+    def test_method_defaults_to_config(
+        self, regular_ds: xr.Dataset, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[dict[str, object]] = []
+
+        def fake_compute(ds: xr.Dataset, level: int, **kwargs: object) -> Path:
+            calls.append(kwargs)
+            return tmp_path / "unused.nc"
+
+        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", fake_compute)
+        for method in ("nearest", "conservative"):
+            monkeypatch.setattr(gd.config.remap, "method", method)
+            cached_weights(regular_ds, 2, cache_path=tmp_path)
+        assert [c["method"] for c in calls] == ["nearest", "conservative"]
+        assert calls[0]["weights_path"] != calls[1]["weights_path"]

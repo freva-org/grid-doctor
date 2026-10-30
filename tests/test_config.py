@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import ClassVar, Literal
 
 import pytest
+import xarray as xr
 
 import grid_doctor as gd
 from grid_doctor.config import RemapConfig, _Namespace
@@ -115,16 +116,65 @@ class TestConfigSet:
 
 
 class TestRemapConfig:
-    def test_default_method_is_nearest(self) -> None:
-        assert RemapConfig.from_env({}).method == "nearest"
+    def test_default_method_is_conservative(self) -> None:
+        assert RemapConfig.from_env({}).method == "conservative"
 
     def test_env_var_name(self) -> None:
-        env = {"GRID_DOCTOR_REMAP__METHOD": "conservative"}
-        assert RemapConfig.from_env(env).method == "conservative"
+        env = {"GRID_DOCTOR_REMAP__METHOD": "nearest"}
+        assert RemapConfig.from_env(env).method == "nearest"
 
     def test_env_var_is_read_at_import(self) -> None:
         src = str(Path(gd.__file__).parents[1])
-        env = {**os.environ, "GRID_DOCTOR_REMAP__METHOD": "conservative", "PYTHONPATH": src}
+        env = {**os.environ, "GRID_DOCTOR_REMAP__METHOD": "nearest", "PYTHONPATH": src}
         code = "import grid_doctor as gd; print(gd.config.remap.method)"
         result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
-        assert result.stdout.strip() == "conservative"
+        assert result.stdout.strip() == "nearest"
+
+
+class _Stop(Exception):
+    pass
+
+
+class TestRemapMethodFallback:
+    @pytest.fixture
+    def backend_methods(self, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        """Record the method reaching the weight backend, then stop."""
+        methods: list[str] = []
+
+        def fake_backend(*args: object, method: str, **kwargs: object) -> Path:
+            methods.append(method)
+            raise _Stop
+
+        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights_backend", fake_backend)
+        return methods
+
+    @pytest.mark.parametrize(
+        ("func", "ds_fixture"),
+        [
+            ("compute_healpix_weights", "regular_ds"),
+            ("regrid_to_healpix", "regular_ds"),
+            ("regrid_unstructured_to_healpix", "unstructured_ds"),
+        ],
+    )
+    def test_method_defaults_to_config(
+        self,
+        func: str,
+        ds_fixture: str,
+        request: pytest.FixtureRequest,
+        backend_methods: list[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ds = request.getfixturevalue(ds_fixture)
+        for method in ("nearest", "conservative"):
+            monkeypatch.setattr(gd.config.remap, "method", method)
+            with pytest.raises(_Stop):
+                getattr(gd, func)(ds, 2)
+        assert backend_methods == ["nearest", "conservative"]
+
+    def test_explicit_method_wins_over_config(
+        self, regular_ds: xr.Dataset, backend_methods: list[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(gd.config.remap, "method", "nearest")
+        with pytest.raises(_Stop):
+            gd.regrid_to_healpix(regular_ds, 2, method="conservative")
+        assert backend_methods == ["conservative"]
