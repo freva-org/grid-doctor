@@ -18,13 +18,19 @@ gd.config.healpix.ellipsoid = "WGS84"
 
 with gd.config.healpix.set(ellipsoid="sphere"):  # restored after the block
     ...
+
+with gd.config.set(healpix={"ellipsoid": "sphere"}):  # several namespaces at once
+    ...
 ```
+
+Passing a whole namespace object, e.g. `gd.config.set(healpix=HealpixConfig())`,
+applies all of its settings, defaults included.
 
 ::: grid_doctor.config
     options:
       show_root_heading: true
       members_order: source
-      members: [HealpixConfig, healpix]
+      members: [set, HealpixConfig, healpix]
       show_bases: false
       inherited_members: true
       filters: ["!^_"]

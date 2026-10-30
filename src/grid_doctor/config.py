@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, fields
 from typing import (
     Any,
@@ -108,3 +108,47 @@ class HealpixConfig(_Namespace):
 
 healpix = HealpixConfig.from_env()
 """Active HEALPix settings, e.g. ``grid_doctor.config.healpix.ellipsoid``."""
+
+
+@contextmanager
+def set(
+    namespaces: Mapping[str, _Namespace | Mapping[str, Any]] | None = None,
+    /,
+    **kwargs: _Namespace | Mapping[str, Any],
+) -> Iterator[None]:
+    """Change settings of several namespaces inside a ``with`` block.
+
+    Each namespace is given by name, either as a mapping of the settings to
+    change or as a whole namespace object, whose every setting is applied::
+
+        with grid_doctor.config.set(healpix={"ellipsoid": "WGS84"}):
+            ...
+        with grid_doctor.config.set({"healpix": HealpixConfig()}):
+            ...
+
+    The namespace objects themselves are kept; only their values change and
+    are restored afterwards.
+
+    Raises
+    ------
+    AttributeError
+        If a namespace does not exist.
+    TypeError
+        If a namespace object is of the wrong type.
+    ValueError
+        If a value is invalid; no setting is changed then.
+    """
+    with ExitStack() as stack:
+        for name, values in {**(namespaces or {}), **kwargs}.items():
+            target = globals().get(name)
+            if not isinstance(target, _Namespace):
+                raise AttributeError(f"Unknown config namespace {name!r}")
+            if isinstance(values, _Namespace):
+                if type(values) is not type(target):
+                    raise TypeError(
+                        f"{name} expects {type(target).__name__}, "
+                        f"got {type(values).__name__}"
+                    )
+                values = {f.name: getattr(values, f.name) for f in fields(values)}  # type: ignore[arg-type]
+            stack.enter_context(target.set(**values))
+        yield
