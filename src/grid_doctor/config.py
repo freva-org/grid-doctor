@@ -79,3 +79,4 @@ class HealpixConfig(_Namespace):
 
 
 healpix = HealpixConfig.from_env()
+"""Active HEALPix settings, e.g. ``grid_doctor.config.healpix.ellipsoid``."""

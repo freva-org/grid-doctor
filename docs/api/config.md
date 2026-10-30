@@ -21,3 +21,5 @@ gd.config.healpix.ellipsoid = "WGS84"
     options:
       show_root_heading: true
       members_order: source
+      members: [HealpixConfig, healpix]
+      show_bases: false
