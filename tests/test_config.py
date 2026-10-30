@@ -4,10 +4,12 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar, Literal
 
 import pytest
 
+import grid_doctor as gd
 from grid_doctor.config import HealpixConfig, _Namespace
 
 
@@ -45,7 +47,8 @@ class TestHealpixConfig:
             HealpixConfig().elipsoid = "WGS84"  # type: ignore[attr-defined]
 
     def test_env_var_is_read_at_import(self) -> None:
-        env = {**os.environ, "GRID_DOCTOR_HEALPIX__ELLIPSOID": "WGS84"}
+        src = str(Path(gd.__file__).parents[1])
+        env = {**os.environ, "GRID_DOCTOR_HEALPIX__ELLIPSOID": "WGS84", "PYTHONPATH": src}
         code = "import grid_doctor as gd; print(gd.config.healpix.ellipsoid)"
         result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
         assert result.stdout.strip() == "WGS84"
