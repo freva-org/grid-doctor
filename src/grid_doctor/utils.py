@@ -7,12 +7,16 @@ import json
 import logging
 import pickle
 import tempfile
+import warnings
+from collections.abc import Mapping
+from math import ceil
 from os import environ
 from pathlib import Path
-from typing import Any, Collection, Literal, cast
+from typing import Any, Collection, Iterable, Literal, Set, cast
 
 import numpy as np
 import xarray as xr
+import zarr
 
 from .types import RemapMethod, SourceUnits
 
@@ -281,10 +285,197 @@ def cached_weights(
     )
 
 
+# This function is useful to speed up writing empty zarr stores for big datasets
+# Since xarray.Dataset.to_zarr(mode='w', compute=False) may process huge dask graphs
+# This is tacken from https://github.com/pydata/xarray/issues/8343#issuecomment-3364428741
+def make_dataset_template(
+    dataset: xr.Dataset,
+    lazy_vars: Set[str] | None = None,
+) -> xr.Dataset:
+    """Make a lazy Dask xarray.Dataset for use only as a template.
+
+    Lazy variables in an xarray.Dataset can be manipulated with xarray operations,
+    but cannot be computed.
+
+    Parameters
+    ----------
+    dataset:
+        dataset to convert into a template.
+    lazy_vars:
+        optional explicit `set` of variables to make lazy. By default, all
+        data variables and coordinates that are not used as an index are made.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset with lazy variables replaced.
+         - Lazy variable each use a single Dask chunk.
+         - Non-lazy variables are loaded in memory as NumPy arrays.
+    """
+    import dask
+
+    if lazy_vars is None:
+        lazy_vars = set(cast(Iterable[str], dataset.keys()))
+        lazy_vars.update(str(k) for k in dataset.coords if k not in dataset.indexes)
+
+    result = dataset.copy()
+
+    # load non-lazy variables into memory
+    result.update(dataset.drop_vars(lazy_vars).compute())
+
+    def _raise_template_error() -> None:
+        raise ValueError(
+            "cannot compute array values of xarray.Dataset objects created directly "
+            "or indirectly from make_dataset_template()"
+        )
+
+    # override the lazy variables
+    delayed = dask.delayed(_raise_template_error)()  # type: ignore[attr-defined]
+    for k, v in dataset.variables.items():
+        if k in lazy_vars:
+            # names of dask arrays are used for keeping track of results, so arrays
+            # with the same name cannot have different shape or dtype
+            name = f"make_dataset_template_{'x'.join(map(str, v.shape))}_{v.dtype}"
+
+            result[k].data = dask.array.from_delayed(
+                delayed, v.shape, v.dtype, name=name
+            )
+
+    return result
+
+
+def _get_encoding(ds: xr.Dataset) -> dict[str, dict[str, Any]]:
+    return {
+        str(k): {
+            "chunks": ds[k].data.chunksize if ds[k].ndim > 1 else ds[k].size,
+        }
+        for k in ds.variables  # keys()
+    }
+
+
+def init_full_zarr_store(
+    ds: xr.Dataset,
+    store: str,
+    overwrite: bool = False,
+    zarr_format: Literal[2, 3] = 2,
+    encoding: Mapping[str, Any] | None = None,
+) -> None:
+    """Initialize an empty zarr store from a **full** xarray.Dataset.
+
+    Writes only the metadata, dimensions and coordinates, but initializes
+    the data variables (by default as chunked by time).
+
+    Parameters
+    ----------
+    ds:
+        Complete dataset to convert initialize a zarr store from.
+    store:
+        Path to zarr store, passed to `xr.Dataset.to_zarr`
+    overwrite:
+        Force reinitialization of the store. Use with care!
+    zarr_format:
+        By default zarr 2 is chosen.
+    encoding:
+        In case there need, provide `encoding` mapping to be passed to `xr.Dataset.to_zarr`
+    """
+    template_ds = make_dataset_template(
+        ds, lazy_vars=set(cast(Iterable[str], ds.keys()))
+    )
+    # Follow input dataset encoding
+    if encoding is None:
+        encoding = _get_encoding(ds)
+        logger.debug(
+            "Encoding not specified, using default method, where 1D elements are put in single chunk: %s",
+            encoding,
+        )
+
+    if zarr_format == 2:
+        if hasattr(zarr.core, "chunk_key_encodings"):
+            from zarr.core.chunk_key_encodings import V2ChunkKeyEncoding
+
+            key_enc = {
+                "chunk_key_encoding": V2ChunkKeyEncoding(separator="/").to_dict()
+            }
+            for v in encoding.values():
+                v.update(key_enc)
+        else:
+            try:
+                store = zarr.open(store, mode="w-").store  # type: ignore[assignment]
+            except (
+                zarr.errors.ContainsGroupError
+            ) as e:  # zarr.errors.ContainsGroupError as e:
+                if not overwrite:
+                    raise FileExistsError(
+                        f"Can't overwrite zarr store {store} by default"
+                    ) from e
+                store = zarr.open(store, mode="w").store  # type: ignore[assignment]
+            store._dimension_separator = "/"  # type: ignore[attr-defined]
+            overwrite = True  # We just created it
+
+    # to get rid of the consolidated metadata warning
+    with warnings.catch_warnings():
+        if hasattr(zarr.errors, "ZarrUserWarning"):
+            warnings.filterwarnings(
+                "ignore",
+                category=zarr.errors.ZarrUserWarning,
+                message=".*consolidated.*",
+            )
+
+        if overwrite:
+            logger.debug("Overwriting %s", store)
+            template_ds.to_zarr(
+                store,
+                mode="w",
+                compute=False,
+                encoding=encoding,
+                zarr_format=zarr_format,
+            )
+        else:
+            try:
+                logger.debug("Initializing %s", store)
+                template_ds.to_zarr(
+                    store,
+                    mode="w-",
+                    compute=False,
+                    encoding=encoding,
+                    zarr_format=zarr_format,
+                )
+            except FileExistsError as e:
+                raise FileExistsError(
+                    f"Can't overwrite zarr store {store} by default"
+                ) from e
+
+    # Warn for unchunked variables that could create
+    # memory problems once loaded/computed
+    for var in template_ds.data_vars:
+        template_ds[var].chunks
+
+
+def get_slurm_region(total_size: int, chunk_size: int) -> Mapping[str, slice] | None:
+
+    n_jobs = int(environ.get("SLURM_ARRAY_TASK_COUNT", 1))
+    t_id = int(environ.get("SLURM_ARRAY_TASK_ID", 0)) - int(
+        environ.get("SLURM_ARRAY_TASK_MIN", 0)
+    )
+
+    n = ceil(ceil(total_size / chunk_size) / n_jobs) * chunk_size
+
+    start = t_id * n
+    end = min((t_id + 1) * n, total_size)
+
+    if start >= total_size or start >= end:
+        logging.info("Nothing to do, region outside dataset")
+        return None
+
+    return {"time": slice(start, end)}
+
+
 __all__ = [
     "cache_dir",
     "cached_open_dataset",
     "chunk_for_target_store_size",
     "cached_weights",
     "get_s3_options",
+    "make_dataset_template",
+    "init_full_zarr_store",
 ]

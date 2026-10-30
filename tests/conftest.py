@@ -129,6 +129,11 @@ def regular_ds() -> xr.Dataset:
 
 
 @pytest.fixture
+def regular_lazy_ds() -> xr.Dataset:
+    return _make_structured_dataset("regular").chunk("auto")
+
+
+@pytest.fixture
 def curvilinear_ds() -> xr.Dataset:
     return _make_structured_dataset("curvilinear")
 
