@@ -9,7 +9,8 @@ argument always wins.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from typing import (
     Any,
@@ -49,6 +50,24 @@ class _Namespace:
         if get_origin(hint) is Literal and value not in get_args(hint):
             raise ValueError(f"{self.namespace}.{name} must be one of {get_args(hint)}, got {value!r}")
         object.__setattr__(self, name, value)
+
+    @contextmanager
+    def set(self, **settings: Any) -> Iterator[None]:
+        """Change settings inside a ``with`` block, restoring them afterwards.
+
+        Raises
+        ------
+        ValueError
+            If a value is invalid; no setting is changed then.
+        """
+        previous = {name: getattr(self, name) for name in settings}
+        try:
+            for name, value in settings.items():
+                setattr(self, name, value)
+            yield
+        finally:
+            for name, value in previous.items():
+                object.__setattr__(self, name, value)
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] = os.environ) -> Self:

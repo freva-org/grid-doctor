@@ -18,6 +18,9 @@ import grid_doctor as gd
 gd.config.remap.method = "conservative"
 gd.regrid_to_healpix(ds, 8)                    # conservative
 gd.regrid_to_healpix(ds, 8, method="nearest")  # explicit argument wins
+
+with gd.config.remap.set(method="nearest"):   # restored after the block
+    gd.regrid_to_healpix(ds, 8)                # nearest
 ```
 
 ::: grid_doctor.config
@@ -26,3 +29,5 @@ gd.regrid_to_healpix(ds, 8, method="nearest")  # explicit argument wins
       members_order: source
       members: [RemapConfig, remap]
       show_bases: false
+      inherited_members: true
+      filters: ["!^_"]

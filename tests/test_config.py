@@ -48,6 +48,24 @@ class TestNamespace:
         with pytest.raises(AttributeError):
             _ExampleConfig().mod = "a"  # type: ignore[attr-defined]
 
+    def test_set_restores_previous_value(self) -> None:
+        cfg = _ExampleConfig(mode="b")
+        with cfg.set(mode="c"):
+            inside = cfg.mode
+        assert (inside, cfg.mode) == ("c", "b")
+
+    def test_set_restores_on_error(self) -> None:
+        cfg = _ExampleConfig(mode="b")
+        with pytest.raises(RuntimeError), cfg.set(mode="c"):
+            raise RuntimeError
+        assert cfg.mode == "b"
+
+    def test_set_invalid_value_changes_nothing(self) -> None:
+        cfg = _ExampleConfig(mode="b")
+        with pytest.raises(ValueError), cfg.set(label="y", mode="z"):
+            pass
+        assert (cfg.mode, cfg.label) == ("b", "x")
+
 
 class TestRemapConfig:
     def test_default_method_is_nearest(self) -> None:
