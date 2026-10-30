@@ -565,6 +565,52 @@ The `crs` convention is also what the
 datasets.
 
 
+### Pyramids in one store
+
+`save_pyramid(..., structure="multiscales")` writes a pyramid as one
+datatree, one group per level (`level_<n>`).  Every level group carries
+the CF metadata above, so tools that only read a single group work
+unchanged.  The root group carries the pyramid-wide attributes (source
+attributes, `Conventions`, grid-doctor version and method) and
+describes the levels with two Zarr conventions:
+
+- [`multiscales`](https://github.com/zarr-conventions/multiscales) v0.1
+  lists the levels in `layout`, finest first.  A coarsened level names
+  the level it was coarsened from in `derived_from`, with
+  `transform.scale = [2**Δlevel]` (the factor by which cell edges grow)
+  and the `resampling_method` (`average` or `mode`).
+- [`dggs`](https://github.com/zarr-conventions/dggs) v1 describes each
+  level's grid inside its layout entry: the source level carries the
+  full object (`name`, `refinement_level`, `indexing_scheme`,
+  `spatial_dimension`, `coordinate`), derived levels only what changes,
+  usually just `refinement_level`.  Stores with implicit coordinates
+  omit `coordinate`, which the convention defines as covering the full
+  sphere.
+
+```json
+"multiscales": {
+  "layout": [
+    {"asset": "level_10", "dggs": {"name": "healpix", "refinement_level": 10,
+      "indexing_scheme": "nested", "spatial_dimension": "cell",
+      "coordinate": "cell", "compression": "none"}},
+    {"asset": "level_9", "derived_from": "level_10",
+      "transform": {"scale": [2.0]}, "dggs": {"refinement_level": 9}}
+  ],
+  "resampling_method": "average"
+}
+```
+
+Both conventions are young: `multiscales` is a pilot with breaking
+changes expected before v1, and embedding `dggs` objects in layout
+entries follows a proposal that is not merged yet
+([zarr-conventions/dggs#25](https://github.com/zarr-conventions/dggs/pull/25)).
+The encoding therefore lives in one module
+(`grid_doctor/metadata/_multiscales.py`, with the pinned versions), and
+the tests validate it against the published schemas.  Flat pyramids
+(one store per level) have no root group and carry only the per-level
+CF metadata.
+
+
 ## Storage format
 
 Pyramids are written as Zarr v2 stores with consolidated metadata, one

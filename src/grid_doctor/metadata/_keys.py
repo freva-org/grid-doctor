@@ -66,15 +66,6 @@ MIN_VALID_FRACTION_ATTR: Final = f"{ATTR_PREFIX}min_valid_fraction"
 SPARSE_ATTR: Final = f"{ATTR_PREFIX}sparse"
 IMPLICIT_COORDS_ATTR: Final = f"{ATTR_PREFIX}implicit_coords"
 
-LEVEL_MIN_ATTR: Final = f"{ATTR_PREFIX}level_min"
-"""Coarsest level of a multiscales datatree (root group only)."""
-
-LEVEL_MAX_ATTR: Final = f"{ATTR_PREFIX}level_max"
-"""Finest level of a multiscales datatree (root group only)."""
-
-SOURCE_ATTRS_ATTR: Final = "source_dataset_attrs"
-"""Pyramid-wide attributes of a multiscales datatree (root group only)."""
-
 OWNED_GLOBAL_ATTRS: Final = frozenset(
     {
         "Conventions",

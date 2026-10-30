@@ -37,3 +37,13 @@ HealpixMetadata.from_dataset(ds).grid.level  # 8
     options:
       show_root_heading: true
       show_root_full_path: false
+
+::: grid_doctor.metadata.PyramidMetadata
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+
+::: grid_doctor.metadata.PyramidLevel
+    options:
+      show_root_heading: true
+      show_root_full_path: false

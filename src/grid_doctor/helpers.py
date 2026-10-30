@@ -43,7 +43,7 @@ from .io._fanout import (
     resume_init,
 )
 from .io._manifest import LevelSpec, PyramidManifest
-from .metadata import HealpixMetadata
+from .metadata import HealpixMetadata, level_group
 from .pyramid import (
     coarse_levels,
     coarsen_dataset,
@@ -750,7 +750,7 @@ def _init_multiscales(
             materialise=materialise,
         )
         templates[level] = template
-        encodings[f"/level_{level}"] = combined_encoding
+        encodings[f"/{level_group(level)}"] = combined_encoding
 
     # Remove duplicate encoding for common variables
     common_encodings = {}
@@ -903,7 +903,7 @@ def _save_multiscale(
         )
         write_region = region
 
-    encodings = {f"/level_{level}": enc for level, enc in encoding.items()}
+    encodings = {f"/{level_group(level)}": enc for level, enc in encoding.items()}
     zarr_options = get_zarr_options(mode, zarr_format, encodings)
     # Deferred writes not yet implemented for multiscales regions
     zarr_options["compute"] = True

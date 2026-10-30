@@ -7,10 +7,12 @@ import xarray as xr
 
 from ..metadata import (
     CELL_DIM,
+    CRS_VAR,
     LAT_VAR,
     LON_VAR,
     HealpixMetadata,
     has_healpix_metadata,
+    level_group,
 )
 from ..metadata._pyramid import pyramid_root_attrs
 from ..types import EncodingDict, IndexSlice, PyramidEncoding
@@ -55,10 +57,16 @@ def _raise_template_error() -> None:
 def get_common_coordinates(
     pyramid: dict[int, xr.Dataset],
 ) -> list[str]:
-    """Find coordinates that are identical amongst given datasets."""
+    """Find coordinates that are identical amongst given datasets.
+
+    The ``crs`` grid mapping is never shared: its value is the same on
+    every level, but its attributes describe each level's grid.
+    """
     common_coords = []
     coordinates = [ds.coords for ds in pyramid.values()]
     for c in coordinates[0]:
+        if c == CRS_VAR:
+            continue
         if all(c in cs and coordinates[0][c].equals(cs[c]) for cs in coordinates):
             common_coords.append(str(c))
     return common_coords
@@ -72,12 +80,14 @@ def pyramid_to_multiscales_tree(
     min_level = min(map(int, pyramid))
     if common_coords:
         root = pyramid[min_level][common_coords]
+        # Selecting variables drags scalar coordinates (``crs``) along.
+        root = root.drop_vars([name for name in root.variables if name not in common_coords])
     else:
         root = xr.Dataset()
-    root.attrs.update(pyramid_root_attrs(pyramid, pyramid[min_level].attrs))
+    root.attrs = pyramid_root_attrs(pyramid)
     tree = {"/": root}
     for level, ds in pyramid.items():
-        tree[f"level_{level}"] = ds
+        tree[level_group(level)] = ds
 
     dt = xr.DataTree.from_dict(tree)
     return dt

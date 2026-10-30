@@ -28,7 +28,7 @@ from grid_doctor.helpers import (
     resolution_to_healpix_level,
     save_pyramid,
 )
-from grid_doctor.metadata import HealpixMetadata
+from grid_doctor.metadata import HealpixMetadata, PyramidMetadata
 from grid_doctor.pyramid import _levels as pyramid_levels
 
 from .helpers import with_healpix_metadata
@@ -806,8 +806,8 @@ class TestSavePyramidMultiscales:
         ds0 = dt["/level_7"].dataset
         ds1 = dt["/level_11"].dataset
 
-        assert dt.attrs["grid_doctor_level_min"] == 7
-        assert dt.attrs["grid_doctor_level_max"] == 11
+        layout = PyramidMetadata.from_attrs(dt.attrs).levels
+        assert [level.asset for level in layout] == ["level_11", "level_7"]
 
         xr.testing.assert_allclose(ds0.compute(), pyramid[7].compute())
         xr.testing.assert_allclose(

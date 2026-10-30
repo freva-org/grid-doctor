@@ -20,7 +20,6 @@ from grid_doctor.metadata import (
     merge_conventions,
 )
 from grid_doctor.metadata._cf import grid_from_mapping
-from grid_doctor.metadata._pyramid import pyramid_root_attrs
 
 LEVEL = 2
 NPIX = 12 * 4**LEVEL
@@ -347,25 +346,6 @@ def test_xdggs_decodes_cf_output(scheme: str) -> None:
     info = decoded.dggs.grid_info
     assert info.level == LEVEL
     assert info.indexing_scheme == scheme
-
-
-def test_pyramid_root_attrs_skip_per_level_attrs() -> None:
-    level_attrs = (
-        HealpixMetadata(
-            HealpixGrid(level=1),
-            Provenance(method="conservative", coarsened_from_level=3, coarsen_mode="mean"),
-        )
-        .apply(_dense(1))
-        .attrs
-    )
-    root = pyramid_root_attrs([1, 3, 2], level_attrs)
-    assert root["grid_doctor_level_min"] == 1
-    assert root["grid_doctor_level_max"] == 3
-    source = root["source_dataset_attrs"]
-    assert isinstance(source, dict)
-    assert source["grid_doctor_method"] == "conservative"
-    assert "grid_doctor_coarsened_from_level" not in source
-    assert "grid_doctor_coarsen_mode" not in source
 
 
 class TestMaybeDropCoordinates:

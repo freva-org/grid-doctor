@@ -77,6 +77,7 @@ tests = [
     "netCDF4",
     "numexpr",
     "reflow-hpc",
+    "jsonschema",
     "xdggs; python_version >= '3.12'",
 ]
 docs = [
