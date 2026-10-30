@@ -77,3 +77,4 @@ class RemapConfig(_Namespace):
 
 
 remap = RemapConfig.from_env()
+"""Active remap settings, e.g. ``grid_doctor.config.remap.method``."""

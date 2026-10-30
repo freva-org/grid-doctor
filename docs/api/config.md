@@ -24,3 +24,5 @@ gd.regrid_to_healpix(ds, 8, method="nearest")  # explicit argument wins
     options:
       show_root_heading: true
       members_order: source
+      members: [RemapConfig, remap]
+      show_bases: false
