@@ -36,7 +36,6 @@ from ._zarr import (
     store_all,
 )
 
-
 __all__ = [
     "DeferredWrite",
     "PyramidManifest",
