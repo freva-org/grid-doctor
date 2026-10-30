@@ -655,7 +655,6 @@ def _save_multiscale(
     # Deferred writes not yet implemented for multiscales regions
     zarr_options["compute"] = True
     logger.info("Writing HEALPix to %s", store)
-    print(f"[DEBUG] template:\n{template}\n")
     template.to_zarr(  # type: ignore[call-overload]
         store,
         region=write_region,
