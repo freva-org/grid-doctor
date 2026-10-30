@@ -13,27 +13,26 @@ Remapping itself lives in [`grid_doctor.remap`][grid_doctor.remap].
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
-from pathlib import Path
 from typing import Any, Literal
 
-import dask
 import numpy as np
 import numpy.typing as npt
 import s3fs
 import xarray as xr
 
-from .io import DeferredWrite, deferred_writes, store_all
-from .io._fanout import (
-    IfExists,
-    StoreExistsError,
-    begin_init,
-    describe_level,
-    finish_init,
-    inspect_target,
-    resume_init,
+from .io import (
+    DeferredWrite,
+    deferred_writes,
+    get_common_coordinates,
+    get_filesystem,
+    get_store,
+    get_zarr_options,
+    maybe_drop_coordinates,
+    prepare_region_dataset,
+    prepare_template,
+    pyramid_to_multiscales_tree,
+    store_all,
 )
-from .io._manifest import LevelSpec, PyramidManifest
 from .pyramid import (
     coarse_levels,
     coarsen_dataset,
@@ -51,7 +50,7 @@ from .remap_backend import (
     _get_unstructured_dim,
     _is_unstructured,
 )
-from .types import CoarsenMode, FloatArray, ValidFraction, ZarrOptions
+from .types import CoarsenMode, FloatArray, ValidFraction
 
 logger = logging.getLogger(__name__)
 
@@ -424,61 +423,6 @@ def create_healpix_pyramid(
 # ===================================================================
 
 
-def _get_zarr_options(
-    mode: Literal["a", "w", "r+"],
-    zarr_format: Literal[2, 3],
-    encoding: dict[str, dict[str, Any]] | None,
-) -> ZarrOptions:
-
-    zarr_options = ZarrOptions(compute=False, mode=mode, zarr_format=zarr_format)
-    if zarr_format == 2:
-        zarr_options["consolidated"] = True
-    if encoding is not None:
-        zarr_options["encoding"] = encoding
-    return zarr_options
-
-
-def _get_filesystem(
-    path: str,
-    s3_options: dict[str, Any] | None,
-) -> s3fs.S3FileSystem | None:
-    is_s3 = path.startswith("s3://")
-    fs = s3fs.S3FileSystem(**(s3_options or {})) if is_s3 else None
-    return fs
-
-
-def _get_store(path: str, store_name: str, fs: s3fs.S3FileSystem | None) -> Any:
-    root_path = f"{path}/{store_name}.zarr"
-    logger.info("Writing HEALPix to %s", root_path)
-    store: Any
-    if fs:
-        store = s3fs.S3Map(root=root_path, s3=fs)
-    else:
-        Path(root_path).parent.mkdir(parents=True, exist_ok=True)
-        store = root_path
-    return store
-
-
-def _maybe_drop_coordinates(
-    level: int,
-    dataset: xr.Dataset,
-    write_coords: bool | Literal["auto"] = "auto",
-) -> xr.Dataset:
-    include_coords = (
-        write_coords
-        if isinstance(write_coords, bool)
-        else level <= WRITE_COORDS_MAX_LEVEL
-    )
-    if not include_coords:
-        dataset = dataset.drop_vars(["latitude", "longitude", "cell"], errors="ignore")
-        dataset.attrs["grid_doctor_implicit_coords"] = 1
-    return dataset
-
-
-def _raise_template_error() -> None:
-    raise ValueError("cannot compute array values")
-
-
 def init_pyramid_store(
     pyramid: dict[int, xr.Dataset],
     path: str,
@@ -488,50 +432,26 @@ def init_pyramid_store(
     encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
     write_coords: bool | Literal["auto"] = "auto",
     materialise: list[str] | None = None,
-    split: Mapping[str, int] | None = None,
-    variables_per_task: int | None = None,
-    if_exists: IfExists = "error",
-) -> PyramidManifest:
-    """Create empty pyramid stores and plan the work to fill them.
+    structure: Literal["flat", "multiscales"] = "flat",
+) -> None:
+    """Write a HEALPix pyramid to Zarr stores on S3 or local disk.
 
-    This is step one of a fan-out write.  It writes, for every level,
-    ``"<path>/level_<level>.zarr"`` with all metadata, encodings and
-    coordinates, but none of the (lazy) data variables, and returns a
-    [`PyramidManifest`][grid_doctor.PyramidManifest] that splits the
-    remaining work into independent
-    [`WriteTask`][grid_doctor.WriteTask] units.  Hand each task to one
-    worker, which calls
-    [`write_pyramid_task`][grid_doctor.write_pyramid_task]; afterwards
-    [`check_pyramid_store`][grid_doctor.check_pyramid_store] tells
-    whether everything was written.  The manifest is also stored as
-    ``"<path>/_grid_doctor/manifest.json"``.
-
-    No data is computed (apart from coordinates and *materialise*), so
-    the init is cheap even for stores with hundreds of thousands of
-    chunks.  The pyramid only needs the right shapes, dtypes, chunks and
-    attributes; it can be built lazily from the full source.
-
-    What happens when *path* already holds a pyramid is controlled by
-    *if_exists*; by default the init refuses, so a second run cannot
-    destroy the stores of a first one by accident.
+    Each level is stored below ``"<path>/level_<level>.zarr"``.
 
     Parameters
     ----------
     pyramid:
-        Mapping of HEALPix level to dataset, typically the lazy result
-        of [`create_healpix_pyramid`][grid_doctor.create_healpix_pyramid].
+        Mapping of HEALPix level to dataset.
     path:
         Target prefix.  An ``"s3://bucket/pyramid"`` URL writes to S3; any
         other value is treated as a local directory path.
     s3_options:
         Options forwarded to :class:`s3fs.S3FileSystem`.  Only used for S3
-        targets; ignored (and optional) for local paths.  Never stored in
-        the manifest.
+        targets; ignored (and optional) for local paths.
     zarr_format:
         Zarr format version.
     encoding:
-        Per-level encoding dictionaries.  Chunking always follows the
-        dask chunks of the pyramid (first chunk along each dimension).
+        Per-level encoding dictionaries.
     write_coords:
         Whether to materialise the ``cell``/``latitude``/``longitude``
         coordinate arrays in the store.  HEALPix coordinates are a pure
@@ -547,169 +467,51 @@ def init_pyramid_store(
         ([`select_bbox`][grid_doctor.select_bbox],
         [`select_cells`][grid_doctor.select_cells]), which reconstruct
         coordinates for exactly the cells they return.
-    materialise:
-        Data variables to compute and write completely during the init,
-        e.g. small static fields.  They are not part of any task.
-    split:
-        Task size per dimension in index units, e.g. ``{"time": 24}``
-        for tasks of 24 time steps.  Sizes are rounded **up** to a
-        multiple of the zarr chunk (or shard) size along that dimension,
-        taken over all variables and levels, so no two tasks ever write
-        to the same chunk.  Several dimensions give the cartesian
-        product of their regions.  Splitting along ``cell`` is not
-        supported.  ``None`` (default) plans one task per group of
-        variables, covering the whole store.
-    variables_per_task:
-        Maximum number of variables per task.  ``None`` (default) keeps
-        all variables that share split dimensions and levels in one
-        task, so the regridding they share is computed once per region.
-    if_exists:
-        What to do if *path* already has a manifest, level stores, or the
-        remains of an interrupted init:
-
-        - ``"error"`` (default): raise
-          [`StoreExistsError`][grid_doctor.io.StoreExistsError].
-        - ``"resume"``: if the stored manifest was planned exactly as
-          this call would plan it (same path, levels, array layouts,
-          split and tasks), return it unchanged, with its
-          ``manifest_id``, and write nothing.  Tasks that already
-          finished keep their markers, so re-submitting a conversion
-          after a time-out only redoes the missing tasks.  Raises
-          [`StoreExistsError`][grid_doctor.io.StoreExistsError] listing
-          the differences otherwise, or if there is no readable
-          manifest to resume (e.g. the previous init was killed).
-          Without anything at *path* it initialises normally.
-        - ``"overwrite"``: re-initialise.  All data is discarded, the
-          result gets a new ``manifest_id``, and tasks and markers of the
-          previous manifest become invalid; workers still running for
-          it fail with ``StaleTaskError``.  Only overwrite when no
-          worker of a previous run may still be writing: grid-doctor
-          does not lock the store, and a worker that is already writing
-          can put its data into the new stores before it notices.
-
-    Returns
-    -------
-    PyramidManifest
-        Store layout and tasks.  JSON-serialisable via
-        ``manifest.to_json()`` and accepted directly as a reflow task
-        result.
-
-    Examples
-    --------
-    ```python
-    pyramid = create_healpix_pyramid(ds, max_level=9)
-    manifest = init_pyramid_store(pyramid, "/scratch/out", split={"time": 24})
-    for task in manifest.tasks:  # one array-job element each
-        write_pyramid_task(pyramid, task)
-    check_pyramid_store(manifest).raise_if_incomplete()
-    ```
+    materialise: list of coordinates which will be computed and written
+        as part of the template.
+    structure: Specify whether to write the datasets in the pyramid to
+        separate stores ('flat'), or combine them into a datatree
+        ('multiscales').
     """
-    if if_exists not in ("error", "resume", "overwrite"):
-        raise ValueError(
-            f"if_exists must be 'error', 'resume' or 'overwrite', got {if_exists!r}"
-        )
-    materialise = list(materialise or [])
-    # Workers rebuild store paths from the manifest; keep them identical.
-    path = path.rstrip("/")
-    existing = inspect_target(
-        path, s3_options, [f"level_{level}.zarr" for level in pyramid]
-    )
-    if existing.exists and if_exists == "error":
-        raise StoreExistsError(
-            f"{path} already holds a pyramid ({existing.describe()}).  Pass "
-            "if_exists='resume' to continue it or if_exists='overwrite' to "
-            "start over."
-        )
-    if existing.exists and if_exists == "resume":
-        if existing.manifest is None:
-            raise StoreExistsError(
-                f"cannot resume {path}: there is no readable manifest "
-                f"({existing.describe()}).  Use if_exists='overwrite'."
-            )
-        templates = {
-            level: _maybe_drop_coordinates(level, ds, write_coords)
-            for level, ds in pyramid.items()
-        }
-        return resume_init(
-            existing.manifest,
-            path,
-            templates,
-            {
-                level: [str(k) for k in ds.data_vars if str(k) not in materialise]
-                for level, ds in templates.items()
-            },
-            s3_options,
-            zarr_format=zarr_format,
-            split=split,
-            variables_per_task=variables_per_task,
-            materialised=[
-                m
-                for m in materialise
-                if m in {str(v) for ds in pyramid.values() for v in ds}
-            ],
-        )
-    fs = _get_filesystem(path, s3_options)
-    begin_init(path, s3_options)
-    encoding = encoding or {}
-    level_specs: dict[int, LevelSpec] = {}
+    fs = get_filesystem(path, s3_options)
+    templates = {}
+    encodings = {}
+    common_coords = get_common_coordinates(pyramid)
     for level, dataset in pyramid.items():
-        dataset = _maybe_drop_coordinates(level, dataset, write_coords)
-        store_name = f"level_{level}"
-        store = _get_store(path, store_name, fs)
-        # Initialise the store with template.
-        task_vars = [str(k) for k in dataset.data_vars if str(k) not in materialise]
-        lazy_vars = set(task_vars)
-
-        template = dataset.copy()
-        template.update(dataset.drop_vars(lazy_vars).compute())
-
-        delayed = dask.delayed(_raise_template_error)()  # type: ignore[attr-defined]
-        for k, v in dataset.variables.items():
-            if k in lazy_vars:
-                # names of dask arrays are used for keeping track of results, so arrays
-                # with the same name cannot have different shape or dtype
-                name = f"template_{'x'.join(map(str, v.shape))}_{v.dtype}"
-                template[k].data = dask.array.from_delayed(
-                    delayed, v.shape, v.dtype, name=name
-                )
-
-        # Create regular chunks
-        zarr_chunks = {}
-        for var_name, variable in dataset.variables.items():
-            chunksizes = variable.chunksizes
-            zarr_chunks[var_name] = {"chunks": tuple(c[0] for c in chunksizes.values())}
-        # Remove old chunk encoding.
-        for var in template.variables.values():
-            if "chunks" in var.encoding:
-                del var.encoding["chunks"]
-
-        combined_encoding = {
-            str(k): encoding.get(level, {}).get(k, {}) | zarr_chunks.get(k, {})  # type: ignore[call-overload]
-            for k in template.variables
-        }
-        zarr_options = _get_zarr_options("w", zarr_format, combined_encoding)
-        template.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
-        level_specs[level] = describe_level(
+        template, combined_encoding = prepare_template(
+            dataset,
             level,
-            f"{store_name}.zarr",
-            store,
-            template,
-            task_vars,
-            zarr_format=zarr_format,
+            write_coords=write_coords,
+            max_level_to_auto_write_coords=WRITE_COORDS_MAX_LEVEL,
+            encoding=encoding,
+            materialise=materialise,
         )
 
-    unknown = sorted(set(materialise) - {str(v) for ds in pyramid.values() for v in ds})
-    if unknown:
-        logger.warning("materialise names unknown variables: %s", ", ".join(unknown))
-    return finish_init(
-        path,
-        s3_options,
-        [level_specs[lvl] for lvl in sorted(level_specs, reverse=True)],
-        zarr_format=zarr_format,
-        split=split,
-        variables_per_task=variables_per_task,
-        materialised=[m for m in materialise if m not in unknown],
-    )
+        if structure == "flat":
+            root_path = f"{path}/level_{level}.zarr"
+            store = get_store(root_path, fs)
+            logger.info("Writing HEALPix to %s", root_path)
+            zarr_options = get_zarr_options("w", zarr_format, combined_encoding)
+            template.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
+        else:
+            templates[level] = template
+            encodings[f"/level_{level}"] = combined_encoding
+
+    if structure == "multiscales":
+        # Remove duplicate encoding for common variables
+        common_encodings = {}
+        for enc in encodings.values():
+            for c in common_coords:
+                common_encodings[c] = enc.pop(c)
+        encodings.update({"/": common_encodings})
+
+        tree_template = pyramid_to_multiscales_tree(
+            templates, common_coords=common_coords
+        )
+        zarr_options = get_zarr_options("w", zarr_format, encodings)
+        store = get_store(path, fs)
+        logger.info("Writing HEALPix to %s", store)
+        tree_template.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
 
 
 def save_pyramid(
@@ -722,6 +524,7 @@ def save_pyramid(
     zarr_format: Literal[2, 3] = 2,
     encoding: dict[int, dict[str, dict[str, Any]]] | None = None,
     write_coords: bool | Literal["auto"] = "auto",
+    structure: Literal["flat", "multiscales"] = "flat",
 ) -> None:
     """Write a HEALPix pyramid to Zarr stores on S3 or local disk.
 
@@ -760,39 +563,44 @@ def save_pyramid(
         ([`select_bbox`][grid_doctor.select_bbox],
         [`select_cells`][grid_doctor.select_cells]), which reconstruct
         coordinates for exactly the cells they return.
+    structure: Specify whether to write the datasets in the pyramid to
+        separate stores ('flat'), or combine them into a datatree
+        ('multiscales').
     """
-    fs = _get_filesystem(path, s3_options)
+    fs = get_filesystem(path, s3_options)
+
+    if structure == "multiscales":
+        _save_multiscale(
+            pyramid,
+            path,
+            fs,
+            mode,
+            region,
+            zarr_format,
+            encoding,
+            write_coords,
+        )
+        return
     # Stores are initialised per level; the data of all levels is written
     # in one pass (see grid_doctor.io._zarr for why).
     deferred: list[DeferredWrite] = []
     encoding = encoding or {}
     for level, dataset in pyramid.items():
-        dataset = _maybe_drop_coordinates(level, dataset, write_coords)
+        dataset = maybe_drop_coordinates(
+            dataset, level, write_coords, WRITE_COORDS_MAX_LEVEL
+        )
         store_name = f"level_{level}"
-        store = _get_store(path, store_name, fs)
-        zarr_options = _get_zarr_options(mode, zarr_format, encoding.get(level, None))
+        root_path = f"{path}/{store_name}.zarr"
+        store = get_store(root_path, fs)
+        logger.info("Writing HEALPix to %s", store)
+        zarr_options = get_zarr_options(mode, zarr_format, encoding.get(level, None))
 
         if region == "auto":
             dataset.to_zarr(store, **zarr_options)  # type: ignore[call-overload]
             written, write_region = dataset, None
         else:
             # Fill in the region of data.
-            region_keys = set(region)
-            to_drop = (
-                {
-                    name
-                    for name, var in dataset.data_vars.items()
-                    if region_keys.isdisjoint(set(var.dims))
-                }
-                | {str(dim) for dim in dataset.dims if str(dim) not in region_keys}
-                | {
-                    str(coord)
-                    for coord in dataset.coords
-                    if str(coord) not in region_keys
-                }
-            )
-
-            written = dataset.drop_vars(to_drop, errors="ignore").isel(region)
+            written = prepare_region_dataset(dataset, region)
             written.to_zarr(  # type: ignore[call-overload]
                 store,
                 region=region,
@@ -809,6 +617,50 @@ def save_pyramid(
             )
         )
     store_all(deferred)
+
+
+def _save_multiscale(
+    pyramid: dict[int, xr.Dataset],
+    path: str,
+    fs: s3fs.S3FileSystem | None,
+    mode: Literal["a", "w", "r+"],
+    region: Literal["auto"] | dict[str, slice],
+    zarr_format: Literal[2, 3],
+    encoding: dict[int, dict[str, dict[str, Any]]] | None,
+    write_coords: bool | Literal["auto"],
+) -> None:
+    store = get_store(path, fs)
+    encoding = encoding or {}
+
+    dropped_pyramid = {
+        lev: maybe_drop_coordinates(ds, lev, write_coords, WRITE_COORDS_MAX_LEVEL)
+        for lev, ds in pyramid.items()
+    }
+    if region == "auto":
+        template = pyramid_to_multiscales_tree(dropped_pyramid)
+        write_region = None
+    else:
+        # Fill in the region of data.
+        templates = {}
+        for level, dataset in pyramid.items():
+            templates[level] = prepare_region_dataset(dataset, region)
+
+        template = pyramid_to_multiscales_tree(
+            templates, common_coords=list(region.keys())
+        )
+        write_region = region
+
+    encodings = {f"/level_{level}": enc for level, enc in encoding.items()}
+    zarr_options = get_zarr_options(mode, zarr_format, encodings)
+    # Deferred writes not yet implemented for multiscales regions
+    zarr_options["compute"] = True
+    logger.info("Writing HEALPix to %s", store)
+    print(f"[DEBUG] template:\n{template}\n")
+    template.to_zarr(  # type: ignore[call-overload]
+        store,
+        region=write_region,
+        **zarr_options,
+    )
 
 
 # ===================================================================
@@ -861,7 +713,6 @@ __all__ = [
     "coarsen_healpix",
     "create_healpix_pyramid",
     "get_latlon_resolution",
-    "init_pyramid_store",
     "latlon_to_healpix_pyramid",
     "regrid_to_healpix",
     "regrid_unstructured_to_healpix",

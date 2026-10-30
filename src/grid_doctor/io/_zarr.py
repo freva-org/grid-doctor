@@ -11,14 +11,18 @@ per level.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 from typing import Any, Dict, Literal, NamedTuple, Union, cast
 
 import dask.array as da
+import s3fs
 import xarray as xr
 import zarr
 from xarray.backends.zarr import (
     encode_zarr_variable as _xr_encode_zarr_variable,
 )
+
+from grid_doctor.types import ZarrOptions
 
 # ``encode_zarr_variable`` gained ``zarr_format`` in recent xarray releases.
 _ENCODE_TAKES_FORMAT = (
@@ -110,3 +114,38 @@ def store_all(writes: list[DeferredWrite]) -> None:
             regions=[w.region for w in writes],
             lock=False,
         )
+
+
+def get_zarr_options(
+    mode: Literal["a", "w", "r+"],
+    zarr_format: Literal[2, 3],
+    encoding: dict[str, dict[str, Any]] | None,
+) -> ZarrOptions:
+    """Build zarr options."""
+    zarr_options = ZarrOptions(compute=False, mode=mode, zarr_format=zarr_format)
+    if zarr_format == 2:
+        zarr_options["consolidated"] = True
+    if encoding is not None:
+        zarr_options["encoding"] = encoding
+    return zarr_options
+
+
+def get_filesystem(
+    path: str,
+    s3_options: dict[str, Any] | None,
+) -> s3fs.S3FileSystem | None:
+    """Get appropriate filesystem for path."""
+    is_s3 = path.startswith("s3://")
+    fs = s3fs.S3FileSystem(**(s3_options or {})) if is_s3 else None
+    return fs
+
+
+def get_store(path: str, fs: s3fs.S3FileSystem | None) -> Any:
+    """Return a location in the provided filesystem."""
+    store: Any
+    if fs:
+        store = s3fs.S3Map(root=path, s3=fs)
+    else:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        store = path
+    return store

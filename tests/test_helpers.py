@@ -479,19 +479,19 @@ class TestSavePyramid:
             ).chunk({"level": 2})
 
             ds = xr.Dataset(
-                data_vars=dict(
-                    temp=(
+                data_vars={
+                    "temp": (
                         ["time", "level", "cell"],
                         np.random.randn(4, 2, 12 * (4**level)),
                     ),
-                    static=static,
-                ),
-                coords=dict(
-                    time=("time", range(4)),
-                    level=("level", range(2)),
-                    cell=("cell", range(12 * (4**level))),
-                    latitude=lat,
-                ),
+                    "static": static,
+                },
+                coords={
+                    "time": ("time", range(4)),
+                    "level": ("level", range(2)),
+                    "cell": ("cell", range(12 * (4**level))),
+                    "latitude": lat,
+                },
             )
             ds["temp"] = ds.temp.chunk({"time": 2})
             return ds
@@ -760,3 +760,131 @@ def test_save_pyramid_region_init_huge_finely_chunked(tmp_path):
     assert not [f for f in os.listdir(store / "t") if not f.startswith(".")], (
         "init must not write data"
     )
+
+
+class TestSavePyramidMultiscales:
+    def _make_pyramid_chunked_coord(self) -> dict[int, xr.Dataset]:
+        def _create_dataset(level: int) -> xr.Dataset:
+            num_cells = 3 * (4 ** int(level / 2))
+            lat = xr.DataArray(
+                np.random.randn(num_cells),
+                coords=[
+                    np.arange(num_cells),
+                ],
+                dims=[
+                    "cell",
+                ],
+            ).chunk({"cell": num_cells})
+            static = xr.DataArray(
+                [1.0, 2.0],
+                coords=[
+                    [0, 1],
+                ],
+                dims=["level"],
+            ).chunk({"level": 2})
+
+            ds = xr.Dataset(
+                data_vars={
+                    "temp": (
+                        ["time", "level", "cell"],
+                        np.random.randn(4, 2, num_cells),
+                    ),
+                    "static": static,
+                },
+                coords={
+                    "time": ("time", range(4)),
+                    "level": ("level", range(2)),
+                    "cell": ("cell", range(num_cells)),
+                    "latitude": lat,
+                },
+            )
+            ds["temp"] = ds.temp.chunk({"time": 2})
+            return ds
+
+        # Pick levels so one keeps the coordinates and one drops them.
+        return {level: _create_dataset(level) for level in (7, 11)}
+
+    def test_save_pyramid_local_multiscales(self, tmp_path):
+        pyramid = self._make_pyramid_chunked_coord()
+        zarr_store = tmp_path / "multi.zarr"
+        save_pyramid(
+            pyramid=pyramid,
+            path=str(zarr_store),
+            structure="multiscales",
+        )
+
+        dt = xr.open_datatree(zarr_store, chunks="auto")
+        ds0 = dt["/level_7"].dataset
+        ds1 = dt["/level_11"].dataset
+
+        assert ds0.attrs["healpix_level"] == 7
+        assert ds1.attrs["healpix_level"] == 11
+
+        xr.testing.assert_allclose(ds0.compute(), pyramid[7].compute())
+        xr.testing.assert_allclose(
+            ds1.compute(), pyramid[11].compute().drop_vars(["cell", "latitude"])
+        )
+
+    def test_save_pyramid_local_multiscales_regions(self, tmp_path):
+        pyramid = self._make_pyramid_chunked_coord()
+        zarr_store = tmp_path / "multi.zarr"
+        init_pyramid_store(
+            pyramid=pyramid,
+            path=str(zarr_store),
+            materialise=[
+                "static",
+            ],
+            structure="multiscales",
+        )
+
+        dt = xr.open_datatree(zarr_store, chunks="auto")
+        ds0 = dt["/level_7"].dataset
+        ds1 = dt["/level_11"].dataset
+
+        xr.testing.assert_equal(ds0.coords, pyramid[7].coords)
+        xr.testing.assert_equal(
+            ds1.coords, pyramid[11].drop_vars(["cell", "latitude"]).coords
+        )
+        assert list(ds0.data_vars) == ["static", "temp"]
+        assert list(ds1.data_vars) == ["static", "temp"]
+
+        assert ds0.static.chunksizes == pyramid[7].static.chunksizes
+        assert ds0.latitude.chunksizes == pyramid[7].latitude.chunksizes
+        assert ds1.static.chunksizes == pyramid[11].static.chunksizes
+        assert "latitude" not in ds1
+
+        # Confirm that the data is nan.
+        ds0t = ds0.temp.data.compute()
+        ds1t = ds1.temp.data.compute()
+        assert len(ds0t[~np.isnan(ds0t)]) == 0
+        assert len(ds1t[~np.isnan(ds1t)]) == 0
+
+        ds0stat = ds0.static.compute()
+        ds1stat = ds1.static.compute()
+        xr.testing.assert_equal(ds0stat, pyramid[7].static.compute())
+        xr.testing.assert_equal(ds1stat, pyramid[11].static.compute())
+
+        regions = [
+            {"time": slice(i, i + 2)} for i in range(0, pyramid[7].sizes["time"], 2)
+        ]
+
+        def _save_section(region: dict):
+            save_pyramid(
+                pyramid,
+                str(zarr_store),
+                region=region,
+                structure="multiscales",
+            )
+
+        with ThreadPoolExecutor(max_workers=len(regions)) as executor:
+            for future in [executor.submit(_save_section, i) for i in regions]:
+                future.result()
+
+        dt = xr.open_datatree(zarr_store, chunks="auto")
+        ds0 = dt["/level_7"].dataset
+        ds1 = dt["/level_11"].dataset
+
+        xr.testing.assert_allclose(ds0.compute(), pyramid[7].compute())
+        xr.testing.assert_allclose(
+            ds1.compute(), pyramid[11].compute().drop_vars(["cell", "latitude"])
+        )
