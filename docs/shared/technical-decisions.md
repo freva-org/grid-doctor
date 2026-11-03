@@ -531,6 +531,8 @@ Every variable along `cell` carries `grid_mapping = "crs"`, and the
 global `Conventions` attribute names `CF-1.13` (any other convention in
 the source's `Conventions`, such as `CMIP-6.2`, is kept).
 `nside = 2**refinement_level` is not stored; it follows from the level.
+CF also defines `nuniq` and ``zuniq` as possible `indexing_scheme`; grid-doctor does not write
+them, so they are rejected rather than half supported.
 
 CF identifies the index coordinate by its `standard_name`, not by its
 name, so the dimension stays `cell`, the name used across the HEALPix
