@@ -136,6 +136,10 @@ class TestCF:
         with pytest.raises(ValueError, match="refinement_level"):
             grid_from_mapping({"grid_mapping_name": "healpix", "indexing_scheme": "nested"})
 
+    def test_rejects_bad_indexing_scheme(self) -> None:
+        with pytest.raises(ValueError, match="indexing_scheme"):
+            grid_from_mapping({"grid_mapping_name": "healpix", "refinement_level":4, "indexing_scheme": "uniq"})
+
     @pytest.mark.parametrize(
         ("existing", "expected"),
         [
