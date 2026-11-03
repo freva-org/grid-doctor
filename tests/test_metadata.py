@@ -188,7 +188,9 @@ class TestProvenance:
 
 class TestApply:
     def test_writes_cf_layout(self) -> None:
-        out = HealpixMetadata(HealpixGrid(level=LEVEL)).apply(_dense())
+        ds = _dense()
+        assert 'crs' not in ds
+        out = HealpixMetadata(HealpixGrid(level=LEVEL)).apply(ds)
         assert out["crs"].attrs == {
             "grid_mapping_name": "healpix",
             "indexing_scheme": "nested",
