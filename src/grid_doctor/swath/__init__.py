@@ -327,7 +327,7 @@ def sparse_to_dense(ds: xr.Dataset) -> xr.Dataset:
         When *ds* does not look like a sparse binned dataset.
     """
     if not has_healpix_metadata(ds):
-        raise ValueError("Dataset is not a sparse binned dataset.")
+        raise ValueError("Dataset doesn't contain healpix metadata.")
     metadata = HealpixMetadata.from_dataset(ds)
     if not metadata.sparse:
         raise ValueError("Dataset is not a sparse binned dataset.")

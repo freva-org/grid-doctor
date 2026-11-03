@@ -145,7 +145,9 @@ class PyramidMetadata:
                     "which is not a HEALPix level of this pyramid."
                 )
             if source.grid.level <= level.grid.level:
-                raise ValueError(f"Level {level.asset!r} must be coarser than {level.derived_from!r}.")
+                raise ValueError(
+                    f"Level {level.asset!r} must be coarser than {level.derived_from!r}."
+                )
 
     # -----------------------------------------------------------------
     # Building
@@ -175,8 +177,12 @@ class PyramidMetadata:
                     asset=asset,
                     grid=metadata.grid,
                     coordinate=CELL_DIM if CELL_DIM in ds.variables else None,
-                    derived_from=level_group(source) if derived else None,
-                    resampling_method=(RESAMPLING_METHODS.get(mode, mode) if derived and mode else None),
+                    derived_from=(
+                        level_group(source) if derived and source is not None else None
+                    ),
+                    resampling_method=(
+                        RESAMPLING_METHODS.get(mode, mode) if derived and mode else None
+                    ),
                 )
             )
         return cls(levels=tuple(levels))
@@ -188,7 +194,11 @@ class PyramidMetadata:
     def to_attrs(self) -> dict[str, object]:
         """Return the ``zarr_conventions`` and ``multiscales`` attributes."""
         assets = {level.asset: level for level in self.levels}
-        methods = {level.resampling_method for level in self.levels if level.derived_from is not None}
+        methods = {
+            level.resampling_method
+            for level in self.levels
+            if level.derived_from is not None
+        }
         shared_method = methods.pop() if len(methods) == 1 else None
 
         layout: list[dict[str, object]] = []
@@ -198,7 +208,9 @@ class PyramidMetadata:
                 source = assets[level.derived_from]
                 assert source.grid is not None  # checked in __post_init__
                 entry["derived_from"] = level.derived_from
-                entry["transform"] = {"scale": [float(2 ** (source.grid.level - level.grid.level))]}
+                entry["transform"] = {
+                    "scale": [float(2 ** (source.grid.level - level.grid.level))]
+                }
                 if level.resampling_method is not None and shared_method is None:
                     entry["resampling_method"] = level.resampling_method
                 entry["dggs"] = _changed_dggs(_dggs_object(source), _dggs_object(level))
@@ -229,18 +241,24 @@ class PyramidMetadata:
             grid other than HEALPix.
         """
         multiscales = attrs.get("multiscales")
-        if not isinstance(multiscales, Mapping) or not isinstance(multiscales.get("layout"), list):
+        if not isinstance(multiscales, Mapping) or not isinstance(
+            multiscales.get("layout"), list
+        ):
             raise ValueError("Attributes have no `multiscales` layout.")
         entries: dict[str, Mapping[str, object]] = {}
         for entry in multiscales["layout"]:
-            if not isinstance(entry, Mapping) or not isinstance(entry.get("asset"), str):
+            if not isinstance(entry, Mapping) or not isinstance(
+                entry.get("asset"), str
+            ):
                 raise ValueError(f"Invalid multiscales layout entry: {entry!r}.")
             entries[entry["asset"]] = entry
         default_method = multiscales.get("resampling_method")
 
         resolved: dict[str, dict[str, object] | None] = {}
 
-        def resolve(asset: str, seen: frozenset[str] = frozenset()) -> dict[str, object] | None:
+        def resolve(
+            asset: str, seen: frozenset[str] = frozenset()
+        ) -> dict[str, object] | None:
             if asset in resolved:
                 return resolved[asset]
             if asset in seen or asset not in entries:
@@ -267,7 +285,9 @@ class PyramidMetadata:
                 PyramidLevel(
                     asset=asset,
                     grid=None if dggs is None else _grid_from_dggs(dggs),
-                    coordinate=None if dggs is None else _optional_str(dggs.get("coordinate")),
+                    coordinate=None
+                    if dggs is None
+                    else _optional_str(dggs.get("coordinate")),
                     derived_from=source if isinstance(source, str) else None,
                     resampling_method=_optional_str(method),
                 )
@@ -305,7 +325,9 @@ def _dggs_object(level: PyramidLevel) -> dict[str, object]:
     return obj
 
 
-def _changed_dggs(source: dict[str, object], derived: dict[str, object]) -> dict[str, object]:
+def _changed_dggs(
+    source: dict[str, object], derived: dict[str, object]
+) -> dict[str, object]:
     """Return the reduced ``dggs`` object of a derived level.
 
     Only changed keys are written, plus ``refinement_level``, which the
