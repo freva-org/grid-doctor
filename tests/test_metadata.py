@@ -148,6 +148,9 @@ class TestCF:
             ("CF-1.7", CF_VERSION),
             ("CF-1.7 CMIP-6.2", f"{CF_VERSION} CMIP-6.2"),
             ("ACDD-1.3, CF-1.8", f"{CF_VERSION} ACDD-1.3"),
+            ("ABC-1.1", f"{CF_VERSION} ABC-1.1"),
+            ("CF-1.7, CF-1.6 CMIP-6.2", f"{CF_VERSION} CMIP-6.2"),
+            ("ACDD-1.3, CF-1.8, CF-1.7", f"{CF_VERSION} ACDD-1.3"),            
             (CF_VERSION, CF_VERSION),
         ],
     )
