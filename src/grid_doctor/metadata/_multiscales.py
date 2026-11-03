@@ -175,7 +175,7 @@ class PyramidMetadata:
                     asset=asset,
                     grid=metadata.grid,
                     coordinate=CELL_DIM if CELL_DIM in ds.variables else None,
-                    derived_from=level_group(source) if derived and source is not None else None,
+                    derived_from=level_group(source) if derived else None,
                     resampling_method=(RESAMPLING_METHODS.get(mode, mode) if derived and mode else None),
                 )
             )
