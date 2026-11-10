@@ -20,7 +20,7 @@ range, say), see [Parallel writes](parallel.md).
 ## Storage configuration
 
 These utilities simplify access to S3-compatible object storage by
-collecting and normalizing the options needed by downstream code.
+collecting and normalising the options needed by downstream code.
 
 ::: grid_doctor.get_s3_options
     options:
