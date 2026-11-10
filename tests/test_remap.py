@@ -26,6 +26,8 @@ from grid_doctor.remap import (
 )
 from grid_doctor.remap_backend import (
     _canonical_lon,
+    _get_latlon_arrays,
+    _looks_like_radians,
     _classify_source_kind,
     _collapse_repeated_corners,
     _corner_mesh_from_arrays,
@@ -104,6 +106,16 @@ class TestPrimitiveHelpers:
     ) -> None:
         with pytest.raises(ValueError, match="Could not determine"):
             _get_spatial_dims(unstructured_ds)
+
+    @pytest.mark.parametrize(
+        ("test_ds", "is_rad"),
+        [("unstructured_ds", False), ("unstructured_rad_ds", True)],
+        indirect=["test_ds"],
+    )
+    def test_unstructured_looks_like_radians(self, test_ds: xr.Dataset, is_rad: bool) -> None:
+        latv, lonv = _get_latlon_arrays(test_ds)
+        assert is_rad == _looks_like_radians(latv)
+        assert is_rad == _looks_like_radians(lonv)
 
     def test_unstructured_vertices_resolution(self, unstructured_ds: xr.Dataset) -> None:
         assert _get_unstructured_vertices(unstructured_ds) == (
