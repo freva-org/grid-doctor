@@ -1239,6 +1239,32 @@ class TestAttachHealpixCoords:
             _attach_healpix_coords(ds, level=2, nest=True)
 
 
+class TestSourceDescription:
+    @pytest.mark.parametrize(
+        "lon",
+        [np.arange(1.0, 360.0, 2.0), np.arange(161.0, 200.0, 2.0)],
+        ids=["global-0-360", "regional-antimeridian"],
+    )
+    def test_regular_mesh_unchanged_by_normalisation(self, lon):
+        """``describe_source`` normalises the geometry; wrapping a 1-D lon axis must not change the cells."""
+        lat = np.arange(-89.0, 90.0, 2.0)
+        ds = xr.Dataset(
+            {"t": (("lat", "lon"), np.zeros((lat.size, lon.size)))},
+            coords={
+                "lat": ("lat", lat, {"units": "degrees_north"}),
+                "lon": ("lon", lon, {"units": "degrees_east"}),
+            },
+        )
+        raw, _ = _source_mesh(ds, source_units="deg")
+        norm = describe_source(ds).source_mesh
+
+        np.testing.assert_allclose(norm.face_lon, raw.face_lon)
+        np.testing.assert_allclose(norm.face_lat, raw.face_lat)
+        corners = norm.node_lon[norm.face_nodes]
+        width = np.ptp(corners, axis=1)
+        np.testing.assert_allclose(np.minimum(width, 360.0 - width), 2.0)
+
+
 class TestNormaliseDataset:
     """Normalisation of xarray objects (``normalise_dataset`` and friends)."""
 

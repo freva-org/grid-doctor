@@ -1213,18 +1213,19 @@ def _regular_grid_mesh(
     [`_infer_bounds_1d`][grid_doctor.remap_backend._infer_bounds_1d].
     No Python-level cell loops are used.
 
-    The caller must pass *lon* as a monotonic sequence (i.e. **not**
-    pre-canonicalised to ``[-180, 180)``).  Canonicalisation of face
-    centres is applied internally.
+    *lon* may be wrapped, e.g. a ``0..360`` axis normalised to
+    ``[-180, 180)`` jumps from ``179`` to ``-179``.  It is unwrapped to a
+    continuous sequence before the bounds are inferred, keeping the cell
+    order.  Canonicalisation of face centres is applied internally.
 
     Args:
         lat: 1-D latitude centres in degrees, shape ``(ny,)``.
         lon: 1-D longitude centres in degrees, shape ``(nx,)``.
-            Must be monotonic.
 
     Returns:
         Compact polygon mesh.
     """
+    lon = np.unwrap(lon.astype(np.float64, copy=False), period=360.0)
     lat_bounds = _infer_bounds_1d(lat)
     lon_bounds = _infer_bounds_1d(lon)
     ny, nx = lat.size, lon.size
@@ -1962,7 +1963,7 @@ def describe_source(
         source_kind: Explicit source representation.  Use ``"auto"``
             to infer it from the available coordinates.
         source_units: Angular unit convention of the source
-            coordinates.
+            coordinates, used to normalise the geometry to degrees.
         spectral_transform_command: External command used when
             ``source_kind="spectral"``.  The command may use
             ``{input}`` and ``{output}`` placeholders.
@@ -1994,9 +1995,10 @@ def describe_source(
         )
         effective_kind = "auto"
 
-    geometry_ds = grid if grid is not None else dataset
+    # Only the geometry source is normalised: grid if given, else dataset.
+    geometry_ds = normalise_dataset(grid if grid is not None else dataset, source_units)
     resolved_kind = _classify_source_kind(geometry_ds, explicit_kind=effective_kind)
-    source_mesh, source_dims = _source_mesh(geometry_ds, source_units=source_units)
+    source_mesh, source_dims = _source_mesh(geometry_ds, source_units="deg")
 
     # The HEALPix target is a complete global tessellation. A source that
     # does not fully tile the sphere -- ocean/land-masked grids, regional
@@ -2009,7 +2011,7 @@ def describe_source(
     # _looks_global is retained as a diagnostic: a source that *does* look
     # global yet still leaves cells unmapped may indicate a grid problem
     # (e.g. NaN coordinates or broken corner inference) rather than a mask.
-    looks_global = _looks_global(geometry_ds, source_units=source_units)
+    looks_global = _looks_global(geometry_ds, source_units="deg")
     ignore_unmapped = True
     if not looks_global:
         logger.debug(
@@ -2021,7 +2023,7 @@ def describe_source(
         "grid_doctor_source_kind": resolved_kind,
         "grid_doctor_source_dims": json.dumps(list(source_dims)),
         "grid_doctor_source_size": source_mesh.face_count,
-        "grid_doctor_source_units": source_units,
+        "grid_doctor_source_units": "deg",
         "grid_doctor_source_looks_global": int(looks_global),
     }
 
