@@ -783,11 +783,6 @@ def _to_micro(a: FloatArray, scale: int) -> tuple[FloatArray, FloatArray]:
     return np.rint(np.where(nan, 0.0, a) * scale).astype(np.int64), nan
 
 
-def _has_degree_unit(da: xr.DataArray) -> bool:
-    unit = da.attrs.get("units")
-    return unit is not None and unit.lower().startswith("deg")
-
-
 def _check_coordinate(da: xr.DataArray, *, allow_nan: bool) -> None:
     """Raise when coordinate *da* is empty or holds non-finite values.
 
@@ -818,8 +813,6 @@ def normalise_lon(lon: xr.DataArray, *, allow_nan: bool = False) -> xr.DataArray
         xr.DataArray with values and `unit` attribute adjusted (`degrees_east`)
     """
     _check_coordinate(lon, allow_nan=allow_nan)
-    if not _has_degree_unit(lon) and _looks_like_radians(lon.values):
-        raise ValueError(f"`{lon.name}` DataArray is not in degrees (try applying `normalise_degrees()`.")
 
     return xr.DataArray(
         _canonical_lon(lon.values, scale=_MICRO_SCALE), dims=lon.dims, attrs=lon.attrs | {"units": LON_UNITS}
@@ -850,8 +843,6 @@ def normalise_lat(lat: xr.DataArray, *, allow_nan: bool = False) -> xr.DataArray
         xr.DataArray with values and `unit` attribute adjusted (`degrees_north`)
     """
     _check_coordinate(lat, allow_nan=allow_nan)
-    if not _has_degree_unit(lat) and _looks_like_radians(lat.values):
-        raise ValueError(f"`{lat.name}` DataArray is not in degrees (try applying `normalise_degrees()`.")
 
     try:
         values = _norm_lat(lat.values)
@@ -893,6 +884,59 @@ def normalise_degrees(array: xr.DataArray, source_units: SourceUnits = "auto") -
     return d_array
 
 
+def _attr_units(da: xr.DataArray) -> Literal["deg", "rad"] | None:
+    """Angular unit stated by the ``units`` attribute of *da*, if any."""
+    units = str(da.attrs.get("units", "")).lower()
+    if units.startswith("rad"):
+        return "rad"
+    if units.startswith("deg"):
+        return "deg"
+    return None
+
+
+def _resolve_pair_units(
+    lat: xr.DataArray,
+    lon: xr.DataArray,
+    source_units: SourceUnits,
+    default: Literal["deg", "rad"] | None = None,
+) -> Literal["deg", "rad"]:
+    """Decide the angular unit shared by a latitude/longitude pair.
+
+    An explicit *source_units* wins. Otherwise the ``units`` attributes
+    decide; they must not contradict each other. Without attributes the
+    pair falls back to *default* (e.g. the unit of the cell centres for
+    their vertices) and, failing that, to a value check: the pair is taken
+    as radians only when both lie within ``[-2*pi, 2*pi]``.
+
+    Raises:
+        ValueError: When the ``units`` attributes of *lat* and *lon* disagree.
+    """
+    if source_units != "auto":
+        return source_units
+    stated = {u for u in (_attr_units(lat), _attr_units(lon)) if u is not None}
+    if len(stated) > 1:
+        raise ValueError(
+            f"`{lat.name}` and `{lon.name}` state different angular units "
+            f"({lat.attrs.get('units')!r} vs {lon.attrs.get('units')!r}); pass `source_units`."
+        )
+    if stated:
+        return stated.pop()
+    if default is not None:
+        return default
+    guess: Literal["deg", "rad"] = (
+        "rad"
+        if _looks_like_radians(_to_float64(lat.values)) and _looks_like_radians(_to_float64(lon.values))
+        else "deg"
+    )
+    logger.warning(
+        "No angular units found for `%s`/`%s`; values suggest %s.",
+        lat.name,
+        lon.name,
+        "radians" if guess == "rad" else "degrees",
+    )
+    return guess
+
+
 def normalise_dataset(ds: xr.Dataset, source_units: SourceUnits = "auto") -> xr.Dataset:
     """Return a normalised copy of the input dataset.
 
@@ -902,8 +946,11 @@ def normalise_dataset(ds: xr.Dataset, source_units: SourceUnits = "auto") -> xr.
 
     Args:
         ds: Source geometry dataset.
-        source_units: Angular unit convention of the coordinates; see
-            ``normalise_degrees``.
+        source_units: Angular unit convention of the coordinates. With
+            ``"auto"`` the ``units`` attributes decide per latitude/longitude
+            pair; without them, vertices follow their cell centres and the
+            centres are taken as radians only when both lie within
+            ``[-2*pi, 2*pi]`` (with a warning).
 
     Returns:
         Normalised copy of *ds*.
@@ -924,9 +971,12 @@ def normalise_dataset(ds: xr.Dataset, source_units: SourceUnits = "auto") -> xr.
         pass  # vertices are optional
 
     mapping: dict[str, xr.DataArray] = {}
+    units: Literal["deg", "rad"] | None = None  # vertices follow their centres
     for (lat_name, lon_name), allow_nan in names:
-        mapping[lat_name] = normalise_lat(normalise_degrees(ds[lat_name], source_units), allow_nan=allow_nan)
-        mapping[lon_name] = normalise_lon(normalise_degrees(ds[lon_name], source_units), allow_nan=allow_nan)
+        lat, lon = ds[lat_name], ds[lon_name]
+        units = _resolve_pair_units(lat, lon, source_units, default=units)
+        mapping[lat_name] = normalise_lat(normalise_degrees(lat, units), allow_nan=allow_nan)
+        mapping[lon_name] = normalise_lon(normalise_degrees(lon, units), allow_nan=allow_nan)
     return _replace_values(ds, mapping)
 
 

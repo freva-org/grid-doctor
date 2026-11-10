@@ -1389,13 +1389,40 @@ class TestNormaliseDataset:
         assert n_deg_ds["lon"].min() == -180
         assert n_deg_ds["lon"].max() < 180
 
-    def test_normalise_missing_units_assumes_degrees(self, caplog):
-        ds = xr.Dataset(coords={"lat": [0.0, 0.5, 1.0], "lon": [0.0, 1.0, 2.0]})
+    @pytest.mark.parametrize(
+        "lat,lon,expected",
+        [
+            ([0.0, 0.5, 1.0], [0.0, 1.0, 2.0], "radians"),  # both within 2*pi
+            ([0.0, 0.5, 1.0], [0.0, 10.0, 20.0], "degrees"),  # lon rules out radians
+            ([0.0, 45.0], [0.0, 1.0], "degrees"),  # lat rules out radians
+        ],
+    )
+    def test_normalise_missing_units_guesses_from_pair(self, caplog, lat, lon, expected):
+        ds = xr.Dataset(coords={"lat": lat, "lon": lon})
         with caplog.at_level(logging.WARNING, logger="grid_doctor.remap_backend"):
             norm_ds = normalise_dataset(ds)
-        np.testing.assert_allclose(norm_ds["lat"], ds["lat"])
-        np.testing.assert_allclose(norm_ds["lon"], ds["lon"])
-        assert "assuming degrees" in caplog.text
+        factor = np.degrees(1.0) if expected == "radians" else 1.0
+        np.testing.assert_allclose(norm_ds["lat"], np.asarray(lat) * factor, atol=1e-6)
+        np.testing.assert_allclose(norm_ds["lon"], np.asarray(lon) * factor, atol=1e-6)
+        assert f"values suggest {expected}" in caplog.text
+
+    def test_normalise_vertices_follow_centres(self, unstructured_rad_ds: xr.Dataset) -> None:
+        """Unit-less radian vertices are converted like their centres, without a second guess."""
+        ds = unstructured_rad_ds.assign_coords(
+            clat=unstructured_rad_ds["clat"].assign_attrs(units="radian"),
+            clon=unstructured_rad_ds["clon"].assign_attrs(units="radian"),
+        )
+        for name in ("clat_vertices", "clon_vertices"):
+            ds[name].attrs.pop("units", None)
+        norm_ds = normalise_dataset(ds)
+        ref = normalise_dataset(ds, source_units="rad")
+        xr.testing.assert_allclose(norm_ds["clat_vertices"], ref["clat_vertices"])
+        xr.testing.assert_allclose(norm_ds["clon_vertices"], ref["clon_vertices"])
+
+    def test_normalise_conflicting_units_raise(self):
+        ds = xr.Dataset(coords={"lat": ("lat", [0.0, 1.0], {"units": "degrees_north"}), "lon": ("lon", [0.0, 1.0], {"units": "radian"})})
+        with pytest.raises(ValueError, match="state different angular units"):
+            normalise_dataset(ds)
 
     def test_normalise_source_units_overrides_attrs(self, caplog):
         ds = xr.Dataset(coords={"lat": [0.0, 0.5], "lon": [0.0, 1.0]})
@@ -1447,8 +1474,9 @@ class TestNormaliseDataset:
         ],
     )
     def test_normalise_raises(self, coords, errmsg):
+        # Values, not units, are under test: pin degrees so small values are not guessed as radians.
         with pytest.raises(ValueError, match=re.escape(errmsg)):
-            normalise_dataset(xr.Dataset(coords=coords))
+            normalise_dataset(xr.Dataset(coords=coords), source_units="deg")
 
 
 class TestNormaliseArrays:
