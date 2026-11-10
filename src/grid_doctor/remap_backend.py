@@ -924,7 +924,7 @@ def _vectorized_polygon_centres(
 ) -> tuple[FloatArray, FloatArray]:
     """Compute spherical polygon centres from padded corner arrays.
 
-    The centre of each polygon is the normalized mean Cartesian vector
+    The centre of each polygon is the normalised mean Cartesian vector
     of its valid corners, projected back to lon/lat.
 
     Args:

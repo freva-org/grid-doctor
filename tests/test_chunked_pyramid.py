@@ -36,7 +36,7 @@ def _values_with_nans(shape: tuple[int, ...], seed: int = 54) -> np.ndarray:
 
 
 def _weight_file(path: Path, n_target: int = NPIX, seed: int = 7) -> Path:
-    """Synthetic conservative-style weights: 3 normalized sources per target."""
+    """Synthetic conservative-style weights: 3 normalised sources per target."""
     rng = np.random.default_rng(seed)
     n_source = NLAT * NLON
     rows = np.repeat(np.arange(n_target), 3)
