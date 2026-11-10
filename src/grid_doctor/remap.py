@@ -182,7 +182,7 @@ def compute_healpix_weights(
     ds: xr.Dataset | str | Path,
     level: int,
     *,
-    method: RemapMethod = "nearest",
+    method: RemapMethod = "conservative",
     nest: bool = True,
     source_units: SourceUnits = "auto",
     weights_path: str | Path | None = None,
