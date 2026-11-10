@@ -256,10 +256,6 @@ class TestApplyWeightFileWithGrid:
                     np.array([1.0, 0.25, 0.75], dtype=np.float64),
                 ),
             },
-            attrs={
-                "grid_doctor_level": 1,
-                "grid_doctor_order": "nested",
-            },
         )
         path = tmp_path / "weights.nc"
         weights.to_netcdf(path)
@@ -273,15 +269,6 @@ class TestApplyWeightFileWithGrid:
                 ("cell",),
             ),
         )
-        monkeypatch.setattr(
-            remap,
-            "_healpix_centres",
-            lambda level, nest: (
-                np.array([0.0, 1.0], dtype=np.float64),
-                np.array([2.0, 3.0], dtype=np.float64),
-            ),
-        )
-
         result = apply_weight_file(ds, path, grid=grid)
         out = result["temperature"].isel(time=0).values
         np.testing.assert_allclose(out, [1.0, 2.75])

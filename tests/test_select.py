@@ -15,7 +15,10 @@ from grid_doctor import (
     select_cone,
 )
 from grid_doctor.helpers import WRITE_COORDS_MAX_LEVEL
+from grid_doctor.metadata import HealpixMetadata
 from grid_doctor.select import _contiguous_runs, _parents_to_ranges
+
+from .helpers import with_healpix_metadata
 
 LEVEL = 8
 DELTA = 4
@@ -37,14 +40,7 @@ def _centres(cells: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 def dense_ds() -> xr.Dataset:
     """Dense global dataset whose values encode the cell index."""
     data = (np.arange(NPIX) % 97).astype(np.float32)
-    return xr.Dataset(
-        {"t2m": ("cell", data)},
-        attrs={
-            "healpix_level": LEVEL,
-            "healpix_nside": 2**LEVEL,
-            "healpix_order": "nested",
-        },
-    )
+    return with_healpix_metadata(xr.Dataset({"t2m": ("cell", data)}), LEVEL)
 
 
 class TestRangeMachinery:
@@ -78,8 +74,10 @@ class TestSelectCells:
         assert np.allclose(result["latitude"].values, lat)
         assert "crs" in result.coords
         assert result["t2m"].attrs["grid_mapping"] == "crs"
-        assert int(result.attrs["grid_doctor_sparse"]) == 1
-        assert result.attrs["healpix_level"] == LEVEL
+        metadata = HealpixMetadata.from_dataset(result)
+        assert metadata.sparse
+        assert metadata.grid.level == LEVEL
+        assert result["cell"].attrs["standard_name"] == "healpix_index"
 
     def test_selection_from_compact_subset(self, dense_ds: xr.Dataset) -> None:
         first = select_cells(dense_ds, np.arange(100, 200))
@@ -101,14 +99,13 @@ class TestSelectCells:
 
     def test_missing_level_attribute_raises(self) -> None:
         ds = xr.Dataset({"t2m": ("cell", np.zeros(12))})
-        with pytest.raises(ValueError, match="healpix_level"):
+        with pytest.raises(ValueError, match="level="):
             select_cells(ds, np.array([0]))
         result = select_cells(ds, np.array([0]), level=0)
         assert result.sizes["cell"] == 1
 
     def test_ring_ordering_rejected(self, dense_ds: xr.Dataset) -> None:
-        ds = dense_ds.copy()
-        ds.attrs["healpix_order"] = "ring"
+        ds = with_healpix_metadata(dense_ds.drop_vars("crs"), LEVEL, nest=False)
         with pytest.raises(ValueError, match="nested"):
             select_cells(ds, np.array([0]))
 
@@ -190,8 +187,9 @@ class TestWriteCoords:
         assert "latitude" not in opened and "longitude" not in opened
         assert "cell" not in opened.coords
         assert "crs" in opened.coords
-        assert int(opened.attrs["grid_doctor_implicit_coords"]) == 1
-        assert opened.attrs["healpix_level"] == LEVEL
+        metadata = HealpixMetadata.from_dataset(opened)
+        assert metadata.implicit_coords
+        assert metadata.grid.level == LEVEL
 
     def test_true_keeps_coordinate_arrays(
         self, dense_ds: xr.Dataset, tmp_path: Path

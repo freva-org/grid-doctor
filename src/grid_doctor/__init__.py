@@ -15,6 +15,7 @@ _SUBMODULES: dict[str, str] = {
     "config": ".config",
     "helpers": ".helpers",
     "log": ".log",
+    "metadata": ".metadata",
     "remap": ".remap",
     "select": ".select",
     "swath": ".swath",
@@ -58,7 +59,7 @@ _ATTRS: dict[str, str] = {
 
 
 if TYPE_CHECKING:
-    from . import config, helpers, log, remap, select, swath, utils
+    from . import config, helpers, log, metadata, remap, select, swath, utils
     from .helpers import (
         coarsen_healpix,
         create_healpix_pyramid,
@@ -129,6 +130,7 @@ __all__ = [
     "config",
     "helpers",
     "log",
+    "metadata",
     "remap",
     "select",
     "swath",

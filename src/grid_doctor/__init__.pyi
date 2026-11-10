@@ -1,6 +1,7 @@
 from . import config as config
 from . import helpers as helpers
 from . import log as log
+from . import metadata as metadata
 from . import remap as remap
 from . import select as select
 from . import swath as swath
@@ -43,6 +44,7 @@ __all__ = [
     "config",
     "helpers",
     "log",
+    "metadata",
     "remap",
     "select",
     "swath",

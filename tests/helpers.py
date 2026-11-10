@@ -1,6 +1,7 @@
 """Little helpers."""
 
 import numpy as np
+import xarray as xr
 
 
 class _FakeHealpixModule:
@@ -31,3 +32,22 @@ class _FakeHealpixModule:
         lon = np.linspace(-180.0, 180.0, n, endpoint=False)
         lat = np.linspace(-90.0, 90.0, n)
         return lon, lat
+
+
+def with_healpix_metadata(
+    ds: xr.Dataset,
+    level: int,
+    *,
+    nest: bool = True,
+    method: str | None = None,
+    sparse: bool = False,
+) -> xr.Dataset:
+    """Write grid-doctor metadata onto a hand-built HEALPix test dataset."""
+    from grid_doctor.metadata import HealpixGrid, HealpixMetadata, Provenance
+
+    metadata = HealpixMetadata(
+        HealpixGrid.from_nest(level, nest=nest),
+        Provenance(method=method),
+        sparse=sparse,
+    )
+    return metadata.apply(ds)
