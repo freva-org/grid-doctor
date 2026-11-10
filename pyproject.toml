@@ -154,6 +154,7 @@ exclude_lines = [
 [tool.codespell]
 ignore-words-list = "te,nd,fo,ist,orcestra,cdo,COO"
 skip = "docs/assets/logos/*.svg"
+dictionary = ".codespell-dictionary,-"
 
 [tool.tox]
 legacy_tox_ini = """
