@@ -28,6 +28,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -40,6 +41,7 @@ import xarray as xr
 if TYPE_CHECKING:
     from esmpy import Mesh
 
+from .metadata import LAT_UNITS, LON_UNITS
 from .types import (
     FloatArray,
     Int64Array,
@@ -150,6 +152,8 @@ _X_CANDIDATES: tuple[str, ...] = (
     "nip1",
 )
 """Lower-cased dimension names considered as longitude / x axes."""
+
+_MICRO_SCALE = 1_000_000
 
 
 # ===================================================================
@@ -531,6 +535,44 @@ def _ensure_ccw(
 # ===================================================================
 
 
+def _get_latlon_names(ds: xr.Dataset) -> tuple[str, str]:
+    """Return the names latitude and longitude from *ds*.
+
+    The function searches coordinate and variables names
+    using the priority-ordered name lists
+    [`_LAT_NAMES`][grid_doctor.remap_backend._LAT_NAMES] and
+    [`_LON_NAMES`][grid_doctor.remap_backend._LON_NAMES].
+
+    Args:
+        ds: Source dataset.
+
+    Returns:
+        ``(lat_name, lon_name)`` as strings.
+    Raises:
+        ValueError: When no latidure/longitude coordinates are present.
+    """
+    lat_name: str | None = None
+    lon_name: str | None = None
+    for name in _LAT_NAMES:
+        if name in ds.coords or name in ds.data_vars:
+            lat_name = name
+            break
+
+    for name in _LON_NAMES:
+        if name in ds.coords or name in ds.data_vars:
+            lon_name = name
+            break
+
+    if lat_name is None or lon_name is None:
+        available = sorted({*map(str, ds.coords), *map(str, ds.data_vars)})
+        raise ValueError(
+            "Could not locate latitude/longitude coordinates. "
+            f"Available names are: {available}."
+        )
+
+    return lat_name, lon_name
+
+
 def _get_latlon_arrays(ds: xr.Dataset) -> tuple[FloatArray, FloatArray]:
     """Extract latitude and longitude arrays from *ds*.
 
@@ -548,25 +590,8 @@ def _get_latlon_arrays(ds: xr.Dataset) -> tuple[FloatArray, FloatArray]:
     Raises:
         ValueError: When no recognised coordinate names are found.
     """
-    lat: FloatArray | None = None
-    lon: FloatArray | None = None
-
-    for name in _LAT_NAMES:
-        if name in ds.coords or name in ds.data_vars:
-            lat = _to_float64(ds[name].values)
-            break
-    for name in _LON_NAMES:
-        if name in ds.coords or name in ds.data_vars:
-            lon = _to_float64(ds[name].values)
-            break
-
-    if lat is None or lon is None:
-        available = sorted({*map(str, ds.coords), *map(str, ds.data_vars)})
-        raise ValueError(
-            "Could not locate latitude/longitude coordinates. "
-            f"Available names are: {available}."
-        )
-    return lat, lon
+    lat_name, lon_name = _get_latlon_names(ds)
+    return _to_float64(ds[lat_name].values), _to_float64(ds[lon_name].values)
 
 
 def _is_unstructured(ds: xr.Dataset) -> bool:
@@ -687,6 +712,180 @@ def _get_spatial_dims(ds: xr.Dataset) -> tuple[str, str]:
             f"Could not determine spatial dimensions from {list(ds.dims)}."
         )
     return y_dim, x_dim
+
+
+def _get_vertex_names(ds: xr.Dataset) -> tuple[str, str]:
+    """Return ``(lat_name, lon_name)`` of the per-cell vertex coordinates.
+
+    Recognises ICON-style names, ``lat_bnds``/``lon_bnds`` and CF bounds
+    variables referenced from the cell-centre coordinates. Names are
+    always returned as a matching pair.
+
+    Raises:
+        ValueError: When no vertex coordinates are present.
+    """
+    for lat_name, lon_name in (
+        ("clat_vertices", "clon_vertices"),
+        ("lat_vertices", "lon_vertices"),
+        ("lat_bnds", "lon_bnds"),
+    ):
+        if lat_name in ds and lon_name in ds:
+            return lat_name, lon_name
+
+    for lat_c, lon_c in (("lat", "lon"), ("clat", "clon")):
+        if lat_c not in ds or lon_c not in ds:
+            continue
+        lat_b = ds[lat_c].attrs.get("bounds")
+        lon_b = ds[lon_c].attrs.get("bounds")
+        if isinstance(lat_b, str) and isinstance(lon_b, str) and lat_b in ds and lon_b in ds:
+            return lat_b, lon_b
+
+    raise ValueError(
+        "Could not find per-cell vertex coordinates "
+        "(e.g. 'clat_vertices'/'clon_vertices' or CF 'bounds')."
+    )
+
+
+# ===================================================================
+# Dataset normalisation
+# ===================================================================
+
+
+def _replace_values(ds: xr.Dataset, mapping: Mapping[str, xr.DataArray]) -> xr.Dataset:
+    """Return *ds* with each variable in *mapping* replaced, as coordinate or data variable."""
+    for name, new in mapping.items():
+        ds = ds.assign_coords({name: new}) if name in ds.coords else ds.assign({name: new})
+    return ds
+
+
+def _to_micro(a: FloatArray, scale: int) -> tuple[FloatArray, FloatArray]:
+    """Return *a* as integer multiples of ``1 / scale`` plus its NaN mask.
+
+    NaN (e.g. padding vertices) cannot be cast to an integer, so it is
+    returned as 0 and must be restored by the caller via the mask.
+    """
+    a = _to_float64(a)
+    if np.isinf(a).any():
+        raise ValueError("inf in input")
+    nan = np.isnan(a)
+    return np.rint(np.where(nan, 0.0, a) * scale).astype(np.int64), nan
+
+
+def _has_degree_unit(da: xr.DataArray) -> bool:
+    unit = da.attrs.get("units")
+    return unit is not None and unit.lower().startswith("deg")
+
+
+def _norm_lon(lon: FloatArray, *, scale: int = _MICRO_SCALE) -> FloatArray:
+    """Convention lon: [-180, 180)°."""
+    q, nan = _to_micro(lon, scale)
+    half = 180 * scale
+    q = (q + half) % (2 * half) - half  # exact wrap to [-180, 180)
+    return np.where(nan, np.nan, q / scale)
+
+
+def normalise_lon(lon: xr.DataArray) -> xr.DataArray:
+    """Convert longiture to expected [-180, 180) range.
+
+    Attribute `unit` is expected to be `degree`.
+
+    Args:
+        lon: xr.DataArray - longitude coordinate in degree
+    Return:
+        xr.DataArray with values and `unit` attribute adjusted (`degrees_east`)
+    """
+    if not _has_degree_unit(lon) and _looks_like_radians(lon.values):
+        raise ValueError(f"`{lon.name}` DataArray is not in degrees (try applying `normalise_degrees()`.")
+
+    return xr.DataArray(_norm_lon(lon.values), dims=lon.dims, attrs=lon.attrs | {"units": LON_UNITS})
+
+
+def _norm_lat(lat: FloatArray, *, scale: int = _MICRO_SCALE) -> FloatArray:
+    """Convention lat: [-90, 90]°."""
+    q, nan = _to_micro(lat, scale)
+    if np.any(np.abs(q) > 90 * scale):
+        raise ValueError("latitude outside [-90, 90]")
+    return np.where(nan, np.nan, q / scale)
+
+
+def normalise_lat(lat: xr.DataArray) -> xr.DataArray:
+    """Convert latitudes to expected [-90, 90] range.
+
+    Attribute `unit` is expected to be `degree`.
+
+    Args:
+        lat: xr.DataArray - latitude coordinate in degree
+    Return:
+        xr.DataArray with values and `unit` attribute adjusted (`degree_north`)
+    """
+    if not _has_degree_unit(lat) and _looks_like_radians(lat.values):
+        raise ValueError(f"`{lat.name}` DataArray is not in degrees (try applying `normalise_degrees()`.")
+
+    return xr.DataArray(_norm_lat(lat.values), dims=lat.dims, attrs=lat.attrs | {"units": LAT_UNITS})
+
+
+def normalise_degrees(array: xr.DataArray, source_units: SourceUnits = "auto") -> xr.DataArray:
+    """Return a copy of *array* in degrees.
+
+    Args:
+        array: Angular coordinate.
+        source_units: Angular unit convention of *array*. With ``"auto"``
+            the ``units`` attribute decides: values are converted only when
+            it says radians. Missing or unrecognised units are assumed to be
+            degrees, with a warning.
+
+    Returns:
+        ``xr.DataArray`` in degrees.
+    """
+    if source_units == "auto":
+        units = str(array.attrs.get("units", "")).lower()
+        if units.startswith("rad"):
+            source_units = "rad"
+        else:
+            if not units.startswith("deg"):
+                logger.warning(
+                    "No angular units found for `%s` (units=%r); assuming degrees.",
+                    array.name,
+                    array.attrs.get("units"),
+                )
+            source_units = "deg"
+
+    d_array = array.copy(deep=True)
+    if source_units == "rad":
+        d_array = d_array.copy(data=np.rad2deg(_to_float64(d_array.values)))
+    d_array.attrs["units"] = "degree"
+    return d_array
+
+
+def normalise_dataset(ds: xr.Dataset, source_units: SourceUnits = "auto") -> xr.Dataset:
+    """Return a normalised copy of the input dataset.
+
+    Latitude/longitude coordinates and their units are inferred and
+    normalised. On unstructured grids, the cell vertices are normalised
+    as well when present.
+
+    Args:
+        ds: Source geometry dataset.
+        source_units: Angular unit convention of the coordinates; see
+            ``normalise_degrees``.
+
+    Returns:
+        ``xr.Dataset`` .
+
+    Raises:
+        ValueError: When no latitude/longitude coordinates are present.
+    """
+    names = [_get_latlon_names(ds)]
+    try:
+        names.append(_get_vertex_names(ds))
+    except ValueError:
+        pass  # vertices are optional
+
+    mapping: dict[str, xr.DataArray] = {}
+    for lat_name, lon_name in names:
+        mapping[lat_name] = normalise_lat(normalise_degrees(ds[lat_name], source_units))
+        mapping[lon_name] = normalise_lon(normalise_degrees(ds[lon_name], source_units))
+    return _replace_values(ds, mapping)
 
 
 # ===================================================================
@@ -1714,8 +1913,8 @@ def describe_source(
 ) -> SourceDescription:
     """Resolve the source representation for HEALPix weight generation.
 
-    This function classifies the source grid, constructs the compact
-    polygon mesh, and assembles the metadata dictionary that will be
+    This function classifies the source grid, constructs the normalised
+    compact polygon mesh, and assembles the metadata dictionary that will be
     written into the output weight file.
 
     Args:

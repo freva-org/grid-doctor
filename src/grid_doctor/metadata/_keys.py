@@ -50,6 +50,12 @@ Accepted in standard name table v94
 discussion (cf-convention discussions #447); if one is adopted, only
 this constant changes."""
 
+LAT_UNITS: Final = "degrees_north"
+"""CF ``units`` of latitude coordinates in degrees."""
+
+LON_UNITS: Final = "degrees_east"
+"""CF ``units`` of longitude coordinates in degrees."""
+
 # ---------------------------------------------------------------------
 # grid-doctor attributes
 # ---------------------------------------------------------------------
