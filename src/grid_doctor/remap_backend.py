@@ -338,16 +338,28 @@ def _to_float64(values: npt.ArrayLike) -> FloatArray:
     return np.asarray(values, dtype=np.float64)
 
 
-def _canonical_lon(lon_deg: FloatArray) -> FloatArray:
+def _canonical_lon(lon_deg: FloatArray, *, scale: int | None = None) -> FloatArray:
     """Map longitudes into the range ``[-180, 180)``.
+
+    Without *scale* the values are wrapped with float arithmetic. With
+    *scale* they are first rounded to multiples of ``1 / scale`` and
+    wrapped exactly on integers, so equivalent longitudes (``-10`` and
+    ``350``, ``-180`` and ``180``) give bit-identical results. NaN is
+    kept in both cases; with *scale* Inf raises.
 
     Args:
         lon_deg: Longitude values in degrees.
+        scale: Rounding resolution, e.g. ``1_000_000`` for micro-degrees.
 
     Returns:
         Canonicalised longitude array (same shape as input).
     """
-    return ((lon_deg + 180.0) % 360.0) - 180.0
+    if scale is None:
+        return ((lon_deg + 180.0) % 360.0) - 180.0
+    q, nan = _to_micro(lon_deg, scale)
+    half = 180 * scale
+    q = (q + half) % (2 * half) - half
+    return np.where(nan, np.nan, q / scale)
 
 
 def _looks_like_radians(values: FloatArray) -> bool:
@@ -776,14 +788,6 @@ def _has_degree_unit(da: xr.DataArray) -> bool:
     return unit is not None and unit.lower().startswith("deg")
 
 
-def _norm_lon(lon: FloatArray, *, scale: int = _MICRO_SCALE) -> FloatArray:
-    """Convention lon: [-180, 180)°."""
-    q, nan = _to_micro(lon, scale)
-    half = 180 * scale
-    q = (q + half) % (2 * half) - half  # exact wrap to [-180, 180)
-    return np.where(nan, np.nan, q / scale)
-
-
 def _check_coordinate(da: xr.DataArray, *, allow_nan: bool) -> None:
     """Raise when coordinate *da* is empty or holds non-finite values.
 
@@ -817,7 +821,9 @@ def normalise_lon(lon: xr.DataArray, *, allow_nan: bool = False) -> xr.DataArray
     if not _has_degree_unit(lon) and _looks_like_radians(lon.values):
         raise ValueError(f"`{lon.name}` DataArray is not in degrees (try applying `normalise_degrees()`.")
 
-    return xr.DataArray(_norm_lon(lon.values), dims=lon.dims, attrs=lon.attrs | {"units": LON_UNITS})
+    return xr.DataArray(
+        _canonical_lon(lon.values, scale=_MICRO_SCALE), dims=lon.dims, attrs=lon.attrs | {"units": LON_UNITS}
+    )
 
 
 def _norm_lat(lat: FloatArray, *, scale: int = _MICRO_SCALE) -> FloatArray:

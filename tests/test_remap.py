@@ -47,7 +47,6 @@ from grid_doctor.remap_backend import (
     _materialise_spectral_source,
     _median_positive_step,
     _mesh_to_polygons,
-    _norm_lon,
     _normalise_angle_units,
     _polygons_to_corner_arrays,
     _regular_grid_mesh,
@@ -1453,7 +1452,7 @@ class TestNormaliseDataset:
 
 
 class TestNormaliseArrays:
-    """Normalisation of plain float arrays (``_norm_lon``, ``_norm_lat``)."""
+    """Normalisation of plain float arrays (``_canonical_lon``, ``_norm_lat``)."""
 
     @pytest.mark.parametrize(
         "lon",
@@ -1473,8 +1472,8 @@ class TestNormaliseArrays:
         ],
     )
     @pytest.mark.parametrize("scale", [1_000_000, 1_000_000_000], ids=["micro", "nano"])
-    def test_norm_lon_noop(self, lon, scale):
-        n_lon = _norm_lon(lon, scale=scale)
+    def test_canonical_lon_noop(self, lon, scale):
+        n_lon = _canonical_lon(lon, scale=scale)
         # last element may change because of wrapping
         np.testing.assert_allclose(lon[:-1], n_lon[:-1], atol=1 / scale)
         assert (n_lon < 180.0).all()
@@ -1496,6 +1495,6 @@ class TestNormaliseArrays:
         ],
     )
     @pytest.mark.parametrize("scale", [1_000_000, 1_000_000_000], ids=["micro", "nano"])
-    def test_norm_lon_duplicates(self, lon, scale):
-        n_lon = _norm_lon(lon, scale=scale)
+    def test_canonical_lon_duplicates(self, lon, scale):
+        n_lon = _canonical_lon(lon, scale=scale)
         np.testing.assert_allclose(n_lon, ((lon + 180.0) % 360.0) - 180.0, atol=1 / scale)
