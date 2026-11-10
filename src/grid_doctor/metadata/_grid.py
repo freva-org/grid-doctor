@@ -49,7 +49,7 @@ class HealpixGrid:
 
     Holds facts only; how they are spelled in a dataset is up to
     [`HealpixMetadata`][grid_doctor.metadata.HealpixMetadata].  Values
-    are validated and normalised on construction, so a ``HealpixGrid``
+    are validated and normalized on construction, so a ``HealpixGrid``
     is always a valid grid (NumPy integers from Zarr attributes are
     accepted and converted).
 
@@ -77,7 +77,7 @@ class HealpixGrid:
     earth_radius: float | None = None
 
     def __post_init__(self) -> None:
-        """Validate and normalise the fields."""
+        """Validate and normalize the fields."""
         object.__setattr__(self, "level", _as_level(self.level))
         scheme = str(self.indexing_scheme)
         if scheme not in INDEXING_SCHEMES:

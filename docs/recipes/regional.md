@@ -29,7 +29,7 @@ hpx = gd.regrid_to_healpix(ds, level, method="conservative")
 
 ### Domain-edge cells: mask by coverage
 
-Conservative weights are normalised by the **full** destination-cell
+Conservative weights are normalized by the **full** destination-cell
 area, so a HEALPix cell only partially inside the domain receives
 weights summing to its coverage fraction — and the default
 `missing_policy="renormalize"` then scales that partial sum back up to a

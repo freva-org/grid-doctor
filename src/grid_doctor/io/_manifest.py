@@ -164,7 +164,7 @@ class ArraySpec:
     dtype: str
 
     def __post_init__(self) -> None:
-        """Validate and normalise the fields (lists become tuples)."""
+        """Validate and normalize the fields (lists become tuples)."""
         where = f"array {self.name!r}"
         dims = _str_tuple(self.dims, where, "dims", unique=True)
         shape = _int_tuple(self.shape, where, "shape", minimum=0)
@@ -247,7 +247,7 @@ class LevelSpec:
     data_vars: tuple[ArraySpec, ...]
 
     def __post_init__(self) -> None:
-        """Validate and normalise the fields (lists become tuples)."""
+        """Validate and normalize the fields (lists become tuples)."""
         where = f"level {self.level!r}"
         coords = _str_tuple(self.coords, where, "coords", unique=True)
         data_vars = _instances(
@@ -347,7 +347,7 @@ class WriteTask:
     levels: tuple[int, ...]
 
     def __post_init__(self) -> None:
-        """Validate and normalise the fields (lists become tuples).
+        """Validate and normalize the fields (lists become tuples).
 
         A task on its own can only be checked for well-formed fields.
         Whether its region is chunk-aligned is checked by the manifest
@@ -795,7 +795,7 @@ def _fail(where: str, message: str) -> NoReturn:
 
 
 def _set(obj: object, **values: object) -> None:
-    """Assign normalised values on a frozen dataclass."""
+    """Assign normalized values on a frozen dataclass."""
     for key, value in values.items():
         object.__setattr__(obj, key, value)
 

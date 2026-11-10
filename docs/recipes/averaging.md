@@ -164,7 +164,7 @@ If the field is valid everywhere that is physically ocean, weight by
 
 The same construction applies to a global land-only variable. Use a continuous
 `land_fraction_surface` (or a
-land-sea mask normalised to 0–1), and coarsen it with `mean`, never
+land-sea mask normalized to 0–1), and coarsen it with `mean`, never
 `mode`:
 
 ```python
