@@ -1387,9 +1387,38 @@ class TestNormaliseDataset:
             ({}, "Could not locate latitude/longitude"),
             ({"lat": []}, "Could not locate latitude/longitude"),
             ({"lon": []}, "Could not locate latitude/longitude"),
-            ({"lat": [360], "lon": [0]}, "latitude outside [-90, 90]"),
-            ({"lat": [91], "lon": [0]}, "latitude outside [-90, 90]"),
-            ({"lat": [-91], "lon": [0]}, "latitude outside [-90, 90]"),
+            ({"lat": [360], "lon": [0]}, "Located coordinate `lat` has values outside [-90, 90]."),
+            ({"lat": [91], "lon": [0]}, "Located coordinate `lat` has values outside [-90, 90]."),
+            ({"lat": [-91], "lon": [0]}, "Located coordinate `lat` has values outside [-90, 90]."),
+            # Input checks:
+            ({"lat": [], "lon":[]}, "Located coordinate `lat` is empty."),
+            ({"lat": [1.0], "lon":[]}, "Located coordinate `lon` is empty."),
+            ({"lat": [float("inf")], "lon":[]}, "Located coordinate `lat` contains Inf or NaN"),
+            ({"lat": [1.0], "lon":[float("inf")]}, "Located coordinate `lon` contains Inf or NaN"),
+            ({"lat": [float("nan")], "lon":[]}, "Located coordinate `lat` contains Inf or NaN"),
+            ({"lat": [1.0], "lon":[float("nan")]}, "Located coordinate `lon` contains Inf or NaN"),
+            # with vertex: centres valid, vertices invalid (NaN padding is allowed)
+            (
+                {"lat": [1.0], "lon": [1.0], "lat_bnds": (("cell", "nv"), np.empty((0, 3))), "lon_bnds": (("cell", "nv"), np.empty((0, 3)))},
+                "Located coordinate `lat_bnds` is empty.",
+            ),
+            (
+                {"lat": [1.0], "lon": [1.0], "lat_bnds": (("cell", "nv"), [[0.0, float("inf"), 2.0]]), "lon_bnds": (("cell", "nv"), [[0.0, 1.0, 2.0]])},
+                "Located coordinate `lat_bnds` contains Inf values.",
+            ),
+            (
+                {"lat": [1.0], "lon": [1.0], "lat_bnds": (("cell", "nv"), [[0.0, 1.0, 2.0]]), "lon_bnds": (("cell", "nv"), [[0.0, -float("inf"), 2.0]])},
+                "Located coordinate `lon_bnds` contains Inf values.",
+            ),
+            (
+                {"lat": [1.0], "lon": [1.0], "lat_bnds": (("cell", "nv"), [[0.0, 91.0, 2.0]]), "lon_bnds": (("cell", "nv"), [[0.0, 1.0, 2.0]])},
+                "Located coordinate `lat_bnds` has values outside [-90, 90].",
+            ),
+            # centres are checked before vertices
+            (
+                {"lat": [float("nan")], "lon": [1.0], "lat_bnds": (("cell", "nv"), [[0.0, float("inf"), 2.0]]), "lon_bnds": (("cell", "nv"), [[0.0, 1.0, 2.0]])},
+                "Located coordinate `lat` contains Inf or NaN",
+            ),
         ],
     )
     def test_normalise_raises(self, coords, errmsg):

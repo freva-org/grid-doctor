@@ -536,7 +536,7 @@ def _ensure_ccw(
 
 
 def _get_latlon_names(ds: xr.Dataset) -> tuple[str, str]:
-    """Return the names latitude and longitude from *ds*.
+    """Return the names of the latitude and longitude variables in *ds*.
 
     The function searches coordinate and variables names
     using the priority-ordered name lists
@@ -549,7 +549,7 @@ def _get_latlon_names(ds: xr.Dataset) -> tuple[str, str]:
     Returns:
         ``(lat_name, lon_name)`` as strings.
     Raises:
-        ValueError: When no latidure/longitude coordinates are present.
+        ValueError: When no latitude/longitude coordinates are present.
     """
     lat_name: str | None = None
     lon_name: str | None = None
@@ -766,7 +766,7 @@ def _to_micro(a: FloatArray, scale: int) -> tuple[FloatArray, FloatArray]:
     """
     a = _to_float64(a)
     if np.isinf(a).any():
-        raise ValueError("inf in input")
+        raise ValueError("Cannot scale Inf values.")
     nan = np.isnan(a)
     return np.rint(np.where(nan, 0.0, a) * scale).astype(np.int64), nan
 
@@ -784,16 +784,36 @@ def _norm_lon(lon: FloatArray, *, scale: int = _MICRO_SCALE) -> FloatArray:
     return np.where(nan, np.nan, q / scale)
 
 
-def normalise_lon(lon: xr.DataArray) -> xr.DataArray:
-    """Convert longiture to expected [-180, 180) range.
+def _check_coordinate(da: xr.DataArray, *, allow_nan: bool) -> None:
+    """Raise when coordinate *da* is empty or holds non-finite values.
 
-    Attribute `unit` is expected to be `degree`.
+    Inf is never valid. NaN is accepted only when *allow_nan* is set,
+    e.g. for padding vertices of cells with fewer corners.
+    """
+    if da.size == 0:
+        raise ValueError(f"Located coordinate `{da.name}` is empty.")
+    values = _to_float64(da.values)
+    invalid = np.isinf(values) if allow_nan else ~np.isfinite(values)
+    if invalid.any():
+        what = "Inf" if allow_nan else "Inf or NaN"
+        raise ValueError(f"Located coordinate `{da.name}` contains {what} values.")
+
+
+def normalise_lon(lon: xr.DataArray, *, allow_nan: bool = False) -> xr.DataArray:
+    """Convert longitudes to the expected [-180, 180) range.
+
+    Values are expected in degrees (see ``normalise_degrees``).
 
     Args:
         lon: xr.DataArray - longitude coordinate in degree
+        allow_nan: Accept NaN values (e.g. padding vertices). Inf is always
+            rejected.
+    Raises:
+        ValueError: When *lon* is empty or holds invalid values.
     Return:
         xr.DataArray with values and `unit` attribute adjusted (`degrees_east`)
     """
+    _check_coordinate(lon, allow_nan=allow_nan)
     if not _has_degree_unit(lon) and _looks_like_radians(lon.values):
         raise ValueError(f"`{lon.name}` DataArray is not in degrees (try applying `normalise_degrees()`.")
 
@@ -804,24 +824,34 @@ def _norm_lat(lat: FloatArray, *, scale: int = _MICRO_SCALE) -> FloatArray:
     """Convention lat: [-90, 90]°."""
     q, nan = _to_micro(lat, scale)
     if np.any(np.abs(q) > 90 * scale):
-        raise ValueError("latitude outside [-90, 90]")
+        raise ValueError("outside [-90, 90]")
     return np.where(nan, np.nan, q / scale)
 
 
-def normalise_lat(lat: xr.DataArray) -> xr.DataArray:
+def normalise_lat(lat: xr.DataArray, *, allow_nan: bool = False) -> xr.DataArray:
     """Convert latitudes to expected [-90, 90] range.
 
-    Attribute `unit` is expected to be `degree`.
+    Values are expected in degrees (see ``normalise_degrees``).
 
     Args:
         lat: xr.DataArray - latitude coordinate in degree
+        allow_nan: Accept NaN values (e.g. padding vertices). Inf is always
+            rejected.
+    Raises:
+        ValueError: When *lat* is empty, holds invalid values or lies
+            outside ``[-90, 90]``.
     Return:
-        xr.DataArray with values and `unit` attribute adjusted (`degree_north`)
+        xr.DataArray with values and `unit` attribute adjusted (`degrees_north`)
     """
+    _check_coordinate(lat, allow_nan=allow_nan)
     if not _has_degree_unit(lat) and _looks_like_radians(lat.values):
         raise ValueError(f"`{lat.name}` DataArray is not in degrees (try applying `normalise_degrees()`.")
 
-    return xr.DataArray(_norm_lat(lat.values), dims=lat.dims, attrs=lat.attrs | {"units": LAT_UNITS})
+    try:
+        values = _norm_lat(lat.values)
+    except ValueError as exc:
+        raise ValueError(f"Located coordinate `{lat.name}` has values {exc}.") from exc
+    return xr.DataArray(values, dims=lat.dims, attrs=lat.attrs | {"units": LAT_UNITS})
 
 
 def normalise_degrees(array: xr.DataArray, source_units: SourceUnits = "auto") -> xr.DataArray:
@@ -870,21 +900,27 @@ def normalise_dataset(ds: xr.Dataset, source_units: SourceUnits = "auto") -> xr.
             ``normalise_degrees``.
 
     Returns:
-        ``xr.Dataset`` .
+        Normalised copy of *ds*.
 
     Raises:
-        ValueError: When no latitude/longitude coordinates are present.
+        ValueError: When no latitude/longitude coordinates are present,
+            a coordinate is empty, the cell centres contain NaN or Inf
+            (masked grids are not supported), the vertices contain Inf,
+            a latitude lies outside ``[-90, 90]``, or the ``units``
+            attributes of a latitude/longitude pair disagree.
     """
-    names = [_get_latlon_names(ds)]
+    # Cell centres are required and must be finite; vertices are optional
+    # and may be NaN-padded.
+    names = [(_get_latlon_names(ds), False)]
     try:
-        names.append(_get_vertex_names(ds))
+        names.append((_get_vertex_names(ds), True))
     except ValueError:
         pass  # vertices are optional
 
     mapping: dict[str, xr.DataArray] = {}
-    for lat_name, lon_name in names:
-        mapping[lat_name] = normalise_lat(normalise_degrees(ds[lat_name], source_units))
-        mapping[lon_name] = normalise_lon(normalise_degrees(ds[lon_name], source_units))
+    for (lat_name, lon_name), allow_nan in names:
+        mapping[lat_name] = normalise_lat(normalise_degrees(ds[lat_name], source_units), allow_nan=allow_nan)
+        mapping[lon_name] = normalise_lon(normalise_degrees(ds[lon_name], source_units), allow_nan=allow_nan)
     return _replace_values(ds, mapping)
 
 
@@ -1934,6 +1970,12 @@ def describe_source(
 
     Returns:
         Fully resolved source description.
+
+    Raises:
+        ValueError: When the geometry cannot be normalised; see
+            [`normalise_dataset`][grid_doctor.remap_backend.normalise_dataset].
+            In particular, cell centres with NaN coordinates (masked grids)
+            are rejected.
     """
     if workdir is None:
         workdir = Path(tempfile.mkdtemp(prefix="grid_doctor_source_"))
