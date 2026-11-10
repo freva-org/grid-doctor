@@ -5,6 +5,16 @@ from typing import Literal
 import dask
 import xarray as xr
 
+from ..metadata import (
+    CELL_DIM,
+    CRS_VAR,
+    LAT_VAR,
+    LON_VAR,
+    HealpixMetadata,
+    has_healpix_metadata,
+    level_group,
+)
+from ..metadata._pyramid import pyramid_root_attrs
 from ..types import EncodingDict, IndexSlice, PyramidEncoding
 
 
@@ -14,16 +24,30 @@ def maybe_drop_coordinates(
     write_coords: bool | Literal["auto"] = "auto",
     max_level_to_auto_write: int = 10,
 ) -> xr.Dataset:
-    """Drop coordinates from dataset if requested."""
+    """Drop the coordinate arrays implied by the cell index, if requested.
+
+    Only dense datasets are affected: position along ``cell`` equals the
+    HEALPix index, so ``cell``, ``latitude`` and ``longitude`` carry no
+    information and are dropped, and the dataset is marked as having
+    implicit coordinates.  Sparse datasets keep everything, since their
+    ``cell`` coordinate is the only record of which cells they hold.
+    Datasets without HEALPix metadata just lose the coordinates.
+    """
     include_coords = (
         write_coords
         if isinstance(write_coords, bool)
         else level <= max_level_to_auto_write
     )
-    if not include_coords:
-        dataset = dataset.drop_vars(["latitude", "longitude", "cell"], errors="ignore")
-        dataset.attrs["grid_doctor_implicit_coords"] = 1
-    return dataset
+    if include_coords:
+        return dataset
+    coords = [CELL_DIM, LAT_VAR, LON_VAR]
+    if not has_healpix_metadata(dataset):
+        return dataset.drop_vars(coords, errors="ignore")
+    metadata = HealpixMetadata.from_dataset(dataset)
+    if metadata.sparse:
+        return dataset
+    dataset = dataset.drop_vars(coords, errors="ignore")
+    return metadata.replace(implicit_coords=True).apply(dataset)
 
 
 def _raise_template_error() -> None:
@@ -33,10 +57,16 @@ def _raise_template_error() -> None:
 def get_common_coordinates(
     pyramid: dict[int, xr.Dataset],
 ) -> list[str]:
-    """Find coordinates that are identical amongst given datasets."""
+    """Find coordinates that are identical amongst given datasets.
+
+    The ``crs`` grid mapping is never shared: its value is the same on
+    every level, but its attributes describe each level's grid.
+    """
     common_coords = []
     coordinates = [ds.coords for ds in pyramid.values()]
     for c in coordinates[0]:
+        if c == CRS_VAR:
+            continue
         if all(c in cs and coordinates[0][c].equals(cs[c]) for cs in coordinates):
             common_coords.append(str(c))
     return common_coords
@@ -47,31 +77,17 @@ def pyramid_to_multiscales_tree(
     common_coords: list[str] | None = None,
 ) -> xr.DataTree:
     """Create datatree from pyramid."""
-    max_level = max(map(int, pyramid))
     min_level = min(map(int, pyramid))
     if common_coords:
         root = pyramid[min_level][common_coords]
+        # Selecting variables drags scalar coordinates (``crs``) along.
+        root = root.drop_vars([name for name in root.variables if name not in common_coords])
     else:
         root = xr.Dataset()
-    root.attrs.update(
-        {
-            "healpix_level_min": int(min_level),
-            "healpix_level_max": int(max_level),
-            "source_dataset_attrs": {
-                str(key): str(value)
-                for key, value in pyramid[min_level].attrs.items()
-                if "healpix" not in key
-            },
-        }
-    )
-    tree = {
-        "/": root,
-    }
+    root.attrs = pyramid_root_attrs(pyramid)
+    tree = {"/": root}
     for level, ds in pyramid.items():
-        ds_mod = ds.assign_attrs(
-            healpix_level=int(level),
-        )
-        tree[f"level_{level}"] = ds_mod
+        tree[level_group(level)] = ds
 
     dt = xr.DataTree.from_dict(tree)
     return dt

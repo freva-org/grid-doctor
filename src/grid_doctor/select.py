@@ -22,7 +22,8 @@ The returned subset is the compact ("sparse") representation also
 produced by ``bin_to_healpix(..., dense=False)``: the ``cell``
 coordinate holds the actual global HEALPix indices, cell-centre
 ``latitude``/``longitude`` are computed on the fly for exactly the
-selected cells, and ``grid_doctor_sparse = 1`` is set.
+selected cells, and the dataset is marked sparse (see
+[`HealpixMetadata`][grid_doctor.metadata.HealpixMetadata]).
 
 Open high-level stores with ``chunks=None``: with the default dask
 chunking, ``xarray`` eagerly builds a chunk-grid description
@@ -39,7 +40,15 @@ from collections.abc import Hashable, Mapping
 import numpy as np
 import xarray as xr
 
-from .remap import _make_crs_variable
+from .metadata import (
+    CELL_DIM,
+    LAT_VAR,
+    LON_VAR,
+    HealpixGrid,
+    HealpixMetadata,
+    Provenance,
+    has_healpix_metadata,
+)
 from .remap_backend import _canonical_lon, _require_healpix_geo_module
 from .types import Int64Array
 
@@ -77,19 +86,22 @@ def _dataset_level(ds: xr.Dataset, level: int | None) -> int:
     """Resolve the HEALPix level of *ds*."""
     if level is not None:
         return level
-    try:
-        return int(ds.attrs["healpix_level"])
-    except KeyError:
+    if not has_healpix_metadata(ds):
         raise ValueError(
-            "Dataset has no `healpix_level` attribute; pass `level=` explicitly."
-        ) from None
+            "Dataset has no HEALPix grid mapping (`crs`); pass `level=` explicitly."
+        )
+    return HealpixMetadata.from_dataset(ds).grid.level
 
 
 def _require_nested(ds: xr.Dataset) -> None:
     """Range-based selection relies on nested ordering."""
-    order = str(ds.attrs.get("healpix_order", "nested"))
-    if order not in {"nested", "nest"}:
-        raise ValueError(f"Region selection requires nested ordering, got {order!r}.")
+    if not has_healpix_metadata(ds):
+        return
+    grid = HealpixMetadata.from_dataset(ds).grid
+    if not grid.nest:
+        raise ValueError(
+            f"Region selection requires nested ordering, got {grid.indexing_scheme!r}."
+        )
 
 
 # ===================================================================
@@ -121,8 +133,8 @@ def select_cells(
         Global HEALPix cell IDs to extract (any order; duplicates are
         dropped).
     level:
-        HEALPix level override when the ``healpix_level`` attribute is
-        missing.
+        HEALPix level override when the dataset has no HEALPix grid
+        mapping.
     load:
         Load the selected data into memory (default).  The selection is
         small by construction — that is the point of selecting.
@@ -131,8 +143,8 @@ def select_cells(
     -------
     xarray.Dataset
         Compact subset: ``cell`` coordinate holds the requested IDs,
-        cell-centre ``latitude``/``longitude`` are attached, and
-        ``grid_doctor_sparse = 1`` is set.
+        cell-centre ``latitude``/``longitude`` are attached, and the
+        subset is marked sparse.
     """
     _require_nested(ds)
     resolved_level = _dataset_level(ds, level)
@@ -317,8 +329,7 @@ def attach_cell_coords(
     -------
     xarray.Dataset
         Subset with ``cell``, ``latitude``, ``longitude``, and ``crs``
-        coordinates, ``grid_mapping`` tags, and ``grid_doctor_sparse``
-        set.
+        coordinates and grid-doctor metadata, marked sparse.
     """
     cells = np.asarray(cells, dtype=np.int64)
     if ds.sizes.get("cell") != cells.size:
@@ -330,26 +341,25 @@ def attach_cell_coords(
     lon_deg, lat_deg = module.healpix_to_lonlat(cells, level, **kwargs)
 
     result = ds.assign_coords(
-        cell=cells,
-        latitude=("cell", np.asarray(lat_deg, dtype=np.float64)),
-        longitude=(
-            "cell",
-            _canonical_lon(np.asarray(lon_deg, dtype=np.float64)),
-        ),
-        crs=_make_crs_variable(level=level, nside=2**level, order="nested"),
+        {
+            CELL_DIM: cells,
+            LAT_VAR: (CELL_DIM, np.asarray(lat_deg, dtype=np.float64)),
+            LON_VAR: (
+                CELL_DIM,
+                _canonical_lon(np.asarray(lon_deg, dtype=np.float64)),
+            ),
+        }
     )
-    for name in result.data_vars:
-        if "cell" in result[name].dims:
-            result[name].attrs["grid_mapping"] = "crs"
     if attrs:
         merged = dict(attrs)
         merged.update(result.attrs)
         result.attrs = merged
-    result.attrs["healpix_level"] = level
-    result.attrs["healpix_nside"] = 2**level
-    result.attrs["healpix_order"] = "nested"
-    result.attrs["grid_doctor_sparse"] = 1
-    return result
+    metadata = HealpixMetadata(
+        HealpixGrid(level=level),
+        Provenance.from_attrs(result.attrs),
+        sparse=True,
+    )
+    return metadata.apply(result)
 
 
 __all__ = [

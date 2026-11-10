@@ -29,6 +29,14 @@ from dask.base import tokenize
 if TYPE_CHECKING:
     from scipy.sparse import csr_array, csr_matrix
 
+from .metadata import (
+    CELL_DIM,
+    LAT_VAR,
+    LON_VAR,
+    HealpixGrid,
+    HealpixMetadata,
+    Provenance,
+)
 from .remap_apply import (
     apply_weights_nd,
     extract_sparse_weights,
@@ -645,77 +653,22 @@ def _attach_healpix_coords(
     nest: bool,
     method: str | None = None,
 ) -> xr.Dataset:
-    """Attach HEALPix cell-centre coordinates, CRS variable, and metadata.
+    """Attach dense HEALPix cell coordinates and grid-doctor metadata.
 
-    Adds:
-
-    - ``cell``, ``latitude``, ``longitude`` coordinates.
-    - A scalar ``crs`` coordinate variable whose attributes describe the
-      HEALPix grid (``grid_mapping_name``, ``healpix_nside``, …).
-    - ``grid_mapping = "crs"`` on every data variable so that CF-aware
-      tools can discover the projection automatically.
-    - Global provenance attributes (``healpix_*``, ``grid_doctor_*``).
+    Adds the ``cell`` index and cell-centre ``latitude``/``longitude``
+    coordinates; everything else (``crs``, CF attributes, provenance)
+    is written by [`HealpixMetadata.apply`][grid_doctor.metadata.HealpixMetadata.apply].
     """
-    import grid_doctor as _gd
-
-    nside = 2**level
-    order = "nested" if nest else "ring"
-
+    grid = HealpixGrid.from_nest(level, nest=nest)
     lat_deg, lon_deg = _healpix_centres(level, nest=nest)
     ds_hp = ds_hp.assign_coords(
-        cell=np.arange(lat_deg.size, dtype=np.int64),
-        latitude=("cell", lat_deg),
-        longitude=("cell", lon_deg),
-        crs=_make_crs_variable(level=level, nside=nside, order=order),
+        {
+            CELL_DIM: np.arange(grid.npix, dtype=np.int64),
+            LAT_VAR: (CELL_DIM, lat_deg),
+            LON_VAR: (CELL_DIM, lon_deg),
+        }
     )
-
-    # Tag every spatially-mapped data variable.
-    for name in ds_hp.data_vars:
-        if "cell" in ds_hp[name].dims:
-            ds_hp[name].attrs["grid_mapping"] = "crs"
-
-    # Global HEALPix metadata.
-    ds_hp.attrs["healpix_level"] = level
-    ds_hp.attrs["healpix_nside"] = nside
-    ds_hp.attrs["healpix_order"] = order
-
-    # Provenance.
-    ds_hp.attrs["grid_doctor_version"] = _gd.__version__
-    if method is not None:
-        ds_hp.attrs["grid_doctor_method"] = method
-
-    return ds_hp
-
-
-def _make_crs_variable(
-    *,
-    level: int,
-    nside: int,
-    order: str,
-) -> xr.DataArray:
-    """Create a scalar CRS coordinate variable for HEALPix.
-
-    The variable follows the CF ``grid_mapping`` convention: a
-    dimensionless scalar whose attributes describe the coordinate
-    reference system.
-
-    Args:
-        level: HEALPix refinement level.
-        nside: ``2**level``.
-        order: ``"nested"`` or ``"ring"``.
-
-    Returns:
-        Scalar :class:`xarray.DataArray`.
-    """
-    return xr.DataArray(
-        np.float64(0.0),
-        attrs={
-            "grid_mapping_name": "healpix",
-            "healpix_nside": nside,
-            "healpix_level": level,
-            "healpix_order": order,
-        },
-    )
+    return HealpixMetadata(grid, Provenance(method=method)).apply(ds_hp)
 
 
 # ===================================================================

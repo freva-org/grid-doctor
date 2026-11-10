@@ -13,6 +13,8 @@ from grid_doctor import remap
 from grid_doctor.helpers import latlon_to_healpix_pyramid
 from grid_doctor.remap import regrid_to_healpix
 
+from .helpers import with_healpix_metadata
+
 
 @pytest.mark.parametrize("method", ["nearest", "conservative"])
 def test_latlon_to_healpix_pyramid_weight_methods(
@@ -23,18 +25,14 @@ def test_latlon_to_healpix_pyramid_weight_methods(
 ) -> None:
     def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
         del kwargs
-        return xr.Dataset(
+        hp = xr.Dataset(
             {
                 name: (("cell",), np.arange(12 * (4**level), dtype=np.float64))
                 for name in ds.data_vars
             },
-            attrs=ds.attrs
-            | {
-                "healpix_level": level,
-                "healpix_nside": 2**level,
-                "healpix_order": "nested",
-            },
+            attrs=ds.attrs,
         )
+        return with_healpix_metadata(hp, level)
 
     monkeypatch.setattr("grid_doctor.helpers.regrid_to_healpix", fake_regrid)
     pyramid = latlon_to_healpix_pyramid(
