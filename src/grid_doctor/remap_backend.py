@@ -41,6 +41,8 @@ import xarray as xr
 if TYPE_CHECKING:
     from esmpy import Mesh
 
+    from .weights import SourceDescription
+
 from .metadata import LAT_UNITS, LON_UNITS
 from .types import (
     FloatArray,
@@ -231,34 +233,6 @@ class PolygonMesh:
     def max_face_nodes(self) -> int:
         """Return the padded face-node width."""
         return int(self.face_nodes.shape[1])
-
-
-@dataclass(frozen=True, slots=True)
-class SourceDescription:
-    """Resolved description of the source representation.
-
-    Produced by [`describe_source`][grid_doctor.remap_backend.describe_source]
-    and consumed by the weight-generation entry point.
-
-    Attributes:
-        dataset: Materialised gridpoint dataset used for weight
-            generation.
-        kind: Source representation class.
-        source_dims: Source dimensions in flattening order.
-        source_mesh: Source mesh stored as compact node/connectivity
-            arrays.
-        ignore_unmapped: Recommended default for ESMF unmapped
-            handling.
-        metadata: Metadata that should be persisted into the output
-            weight file.
-    """
-
-    dataset: xr.Dataset
-    kind: SourceKind
-    source_dims: tuple[str, ...]
-    source_mesh: PolygonMesh
-    ignore_unmapped: bool
-    metadata: dict[str, str | int | float | bool]
 
 
 class SpectralTransformError(RuntimeError):
@@ -2083,8 +2057,11 @@ def describe_source(
         "grid_doctor_source_looks_global": int(looks_global),
     }
 
+    from .weights import SourceDescription
+
     return SourceDescription(
         dataset=dataset,
+        geometry=geometry_ds,
         kind=resolved_kind,
         source_dims=source_dims,
         source_mesh=source_mesh,
