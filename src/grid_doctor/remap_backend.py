@@ -2219,28 +2219,6 @@ def compute_healpix_weights_backend(
         source_desc.ignore_unmapped if ignore_unmapped is None else ignore_unmapped
     )
 
-    if use_offline:
-        generated = _run_offline_esmf(
-            source_desc=source_desc,
-            target_mesh=target_mesh,
-            target_path=target,
-            level=level,
-            nest=nest,
-            method=method,
-            config=offline_cfg,
-            ignore_unmapped=eff_ignore,
-        )
-    else:
-        generated = _compute_weights_in_memory(
-            source_mesh=source_desc.source_mesh,
-            target_mesh=target_mesh,
-            weights_path=target,
-            method=method,
-            ignore_unmapped=eff_ignore,
-            large_file=large_file,
-        )
-
-    # Annotate the weight file with provenance metadata.
     meta: dict[str, str | int | float | bool] = {
         "grid_doctor_method": method,
         "grid_doctor_level": level,
@@ -2249,11 +2227,34 @@ def compute_healpix_weights_backend(
         "grid_doctor_ignore_unmapped": int(bool(eff_ignore)),
         **source_desc.metadata,
     }
-    with xr.open_dataset(generated) as raw_weights:
-        annotated = raw_weights.load()
-    annotated.attrs.update(meta)
-    annotated.to_netcdf(generated, mode="w")
-    return generated
+    # Generate and annotate next to *target*, then rename: readers never
+    # see a partial weight file, and the scratch dir is always removed.
+    with tempfile.TemporaryDirectory(dir=target.parent, prefix=f".{target.name}.") as scratch:
+        raw, annotated = Path(scratch) / "raw.nc", Path(scratch) / "annotated.nc"
+        if use_offline:
+            _run_offline_esmf(
+                source_desc=source_desc,
+                target_mesh=target_mesh,
+                target_path=raw,
+                level=level,
+                nest=nest,
+                method=method,
+                config=offline_cfg,
+                ignore_unmapped=eff_ignore,
+            )
+        else:
+            _compute_weights_in_memory(
+                source_mesh=source_desc.source_mesh,
+                target_mesh=target_mesh,
+                weights_path=raw,
+                method=method,
+                ignore_unmapped=eff_ignore,
+                large_file=large_file,
+            )
+        with xr.open_dataset(raw) as weights:
+            weights.load().assign_attrs(meta).to_netcdf(annotated)
+        os.replace(annotated, target)
+    return target
 
 
 # ===================================================================

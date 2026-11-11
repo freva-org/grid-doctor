@@ -463,7 +463,7 @@ class WeightsStore:
         return found
 
 
-def _atomic_write(target: Path, write: Any) -> None:
+def _atomic_write(target: Path, write: Callable[[str], object]) -> None:
     """Call ``write(tmp)`` on a temporary file next to *target*, then rename it."""
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".part")

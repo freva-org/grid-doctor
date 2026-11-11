@@ -153,6 +153,37 @@ class TestWeightGeneration:
             == _FakeESMPy.RegridMethod.NEAREST_STOD
         )
 
+    def _fake_healpix(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
+        for module in (remap_backend, remap):
+            monkeypatch.setattr(module, "_require_healpix_geo_module", lambda nest: (_FakeHealpixModule(), {}))
+
+    def test_write_is_atomic(
+        self, monkeypatch: pytest.MonkeyPatch, regular_ds: xr.Dataset, tmp_path: Path
+    ) -> None:
+        """Only the finished, annotated file appears; no scratch files are left behind."""
+        self._fake_healpix(monkeypatch)
+        out = tmp_path / "out" / "weights.nc"
+        assert compute_healpix_weights(regular_ds, 1, method="nearest", weights_path=out) == out
+        assert [p.name for p in out.parent.iterdir()] == ["weights.nc"]
+        with xr.open_dataset(out) as ds:
+            assert ds.attrs["grid_doctor_method"] == "nearest"
+
+    def test_failed_generation_leaves_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, regular_ds: xr.Dataset, tmp_path: Path
+    ) -> None:
+        self._fake_healpix(monkeypatch)
+
+        def broken(**kwargs: Any) -> Path:
+            Path(kwargs["weights_path"]).write_bytes(b"partial")
+            raise RuntimeError("ESMF crashed")
+
+        monkeypatch.setattr(remap_backend, "_compute_weights_in_memory", broken)
+        out = tmp_path / "out" / "weights.nc"
+        with pytest.raises(RuntimeError, match="ESMF crashed"):
+            compute_healpix_weights(regular_ds, 1, method="nearest", weights_path=out)
+        assert list(out.parent.iterdir()) == []
+
     def test_default_path_follows_weights_ref(
         self,
         monkeypatch: pytest.MonkeyPatch,
