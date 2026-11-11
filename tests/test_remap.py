@@ -15,6 +15,7 @@ import xarray as xr
 
 from grid_doctor import remap
 from grid_doctor import remap_backend as remap_backend_module
+from grid_doctor import weights as weights_module
 from grid_doctor.remap import (
     _attach_healpix_coords,
     _flattened_size,
@@ -61,11 +62,12 @@ from grid_doctor.remap_backend import (
     OfflineWeightConfig,
     SpectralTransformError,
     compute_healpix_weights_backend,
-    describe_source,
     run_esmf_regrid_weightgen,
     write_ugrid_mesh_file,
     normalise_dataset,
 )
+from grid_doctor.weights import describe_source
+
 from .helpers import _FakeHealpixModule
 
 
@@ -458,7 +460,7 @@ class TestBackendExternalWorkflows:
         assert description.dataset.identical(regular_ds)
 
         monkeypatch.setattr(
-            remap_backend_module,
+            weights_module,
             "_materialise_spectral_source",
             lambda source, **kwargs: regular_ds,
         )
@@ -494,7 +496,7 @@ class TestBackendExternalWorkflows:
             np.array([0.0, 1.0]), np.array([0.0, 1.0])
         )
         monkeypatch.setattr(
-            remap_backend_module, "describe_source", lambda *args, **kwargs: description
+            weights_module, "describe_source", lambda *args, **kwargs: description
         )
         monkeypatch.setattr(
             remap_backend_module,
@@ -1236,46 +1238,6 @@ class TestAttachHealpixCoords:
         ds = xr.Dataset({"t": ("cell", np.arange(2.0))})
         with pytest.raises(ValueError, match="conflicting sizes|cells"):
             _attach_healpix_coords(ds, level=2, nest=True)
-
-
-class TestSourceDescription:
-    @pytest.mark.parametrize("source_units", ["auto", "rad"])
-    def test_geometry_is_described_in_degrees(
-        self, unstructured_ds: xr.Dataset, unstructured_rad_ds: xr.Dataset, source_units: str
-    ) -> None:
-        """The same grid in radians and degrees gives the same mesh, recorded as ``"deg"``."""
-        deg = describe_source(unstructured_ds)
-        rad = describe_source(unstructured_rad_ds, source_units=source_units)
-
-        for desc in (deg, rad):
-            assert desc.metadata["grid_doctor_source_units"] == "deg"
-        assert rad.metadata == deg.metadata
-        for name in ("node_lon", "node_lat", "face_nodes", "face_lon", "face_lat"):
-            np.testing.assert_allclose(getattr(rad.source_mesh, name), getattr(deg.source_mesh, name), atol=1e-6)
-
-    @pytest.mark.parametrize(
-        "lon",
-        [np.arange(1.0, 360.0, 2.0), np.arange(161.0, 200.0, 2.0)],
-        ids=["global-0-360", "regional-antimeridian"],
-    )
-    def test_regular_mesh_unchanged_by_normalisation(self, lon):
-        """``describe_source`` normalises the geometry; wrapping a 1-D lon axis must not change the cells."""
-        lat = np.arange(-89.0, 90.0, 2.0)
-        ds = xr.Dataset(
-            {"t": (("lat", "lon"), np.zeros((lat.size, lon.size)))},
-            coords={
-                "lat": ("lat", lat, {"units": "degrees_north"}),
-                "lon": ("lon", lon, {"units": "degrees_east"}),
-            },
-        )
-        raw, _ = _source_mesh(ds, source_units="deg")
-        norm = describe_source(ds).source_mesh
-
-        np.testing.assert_allclose(norm.face_lon, raw.face_lon)
-        np.testing.assert_allclose(norm.face_lat, raw.face_lat)
-        corners = norm.node_lon[norm.face_nodes]
-        width = np.ptp(corners, axis=1)
-        np.testing.assert_allclose(np.minimum(width, 360.0 - width), 2.0)
 
 
 class TestNormaliseDataset:

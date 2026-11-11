@@ -11,7 +11,7 @@ import pytest
 import xarray as xr
 
 from grid_doctor.metadata import HealpixGrid
-from grid_doctor.remap_backend import describe_source
+from grid_doctor.weights import describe_source
 from grid_doctor.weights import (
     WEIGHTS_STORE_ENV,
     WeightsDescription,

@@ -242,7 +242,7 @@ def compute_healpix_weights(
         External command for ``source_kind="spectral"``.
     source_description:
         Description of *ds* from
-        [`describe_source`][grid_doctor.remap_backend.describe_source],
+        [`describe_source`][grid_doctor.weights.describe_source],
         e.g. when the caller already built one to look the weights up;
         skips describing the source again.
 

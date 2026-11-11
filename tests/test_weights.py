@@ -9,12 +9,13 @@ import pytest
 import xarray as xr
 
 from grid_doctor.metadata import HealpixGrid
-from grid_doctor.remap_backend import describe_source
+from grid_doctor.remap_backend import _source_mesh
 from grid_doctor.weights import (
     WEIGHTS_VERSION,
-    WeightsRef,
     WeightsDescription,
+    WeightsRef,
     _source_hash,
+    describe_source,
 )
 
 
@@ -44,6 +45,63 @@ class TestSourceDescription:
         assert len({a, b}) == 1
         assert a != "not a description"
         assert "dataset" not in repr(a)
+
+    def test_description_is_lazy(self, regular_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Describing a source and taking its digest must not build the mesh."""
+        import grid_doctor.weights as weights_module
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise AssertionError("mesh built eagerly")
+
+        monkeypatch.setattr(weights_module, "_source_mesh", boom)
+        desc = describe_source(regular_ds)
+        assert desc.digest
+        with pytest.raises(AssertionError, match="eagerly"):
+            desc.source_mesh  # noqa: B018
+
+    def test_mesh_is_built_once(self, regular_ds: xr.Dataset) -> None:
+        desc = describe_source(regular_ds)
+        assert desc.source_mesh is desc.source_mesh
+        assert set(desc.source_dims) <= set(regular_ds.dims)
+        assert desc.metadata["grid_doctor_source_size"] == desc.source_mesh.face_count
+
+    @pytest.mark.parametrize("source_units", ["auto", "rad"])
+    def test_geometry_is_described_in_degrees(
+        self, unstructured_ds: xr.Dataset, unstructured_rad_ds: xr.Dataset, source_units: str
+    ) -> None:
+        """The same grid in radians and degrees gives the same mesh, recorded as ``"deg"``."""
+        deg = describe_source(unstructured_ds)
+        rad = describe_source(unstructured_rad_ds, source_units=source_units)
+
+        for desc in (deg, rad):
+            assert desc.metadata["grid_doctor_source_units"] == "deg"
+        assert rad.metadata == deg.metadata
+        for name in ("node_lon", "node_lat", "face_nodes", "face_lon", "face_lat"):
+            np.testing.assert_allclose(getattr(rad.source_mesh, name), getattr(deg.source_mesh, name), atol=1e-6)
+
+    @pytest.mark.parametrize(
+        "lon",
+        [np.arange(1.0, 360.0, 2.0), np.arange(161.0, 200.0, 2.0)],
+        ids=["global-0-360", "regional-antimeridian"],
+    )
+    def test_regular_mesh_unchanged_by_normalisation(self, lon):
+        """``describe_source`` normalises the geometry; wrapping a 1-D lon axis must not change the cells."""
+        lat = np.arange(-89.0, 90.0, 2.0)
+        ds = xr.Dataset(
+            {"t": (("lat", "lon"), np.zeros((lat.size, lon.size)))},
+            coords={
+                "lat": ("lat", lat, {"units": "degrees_north"}),
+                "lon": ("lon", lon, {"units": "degrees_east"}),
+            },
+        )
+        raw, _ = _source_mesh(ds, source_units="deg")
+        norm = describe_source(ds).source_mesh
+
+        np.testing.assert_allclose(norm.face_lon, raw.face_lon)
+        np.testing.assert_allclose(norm.face_lat, raw.face_lat)
+        corners = norm.node_lon[norm.face_nodes]
+        width = np.ptp(corners, axis=1)
+        np.testing.assert_allclose(np.minimum(width, 360.0 - width), 2.0)
 
 
 class TestWeightsDescription:

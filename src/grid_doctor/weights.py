@@ -9,6 +9,7 @@ share weights.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -36,12 +37,18 @@ from .metadata import (
     HealpixGrid,
     IndexingScheme,
 )
+from .metadata import _keys as keys
 from .remap_backend import (
     PolygonMesh,
+    _classify_source_kind,
     _get_latlon_names,
     _get_vertex_names,
+    _looks_global,
+    _materialise_spectral_source,
+    _source_mesh,
+    normalise_dataset,
 )
-from .types import RemapMethod, SourceKind
+from .types import RemapMethod, SourceKind, SourceUnits
 
 if TYPE_CHECKING:
     from fsspec import AbstractFileSystem
@@ -54,7 +61,7 @@ logger = logging.getLogger(__name__)
 class SourceDescription:
     """Resolved description of the source representation.
 
-    Produced by [`describe_source`][grid_doctor.remap_backend.describe_source]
+    Built by [`describe_source`][grid_doctor.weights.describe_source]
     and consumed by the weight-generation entry point and
     [`WeightsDescription`][grid_doctor.weights.WeightsDescription].
 
@@ -68,22 +75,57 @@ class SourceDescription:
         geometry: Normalised geometry dataset (degrees, longitudes in
             ``[-180, 180)``) the mesh is built from.
         kind: Source representation class.
-        source_dims: Source dimensions in flattening order.
-        source_mesh: Source mesh stored as compact node/connectivity
-            arrays.
-        ignore_unmapped: Recommended default for ESMF unmapped
-            handling.
-        metadata: Metadata that should be persisted into the output
-            weight file.
+
+    The source mesh and everything derived from it are built lazily on
+    first access, so describing a source to look its weights up is cheap.
     """
 
     dataset: xr.Dataset
     geometry: xr.Dataset
     kind: SourceKind
-    source_dims: tuple[str, ...]
-    source_mesh: PolygonMesh
-    ignore_unmapped: bool
-    metadata: dict[str, str | int | float | bool]
+
+    @cached_property
+    def _mesh_and_dims(self) -> tuple[PolygonMesh, tuple[str, ...]]:
+        return _source_mesh(self.geometry, source_units="deg")
+
+    @property
+    def source_mesh(self) -> PolygonMesh:
+        """Source mesh stored as compact node/connectivity arrays."""
+        return self._mesh_and_dims[0]
+
+    @property
+    def source_dims(self) -> tuple[str, ...]:
+        """Source dimensions in flattening order."""
+        return self._mesh_and_dims[1]
+
+    @cached_property
+    def looks_global(self) -> bool:
+        """Whether the source appears to cover the whole sphere (diagnostic only)."""
+        return _looks_global(self.geometry, source_units="deg")
+
+    @property
+    def ignore_unmapped(self) -> bool:
+        """Recommended default for ESMF unmapped handling; always ``True``.
+
+        The HEALPix target tiles the whole sphere, so a source that does
+        not (masked, regional, polar gaps) leaves destination cells
+        without overlap. They must become missing values rather than abort
+        weight generation; callers can pass ``ignore_unmapped=False`` to
+        require full coverage. A source that looks global yet leaves cells
+        unmapped may point at a grid problem (see ``looks_global``).
+        """
+        return True
+
+    @cached_property
+    def metadata(self) -> dict[str, str | int | float | bool]:
+        """Source attributes to persist into the weight file."""
+        return {
+            keys.SOURCE_KIND_ATTR: self.kind,
+            keys.SOURCE_DIMS_ATTR: json.dumps(list(self.source_dims)),
+            keys.SOURCE_SIZE_ATTR: self.source_mesh.face_count,
+            keys.SOURCE_UNITS_ATTR: "deg",
+            keys.SOURCE_LOOKS_GLOBAL_ATTR: int(self.looks_global),
+        }
 
     @cached_property
     def digest(self) -> str:
@@ -99,6 +141,59 @@ class SourceDescription:
 
     def __eq__(self, other: object) -> bool:  # noqa: D105
         return isinstance(other, SourceDescription) and self.digest == other.digest
+
+
+def describe_source(
+    source: xr.Dataset | str | Path,
+    *,
+    grid: xr.Dataset | None = None,
+    source_kind: SourceKind = "auto",
+    source_units: SourceUnits = "auto",
+    spectral_transform_command: list[str] | tuple[str, ...] | None = None,
+    workdir: Path | None = None,
+) -> SourceDescription:
+    """Describe a source for HEALPix weight generation.
+
+    Normalises the source geometry and classifies the grid. The mesh
+    and the weight-file metadata are built lazily, so describing a
+    source to look its weights up does not mesh it.
+
+    Args:
+        source: Source dataset or source path. A path is mainly
+            useful for spectral inputs that need an external transform.
+        grid: Optional grid dataset that supplies geometry when the
+            data file itself only contains values on dimensions such
+            as ``cell``.
+        source_kind: Explicit source representation. Use ``"auto"``
+            to infer it from the available coordinates.
+        source_units: Angular unit convention of the source
+            coordinates, used to normalise the geometry to degrees.
+        spectral_transform_command: External command used when
+            ``source_kind="spectral"``. The command may use
+            ``{input}`` and ``{output}`` placeholders.
+        workdir: Working directory for the spectral transform;
+            a temporary directory when omitted.
+
+    Raises:
+        ValueError: When the geometry cannot be normalised (see
+            ``normalise_dataset``). In particular, cell centres with
+            NaN coordinates (masked grids) are rejected.
+    """
+    dataset = source if isinstance(source, xr.Dataset) else xr.load_dataset(source)
+    kind = source_kind
+    if kind == "spectral":
+        with tempfile.TemporaryDirectory(prefix="grid_doctor_source_") as scratch:
+            dataset = _materialise_spectral_source(  # loads eagerly, scratch can go
+                source,
+                transform_command=spectral_transform_command,
+                workdir=workdir or Path(scratch),
+            )
+        kind = "auto"
+
+    # Only the geometry source is normalised: grid if given, else dataset.
+    geometry = normalise_dataset(grid if grid is not None else dataset, source_units)
+    kind = _classify_source_kind(geometry, explicit_kind=kind)
+    return SourceDescription(dataset=dataset, geometry=geometry, kind=kind)
 
 
 @dataclass(frozen=True, eq=False, repr=False)

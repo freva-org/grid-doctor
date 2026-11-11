@@ -222,7 +222,7 @@ class TestCachedWeights:
     @staticmethod
     def _ref(ds: xr.Dataset, level: int, method: str = "conservative") -> str:
         from grid_doctor.metadata import HealpixGrid
-        from grid_doctor.remap_backend import describe_source
+        from grid_doctor.weights import describe_source
         from grid_doctor.weights import WeightsDescription
 
         return WeightsDescription(describe_source(ds), HealpixGrid(level=level), method).ref.ref  # type: ignore[arg-type]
@@ -234,6 +234,21 @@ class TestCachedWeights:
         assert path == tmp_path / self._ref(regular_ds, 2)
         assert path.exists()
         assert computed[0]["source_description"] is not None  # source described once
+
+    def test_cache_hit_does_not_mesh(
+        self,
+        regular_ds: xr.Dataset,
+        tmp_path: Path,
+        computed: list[dict[str, object]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = cached_weights(regular_ds, 2, store=tmp_path)
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise AssertionError("mesh built on a cache hit")
+
+        monkeypatch.setattr("grid_doctor.weights._source_mesh", boom)
+        assert cached_weights(regular_ds, 2, store=tmp_path) == path
 
     def test_reuses_weights(self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]) -> None:
         assert cached_weights(regular_ds, 2, store=tmp_path) == cached_weights(regular_ds, 2, store=tmp_path)

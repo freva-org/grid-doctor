@@ -175,7 +175,7 @@ class TestWeightGeneration:
         """A weight file names its whole identity, so a store can be verified from the files alone."""
         from grid_doctor.metadata import HealpixGrid
         from grid_doctor.metadata import _keys as keys
-        from grid_doctor.remap_backend import describe_source
+        from grid_doctor.weights import describe_source
         from grid_doctor.weights import WEIGHTS_VERSION, WeightsDescription
 
         self._fake_healpix(monkeypatch)
@@ -214,7 +214,7 @@ class TestWeightGeneration:
     ) -> None:
         """Without ``weights_path`` the same weights always land at the same local path."""
         from grid_doctor.metadata import HealpixGrid
-        from grid_doctor.remap_backend import describe_source
+        from grid_doctor.weights import describe_source
         from grid_doctor.weights import WeightsDescription
 
         monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())

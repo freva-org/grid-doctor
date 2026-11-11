@@ -249,9 +249,9 @@ def cached_weights(
     from .helpers import get_latlon_resolution, resolution_to_healpix_level
     from .metadata import HealpixGrid
     from .remap import compute_healpix_weights
-    from .remap_backend import describe_source
     from .weights import WeightsDescription
     from .weights import WeightsStore as _WeightsStore
+    from .weights import describe_source
 
     if cache_path is not None:
         warnings.warn("`cache_path` is deprecated, use `store=`.", DeprecationWarning, stacklevel=2)

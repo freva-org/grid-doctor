@@ -22,7 +22,6 @@ Two weight-generation paths are available:
 from __future__ import annotations
 
 import importlib
-import json
 import logging
 import os
 import shutil
@@ -1966,112 +1965,6 @@ def _materialise_spectral_source(
 
 
 # ===================================================================
-# Source description facade
-# ===================================================================
-
-
-def describe_source(
-    source: xr.Dataset | str | Path,
-    *,
-    grid: xr.Dataset | None = None,
-    source_kind: SourceKind = "auto",
-    source_units: SourceUnits = "auto",
-    spectral_transform_command: (list[str] | tuple[str, ...] | None) = None,
-    workdir: Path | None = None,
-) -> SourceDescription:
-    """Resolve the source representation for HEALPix weight generation.
-
-    This function classifies the source grid, constructs the normalised
-    compact polygon mesh, and assembles the metadata dictionary that will be
-    written into the output weight file.
-
-    Args:
-        source: Source dataset or source path.  A path is mainly
-            useful for spectral inputs that need an external transform.
-        grid: Optional grid dataset that supplies geometry when the
-            data file itself only contains values on dimensions such
-            as ``cell``.
-        source_kind: Explicit source representation.  Use ``"auto"``
-            to infer it from the available coordinates.
-        source_units: Angular unit convention of the source
-            coordinates, used to normalise the geometry to degrees.
-        spectral_transform_command: External command used when
-            ``source_kind="spectral"``.  The command may use
-            ``{input}`` and ``{output}`` placeholders.
-        workdir: Optional working directory for temporary files.
-
-    Returns:
-        Fully resolved source description.
-
-    Raises:
-        ValueError: When the geometry cannot be normalised; see
-            [`normalise_dataset`][grid_doctor.remap_backend.normalise_dataset].
-            In particular, cell centres with NaN coordinates (masked grids)
-            are rejected.
-    """
-    if workdir is None:
-        workdir = Path(tempfile.mkdtemp(prefix="grid_doctor_source_"))
-
-    if isinstance(source, xr.Dataset):
-        dataset = source
-    else:
-        dataset = xr.load_dataset(source)
-
-    effective_kind = source_kind
-    if effective_kind == "spectral":
-        dataset = _materialise_spectral_source(
-            source,
-            transform_command=spectral_transform_command,
-            workdir=workdir,
-        )
-        effective_kind = "auto"
-
-    # Only the geometry source is normalised: grid if given, else dataset.
-    geometry_ds = normalise_dataset(grid if grid is not None else dataset, source_units)
-    resolved_kind = _classify_source_kind(geometry_ds, explicit_kind=effective_kind)
-    source_mesh, source_dims = _source_mesh(geometry_ds, source_units="deg")
-
-    # The HEALPix target is a complete global tessellation. A source that
-    # does not fully tile the sphere -- ocean/land-masked grids, regional
-    # domains, polar gaps -- leaves some destination cells with no
-    # overlapping source cell. Those cells must become missing values, not
-    # abort weight generation, so unmapped destinations are ignored by
-    # default. Callers can pass ignore_unmapped=False to require full
-    # coverage (e.g. for a source that is expected to be globally complete).
-    #
-    # _looks_global is retained as a diagnostic: a source that *does* look
-    # global yet still leaves cells unmapped may indicate a grid problem
-    # (e.g. NaN coordinates or broken corner inference) rather than a mask.
-    looks_global = _looks_global(geometry_ds, source_units="deg")
-    ignore_unmapped = True
-    if not looks_global:
-        logger.debug(
-            "Source grid does not look global (lon/lat extent below "
-            "thresholds); unmapped HEALPix destinations are expected."
-        )
-
-    metadata: dict[str, str | int | float | bool] = {
-        keys.SOURCE_KIND_ATTR: resolved_kind,
-        keys.SOURCE_DIMS_ATTR: json.dumps(list(source_dims)),
-        keys.SOURCE_SIZE_ATTR: source_mesh.face_count,
-        keys.SOURCE_UNITS_ATTR: "deg",
-        keys.SOURCE_LOOKS_GLOBAL_ATTR: int(looks_global),
-    }
-
-    from .weights import SourceDescription
-
-    return SourceDescription(
-        dataset=dataset,
-        geometry=geometry_ds,
-        kind=resolved_kind,
-        source_dims=source_dims,
-        source_mesh=source_mesh,
-        ignore_unmapped=ignore_unmapped,
-        metadata=metadata,
-    )
-
-
-# ===================================================================
 # In-memory weight computation
 # ===================================================================
 
@@ -2180,7 +2073,7 @@ def compute_healpix_weights_backend(
         spectral_transform_command: External command used when
             ``source_kind="spectral"``.
         source_description: Description of *source* from
-            [`describe_source`][grid_doctor.remap_backend.describe_source];
+            [`describe_source`][grid_doctor.weights.describe_source];
             skips describing the source again.
 
     Returns:
@@ -2194,7 +2087,12 @@ def compute_healpix_weights_backend(
     if method not in {"nearest", "conservative"}:
         raise ValueError("Only 'nearest' and 'conservative' are supported.")
 
-    from .weights import WEIGHTS_VERSION, WeightsDescription, local_weights_dir
+    from .weights import (
+        WEIGHTS_VERSION,
+        WeightsDescription,
+        describe_source,
+        local_weights_dir,
+    )
 
     offline_cfg = offline or OfflineWeightConfig()
     source_desc = source_description or describe_source(
