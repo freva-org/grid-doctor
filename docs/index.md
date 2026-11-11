@@ -29,7 +29,7 @@ curvilinear, or unstructured grids to multi-resolution
 import grid_doctor as gd
 
 ds = gd.cached_open_dataset(["data/*.nc"])
-weights_file = gd.cached_weights("/path/to/weights/", nproc=4)
+weights_file = gd.cached_weights(ds, store="/path/to/weights", nproc=4)
 pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_file)
 gd.save_pyramid(
     pyramid,
