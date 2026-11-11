@@ -1,13 +1,21 @@
-"""Tests for the source description and its digest."""
+"""Tests for the weight descriptions and references."""
 
 from __future__ import annotations
+
+from itertools import product
 
 import numpy as np
 import pytest
 import xarray as xr
 
+from grid_doctor.metadata import HealpixGrid
 from grid_doctor.remap_backend import describe_source
-from grid_doctor.weights import _source_hash
+from grid_doctor.weights import (
+    WEIGHTS_VERSION,
+    WeightsRef,
+    WeightsDescription,
+    _source_hash,
+)
 
 
 def _wrf_ds(offset: float = 0.0, lat: str = "XLAT", lon: str = "XLONG") -> xr.Dataset:
@@ -36,6 +44,29 @@ class TestSourceDescription:
         assert len({a, b}) == 1
         assert a != "not a description"
         assert "dataset" not in repr(a)
+
+
+class TestWeightsDescription:
+    def test_identity_per_target_and_method(self, regular_ds: xr.Dataset) -> None:
+        source = describe_source(regular_ds)
+        descs = [
+            WeightsDescription(source, HealpixGrid(level=level, indexing_scheme=scheme), method)
+            for method, level, scheme in product(("nearest", "conservative"), (0, 1), ("nested", "ring"))
+        ]
+        assert len(set(descs)) == len(descs)
+        assert len({d.ref for d in descs}) == len(descs)
+        assert {d.ref.key for d in descs} == {source.digest}  # one source digest for all targets
+
+    def test_eq_and_hash(self, regular_ds: xr.Dataset) -> None:
+        def make() -> WeightsDescription:
+            return WeightsDescription(describe_source(regular_ds), HealpixGrid(level=1), "nearest")
+
+        a, b = make(), make()
+        assert a is not b
+        assert a == b
+        assert hash(a) == hash(b)
+        assert len({a, b}) == 1
+        assert a != "not a description"
 
 
 class TestSourceHash:
@@ -169,3 +200,53 @@ class TestCanonicalSourceDigest:
         """Weight columns follow the data's cell order, so a sorted grid must not reuse weights."""
         lon_sorted = np.sort((self.LON + 180.0) % 360.0 - 180.0)  # -180, ..., 135
         assert self._digest(self._grid(lon_sorted)) != self._digest(self._grid())
+
+
+class TestWeightRef:
+    PREFIX = "version=1/grid=healpix/ellipsoid=sphere"
+
+    def test_roundtrip(self, regular_ds: xr.Dataset) -> None:
+        desc = WeightsDescription(describe_source(regular_ds), HealpixGrid(level=3, indexing_scheme="ring"), "nearest")
+        ref = desc.ref
+        assert ref.ref == f"{self.PREFIX}/indexing_scheme=ring/level=3/method=nearest/{desc.source.digest}.nc"
+        assert WeightsRef.parse(ref.ref) == ref
+        assert WeightsRef.parse("/" + ref.ref + "/") == ref
+
+    def test_hierarchy_is_versioned(self) -> None:
+        """Changing the path scheme must come with a new ``WEIGHTS_VERSION``.
+
+        If this fails, bump ``WEIGHTS_VERSION``, keep the old paths readable
+        and give every new segment a default matching the old behaviour.
+        """
+        assert (WEIGHTS_VERSION, WeightsRef.HIERARCHY) == (
+            1,
+            ("version", "grid", "ellipsoid", "indexing_scheme", "level", "method"),
+        ), "weight path scheme changed: bump WEIGHTS_VERSION"
+
+    def test_known_path_is_stable(self) -> None:
+        """A version-1 reference must keep its exact path, or stores lose their files."""
+        ref = WeightsRef("conservative", "nested", 10, "abc123")
+        expected = "version=1/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=10/method=conservative/abc123.nc"
+        assert ref.ref == expected
+        assert WeightsRef.parse(expected) == ref
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            f"{PREFIX}/indexing_scheme=nested/level=3/k.nc",  # method missing
+            f"{PREFIX}/level=3/indexing_scheme=nested/method=nearest/k.nc",  # wrong order
+            "grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/k.nc",  # no version
+            "version=2/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/k.nc",
+            "version=1/grid=other/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/k.nc",
+            "version=1/grid=healpix/indexing_scheme=nested/level=3/method=nearest/k.nc",  # no ellipsoid
+            "version=1/grid=healpix/ellipsoid=wgs84/indexing_scheme=nested/level=3/method=nearest/k.nc",
+            f"{PREFIX}/indexing_scheme=nest/level=3/method=nearest/k.nc",  # not a CF scheme
+            f"{PREFIX}/indexing_scheme=nested/level=x/method=nearest/k.nc",
+            f"{PREFIX}/indexing_scheme=nested/level=3/method=bilinear/k.nc",
+            f"{PREFIX}/indexing_scheme=nested/level=3/method=nearest/k.zarr",
+            f"{PREFIX}/indexing_scheme/level=3/method=nearest/k.nc",  # no '='
+        ],
+    )
+    def test_parse_rejects(self, bad: str) -> None:
+        with pytest.raises(ValueError, match="Not a weight reference"):
+            WeightsRef.parse(bad)
