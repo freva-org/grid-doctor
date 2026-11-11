@@ -169,6 +169,28 @@ class TestWeightGeneration:
         with xr.open_dataset(out) as ds:
             assert ds.attrs["grid_doctor_method"] == "nearest"
 
+    def test_provenance_matches_weights_ref(
+        self, monkeypatch: pytest.MonkeyPatch, regular_ds: xr.Dataset, tmp_path: Path
+    ) -> None:
+        """A weight file names its whole identity, so a store can be verified from the files alone."""
+        from grid_doctor.metadata import HealpixGrid
+        from grid_doctor.metadata import _keys as keys
+        from grid_doctor.remap_backend import describe_source
+        from grid_doctor.weights import WEIGHTS_VERSION, WeightsDescription
+
+        self._fake_healpix(monkeypatch)
+        out = compute_healpix_weights(regular_ds, 1, method="nearest", nest=False, weights_path=tmp_path / "w.nc")
+        ref = WeightsDescription(describe_source(regular_ds), HealpixGrid(level=1, indexing_scheme="ring"), "nearest").ref
+        with xr.open_dataset(out) as ds:
+            attrs = ds.attrs
+        assert attrs[keys.WEIGHTS_VERSION_ATTR] == WEIGHTS_VERSION
+        assert attrs[keys.SOURCE_HASH_ATTR] == ref.key
+        assert attrs[keys.LEVEL_ATTR] == ref.level
+        assert attrs[keys.ORDER_ATTR] == ref.indexing_scheme
+        assert attrs[keys.ELLIPSOID_ATTR] == ref.ellipsoid
+        assert attrs[keys.METHOD_ATTR] == ref.method
+        assert keys.VERSION_ATTR in attrs  # grid-doctor version
+
     def test_failed_generation_leaves_nothing(
         self, monkeypatch: pytest.MonkeyPatch, regular_ds: xr.Dataset, tmp_path: Path
     ) -> None:

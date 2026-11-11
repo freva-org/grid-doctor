@@ -43,7 +43,8 @@ if TYPE_CHECKING:
 
     from .weights import SourceDescription
 
-from .metadata import LAT_UNITS, LON_UNITS, HealpixGrid
+from .metadata import LAT_UNITS, LON_UNITS, HealpixGrid, Provenance
+from .metadata import _keys as keys
 from .types import (
     FloatArray,
     Int64Array,
@@ -2050,11 +2051,11 @@ def describe_source(
         )
 
     metadata: dict[str, str | int | float | bool] = {
-        "grid_doctor_source_kind": resolved_kind,
-        "grid_doctor_source_dims": json.dumps(list(source_dims)),
-        "grid_doctor_source_size": source_mesh.face_count,
-        "grid_doctor_source_units": "deg",
-        "grid_doctor_source_looks_global": int(looks_global),
+        keys.SOURCE_KIND_ATTR: resolved_kind,
+        keys.SOURCE_DIMS_ATTR: json.dumps(list(source_dims)),
+        keys.SOURCE_SIZE_ATTR: source_mesh.face_count,
+        keys.SOURCE_UNITS_ATTR: "deg",
+        keys.SOURCE_LOOKS_GLOBAL_ATTR: int(looks_global),
     }
 
     from .weights import SourceDescription
@@ -2193,7 +2194,7 @@ def compute_healpix_weights_backend(
     if method not in {"nearest", "conservative"}:
         raise ValueError("Only 'nearest' and 'conservative' are supported.")
 
-    from .weights import WeightsDescription, local_weights_dir
+    from .weights import WEIGHTS_VERSION, WeightsDescription, local_weights_dir
 
     offline_cfg = offline or OfflineWeightConfig()
     source_desc = source_description or describe_source(
@@ -2219,12 +2220,17 @@ def compute_healpix_weights_backend(
         source_desc.ignore_unmapped if ignore_unmapped is None else ignore_unmapped
     )
 
+    # Provenance: every part of the weights' identity, so a store can be
+    # re-verified from the files alone.
     meta: dict[str, str | int | float | bool] = {
-        "grid_doctor_method": method,
-        "grid_doctor_level": level,
-        "grid_doctor_order": "nested" if nest else "ring",
-        "grid_doctor_backend": ("offline-esmf" if use_offline else "esmpy"),
-        "grid_doctor_ignore_unmapped": int(bool(eff_ignore)),
+        **Provenance(method=method).to_attrs(),
+        keys.WEIGHTS_VERSION_ATTR: WEIGHTS_VERSION,
+        keys.SOURCE_HASH_ATTR: source_desc.digest,
+        keys.LEVEL_ATTR: level,
+        keys.ORDER_ATTR: desc.target.indexing_scheme,
+        keys.ELLIPSOID_ATTR: desc.ref.ellipsoid,
+        keys.BACKEND_ATTR: "offline-esmf" if use_offline else "esmpy",
+        keys.IGNORE_UNMAPPED_ATTR: int(bool(eff_ignore)),
         **source_desc.metadata,
     }
     # Generate and annotate next to *target*, then rename: readers never

@@ -39,6 +39,7 @@ from .metadata import (
     HealpixMetadata,
     Provenance,
 )
+from .metadata import _keys as keys
 from .remap_apply import (
     apply_weights_nd,
     extract_sparse_weights,
@@ -156,19 +157,19 @@ def _read_weight_file(weights_path: str | Path) -> _WeightFile:
         col_name = "col" if "col" in wds else "src_address"
         val_name = "S" if "S" in wds else "remap_matrix"
 
-        level = int(wds.attrs.get("grid_doctor_level", -1))
-        source_size = wds.attrs.get("grid_doctor_source_size")
+        level = int(wds.attrs.get(keys.LEVEL_ATTR, -1))
+        source_size = wds.attrs.get(keys.SOURCE_SIZE_ATTR)
         matrix, n_target, n_source = extract_sparse_weights(
             row=wds[row_name].values,
             col=wds[col_name].values,
             values=wds[val_name].values,
             n_source=int(source_size) if source_size is not None else None,
         )
-        order = str(wds.attrs.get("grid_doctor_order", "nested"))
-        method_raw = wds.attrs.get("grid_doctor_method")
+        order = str(wds.attrs.get(keys.ORDER_ATTR, "nested"))
+        method_raw = wds.attrs.get(keys.METHOD_ATTR)
         method = str(method_raw) if method_raw is not None else None
         stored_source_dims = _parse_source_dims_attr(
-            wds.attrs.get("grid_doctor_source_dims")
+            wds.attrs.get(keys.SOURCE_DIMS_ATTR)
         )
     return _WeightFile(
         matrix, n_target, n_source, level, order, method, stored_source_dims
