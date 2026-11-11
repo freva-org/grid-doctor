@@ -9,9 +9,14 @@ share weights.
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
+import shutil
+import tempfile
 from dataclasses import dataclass
 from functools import cached_property
-from typing import ClassVar, Final, Literal, cast, get_args
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, cast, get_args
 
 import numpy as np
 import xarray as xr
@@ -28,6 +33,12 @@ from .remap_backend import (
     _get_vertex_names,
 )
 from .types import RemapMethod, SourceKind
+
+if TYPE_CHECKING:
+    from fsspec import AbstractFileSystem
+    from fsspec.mapping import FSMap
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, eq=False, repr=False)
@@ -231,3 +242,197 @@ class WeightsRef:
             level=int(values["level"]),
             key=file[: -len(".nc")],
         )
+
+
+WEIGHTS_STORE_ENV: Final = "GRID_DOCTOR_WEIGHTS_STORE"
+"""Environment variable naming the default [`WeightsStore`][grid_doctor.weights.WeightsStore] location."""
+
+_LOCAL_PROTOCOLS: Final = frozenset({"file", "local"})
+_SUPPORTED_PROTOCOLS: Final = _LOCAL_PROTOCOLS | {"memory"}
+
+
+def local_weights_dir() -> Path:
+    """Local directory holding weight files in the [`WeightsRef`][grid_doctor.weights.WeightsRef] layout.
+
+    ``<cache_dir()>/weights``. The default store root and the local
+    cache of in-memory [`WeightsStore`][grid_doctor.weights.WeightsStore]s,
+    so one set of weights has one local path.
+    """
+    from .utils import cache_dir
+
+    return cache_dir() / "weights"
+
+
+class WeightsStore:
+    """Store of HEALPix weight files, laid out by [`WeightsRef`][grid_doctor.weights.WeightsRef].
+
+    Callers pass a root; everything below it is grid-doctor's layout. The
+    root is a local (POSIX) directory, or an in-memory fsspec filesystem
+    (``memory://``, mainly for tests). ESMF and the weight readers need
+    local files, so files of in-memory stores are copied once into a local
+    cache that mirrors the same layout.
+
+    Args:
+        location: Root of the store: a local path, a ``file://`` or
+            ``memory://`` URL, or an fsspec mapper of either. Defaults to the
+            ``GRID_DOCTOR_WEIGHTS_STORE`` environment variable, else
+            ``<cache_dir()>/weights``.
+        cache_dir: Local directory for copies of in-memory weights.
+            Defaults to ``<cache_dir()>/weights``. Unused for local stores.
+        read_only: Forbid [`publish`][grid_doctor.weights.WeightsStore.publish].
+
+    Raises:
+        ValueError: For filesystems other than local and in-memory ones.
+
+    Examples:
+        ```python
+        store = WeightsStore("/work/ab1234/weights")
+        if store.exists(desc):
+            path = store.fetch(desc)
+        ```
+    """
+
+    def __init__(
+        self,
+        location: str | Path | FSMap | None = None,
+        *,
+        cache_dir: str | Path | None = None,
+        read_only: bool | None = None,
+    ) -> None:  # noqa: D107
+        from fsspec.core import url_to_fs
+        from fsspec.mapping import FSMap
+
+        if location is None:
+            location = os.environ.get(WEIGHTS_STORE_ENV) or local_weights_dir()
+        fs: AbstractFileSystem
+        if isinstance(location, FSMap):
+            fs, root = location.fs, location.root
+        elif isinstance(location, (str, os.PathLike)):
+            fs, root = url_to_fs(str(location))
+        else:
+            raise TypeError(
+                f"Unsupported weights store location {type(location).__name__!r}; "
+                "expected a path, an fsspec URL or an fsspec mapper."
+            )
+        self.fs = fs
+        self.root = str(root).rstrip("/")
+        protocols = fs.protocol
+        protocols = (protocols,) if isinstance(protocols, str) else tuple(protocols)
+        if not _SUPPORTED_PROTOCOLS.intersection(protocols):
+            raise ValueError(
+                f"Unsupported weights store filesystem {protocols[0]!r}; "
+                f"expected one of {sorted(_SUPPORTED_PROTOCOLS)}."
+            )
+        self.is_local = bool(_LOCAL_PROTOCOLS.intersection(protocols))
+        self._protocol = protocols[0]
+        self.read_only = bool(read_only)
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else local_weights_dir()
+
+    def __repr__(self) -> str:  # noqa: D105
+        return f"{type(self).__name__}({self.url_root!r}, read_only={self.read_only})"
+
+    @property
+    def url_root(self) -> str:
+        """URL of the store root."""
+        return f"{self._protocol}://{self.root}"
+
+    @staticmethod
+    def _ref(item: WeightsDescription | WeightsRef | str) -> WeightsRef:
+        if isinstance(item, WeightsDescription):
+            return item.ref
+        if isinstance(item, WeightsRef):
+            return item
+        return WeightsRef.parse(item)
+
+    def _path(self, item: WeightsDescription | WeightsRef | str) -> str:
+        return f"{self.root}/{self._ref(item).ref}"
+
+    def url(self, item: WeightsDescription | WeightsRef | str) -> str:
+        """Return the full URL (``file://`` or ``memory://``) of a weight file."""
+        return f"{self._protocol}://{self._path(item)}"
+
+    def exists(self, item: WeightsDescription | WeightsRef | str) -> bool:
+        """Return whether the store holds the weight file."""
+        return bool(self.fs.exists(self._path(item)))
+
+    def fetch(self, item: WeightsDescription | WeightsRef | str) -> Path:
+        """Return a local path to the weight file, downloading it if needed.
+
+        Raises:
+            FileNotFoundError: If the store does not hold the file.
+        """
+        path = self._path(item)
+        if self.is_local:
+            if not self.fs.exists(path):
+                raise FileNotFoundError(self.url(item))
+            return Path(path)
+        local = self.cache_dir / self._ref(item).ref
+        if local.exists():
+            return local
+        if not self.fs.exists(path):
+            raise FileNotFoundError(self.url(item))
+        logger.info("Copying weight file %s", self.url(item))
+        _atomic_write(local, lambda tmp: self.fs.get_file(path, tmp))
+        return local
+
+    def publish(self, desc: WeightsDescription, local_file: str | Path) -> WeightsRef:
+        """Store *local_file* as the weights of *desc* and return its reference.
+
+        Readers never see a partial file: local stores write a temporary
+        file and rename it.
+
+        Raises:
+            PermissionError: If the store is read-only.
+        """
+        if self.read_only:
+            raise PermissionError(f"{self!r} is read-only")
+        ref = desc.ref
+        path = self._path(ref)
+        logger.info("Publishing weight file %s", self.url(ref))
+        if self.is_local:
+            _atomic_write(Path(path), lambda tmp: shutil.copyfile(local_file, tmp))
+        else:
+            self.fs.makedirs(path.rsplit("/", 1)[0], exist_ok=True)
+            self.fs.put_file(str(local_file), path)
+        return ref
+
+    def find(self, **filters: Any) -> list[WeightsRef]:
+        """List the weight files whose reference fields match *filters*.
+
+        Args:
+            **filters: Field values of [`WeightsRef`][grid_doctor.weights.WeightsRef],
+                e.g. ``level``, ``method``, ``indexing_scheme`` or ``key``.
+
+        Raises:
+            TypeError: For unknown filter names.
+
+        Examples:
+            ```python
+            store.find(level=10, method="conservative")
+            ```
+        """
+        fields = set(WeightsRef.__dataclass_fields__)
+        unknown = set(filters) - fields
+        if unknown:
+            raise TypeError(f"Unknown filters: {sorted(unknown)}; expected {sorted(fields)}")
+        dirs = (f"{name}={filters.get(name, '*')}" for name in WeightsRef.HIERARCHY)
+        pattern = "/".join((*dirs, f"{filters.get('key', '*')}.nc"))
+        found = []
+        for path in sorted(self.fs.glob(f"{self.root}/{pattern}")):
+            try:
+                found.append(WeightsRef.parse(str(path).removeprefix(self.root)))
+            except ValueError:
+                continue
+        return found
+
+
+def _atomic_write(target: Path, write: Any) -> None:
+    """Call ``write(tmp)`` on a temporary file next to *target*, then rename it."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".part")
+    os.close(fd)
+    try:
+        write(tmp)
+        os.replace(tmp, target)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
