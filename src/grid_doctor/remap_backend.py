@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
     from .weights import SourceDescription
 
-from .metadata import LAT_UNITS, LON_UNITS
+from .metadata import LAT_UNITS, LON_UNITS, HealpixGrid
 from .types import (
     FloatArray,
     Int64Array,
@@ -2165,8 +2165,10 @@ def compute_healpix_weights_backend(
         nest: Use nested HEALPix ordering when *True*.
         source_units: Angular unit convention of the source
             coordinates.
-        weights_path: Output weight file path.  A temporary file is
-            created when omitted.
+        weights_path: Output weight file path. Defaults to the local
+            weights directory in the
+            [`WeightsRef`][grid_doctor.weights.WeightsRef] layout (see
+            [`local_weights_dir`][grid_doctor.weights.local_weights_dir]).
         grid: Optional external geometry dataset.
         source_kind: Explicit source representation or ``"auto"``.
         ignore_unmapped: Whether destination cells without source
@@ -2187,14 +2189,9 @@ def compute_healpix_weights_backend(
     if method not in {"nearest", "conservative"}:
         raise ValueError("Only 'nearest' and 'conservative' are supported.")
 
-    offline_cfg = offline or OfflineWeightConfig()
-    target = (
-        Path(weights_path)
-        if weights_path is not None
-        else Path(tempfile.mkstemp(suffix=".nc")[1])
-    )
-    target.parent.mkdir(parents=True, exist_ok=True)
+    from .weights import WeightsDescription, local_weights_dir
 
+    offline_cfg = offline or OfflineWeightConfig()
     source_desc = describe_source(
         source,
         grid=grid,
@@ -2203,6 +2200,9 @@ def compute_healpix_weights_backend(
         spectral_transform_command=spectral_transform_command,
         workdir=offline_cfg.workdir,
     )
+    desc = WeightsDescription(source_desc, HealpixGrid.from_nest(level, nest=nest), method)
+    target = Path(weights_path) if weights_path is not None else local_weights_dir() / desc.ref.ref
+    target.parent.mkdir(parents=True, exist_ok=True)
     _, target_mesh = _target_healpix_mesh(level, nest=nest)
 
     use_offline = _default_offline_enabled(

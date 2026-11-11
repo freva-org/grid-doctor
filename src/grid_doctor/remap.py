@@ -212,7 +212,10 @@ def compute_healpix_weights(
     source_units:
         Unit convention of the source coordinates.
     weights_path:
-        Output NetCDF file.  A temporary file is created when omitted.
+        Output NetCDF file. Defaults to the local weights directory in the
+        [`WeightsRef`][grid_doctor.weights.WeightsRef] layout (see
+        [`local_weights_dir`][grid_doctor.weights.local_weights_dir]), so
+        the same weights always land at the same path.
     grid:
         Optional external geometry dataset.
     source_kind:

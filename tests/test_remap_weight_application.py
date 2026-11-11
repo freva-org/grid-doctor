@@ -153,6 +153,29 @@ class TestWeightGeneration:
             == _FakeESMPy.RegridMethod.NEAREST_STOD
         )
 
+    def test_default_path_follows_weights_ref(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        regular_ds: xr.Dataset,
+        tmp_path: Path,
+    ) -> None:
+        """Without ``weights_path`` the same weights always land at the same local path."""
+        from grid_doctor.metadata import HealpixGrid
+        from grid_doctor.remap_backend import describe_source
+        from grid_doctor.weights import WeightsDescription
+
+        monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
+        for module in (remap_backend, remap):
+            monkeypatch.setattr(module, "_require_healpix_geo_module", lambda nest: (_FakeHealpixModule(), {}))
+        monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: tmp_path)
+
+        result = compute_healpix_weights(regular_ds, 1, method="nearest", nest=False)
+
+        desc = WeightsDescription(describe_source(regular_ds), HealpixGrid(level=1, indexing_scheme="ring"), "nearest")
+        assert result == tmp_path / "weights" / desc.ref.ref
+        assert result.exists()
+        assert compute_healpix_weights(regular_ds, 1, method="nearest", nest=False) == result
+
     def test_compute_healpix_weights_conservative(
         self,
         monkeypatch: pytest.MonkeyPatch,

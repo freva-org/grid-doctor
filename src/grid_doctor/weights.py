@@ -254,9 +254,9 @@ _SUPPORTED_PROTOCOLS: Final = _LOCAL_PROTOCOLS | {"memory"}
 def local_weights_dir() -> Path:
     """Local directory holding weight files in the [`WeightsRef`][grid_doctor.weights.WeightsRef] layout.
 
-    ``<cache_dir()>/weights``. The default store root and the local
-    cache of in-memory [`WeightsStore`][grid_doctor.weights.WeightsStore]s,
-    so one set of weights has one local path.
+    ``<cache_dir()>/weights``. Generated weights land here by default and
+    remote [`WeightsStore`][grid_doctor.weights.WeightsStore]s download
+    into it, so one set of weights has one local path.
     """
     from .utils import cache_dir
 
