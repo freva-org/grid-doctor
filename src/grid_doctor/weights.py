@@ -16,7 +16,16 @@ import tempfile
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, cast, get_args
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    ClassVar,
+    Final,
+    Literal,
+    cast,
+    get_args,
+)
 
 import numpy as np
 import xarray as xr
@@ -351,6 +360,16 @@ class WeightsStore:
         """Return the full URL (``file://`` or ``memory://``) of a weight file."""
         return f"{self._protocol}://{self._path(item)}"
 
+    def local_path(self, item: WeightsDescription | WeightsRef | str) -> Path:
+        """Return where the local copy of a weight file lives.
+
+        The file itself for local stores, its place in the local cache
+        for in-memory ones. The file need not exist.
+        """
+        if self.is_local:
+            return Path(self._path(item))
+        return self.cache_dir / self._ref(item).ref
+
     def exists(self, item: WeightsDescription | WeightsRef | str) -> bool:
         """Return whether the store holds the weight file."""
         return bool(self.fs.exists(self._path(item)))
@@ -366,7 +385,7 @@ class WeightsStore:
             if not self.fs.exists(path):
                 raise FileNotFoundError(self.url(item))
             return Path(path)
-        local = self.cache_dir / self._ref(item).ref
+        local = self.local_path(item)
         if local.exists():
             return local
         if not self.fs.exists(path):
@@ -395,6 +414,24 @@ class WeightsStore:
             self.fs.makedirs(path.rsplit("/", 1)[0], exist_ok=True)
             self.fs.put_file(str(local_file), path)
         return ref
+
+    def fetch_or_compute(self, desc: WeightsDescription, compute: Callable[[Path], Path]) -> Path:
+        """Return a local copy of the weights of *desc*, computing them if needed.
+
+        Looks for the local copy, then the store; otherwise calls
+        ``compute(local_path)`` and publishes the result to a writable
+        remote store. Read-only stores keep it locally only.
+        """
+        local = self.local_path(desc)
+        if local.exists():
+            return local
+        if self.exists(desc):
+            return self.fetch(desc)
+        logger.info("Generating HEALPix weight file %s", local)
+        local = compute(local)
+        if not self.is_local and not self.read_only:
+            self.publish(desc, local)
+        return local
 
     def find(self, **filters: Any) -> list[WeightsRef]:
         """List the weight files whose reference fields match *filters*.

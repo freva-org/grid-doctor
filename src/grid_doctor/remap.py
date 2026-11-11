@@ -29,6 +29,8 @@ from dask.base import tokenize
 if TYPE_CHECKING:
     from scipy.sparse import csr_array, csr_matrix
 
+    from .weights import SourceDescription
+
 from .metadata import (
     CELL_DIM,
     LAT_VAR,
@@ -196,6 +198,7 @@ def compute_healpix_weights(
     keep_intermediates: bool = False,
     workdir: str | Path | None = None,
     spectral_transform_command: list[str] | tuple[str, ...] | None = None,
+    source_description: SourceDescription | None = None,
 ) -> Path:
     """Generate a reusable NetCDF weight file for HEALPix remapping.
 
@@ -236,6 +239,11 @@ def compute_healpix_weights(
         Working directory for offline intermediate files.
     spectral_transform_command:
         External command for ``source_kind="spectral"``.
+    source_description:
+        Description of *ds* from
+        [`describe_source`][grid_doctor.remap_backend.describe_source],
+        e.g. when the caller already built one to look the weights up;
+        skips describing the source again.
 
     Returns
     -------
@@ -267,6 +275,7 @@ def compute_healpix_weights(
         large_file=large_file,
         offline=offline,
         spectral_transform_command=spectral_transform_command,
+        source_description=source_description,
     )
 
 

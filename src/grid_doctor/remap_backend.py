@@ -2150,6 +2150,7 @@ def compute_healpix_weights_backend(
     large_file: bool = True,
     offline: OfflineWeightConfig | None = None,
     spectral_transform_command: (list[str] | tuple[str, ...] | None) = None,
+    source_description: SourceDescription | None = None,
 ) -> Path:
     """Compute reusable HEALPix weights.
 
@@ -2177,6 +2178,9 @@ def compute_healpix_weights_backend(
         offline: Offline weight-generation configuration.
         spectral_transform_command: External command used when
             ``source_kind="spectral"``.
+        source_description: Description of *source* from
+            [`describe_source`][grid_doctor.remap_backend.describe_source];
+            skips describing the source again.
 
     Returns:
         Path to the generated weight file.
@@ -2192,7 +2196,7 @@ def compute_healpix_weights_backend(
     from .weights import WeightsDescription, local_weights_dir
 
     offline_cfg = offline or OfflineWeightConfig()
-    source_desc = describe_source(
+    source_desc = source_description or describe_source(
         source,
         grid=grid,
         source_kind=source_kind,
