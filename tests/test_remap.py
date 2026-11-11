@@ -1239,6 +1239,20 @@ class TestAttachHealpixCoords:
 
 
 class TestSourceDescription:
+    @pytest.mark.parametrize("source_units", ["auto", "rad"])
+    def test_geometry_is_described_in_degrees(
+        self, unstructured_ds: xr.Dataset, unstructured_rad_ds: xr.Dataset, source_units: str
+    ) -> None:
+        """The same grid in radians and degrees gives the same mesh, recorded as ``"deg"``."""
+        deg = describe_source(unstructured_ds)
+        rad = describe_source(unstructured_rad_ds, source_units=source_units)
+
+        for desc in (deg, rad):
+            assert desc.metadata["grid_doctor_source_units"] == "deg"
+        assert rad.metadata == deg.metadata
+        for name in ("node_lon", "node_lat", "face_nodes", "face_lon", "face_lat"):
+            np.testing.assert_allclose(getattr(rad.source_mesh, name), getattr(deg.source_mesh, name), atol=1e-6)
+
     @pytest.mark.parametrize(
         "lon",
         [np.arange(1.0, 360.0, 2.0), np.arange(161.0, 200.0, 2.0)],
