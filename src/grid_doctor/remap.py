@@ -150,8 +150,14 @@ class _WeightFile(NamedTuple):
     stored_source_dims: tuple[str, ...] | None
 
 
-def _read_weight_file(weights_path: str | Path) -> _WeightFile:
-    """Read a weight file and return matrix plus metadata."""
+def _read_weight_file(weights_path: str | Path, nest: bool | None = None) -> _WeightFile:
+    """Read a weight file and return matrix plus metadata.
+
+    With *nest*, the target rows are renumbered into that HEALPix order
+    when the file is in the other one; ``None`` keeps the file's order.
+    """
+    from .weights import nested_to_ring, ring_to_nested
+
     with xr.open_dataset(weights_path) as wds:
         row_name = "row" if "row" in wds else "dst_address"
         col_name = "col" if "col" in wds else "src_address"
@@ -159,13 +165,18 @@ def _read_weight_file(weights_path: str | Path) -> _WeightFile:
 
         level = int(wds.attrs.get(keys.LEVEL_ATTR, -1))
         source_size = wds.attrs.get(keys.SOURCE_SIZE_ATTR)
+        order = str(wds.attrs.get(keys.ORDER_ATTR, "nested"))
+        rows = wds[row_name].values
+        if nest is not None and nest != (order == "nested"):
+            renumber = nested_to_ring if order == "nested" else ring_to_nested
+            rows = renumber(rows.astype(np.int64) - 1, level) + 1  # rows are 1-based
+            order = "nested" if nest else "ring"
         matrix, n_target, n_source = extract_sparse_weights(
-            row=wds[row_name].values,
+            row=rows,
             col=wds[col_name].values,
             values=wds[val_name].values,
             n_source=int(source_size) if source_size is not None else None,
         )
-        order = str(wds.attrs.get(keys.ORDER_ATTR, "nested"))
         method_raw = wds.attrs.get(keys.METHOD_ATTR)
         method = str(method_raw) if method_raw is not None else None
         stored_source_dims = _parse_source_dims_attr(
@@ -512,6 +523,7 @@ def apply_weight_file(
     source_units: SourceUnits = "auto",
     backend: ApplyBackend = "auto",
     cell_chunks: int | Literal["auto"] | None = "auto",
+    nest: bool | None = None,
 ) -> xr.Dataset:
     """Apply a previously generated ESMF weight file to *ds*.
 
@@ -570,6 +582,11 @@ def apply_weight_file(
         ``DEFAULT_CELL_CHUNK`` cells (rounded to a multiple of 4), ``None``
         produces a single chunk.  NumPy-backed input is always computed
         in one piece.
+    nest:
+        HEALPix order of the output: nested when ``True``, ring when
+        ``False``. ``None`` (default) keeps the order of the weight file.
+        Stored weight files are nested; their rows are renumbered for
+        ring output, so one file serves both orders.
 
     Returns
     -------
@@ -586,7 +603,7 @@ def apply_weight_file(
         raise ValueError("missing_policy must be 'renormalize' or 'propagate'.")
 
     matrix, n_target, n_source, level, order, method, stored_sd = _read_weight_file(
-        weights_path
+        weights_path, nest=nest
     )
 
     resolved_sd = _resolve_source_dims_for_weight_application(
@@ -796,6 +813,7 @@ def regrid_to_healpix(
         missing_policy=missing_policy,
         backend=backend,
         cell_chunks=cell_chunks,
+        nest=nest,
     )
 
 

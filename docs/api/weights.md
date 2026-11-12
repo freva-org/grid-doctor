@@ -29,6 +29,22 @@ variable, or `<cache_dir()>/weights` when it is unset. To compute into an
 explicit file instead, use
 [`compute_healpix_weights(weights_path=...)`][grid_doctor.compute_healpix_weights].
 
+### Nested and ring order
+
+Weight files are nested; their order is recorded in the
+`grid_doctor_order` attribute. Ring and nested weights differ only in how
+the HEALPix cells are numbered, so ring order is chosen when the weights
+are applied, and one file serves both:
+
+```python
+ds_ring = gd.apply_weight_file(ds, weights_file, nest=False)
+pyramid = gd.create_healpix_pyramid(ds, max_level=9, weights_path=weights_file, nest=False)
+```
+
+The target rows are then renumbered in memory (see
+[`nested_to_ring`][grid_doctor.weights.nested_to_ring]); no ESMF run and
+no second file are needed.
+
 ## Sharing weights
 
 Point several users or jobs at the same directory to share weights, e.g.
@@ -68,7 +84,7 @@ Weight files are stored under Hive-style directories, followed by the
 digest of the source grid:
 
 ```
-<root>/version=1/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=9/method=conservative/<digest>.nc
+<root>/version=1/grid=healpix/ellipsoid=sphere/level=9/method=conservative/<digest>.nc
 ```
 
 Tools such as pyarrow, DuckDB or Polars read the directory names as
@@ -137,6 +153,16 @@ cells and need no shared node numbering between tools.
       show_root_full_path: false
 
 ::: grid_doctor.weights.WeightsRef
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+
+::: grid_doctor.weights.nested_to_ring
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+
+::: grid_doctor.weights.ring_to_nested
     options:
       show_root_heading: true
       show_root_full_path: false

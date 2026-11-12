@@ -506,7 +506,7 @@ class TestBackendExternalWorkflows:
 
         def offline(**kwargs: Any) -> Path:
             output = kwargs["target_path"]
-            xr.Dataset({"S": ("n_s", np.array([1.0]))}).to_netcdf(output)
+            xr.Dataset({k: ("n_s", np.array([v])) for k, v in (("row", 1), ("col", 1), ("S", 1.0))}).to_netcdf(output)
             return output
 
         monkeypatch.setattr(remap_backend_module, "_run_offline_esmf", offline)

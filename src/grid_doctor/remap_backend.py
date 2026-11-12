@@ -2057,13 +2057,18 @@ def compute_healpix_weights_backend(
         source: Source dataset or source path.
         level: HEALPix refinement level.
         method: Weight method (``"nearest"`` or ``"conservative"``).
-        nest: Use nested HEALPix ordering when *True*.
+        nest: Write ring-order rows to an explicit *weights_path* when
+            *False*. ESMF always computes nested weights; ring rows are
+            renumbered (see
+            [`nested_to_ring`][grid_doctor.weights.nested_to_ring]). Files
+            at the default path are always nested.
         source_units: Angular unit convention of the source
             coordinates.
         weights_path: Output weight file path. Defaults to the local
             weights directory in the
             [`WeightsRef`][grid_doctor.weights.WeightsRef] layout (see
-            [`local_weights_dir`][grid_doctor.weights.local_weights_dir]).
+            [`local_weights_dir`][grid_doctor.weights.local_weights_dir]),
+            in nested order; choose ring order when applying them.
         grid: Optional external geometry dataset.
         source_kind: Explicit source representation or ``"auto"``.
         ignore_unmapped: Whether destination cells without source
@@ -2105,8 +2110,9 @@ def compute_healpix_weights_backend(
     )
     desc = WeightsDescription(source_desc, HealpixGrid.from_nest(level, nest=nest), method)
     target = Path(weights_path) if weights_path is not None else local_weights_dir() / desc.ref.path
+    ring = not nest and weights_path is not None  # the default (store) layout holds nested weights
     target.parent.mkdir(parents=True, exist_ok=True)
-    _, target_mesh = _target_healpix_mesh(level, nest=nest)
+    _, target_mesh = _target_healpix_mesh(level, nest=True)  # ring: rows renumbered below
 
     use_offline = _default_offline_enabled(
         method=method,
@@ -2125,7 +2131,7 @@ def compute_healpix_weights_backend(
         keys.WEIGHTS_VERSION_ATTR: WEIGHTS_VERSION,
         keys.SOURCE_HASH_ATTR: source_desc.digest,
         keys.LEVEL_ATTR: level,
-        keys.ORDER_ATTR: desc.target.indexing_scheme,
+        keys.ORDER_ATTR: "ring" if ring else "nested",
         keys.ELLIPSOID_ATTR: desc.ref.ellipsoid,
         keys.BACKEND_ATTR: "offline-esmf" if use_offline else "esmpy",
         keys.IGNORE_UNMAPPED_ATTR: int(bool(eff_ignore)),
@@ -2141,7 +2147,7 @@ def compute_healpix_weights_backend(
                 target_mesh=target_mesh,
                 target_path=raw,
                 level=level,
-                nest=nest,
+                nest=True,
                 method=method,
                 config=offline_cfg,
                 ignore_unmapped=eff_ignore,
@@ -2156,9 +2162,29 @@ def compute_healpix_weights_backend(
                 large_file=large_file,
             )
         with xr.open_dataset(raw) as weights:
-            weights.load().assign_attrs(meta).to_netcdf(annotated)
+            weights = weights.load()
+        if ring:
+            weights = _renumber_to_ring(weights, level)
+        weights.assign_attrs(meta).to_netcdf(annotated)
         os.replace(annotated, target)
     return target
+
+
+def _renumber_to_ring(weights: xr.Dataset, level: int) -> xr.Dataset:
+    """Return nested-order *weights* with their target cells numbered in ring order.
+
+    Renumbers the (1-based) rows and reorders ESMF's per-target-cell
+    arrays (dimension ``n_b``).
+    """
+    from .weights import nested_to_ring
+
+    row = "row" if "row" in weights else "dst_address"
+    ring_of = nested_to_ring(np.arange(12 * 4**level), level)
+    weights[row] = weights[row].copy(data=(ring_of[weights[row].values.astype(np.int64) - 1] + 1))
+    nested_of = np.argsort(ring_of)  # ring cell i holds nested cell nested_of[i]
+    for name in [n for n, v in weights.data_vars.items() if "n_b" in v.dims]:
+        weights[name] = weights[name].isel(n_b=nested_of)
+    return weights
 
 
 # ===================================================================

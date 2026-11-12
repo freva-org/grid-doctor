@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from itertools import product
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -16,6 +17,8 @@ from grid_doctor.weights import (
     WeightsRef,
     _source_hash,
     describe_source,
+    nested_to_ring,
+    ring_to_nested,
 )
 
 
@@ -112,7 +115,7 @@ class TestWeightsDescription:
             for method, level, scheme in product(("nearest", "conservative"), (0, 1), ("nested", "ring"))
         ]
         assert len(set(descs)) == len(descs)
-        assert len({d.ref for d in descs}) == len(descs)
+        assert len({d.ref for d in descs}) == len(descs) // 2  # nested and ring share the nested file
         assert {d.ref.key for d in descs} == {source.digest}  # one source digest for all targets
 
     def test_eq_and_hash(self, regular_ds: xr.Dataset) -> None:
@@ -294,14 +297,14 @@ class TestWeightRef:
     def test_roundtrip(self, regular_ds: xr.Dataset) -> None:
         desc = WeightsDescription(describe_source(regular_ds), HealpixGrid(level=3, indexing_scheme="ring"), "nearest")
         ref = desc.ref
-        assert ref.path == f"{self.PREFIX}/indexing_scheme=ring/level=3/method=nearest/{desc.source.digest}.nc"
+        assert ref.path == f"{self.PREFIX}/level=3/method=nearest/{desc.source.digest}.nc"
         assert WeightsRef.parse(ref.path) == ref
         assert WeightsRef.parse("/" + ref.path + "/") == ref
 
     def test_ref_is_lowercase(self) -> None:
         """Mixed-case input must not give the same weights a second path."""
-        upper = WeightsRef("NEAREST", "RING", 3, KEY.upper())  # type: ignore[arg-type]
-        assert upper == WeightsRef("nearest", "ring", 3, KEY)
+        upper = WeightsRef("NEAREST", 3, KEY.upper())  # type: ignore[arg-type]
+        assert upper == WeightsRef("nearest", 3, KEY)
         assert upper.path == upper.path.lower()
         assert WeightsRef.parse(upper.path) == upper
 
@@ -313,32 +316,32 @@ class TestWeightRef:
         """
         assert (WEIGHTS_VERSION, WeightsRef.HIERARCHY) == (
             1,
-            ("version", "grid", "ellipsoid", "indexing_scheme", "level", "method"),
+            ("version", "grid", "ellipsoid", "level", "method"),
         ), "weight path scheme changed: bump WEIGHTS_VERSION"
 
     def test_known_path_is_stable(self) -> None:
         """A version-1 reference must keep its exact path, or stores lose their files."""
-        ref = WeightsRef("conservative", "nested", 10, KEY)
-        expected = f"version=1/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=10/method=conservative/{KEY}.nc"
+        ref = WeightsRef("conservative", 10, KEY)
+        expected = f"version=1/grid=healpix/ellipsoid=sphere/level=10/method=conservative/{KEY}.nc"
         assert ref.path == expected
         assert WeightsRef.parse(expected) == ref
 
     @pytest.mark.parametrize(
         "bad",
         [
-            f"{PREFIX}/indexing_scheme=nested/level=3/{KEY}.nc",  # method missing
-            f"{PREFIX}/level=3/indexing_scheme=nested/method=nearest/{KEY}.nc",  # wrong order
-            f"grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",  # no version
-            f"version=2/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",
-            f"version=1/grid=other/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",
-            f"version=1/grid=healpix/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",  # no ellipsoid
-            f"version=1/grid=healpix/ellipsoid=wgs84/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",
-            f"{PREFIX}/indexing_scheme=nest/level=3/method=nearest/{KEY}.nc",  # not a CF scheme
-            f"{PREFIX}/indexing_scheme=nested/level=x/method=nearest/{KEY}.nc",
-            f"{PREFIX}/indexing_scheme=nested/level=3/method=bilinear/{KEY}.nc",
-            f"{PREFIX}/indexing_scheme=nested/level=3/method=nearest/{KEY}.zarr",
-            f"{PREFIX}/indexing_scheme/level=3/method=nearest/{KEY}.nc",  # no '='
-            f"{PREFIX}/indexing_scheme=nested/level=3/method=nearest/abc123.nc",  # not a sha256 digest
+            f"{PREFIX}/level=3/{KEY}.nc",  # method missing
+            f"{PREFIX}/method=nearest/level=3/{KEY}.nc",  # wrong order
+            f"grid=healpix/ellipsoid=sphere/level=3/method=nearest/{KEY}.nc",  # no version
+            f"version=2/grid=healpix/ellipsoid=sphere/level=3/method=nearest/{KEY}.nc",
+            f"version=1/grid=other/ellipsoid=sphere/level=3/method=nearest/{KEY}.nc",
+            f"version=1/grid=healpix/level=3/method=nearest/{KEY}.nc",  # no ellipsoid
+            f"version=1/grid=healpix/ellipsoid=wgs84/level=3/method=nearest/{KEY}.nc",
+            f"{PREFIX}/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",  # indexing scheme is not a level
+            f"{PREFIX}/level=x/method=nearest/{KEY}.nc",
+            f"{PREFIX}/level=3/method=bilinear/{KEY}.nc",
+            f"{PREFIX}/level=3/method=nearest/{KEY}.zarr",
+            f"{PREFIX}/level/method=nearest/{KEY}.nc",  # no '='
+            f"{PREFIX}/level=3/method=nearest/abc123.nc",  # not a sha256 digest
         ],
     )
     def test_parse_rejects(self, bad: str) -> None:
@@ -349,7 +352,6 @@ class TestWeightRef:
         ("field", "value"),
         [
             ("method", "bilinear"),
-            ("indexing_scheme", "nest"),  # not a CF scheme
             ("level", -1),
             ("level", 30),
             ("level", 3.0),
@@ -363,6 +365,50 @@ class TestWeightRef:
     )
     def test_constructor_validates(self, field: str, value: object) -> None:
         """A constructed reference is as strict as a parsed one."""
-        fields: dict[str, object] = {"method": "nearest", "indexing_scheme": "nested", "level": 3, "key": KEY}
+        fields: dict[str, object] = {"method": "nearest", "level": 3, "key": KEY}
         with pytest.raises(ValueError, match=f"Invalid weight reference {field}"):
             WeightsRef(**{**fields, field: value})  # type: ignore[arg-type]
+
+
+class TestNestedToRing:
+    """Weight files are nested; ring output renumbers their target rows when they are applied."""
+
+    LEVEL = 1
+    N = 12 * 4**LEVEL
+
+    def _nested_file(self, path: Path) -> Path:
+        """Weights from N source cells that put source cell j into nested target cell (j * 7) % N."""
+        from grid_doctor.metadata import _keys as keys
+
+        col = np.arange(1, self.N + 1, dtype=np.int32)
+        row = ((col - 1) * 7 % self.N + 1).astype(np.int32)
+        data = {"row": ("n_s", row), "col": ("n_s", col), "S": ("n_s", np.ones(self.N))}
+        xr.Dataset(data, attrs={keys.LEVEL_ATTR: self.LEVEL, keys.ORDER_ATTR: "nested"}).to_netcdf(path)
+        return path
+
+    @staticmethod
+    def _apply(path: Path, data: np.ndarray, nest: bool | None = None) -> np.ndarray:
+        from grid_doctor.remap import _read_weight_file
+
+        return np.asarray(_read_weight_file(path, nest=nest).matrix @ data)
+
+    def test_conversions_are_inverse(self) -> None:
+        cells = np.arange(self.N)
+        ring = nested_to_ring(cells, self.LEVEL)
+        assert sorted(ring) == list(cells)  # a permutation...
+        assert not np.array_equal(ring, cells)  # ...that is not the identity
+        np.testing.assert_array_equal(ring_to_nested(ring, self.LEVEL), cells)
+
+    def test_nested_file_must_be_permuted_for_ring(self, tmp_path: Path) -> None:
+        """Read as is, a nested file puts ring output into the wrong cells; renumbering fixes that."""
+        from grid_doctor.remap import _read_weight_file
+
+        nested = self._nested_file(tmp_path / "w.nc")
+        data = np.arange(self.N, dtype=np.float64) + 1.0
+        out_nested, out_ring = self._apply(nested, data), self._apply(nested, data, nest=False)
+        ring_of = nested_to_ring(np.arange(self.N), self.LEVEL)
+
+        assert not np.array_equal(out_nested, out_ring)  # the nested rows as is would be wrong for ring
+        np.testing.assert_array_equal(out_ring[ring_of], out_nested)  # same values, ring cell numbers
+        assert _read_weight_file(nested, nest=False).order == "ring"
+        np.testing.assert_array_equal(self._apply(nested, data, nest=True), out_nested)  # nothing to do

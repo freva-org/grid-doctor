@@ -219,7 +219,10 @@ class TestCachedWeights:
             calls.append({"level": level, **kwargs})
             target = Path(str(kwargs["weights_path"]))
             target.parent.mkdir(parents=True, exist_ok=True)
-            xr.Dataset({"S": ("nnz", np.array([1.0]))}).to_netcdf(target)
+            from grid_doctor.metadata import _keys as keys
+
+            data = {"row": ("nnz", np.array([1])), "col": ("nnz", np.array([1])), "S": ("nnz", np.array([1.0]))}
+            xr.Dataset(data, attrs={keys.LEVEL_ATTR: level, keys.ORDER_ATTR: "nested"}).to_netcdf(target)
             return target
 
         monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", fake_compute)
@@ -279,6 +282,16 @@ class TestCachedWeights:
             for ds in (regular_ds.isel(time=slice(0, 1)), regular_ds, longer)
         }
         assert len(paths) == 1
+        assert len(computed) == 1
+
+    def test_nest_is_deprecated(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+    ) -> None:
+        """Weight files are nested; ring order is chosen when applying them."""
+        with pytest.warns(DeprecationWarning, match="nest=False"):
+            ring = cached_weights(regular_ds, 2, nest=False, store=tmp_path)
+        assert ring == cached_weights(regular_ds, 2, store=tmp_path) == tmp_path / self._ref(regular_ds, 2)
+        assert computed[0]["nest"] is True
         assert len(computed) == 1
 
     def test_level_derived_before_lookup(

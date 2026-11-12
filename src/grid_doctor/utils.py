@@ -220,7 +220,10 @@ def cached_weights(
         Weight-generation method. Supported values are `"nearest"` and
         `"conservative"`.
     nest:
-        Use nested HEALPix ordering when `True`.
+        Deprecated, has no effect: weight files are nested. Choose ring
+        order where the weights are applied, e.g.
+        ``apply_weight_file(..., nest=False)`` or
+        ``create_healpix_pyramid(..., nest=False)``.
     source_units:
         Unit convention of the source coordinates.
     store:
@@ -256,6 +259,12 @@ def cached_weights(
     if cache_path is not None:
         warnings.warn("`cache_path` is deprecated, use `store=`.", DeprecationWarning, stacklevel=2)
         store = cache_path if store is None else store
+    if not nest:
+        warnings.warn(
+            "`nest=False` has no effect: weight files are nested; pass `nest=False` where they are applied.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     if not isinstance(store, _WeightsStore):
         store = _WeightsStore(store)
     if level is None:
@@ -263,14 +272,14 @@ def cached_weights(
 
     describe_kwargs = {k: kwargs[k] for k in ("grid", "source_kind", "spectral_transform_command") if k in kwargs}
     source = describe_source(ds, source_units=source_units, **describe_kwargs)  # type: ignore[arg-type]
-    desc = WeightsDescription(source, HealpixGrid.from_nest(level, nest=nest), method)
+    desc = WeightsDescription(source, HealpixGrid(level=level), method)  # stored weights are nested
 
-    def compute(path: Path) -> Path:
+    def compute(path: Path) -> Path:  # the store holds nested weights; ring is derived from them
         return compute_healpix_weights(
             ds,
             level,
             method=method,
-            nest=nest,
+            nest=True,
             source_units=source_units,
             weights_path=path,
             source_description=source,

@@ -186,7 +186,7 @@ class TestWeightGeneration:
         assert attrs[keys.WEIGHTS_VERSION_ATTR] == WEIGHTS_VERSION
         assert attrs[keys.SOURCE_HASH_ATTR] == ref.key
         assert attrs[keys.LEVEL_ATTR] == ref.level
-        assert attrs[keys.ORDER_ATTR] == ref.indexing_scheme
+        assert attrs[keys.ORDER_ATTR] == "ring"  # stored files are nested; this one was renumbered
         assert attrs[keys.ELLIPSOID_ATTR] == ref.ellipsoid
         assert attrs[keys.METHOD_ATTR] == ref.method
         assert keys.VERSION_ATTR in attrs  # grid-doctor version
@@ -214,8 +214,7 @@ class TestWeightGeneration:
     ) -> None:
         """Without ``weights_path`` the same weights always land at the same local path."""
         from grid_doctor.metadata import HealpixGrid
-        from grid_doctor.weights import describe_source
-        from grid_doctor.weights import WeightsDescription
+        from grid_doctor.weights import WeightsDescription, describe_source
 
         monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
         for module in (remap_backend, remap):
@@ -225,8 +224,10 @@ class TestWeightGeneration:
         result = compute_healpix_weights(regular_ds, 1, method="nearest", nest=False)
 
         desc = WeightsDescription(describe_source(regular_ds), HealpixGrid(level=1, indexing_scheme="ring"), "nearest")
-        assert result == tmp_path / "weights" / desc.ref.path
+        assert result == tmp_path / "weights" / desc.ref.path  # the default layout holds nested weights
         assert result.exists()
+        with xr.open_dataset(result) as ds:
+            assert ds.attrs["grid_doctor_order"] == "nested"
         assert compute_healpix_weights(regular_ds, 1, method="nearest", nest=False) == result
 
     def test_compute_healpix_weights_conservative(

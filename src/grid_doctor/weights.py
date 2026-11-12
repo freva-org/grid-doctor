@@ -31,14 +31,13 @@ from typing import (
 from uuid import uuid4
 
 import numpy as np
+import numpy.typing as npt
 import xarray as xr
 
 from .metadata import (
     GRID_MAPPING_NAME,
-    INDEXING_SCHEMES,
     MAX_LEVEL,
     HealpixGrid,
-    IndexingScheme,
 )
 from .metadata import _keys as keys
 from .remap_backend import (
@@ -220,8 +219,14 @@ class WeightsDescription:
 
     @property
     def ref(self) -> WeightsRef:
-        """[`WeightsRef`][grid_doctor.weights.WeightsRef] under which these weights are stored."""
-        return WeightsRef(self.method, self.target.indexing_scheme, self.target.level, self.source.digest)
+        """[`WeightsRef`][grid_doctor.weights.WeightsRef] under which these weights are stored.
+
+        Weight files are nested; ring order is chosen when the weights
+        are applied (see
+        [`apply_weight_file`][grid_doctor.remap.apply_weight_file]), so
+        both indexing schemes share one reference.
+        """
+        return WeightsRef(self.method, self.target.level, self.source.digest)
 
     def _identity(self) -> tuple[str, HealpixGrid, RemapMethod]:
         return (self.source.digest, self.target, self.method)
@@ -288,16 +293,17 @@ class WeightsRef:
     [`HIERARCHY`][grid_doctor.weights.WeightsRef.HIERARCHY], followed by the
     source digest as file name::
 
-        version=1/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=10/method=conservative/<key>.nc
+        version=1/grid=healpix/ellipsoid=sphere/level=10/method=conservative/<key>.nc
 
     Every part that changes the weights is a directory, so the path is
     unique per weight file and the fields used for searching can be read
     from a listing without opening files. ``version`` is the version of the
-    path scheme itself.
+    path scheme itself. Files hold nested-order weights; ring order is a
+    renumbering of their rows when they are applied, so it needs no file
+    of its own.
 
     Attributes:
         method: Remapping method.
-        indexing_scheme: HEALPix indexing scheme.
         level: HEALPix level.
         key: Source digest (sha256 hex digest); see
             [`SourceDescription.digest`][grid_doctor.weights.SourceDescription.digest].
@@ -311,14 +317,12 @@ class WeightsRef:
         "version",
         "grid",
         "ellipsoid",
-        "indexing_scheme",
         "level",
         "method",
     )
     """Directory levels, outermost first."""
 
     method: RemapMethod
-    indexing_scheme: IndexingScheme
     level: int
     key: str
     grid: str = GRID_MAPPING_NAME
@@ -337,7 +341,6 @@ class WeightsRef:
                 object.__setattr__(self, name, value.lower())
         valid = {
             "method": self.method in get_args(RemapMethod),
-            "indexing_scheme": self.indexing_scheme in INDEXING_SCHEMES,
             "level": type(self.level) is int and 0 <= self.level <= MAX_LEVEL,
             "key": isinstance(self.key, str) and _SHA256_HEX.fullmatch(self.key) is not None,
             "grid": self.grid == GRID_MAPPING_NAME,
@@ -374,7 +377,6 @@ class WeightsRef:
         try:
             return cls(
                 method=cast(RemapMethod, values["method"]),
-                indexing_scheme=cast(IndexingScheme, values["indexing_scheme"]),
                 level=int(values["level"]),
                 key=file.removesuffix(".nc"),
                 grid=values["grid"],
@@ -560,6 +562,9 @@ class WeightsStore:
         ``compute(path)`` and publishes the result to a writable in-memory
         store. Weights for a read-only store are computed into and kept in
         ``cache_dir`` only.
+
+        The store holds nested-order weights, so *compute* must write
+        those, whatever the indexing scheme of *desc*.
         """
         local = self.local_path(desc)
         cached = self.cache_dir / desc.ref.path
@@ -606,7 +611,7 @@ class WeightsStore:
 
         Args:
             **filters: Field values of [`WeightsRef`][grid_doctor.weights.WeightsRef],
-                e.g. ``level``, ``method``, ``indexing_scheme`` or ``key``.
+                e.g. ``level``, ``method`` or ``key``.
 
         Raises:
             TypeError: For unknown filter names.
@@ -630,6 +635,25 @@ class WeightsStore:
             except ValueError:
                 continue
         return found
+
+
+def nested_to_ring(cells: npt.ArrayLike, level: int) -> npt.NDArray[np.int64]:
+    """Return the ring-order numbers of nested HEALPix cells (0-based) at *level*.
+
+    Weight files are stored in nested order; their rows are renumbered
+    with this when ring order is wanted, instead of computing the weights
+    again.
+    """
+    from healpix_geo.nested import to_ring
+
+    return np.asarray(to_ring(np.asarray(cells, dtype=np.uint64), depth=level), dtype=np.int64)
+
+
+def ring_to_nested(cells: npt.ArrayLike, level: int) -> npt.NDArray[np.int64]:
+    """Return the nested-order numbers of ring HEALPix cells (0-based) at *level*."""
+    from healpix_geo.ring import to_nested
+
+    return np.asarray(to_nested(np.asarray(cells, dtype=np.uint64), depth=level), dtype=np.int64)
 
 
 def _is_writable(path: Path) -> bool:

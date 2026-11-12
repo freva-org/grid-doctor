@@ -26,8 +26,12 @@ def _desc(ds: xr.Dataset, level: int = 2, method: str = "conservative") -> Weigh
     return WeightsDescription(describe_source(ds), HealpixGrid(level=level), method)  # type: ignore[arg-type]
 
 
-def _weight_file(path: Path, value: float = 1.0) -> Path:
-    xr.Dataset({"S": ("nnz", np.array([value]))}).to_netcdf(path)
+def _weight_file(path: Path, value: float = 1.0, level: int = 2) -> Path:
+    """A minimal nested-order weight file: target cell 1 gets source cell 1."""
+    from grid_doctor.metadata import _keys as keys
+
+    data = {"row": ("nnz", np.array([1])), "col": ("nnz", np.array([1])), "S": ("nnz", np.array([value]))}
+    xr.Dataset(data, attrs={keys.LEVEL_ATTR: level, keys.ORDER_ATTR: "nested"}).to_netcdf(path)
     return path
 
 
@@ -245,16 +249,16 @@ class TestLocalStore:
     def test_hive_globs(self, regular_ds: xr.Dataset, unstructured_ds: xr.Dataset, tmp_path: Path) -> None:
         """Plain globs, without grid-doctor, find all targets of a grid and all grids of a target.
 
-        The same grid has the same digest at every level, indexing scheme
-        and method, so its file name is the same in every target directory.
+        The same grid has the same digest at every level and method, so its
+        file name is the same in every target directory.
         """
         root = tmp_path / "store"
         store = WeightsStore(root)
         w = _weight_file(tmp_path / "w.nc")
         source_desc = describe_source(regular_ds)
         targets = [
-            WeightsDescription(source_desc, HealpixGrid(level=level, indexing_scheme=scheme), method)  # type: ignore[arg-type]
-            for level, scheme, method in product((2, 3), ("nested", "ring"), ("nearest", "conservative"))
+            WeightsDescription(source_desc, HealpixGrid(level=level), method)  # type: ignore[arg-type]
+            for level, method in product((2, 3), ("nearest", "conservative"))
         ]
         other = WeightsDescription(describe_source(unstructured_ds), HealpixGrid(level=2), "conservative")
         for desc in (*targets, other):
@@ -266,7 +270,7 @@ class TestLocalStore:
         any_target = "/".join(["*"] * len(WeightsRef.HIERARCHY))
         assert sorted(root.glob(f"{any_target}/{source_desc.digest}.nc")) == sorted(root / d.ref.path for d in targets)
        # All grids of one target: fixed directories, any file name.
-        target = "version=1/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=2/method=conservative"
+        target = "version=1/grid=healpix/ellipsoid=sphere/level=2/method=conservative"
         assert {p.stem for p in root.glob(f"{target}/*.nc")} == {source_desc.digest, other.source.digest}
 
 
