@@ -218,8 +218,22 @@ class TestSourceHash:
         """
         ds = _wrf_ds()
         big = ds.assign_coords({k: ds[k].astype(">f8") for k in ("XLAT", "XLONG")})
-        expected = "5965fbcec230c4066fae8d21eec71431c9bf4913e930b80622f16e76882bb589"
+        expected = "46bd11acb66b91f664ff104b273ad05b1d84a4be5d29d4107575ef24b0e45dbf"
         assert _source_hash(ds) == _source_hash(big) == expected
+
+    def test_documented_algorithm(self) -> None:
+        """Other tools can compute the same digest from the spec in the docs alone."""
+        import hashlib
+
+        lat = np.array([[-10.0, -10.0], [10.0, 10.0]])
+        lon = np.array([[170.0, -170.0], [170.0, -170.0]])
+        ds = xr.Dataset(coords={"lat": (("y", "x"), lat), "lon": (("y", "x"), lon)})
+
+        spec = hashlib.sha256()
+        for values in (lat, lon):  # centres: lat then lon; both on dims 0, 1
+            spec.update(b"dims=(0, 1);shape=(2, 2);")
+            spec.update(np.rint(values * 1_000_000).astype("<i8").tobytes())
+        assert _source_hash(ds) == spec.hexdigest()
 
     def test_raises_without_coordinates(self) -> None:
         with pytest.raises(ValueError, match="Could not locate latitude/longitude"):
@@ -253,6 +267,17 @@ class TestCanonicalSourceDigest:
         """The same cells in the same order share weights, whatever the lon convention."""
         lon_180 = (self.LON + 180.0) % 360.0 - 180.0  # 0, ..., 135, -180, ..., -45
         assert self._digest(self._grid(lon_180)) == self._digest(self._grid())
+
+    def test_float_noise_shares_digest(self) -> None:
+        """Values within half a micro-degree are the same grid (#86)."""
+        noisy = self.LON + 4e-7 * np.cos(self.LON)  # |noise| < 0.5e-6 degrees
+        assert self._digest(self._grid(noisy)) == self._digest(self._grid())
+
+    def test_antimeridian_rounding_shares_digest(self) -> None:
+        """179.9999999 rounds to 180 and wraps to -180, like an exact -180."""
+        lon = np.array([-180.0, 0.0])
+        nearly = np.array([179.9999999, 0.0])
+        assert self._digest(self._grid(nearly)) == self._digest(self._grid(lon))
 
     def test_reordered_cells_get_own_digest(self) -> None:
         """Weight columns follow the data's cell order, so a sorted grid must not reuse weights."""

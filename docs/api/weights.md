@@ -87,6 +87,33 @@ Each file also records its identity (source digest, level, indexing
 scheme, ellipsoid, method, grid-doctor and layout version) as global
 attributes, so a store can be checked from the files alone.
 
+## Source digest
+
+The file name is the SHA-256 digest of the source grid's geometry. It
+depends only on the cells and their order, so other tools can compute
+the same digest and share weight files with grid-doctor:
+
+1. **Coordinates.** Take the cell-centre latitude and longitude and, if
+   present, the cell-vertex latitude and longitude, in degrees.
+2. **Quantise.** Round every value to integer micro-degrees,
+   `round(value * 1_000_000)` (round half to even). Wrap longitudes into
+   `[-180_000_000, 180_000_000)`, so `180` and `-180` are equal. Missing
+   vertices (NaN) become `-2**63`.
+3. **Dimensions.** Number the dimensions by first appearance, in the
+   order of step 4. A regular grid has `lat` on `(0,)` and `lon` on
+   `(1,)`. An unstructured grid has both on `(0,)`, and its vertices on
+   `(0, 1)`.
+4. **Hash.** For centre latitude, centre longitude, vertex latitude and
+   vertex longitude in that order, add `dims=<dims>;shape=<shape>;` (Python tuple notation,
+   e.g. `dims=(0, 1);shape=(2, 2);`), followed by the integers as
+   little-endian 64-bit values in C (row-major) order.
+
+Variable names, dtypes, units (radians are converted first) and the
+longitude convention do not change the digest. Cell order does, because
+it defines the columns of the weight matrix. Vertex coordinates are hashed
+instead of a node/connectivity list (`face_nodes`): they describe the same
+cells and need no shared node numbering between tools.
+
 ## API
 
 ::: grid_doctor.weights.WeightsStore

@@ -42,6 +42,7 @@ from .metadata import (
 )
 from .metadata import _keys as keys
 from .remap_backend import (
+    _MICRO_SCALE,
     PolygonMesh,
     _classify_source_kind,
     _get_latlon_names,
@@ -232,15 +233,22 @@ class WeightsDescription:
         return isinstance(other, WeightsDescription) and self._identity() == other._identity()
 
 
+_NAN_MICRO: Final = np.iinfo(np.int64).min
+"""Integer standing for NaN (e.g. padding vertices) in the digest."""
+
+
 def _source_hash(ds: xr.Dataset) -> str:
     """Hash the cell centres and vertices of *ds*.
 
     *ds* is expected to be normalised (see
-    [`normalise_dataset`][grid_doctor.remap_backend.normalise_dataset]).
-    Variable and dimension names and dtypes do not enter the hash; values,
-    shapes, the order of the cells and which dimensions the coordinates
-    share do (separate ``lat``/``lon`` dims form a regular grid, a shared
-    ``cell`` dim does not).
+    [`normalise_dataset`][grid_doctor.remap_backend.normalise_dataset]):
+    degrees, longitudes in ``[-180, 180)``, rounded to micro-degrees. The
+    values are hashed as those integers, so float noise below half a
+    micro-degree, dtypes and signed zeros do not change the digest.
+    Variable and dimension names do not enter the hash; values, shapes,
+    the order of the cells and which dimensions the coordinates share do
+    (separate ``lat``/``lon`` dims form a regular grid, a shared ``cell``
+    dim does not). The algorithm is specified in the weights store docs.
     """
     names = [_get_latlon_names(ds)]
     try:
@@ -255,11 +263,11 @@ def _source_hash(ds: xr.Dataset) -> str:
     for lat_name, lon_name in names:
         for name in (lat_name, lon_name):
             dims = tuple(dim_ids.setdefault(str(d), len(dim_ids)) for d in ds[name].dims)
-            values = np.asarray(ds[name].values, dtype=np.float64) + 0.0  # -0.0 -> 0.0
-            values[np.isnan(values)] = np.nan  # one NaN bit pattern
-            values = np.ascontiguousarray(values, dtype="<f8")  # same bytes on any host
+            values = np.asarray(ds[name].values, dtype=np.float64)
+            nan = np.isnan(values)
+            micro = np.where(nan, _NAN_MICRO, np.rint(np.where(nan, 0.0, values) * _MICRO_SCALE).astype(np.int64))
             digest.update(f"dims={dims};shape={values.shape};".encode())
-            digest.update(values.tobytes())
+            digest.update(np.ascontiguousarray(micro, dtype="<i8").tobytes())  # same bytes on any host
     return digest.hexdigest()
 
 
