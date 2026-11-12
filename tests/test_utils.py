@@ -204,6 +204,12 @@ class TestCachedWeights:
     """``cached_weights`` looks weights up by their description: local copy, store, else compute."""
 
     @staticmethod
+    @pytest.fixture(autouse=True)
+    def _default_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Keep the default cache in ``tmp_path``, never in the user's cache."""
+        monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: tmp_path / "default-cache")
+
+    @staticmethod
     @pytest.fixture
     def computed(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
         """Fake ``compute_healpix_weights`` writing to ``weights_path``; records each call."""
@@ -235,11 +241,11 @@ class TestCachedWeights:
         assert path.exists()
         assert computed[0]["source_description"] is not None  # source described once
 
+    @pytest.mark.usefixtures("computed")
     def test_cache_hit_does_not_mesh(
         self,
         regular_ds: xr.Dataset,
         tmp_path: Path,
-        computed: list[dict[str, object]],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         path = cached_weights(regular_ds, 2, store=tmp_path)
@@ -264,6 +270,17 @@ class TestCachedWeights:
         assert cached_weights(radians, 2, store=tmp_path) == cached_weights(regular_ds, 2, store=tmp_path)
         assert len(computed) == 1
 
+    def test_growing_along_time_reuses_weights(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+    ) -> None:
+        longer = xr.concat([regular_ds, regular_ds.assign_coords(time=regular_ds.time + 100)], "time")
+        paths = {
+            cached_weights(ds, 2, store=tmp_path)
+            for ds in (regular_ds.isel(time=slice(0, 1)), regular_ds, longer)
+        }
+        assert len(paths) == 1
+        assert len(computed) == 1
+
     def test_level_derived_before_lookup(
         self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
     ) -> None:
@@ -273,8 +290,9 @@ class TestCachedWeights:
         assert cached_weights(regular_ds, level, store=tmp_path) == derived
         assert len(computed) == 1
 
+    @pytest.mark.usefixtures("computed")
     def test_method_and_level_get_own_files(
-        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+        self, regular_ds: xr.Dataset, tmp_path: Path
     ) -> None:
         paths = {
             cached_weights(regular_ds, 1, method="nearest", store=tmp_path),
@@ -302,8 +320,9 @@ class TestCachedWeights:
         assert len(computed) == 1
         fsspec.filesystem("memory").store.clear()
 
+    @pytest.mark.usefixtures("computed")
     def test_read_only_store_keeps_local_copy(
-        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+        self, regular_ds: xr.Dataset, tmp_path: Path
     ) -> None:
         import fsspec
 
@@ -314,8 +333,9 @@ class TestCachedWeights:
         assert cached_weights(regular_ds, 2, store=store).exists()
         assert not store.exists(self._ref(regular_ds, 2))
 
+    @pytest.mark.usefixtures("computed")
     def test_cache_path_is_deprecated(
-        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+        self, regular_ds: xr.Dataset, tmp_path: Path
     ) -> None:
         with pytest.warns(DeprecationWarning, match="cache_path"):
             path = cached_weights(regular_ds, 2, cache_path=tmp_path)
