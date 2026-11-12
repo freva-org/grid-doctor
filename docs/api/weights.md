@@ -106,9 +106,9 @@ store.find(level=9, method="conservative")
 ```
 
 Each file also records its identity (source digest, level, indexing
-scheme, ellipsoid, method, grid-doctor and layout version) and the
-number of unmapped HEALPix cells as global attributes, so a store can
-be checked from the files alone.
+scheme, ellipsoid, method, grid-doctor and layout version), the ESMF
+version and the number of unmapped HEALPix cells as global attributes,
+so a store can be checked from the files alone.
 
 ## Source digest
 

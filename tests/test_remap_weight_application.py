@@ -190,6 +190,7 @@ class TestWeightGeneration:
         assert attrs[keys.ELLIPSOID_ATTR] == ref.ellipsoid
         assert attrs[keys.METHOD_ATTR] == ref.method
         assert keys.VERSION_ATTR in attrs  # grid-doctor version
+        assert attrs[keys.ESMF_VERSION_ATTR]  # installed ESMPy version, or "unknown"
         assert attrs[keys.UNMAPPED_CELLS_ATTR] >= 0
 
     def test_failed_generation_leaves_nothing(

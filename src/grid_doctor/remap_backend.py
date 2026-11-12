@@ -22,8 +22,10 @@ Two weight-generation paths are available:
 from __future__ import annotations
 
 import importlib
+import importlib.metadata
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -2134,6 +2136,7 @@ def compute_healpix_weights_backend(
         keys.ORDER_ATTR: "ring" if ring else "nested",
         keys.ELLIPSOID_ATTR: desc.ref.ellipsoid,
         keys.BACKEND_ATTR: "offline-esmf" if use_offline else "esmpy",
+        keys.ESMF_VERSION_ATTR: _esmf_version(use_offline, offline_cfg),
         keys.IGNORE_UNMAPPED_ATTR: int(bool(eff_ignore)),
         **source_desc.metadata,
     }
@@ -2187,6 +2190,24 @@ def _renumber_to_ring(weights: xr.Dataset, level: int) -> xr.Dataset:
     for name in [n for n, v in weights.data_vars.items() if "n_b" in v.dims]:
         weights[name] = weights[name].isel(n_b=nested_of)
     return weights
+
+
+def _esmf_version(offline: bool, config: OfflineWeightConfig) -> str:
+    """Return the version of the ESMF that computes the weights, or ``"unknown"``."""
+    if not offline:  # from the package metadata: importing ESMPy would start ESMF and write logs
+        try:
+            return importlib.metadata.version("esmpy")
+        except importlib.metadata.PackageNotFoundError:
+            return "unknown"
+    try:
+        with tempfile.TemporaryDirectory() as scratch:  # ESMF writes PET*.Log files into its working dir
+            out = subprocess.run(
+                [config.esmf_regrid_weightgen, "--version"], capture_output=True, text=True, timeout=60, cwd=scratch
+            ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    match = re.search(r"\d+\.\d+\.\d+\S*", out)
+    return match.group() if match else "unknown"
 
 
 # ===================================================================
