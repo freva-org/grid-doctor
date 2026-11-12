@@ -2163,6 +2163,8 @@ def compute_healpix_weights_backend(
             )
         with xr.open_dataset(raw) as weights:
             weights = weights.load()
+        rows = weights["row" if "row" in weights else "dst_address"].values
+        meta[keys.UNMAPPED_CELLS_ATTR] = target_mesh.face_count - np.unique(rows).size
         if ring:
             weights = _renumber_to_ring(weights, level)
         weights.assign_attrs(meta).to_netcdf(annotated)

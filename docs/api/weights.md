@@ -29,6 +29,12 @@ variable, or `<cache_dir()>/weights` when it is unset. To compute into an
 explicit file instead, use
 [`compute_healpix_weights(weights_path=...)`][grid_doctor.compute_healpix_weights].
 
+Only these choices select a weight file: the source grid, the HEALPix
+level and the method. Options such as `ignore_unmapped`, `large_file`,
+`nproc` or `prefer_offline` change how weights are computed, not the
+weights themselves. With `ignore_unmapped=False`, a file found in the store
+is still checked: it fails if it leaves HEALPix cells unmapped.
+
 ### Nested and ring order
 
 Weight files are nested; their order is recorded in the
@@ -100,8 +106,9 @@ store.find(level=9, method="conservative")
 ```
 
 Each file also records its identity (source digest, level, indexing
-scheme, ellipsoid, method, grid-doctor and layout version) as global
-attributes, so a store can be checked from the files alone.
+scheme, ellipsoid, method, grid-doctor and layout version) and the
+number of unmapped HEALPix cells as global attributes, so a store can
+be checked from the files alone.
 
 ## Source digest
 

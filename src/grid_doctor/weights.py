@@ -656,6 +656,25 @@ def ring_to_nested(cells: npt.ArrayLike, level: int) -> npt.NDArray[np.int64]:
     return np.asarray(to_nested(np.asarray(cells, dtype=np.uint64), depth=level), dtype=np.int64)
 
 
+def check_coverage(path: str | Path) -> None:
+    """Raise when weight file *path* leaves HEALPix target cells unmapped.
+
+    Repeats the check of ``ignore_unmapped=False`` for weights that were
+    generated (and stored) with unmapped cells ignored. Files without the
+    unmapped-cells attribute (older files) pass.
+
+    Raises:
+        ValueError: If the file records unmapped target cells.
+    """
+    with xr.open_dataset(path) as ds:
+        unmapped = int(ds.attrs.get(keys.UNMAPPED_CELLS_ATTR, 0))
+    if unmapped:
+        raise ValueError(
+            f"{unmapped} HEALPix target cells of {path} are not covered by the source grid; "
+            "pass ignore_unmapped=True to accept them as missing values."
+        )
+
+
 def _is_writable(path: Path) -> bool:
     """Return whether *path*, or its nearest existing parent, is writable."""
     while not path.exists() and path != path.parent:

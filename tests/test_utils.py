@@ -294,6 +294,22 @@ class TestCachedWeights:
         assert computed[0]["nest"] is True
         assert len(computed) == 1
 
+    def test_ignore_unmapped_false_checks_cache_hits(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+    ) -> None:
+        """Weights stored while ignoring unmapped cells must not pass a full-coverage request."""
+        from grid_doctor.metadata import _keys as keys
+
+        path = cached_weights(regular_ds, 2, store=tmp_path, ignore_unmapped=True)
+        with xr.open_dataset(path) as ds:
+            ds = ds.load()
+        ds.assign_attrs({keys.UNMAPPED_CELLS_ATTR: 5}).to_netcdf(path)  # e.g. a regional grid
+
+        with pytest.raises(ValueError, match="5 HEALPix target cells"):
+            cached_weights(regular_ds, 2, store=tmp_path, ignore_unmapped=False)
+        assert cached_weights(regular_ds, 2, store=tmp_path) == path  # default: unmapped cells accepted
+        assert len(computed) == 1
+
     def test_level_derived_before_lookup(
         self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
     ) -> None:

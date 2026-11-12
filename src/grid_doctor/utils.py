@@ -254,7 +254,7 @@ def cached_weights(
     from .remap import compute_healpix_weights
     from .weights import WeightsDescription
     from .weights import WeightsStore as _WeightsStore
-    from .weights import describe_source
+    from .weights import check_coverage, describe_source
 
     if cache_path is not None:
         warnings.warn("`cache_path` is deprecated, use `store=`.", DeprecationWarning, stacklevel=2)
@@ -286,7 +286,10 @@ def cached_weights(
             **kwargs,
         )
 
-    return store.fetch_or_compute(desc, compute)
+    path = store.fetch_or_compute(desc, compute)
+    if kwargs.get("ignore_unmapped") is False:
+        check_coverage(path)  # the stored weights may have been computed ignoring unmapped cells
+    return path
 
 
 __all__ = [
