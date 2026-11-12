@@ -27,6 +27,7 @@ from typing import (
     cast,
     get_args,
 )
+from uuid import uuid4
 
 import numpy as np
 import xarray as xr
@@ -516,6 +517,7 @@ class WeightsStore:
         path = self._path(ref)
         logger.info("Publishing weight file %s", self.url(ref))
         if self.is_local:
+            self._makedirs(Path(path).parent)
             _atomic_write(Path(path), lambda tmp: shutil.copyfile(local_file, tmp))
         else:
             self.fs.makedirs(path.rsplit("/", 1)[0], exist_ok=True)
@@ -538,11 +540,37 @@ class WeightsStore:
         if self.exists(desc):
             return self.fetch(desc)
         target = local if (self.is_local and not self.read_only) else cached
+        if self.is_local and target == local:
+            self._makedirs(local.parent)
         logger.info("Computing HEALPix weight file %s", target)
-        target = compute(target)
+        try:
+            target = compute(target)
+        except PermissionError:
+            if not target.exists():
+                raise
+            # Sticky directory: another user stored the same (content-addressed) file first.
         if not self.is_local and not self.read_only:
             self.publish(desc, target)
         return target
+
+    def _makedirs(self, path: Path) -> None:
+        """Create *path* below a local root, each new directory with its parent's mode.
+
+        ``mkdir`` applies the umask and does not inherit the sticky bit, so
+        without this a shared root (e.g. mode ``1777`` or ``3775``) would get
+        subdirectories only their creator can write to.
+        """
+        Path(self.root).mkdir(parents=True, exist_ok=True)
+        missing = []
+        while not path.exists():
+            missing.append(path)
+            path = path.parent
+        for new in reversed(missing):
+            new.mkdir(exist_ok=True)
+            try:
+                new.chmod(new.parent.stat().st_mode & 0o7777)
+            except PermissionError:
+                pass  # created by another user at the same time; theirs to set
 
     def find(self, **filters: Any) -> list[WeightsRef]:
         """List the weight files whose reference fields match *filters*.
@@ -585,10 +613,16 @@ def _is_writable(path: Path) -> bool:
 def _atomic_write(target: Path, write: Callable[[str], object]) -> None:
     """Call ``write(tmp)`` on a temporary file next to *target*, then rename it."""
     target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".part")
-    os.close(fd)
+    # Not mkstemp: its 0600 would make shared weight files private; 0666 lets the umask decide.
+    tmp = str(target.with_name(f".{target.name}.{uuid4().hex}.part"))
+    os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666))
     try:
         write(tmp)
-        os.replace(tmp, target)
+        try:
+            os.replace(tmp, target)
+        except PermissionError:
+            if not target.exists():
+                raise
+            # Sticky directory: another user stored the same (content-addressed) file first.
     finally:
         Path(tmp).unlink(missing_ok=True)
