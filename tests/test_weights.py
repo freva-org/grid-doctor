@@ -260,6 +260,9 @@ class TestCanonicalSourceDigest:
         assert self._digest(self._grid(lon_sorted)) != self._digest(self._grid())
 
 
+KEY = "0123456789abcdef" * 4  # a sha256 hex digest
+
+
 class TestWeightRef:
     PREFIX = "version=1/grid=healpix/ellipsoid=sphere"
 
@@ -272,8 +275,8 @@ class TestWeightRef:
 
     def test_ref_is_lowercase(self) -> None:
         """Mixed-case input must not give the same weights a second path."""
-        upper = WeightsRef("NEAREST", "RING", 3, "ABC123")  # type: ignore[arg-type]
-        assert upper == WeightsRef("nearest", "ring", 3, "abc123")
+        upper = WeightsRef("NEAREST", "RING", 3, KEY.upper())  # type: ignore[arg-type]
+        assert upper == WeightsRef("nearest", "ring", 3, KEY)
         assert upper.ref == upper.ref.lower()
         assert WeightsRef.parse(upper.ref) == upper
 
@@ -290,28 +293,51 @@ class TestWeightRef:
 
     def test_known_path_is_stable(self) -> None:
         """A version-1 reference must keep its exact path, or stores lose their files."""
-        ref = WeightsRef("conservative", "nested", 10, "abc123")
-        expected = "version=1/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=10/method=conservative/abc123.nc"
+        ref = WeightsRef("conservative", "nested", 10, KEY)
+        expected = f"version=1/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=10/method=conservative/{KEY}.nc"
         assert ref.ref == expected
         assert WeightsRef.parse(expected) == ref
 
     @pytest.mark.parametrize(
         "bad",
         [
-            f"{PREFIX}/indexing_scheme=nested/level=3/k.nc",  # method missing
-            f"{PREFIX}/level=3/indexing_scheme=nested/method=nearest/k.nc",  # wrong order
-            "grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/k.nc",  # no version
-            "version=2/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/k.nc",
-            "version=1/grid=other/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/k.nc",
-            "version=1/grid=healpix/indexing_scheme=nested/level=3/method=nearest/k.nc",  # no ellipsoid
-            "version=1/grid=healpix/ellipsoid=wgs84/indexing_scheme=nested/level=3/method=nearest/k.nc",
-            f"{PREFIX}/indexing_scheme=nest/level=3/method=nearest/k.nc",  # not a CF scheme
-            f"{PREFIX}/indexing_scheme=nested/level=x/method=nearest/k.nc",
-            f"{PREFIX}/indexing_scheme=nested/level=3/method=bilinear/k.nc",
-            f"{PREFIX}/indexing_scheme=nested/level=3/method=nearest/k.zarr",
-            f"{PREFIX}/indexing_scheme/level=3/method=nearest/k.nc",  # no '='
+            f"{PREFIX}/indexing_scheme=nested/level=3/{KEY}.nc",  # method missing
+            f"{PREFIX}/level=3/indexing_scheme=nested/method=nearest/{KEY}.nc",  # wrong order
+            f"grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",  # no version
+            f"version=2/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",
+            f"version=1/grid=other/ellipsoid=sphere/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",
+            f"version=1/grid=healpix/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",  # no ellipsoid
+            f"version=1/grid=healpix/ellipsoid=wgs84/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",
+            f"{PREFIX}/indexing_scheme=nest/level=3/method=nearest/{KEY}.nc",  # not a CF scheme
+            f"{PREFIX}/indexing_scheme=nested/level=x/method=nearest/{KEY}.nc",
+            f"{PREFIX}/indexing_scheme=nested/level=3/method=bilinear/{KEY}.nc",
+            f"{PREFIX}/indexing_scheme=nested/level=3/method=nearest/{KEY}.zarr",
+            f"{PREFIX}/indexing_scheme/level=3/method=nearest/{KEY}.nc",  # no '='
+            f"{PREFIX}/indexing_scheme=nested/level=3/method=nearest/abc123.nc",  # not a sha256 digest
         ],
     )
     def test_parse_rejects(self, bad: str) -> None:
         with pytest.raises(ValueError, match="Not a weight reference"):
             WeightsRef.parse(bad)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("method", "bilinear"),
+            ("indexing_scheme", "nest"),  # not a CF scheme
+            ("level", -1),
+            ("level", 30),
+            ("level", 3.0),
+            ("level", True),
+            ("key", "abc123"),  # not a sha256 digest
+            ("key", "../" + KEY[3:]),  # would escape the directory
+            ("grid", "other"),
+            ("ellipsoid", "wgs84"),
+            ("version", 2),
+        ],
+    )
+    def test_constructor_validates(self, field: str, value: object) -> None:
+        """A constructed reference is as strict as a parsed one."""
+        fields: dict[str, object] = {"method": "nearest", "indexing_scheme": "nested", "level": 3, "key": KEY}
+        with pytest.raises(ValueError, match=f"Invalid weight reference {field}"):
+            WeightsRef(**{**fields, field: value})  # type: ignore[arg-type]

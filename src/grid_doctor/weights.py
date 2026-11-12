@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ import xarray as xr
 from .metadata import (
     GRID_MAPPING_NAME,
     INDEXING_SCHEMES,
+    MAX_LEVEL,
     HealpixGrid,
     IndexingScheme,
 )
@@ -261,6 +263,8 @@ def _source_hash(ds: xr.Dataset) -> str:
     return digest.hexdigest()
 
 
+_SHA256_HEX: Final = re.compile(r"[0-9a-f]{64}")
+
 WEIGHTS_VERSION: Final = 1
 """Version of the [`WeightsRef`][grid_doctor.weights.WeightsRef] path scheme.
 
@@ -314,11 +318,27 @@ class WeightsRef:
     version: int = WEIGHTS_VERSION
 
     def __post_init__(self) -> None:
-        """Lowercase every string field, so one set of weights has one path."""
+        """Lowercase every string field, so one set of weights has one path, and validate them.
+
+        Raises:
+            ValueError: If a field cannot appear in a weight reference.
+        """
         for name in self.__dataclass_fields__:
             value = getattr(self, name)
             if isinstance(value, str):
                 object.__setattr__(self, name, value.lower())
+        valid = {
+            "method": self.method in get_args(RemapMethod),
+            "indexing_scheme": self.indexing_scheme in INDEXING_SCHEMES,
+            "level": type(self.level) is int and 0 <= self.level <= MAX_LEVEL,
+            "key": isinstance(self.key, str) and _SHA256_HEX.fullmatch(self.key) is not None,
+            "grid": self.grid == GRID_MAPPING_NAME,
+            "ellipsoid": self.ellipsoid == "sphere",
+            "version": self.version == WEIGHTS_VERSION,
+        }
+        for name, ok in valid.items():
+            if not ok:
+                raise ValueError(f"Invalid weight reference {name}: {getattr(self, name)!r}")
 
     @property
     def ref(self) -> str:
@@ -339,21 +359,22 @@ class WeightsRef:
         if (
             tuple(name for name, _, _ in pairs) != cls.HIERARCHY
             or any(sep != "=" for _, sep, _ in pairs)
-            or values["version"] != str(WEIGHTS_VERSION)
-            or values["grid"] != GRID_MAPPING_NAME
-            or values["ellipsoid"] != "sphere"
-            or values["method"] not in get_args(RemapMethod)
-            or values["indexing_scheme"] not in INDEXING_SCHEMES
-            or not values["level"].isdigit()
+            or not (values["version"].isdigit() and values["level"].isdigit())
             or not file.endswith(".nc")
         ):
             raise ValueError(f"Not a weight reference: {ref!r}")
-        return cls(
-            method=cast(RemapMethod, values["method"]),
-            indexing_scheme=cast(IndexingScheme, values["indexing_scheme"]),
-            level=int(values["level"]),
-            key=file[: -len(".nc")],
-        )
+        try:
+            return cls(
+                method=cast(RemapMethod, values["method"]),
+                indexing_scheme=cast(IndexingScheme, values["indexing_scheme"]),
+                level=int(values["level"]),
+                key=file.removesuffix(".nc"),
+                grid=values["grid"],
+                ellipsoid=cast(Literal["sphere"], values["ellipsoid"]),
+                version=int(values["version"]),
+            )
+        except ValueError as exc:
+            raise ValueError(f"Not a weight reference: {ref!r} ({exc})") from None
 
 
 WEIGHTS_STORE_ENV: Final = "GRID_DOCTOR_WEIGHTS_STORE"
