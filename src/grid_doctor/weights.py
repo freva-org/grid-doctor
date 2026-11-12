@@ -271,7 +271,7 @@ Not the grid-doctor package version: bump it only when the path layout changes.
 class WeightsRef:
     """Reference to a weight file, as a Hive-style relative path.
 
-    One ``name=value`` directory per entry of
+    Lowercase throughout. One ``name=value`` directory per entry of
     [`HIERARCHY`][grid_doctor.weights.WeightsRef.HIERARCHY], followed by the
     source digest as file name::
 
@@ -311,6 +311,13 @@ class WeightsRef:
     grid: str = GRID_MAPPING_NAME
     ellipsoid: Literal["sphere"] = "sphere"
     version: int = WEIGHTS_VERSION
+
+    def __post_init__(self) -> None:
+        """Lowercase every string field, so one set of weights has one path."""
+        for name in self.__dataclass_fields__:
+            value = getattr(self, name)
+            if isinstance(value, str):
+                object.__setattr__(self, name, value.lower())
 
     @property
     def ref(self) -> str:
@@ -381,9 +388,12 @@ class WeightsStore:
             ``memory://`` URL, or an fsspec mapper of either. Defaults to the
             ``GRID_DOCTOR_WEIGHTS_STORE`` environment variable, else
             ``<cache_dir()>/weights``.
-        cache_dir: Local directory for copies of in-memory weights.
-            Defaults to ``<cache_dir()>/weights``. Unused for local stores.
+        cache_dir: Local directory for copies of in-memory weights and for
+            weights computed while the store is read-only. Defaults to
+            ``<cache_dir()>/weights``.
         read_only: Forbid [`publish`][grid_doctor.weights.WeightsStore.publish].
+            When omitted, local stores are read-only if their directory is
+            not writable.
 
     Raises:
         ValueError: For filesystems other than local and in-memory ones.
@@ -429,7 +439,9 @@ class WeightsStore:
             )
         self.is_local = bool(_LOCAL_PROTOCOLS.intersection(protocols))
         self._protocol = protocols[0]
-        self.read_only = bool(read_only)
+        if read_only is None:
+            read_only = self.is_local and not _is_writable(Path(self.root))
+        self.read_only = read_only
         self.cache_dir = Path(cache_dir) if cache_dir is not None else local_weights_dir()
 
     def __repr__(self) -> str:  # noqa: D105
@@ -514,19 +526,23 @@ class WeightsStore:
         """Return a local copy of the weights of *desc*, computing them if needed.
 
         Looks for the local copy, then the store; otherwise calls
-        ``compute(local_path)`` and publishes the result to a writable
-        remote store. Read-only stores keep it locally only.
+        ``compute(path)`` and publishes the result to a writable in-memory
+        store. Weights for a read-only store are computed into and kept in
+        ``cache_dir`` only.
         """
         local = self.local_path(desc)
-        if local.exists():
-            return local
+        cached = self.cache_dir / desc.ref.ref
+        for path in dict.fromkeys((local, cached)):
+            if path.exists():
+                return path
         if self.exists(desc):
             return self.fetch(desc)
-        logger.info("Generating HEALPix weight file %s", local)
-        local = compute(local)
+        target = local if (self.is_local and not self.read_only) else cached
+        logger.info("Computing HEALPix weight file %s", target)
+        target = compute(target)
         if not self.is_local and not self.read_only:
-            self.publish(desc, local)
-        return local
+            self.publish(desc, target)
+        return target
 
     def find(self, **filters: Any) -> list[WeightsRef]:
         """List the weight files whose reference fields match *filters*.
@@ -547,6 +563,7 @@ class WeightsStore:
         unknown = set(filters) - fields
         if unknown:
             raise TypeError(f"Unknown filters: {sorted(unknown)}; expected {sorted(fields)}")
+        filters = {k: v.lower() if isinstance(v, str) else v for k, v in filters.items()}
         dirs = (f"{name}={filters.get(name, '*')}" for name in WeightsRef.HIERARCHY)
         pattern = "/".join((*dirs, f"{filters.get('key', '*')}.nc"))
         found = []
@@ -556,6 +573,13 @@ class WeightsStore:
             except ValueError:
                 continue
         return found
+
+
+def _is_writable(path: Path) -> bool:
+    """Return whether *path*, or its nearest existing parent, is writable."""
+    while not path.exists() and path != path.parent:
+        path = path.parent
+    return os.access(path, os.W_OK)
 
 
 def _atomic_write(target: Path, write: Callable[[str], object]) -> None:

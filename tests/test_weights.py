@@ -270,6 +270,13 @@ class TestWeightRef:
         assert WeightsRef.parse(ref.ref) == ref
         assert WeightsRef.parse("/" + ref.ref + "/") == ref
 
+    def test_ref_is_lowercase(self) -> None:
+        """Mixed-case input must not give the same weights a second path."""
+        upper = WeightsRef("NEAREST", "RING", 3, "ABC123")  # type: ignore[arg-type]
+        assert upper == WeightsRef("nearest", "ring", 3, "abc123")
+        assert upper.ref == upper.ref.lower()
+        assert WeightsRef.parse(upper.ref) == upper
+
     def test_hierarchy_is_versioned(self) -> None:
         """Changing the path scheme must come with a new ``WEIGHTS_VERSION``.
 
