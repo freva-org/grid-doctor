@@ -2104,7 +2104,7 @@ def compute_healpix_weights_backend(
         workdir=offline_cfg.workdir,
     )
     desc = WeightsDescription(source_desc, HealpixGrid.from_nest(level, nest=nest), method)
-    target = Path(weights_path) if weights_path is not None else local_weights_dir() / desc.ref.ref
+    target = Path(weights_path) if weights_path is not None else local_weights_dir() / desc.ref.path
     target.parent.mkdir(parents=True, exist_ok=True)
     _, target_mesh = _target_healpix_mesh(level, nest=nest)
 

@@ -219,7 +219,7 @@ class WeightsDescription:
 
     @property
     def ref(self) -> WeightsRef:
-        """Reference (relative path) under which these weights are stored."""
+        """[`WeightsRef`][grid_doctor.weights.WeightsRef] under which these weights are stored."""
         return WeightsRef(self.method, self.target.indexing_scheme, self.target.level, self.source.digest)
 
     def _identity(self) -> tuple[str, HealpixGrid, RemapMethod]:
@@ -341,19 +341,19 @@ class WeightsRef:
                 raise ValueError(f"Invalid weight reference {name}: {getattr(self, name)!r}")
 
     @property
-    def ref(self) -> str:
-        """Relative path of the weight file."""
+    def path(self) -> str:
+        """Relative (store-root) path of the weight file."""
         dirs = (f"{name}={getattr(self, name)}" for name in self.HIERARCHY)
         return "/".join((*dirs, f"{self.key}.nc"))
 
     @classmethod
-    def parse(cls, ref: str) -> WeightsRef:
-        """Parse a relative reference path.
+    def parse(cls, path: str) -> WeightsRef:
+        """Parse a relative weight file path, the inverse of [`path`][grid_doctor.weights.WeightsRef.path].
 
         Raises:
-            ValueError: If *ref* does not follow the layout.
+            ValueError: If *path* does not follow the layout.
         """
-        *dirs, file = ref.strip("/").split("/")
+        *dirs, file = path.strip("/").split("/")
         pairs = [d.partition("=") for d in dirs]
         values = {name: value for name, _, value in pairs}
         if (
@@ -362,7 +362,7 @@ class WeightsRef:
             or not (values["version"].isdigit() and values["level"].isdigit())
             or not file.endswith(".nc")
         ):
-            raise ValueError(f"Not a weight reference: {ref!r}")
+            raise ValueError(f"Not a weight reference: {path!r}")
         try:
             return cls(
                 method=cast(RemapMethod, values["method"]),
@@ -374,7 +374,7 @@ class WeightsRef:
                 version=int(values["version"]),
             )
         except ValueError as exc:
-            raise ValueError(f"Not a weight reference: {ref!r} ({exc})") from None
+            raise ValueError(f"Not a weight reference: {path!r} ({exc})") from None
 
 
 WEIGHTS_STORE_ENV: Final = "GRID_DOCTOR_WEIGHTS_STORE"
@@ -483,7 +483,7 @@ class WeightsStore:
         return WeightsRef.parse(item)
 
     def _path(self, item: WeightsDescription | WeightsRef | str) -> str:
-        return f"{self.root}/{self._ref(item).ref}"
+        return f"{self.root}/{self._ref(item).path}"
 
     def url(self, item: WeightsDescription | WeightsRef | str) -> str:
         """Return the full URL (``file://`` or ``memory://``) of a weight file."""
@@ -497,7 +497,7 @@ class WeightsStore:
         """
         if self.is_local:
             return Path(self._path(item))
-        return self.cache_dir / self._ref(item).ref
+        return self.cache_dir / self._ref(item).path
 
     def exists(self, item: WeightsDescription | WeightsRef | str) -> bool:
         """Return whether the store holds the weight file."""
@@ -554,7 +554,7 @@ class WeightsStore:
         ``cache_dir`` only.
         """
         local = self.local_path(desc)
-        cached = self.cache_dir / desc.ref.ref
+        cached = self.cache_dir / desc.ref.path
         for path in dict.fromkeys((local, cached)):
             if path.exists():
                 return path

@@ -100,9 +100,9 @@ class TestWeightsStore:
         assert reader.exists(desc)
 
         local = writer.fetch(desc)
-        assert local == writer.cache_dir / desc.ref.ref
+        assert local == writer.cache_dir / desc.ref.path
 
-        memory_fs.rm(f"/weights/{desc.ref.ref}")
+        memory_fs.rm(f"/weights/{desc.ref.path}")
         # the reader can now only use a local copy
         if shared:
             # removed actual the store location but still cached on shared cache
@@ -156,14 +156,14 @@ class TestLocalStore:
 
         ref = store.publish(desc, _weight_file(tmp_path / "w.nc"))
         assert ref == desc.ref
-        assert store.exists(desc) and store.exists(ref) and store.exists(ref.ref)
-        assert store.fetch(desc) == tmp_path / "store" / ref.ref
-        assert store.url(desc) == f"file://{tmp_path}/store/{ref.ref}"
+        assert store.exists(desc) and store.exists(ref) and store.exists(ref.path)
+        assert store.fetch(desc) == tmp_path / "store" / ref.path
+        assert store.url(desc) == f"file://{tmp_path}/store/{ref.path}"
 
     def test_publish_leaves_no_partial_files(self, regular_ds: xr.Dataset, tmp_path: Path) -> None:
         store = WeightsStore(tmp_path / "store")
         ref = store.publish(_desc(regular_ds), _weight_file(tmp_path / "w.nc"))
-        siblings = list((tmp_path / "store" / ref.ref).parent.iterdir())
+        siblings = list((tmp_path / "store" / ref.path).parent.iterdir())
         assert [p.name for p in siblings] == [f"{ref.key}.nc"]
 
     @pytest.mark.skipif(os.name != "posix", reason="needs POSIX permissions")
@@ -174,7 +174,7 @@ class TestLocalStore:
             ref = store.publish(_desc(regular_ds), _weight_file(tmp_path / "w.nc"))
         finally:
             os.umask(old)
-        assert (tmp_path / "store" / ref.ref).stat().st_mode & 0o777 == 0o644  # not mkstemp's 0600
+        assert (tmp_path / "store" / ref.path).stat().st_mode & 0o777 == 0o644  # not mkstemp's 0600
 
     @pytest.mark.skipif(os.name != "posix", reason="needs POSIX permissions")
     @pytest.mark.parametrize("via", ["publish", "compute"])
@@ -188,7 +188,7 @@ class TestLocalStore:
             store.publish(desc, _weight_file(tmp_path / "w.nc"))
         else:
             store.fetch_or_compute(desc, lambda path: _weight_file(path))
-        new_dirs = (root / desc.ref.ref).parents[: len(WeightsRef.HIERARCHY)]
+        new_dirs = (root / desc.ref.path).parents[: len(WeightsRef.HIERARCHY)]
         assert {d.stat().st_mode & 0o7777 for d in new_dirs} == {0o1777}
 
     @staticmethod
@@ -264,7 +264,7 @@ class TestLocalStore:
 
         # All targets of one grid: any value in every directory level, fixed file name.
         any_target = "/".join(["*"] * len(WeightsRef.HIERARCHY))
-        assert sorted(root.glob(f"{any_target}/{source_desc.digest}.nc")) == sorted(root / d.ref.ref for d in targets)
+        assert sorted(root.glob(f"{any_target}/{source_desc.digest}.nc")) == sorted(root / d.ref.path for d in targets)
        # All grids of one target: fixed directories, any file name.
         target = "version=1/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=2/method=conservative"
         assert {p.stem for p in root.glob(f"{target}/*.nc")} == {source_desc.digest, other.source.digest}
@@ -276,14 +276,14 @@ class TestRemoteStore:
     ) -> None:
         store = WeightsStore("memory://weights", cache_dir=tmp_path / "cache")
         ref = store.publish(_desc(regular_ds), _weight_file(tmp_path / "w.nc"))
-        assert store.url(ref) == f"memory:///weights/{ref.ref}"
+        assert store.url(ref) == f"memory:///weights/{ref.path}"
 
         local = store.fetch(ref)
-        assert local == tmp_path / "cache" / ref.ref  # cache mirrors the store layout
+        assert local == tmp_path / "cache" / ref.path  # cache mirrors the store layout
         with xr.open_dataset(local) as ds:
             assert float(ds["S"][0]) == 1.0
 
-        memory_fs.rm(f"/weights/{ref.ref}")
+        memory_fs.rm(f"/weights/{ref.path}")
         assert store.fetch(ref) == local  # served from the local cache, no download
         assert not list((tmp_path / "cache").rglob("*.part"))
 
@@ -327,7 +327,7 @@ class TestReadOnlyStore:
         WeightsStore(tmp_path / "store").publish(desc, _weight_file(tmp_path / "w.nc"))
         store = WeightsStore(tmp_path / "store", cache_dir=tmp_path / "cache", read_only=True)
         calls: list[Path] = []
-        assert store.fetch_or_compute(desc, self._compute(calls)) == tmp_path / "store" / desc.ref.ref
+        assert store.fetch_or_compute(desc, self._compute(calls)) == tmp_path / "store" / desc.ref.path
         assert not calls
 
     def test_missing_weights_are_computed_into_cache(self, regular_ds: xr.Dataset, tmp_path: Path) -> None:
@@ -335,7 +335,7 @@ class TestReadOnlyStore:
         store = WeightsStore(tmp_path / "store", cache_dir=tmp_path / "cache", read_only=True)
         calls: list[Path] = []
         path = store.fetch_or_compute(desc, self._compute(calls))
-        assert path == tmp_path / "cache" / desc.ref.ref
+        assert path == tmp_path / "cache" / desc.ref.path
         assert not store.exists(desc)  # store untouched
         assert store.fetch_or_compute(desc, self._compute(calls)) == path  # reused from the cache
         assert len(calls) == 1

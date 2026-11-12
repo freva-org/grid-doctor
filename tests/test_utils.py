@@ -231,7 +231,7 @@ class TestCachedWeights:
         from grid_doctor.weights import describe_source
         from grid_doctor.weights import WeightsDescription
 
-        return WeightsDescription(describe_source(ds), HealpixGrid(level=level), method).ref.ref  # type: ignore[arg-type]
+        return WeightsDescription(describe_source(ds), HealpixGrid(level=level), method).ref.path  # type: ignore[arg-type]
 
     def test_computes_into_store_layout(
         self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]

@@ -269,16 +269,16 @@ class TestWeightRef:
     def test_roundtrip(self, regular_ds: xr.Dataset) -> None:
         desc = WeightsDescription(describe_source(regular_ds), HealpixGrid(level=3, indexing_scheme="ring"), "nearest")
         ref = desc.ref
-        assert ref.ref == f"{self.PREFIX}/indexing_scheme=ring/level=3/method=nearest/{desc.source.digest}.nc"
-        assert WeightsRef.parse(ref.ref) == ref
-        assert WeightsRef.parse("/" + ref.ref + "/") == ref
+        assert ref.path == f"{self.PREFIX}/indexing_scheme=ring/level=3/method=nearest/{desc.source.digest}.nc"
+        assert WeightsRef.parse(ref.path) == ref
+        assert WeightsRef.parse("/" + ref.path + "/") == ref
 
     def test_ref_is_lowercase(self) -> None:
         """Mixed-case input must not give the same weights a second path."""
         upper = WeightsRef("NEAREST", "RING", 3, KEY.upper())  # type: ignore[arg-type]
         assert upper == WeightsRef("nearest", "ring", 3, KEY)
-        assert upper.ref == upper.ref.lower()
-        assert WeightsRef.parse(upper.ref) == upper
+        assert upper.path == upper.path.lower()
+        assert WeightsRef.parse(upper.path) == upper
 
     def test_hierarchy_is_versioned(self) -> None:
         """Changing the path scheme must come with a new ``WEIGHTS_VERSION``.
@@ -295,7 +295,7 @@ class TestWeightRef:
         """A version-1 reference must keep its exact path, or stores lose their files."""
         ref = WeightsRef("conservative", "nested", 10, KEY)
         expected = f"version=1/grid=healpix/ellipsoid=sphere/indexing_scheme=nested/level=10/method=conservative/{KEY}.nc"
-        assert ref.ref == expected
+        assert ref.path == expected
         assert WeightsRef.parse(expected) == ref
 
     @pytest.mark.parametrize(

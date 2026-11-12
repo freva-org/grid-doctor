@@ -225,7 +225,7 @@ class TestWeightGeneration:
         result = compute_healpix_weights(regular_ds, 1, method="nearest", nest=False)
 
         desc = WeightsDescription(describe_source(regular_ds), HealpixGrid(level=1, indexing_scheme="ring"), "nearest")
-        assert result == tmp_path / "weights" / desc.ref.ref
+        assert result == tmp_path / "weights" / desc.ref.path
         assert result.exists()
         assert compute_healpix_weights(regular_ds, 1, method="nearest", nest=False) == result
 
