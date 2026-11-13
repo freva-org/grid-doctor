@@ -47,8 +47,8 @@ args = parser.parse_args()
 gd_cli.setup_logging_from_args(args)
 
 ds = gd.cached_open_dataset(["path/to/*.nc"])
-weights_file = gd.cached_weights("~/weights/", nproc=4)
-pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_path)
+weights_file = gd.cached_weights(ds, store="~/weights", nproc=4)
+pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_file)
 gd.save_pyramid(
     pyramid,
     f"s3://{args.s3_bucket}/my-dataset.zarr",

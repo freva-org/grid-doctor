@@ -7,15 +7,19 @@ import json
 import logging
 import pickle
 import tempfile
+import warnings
 from os import environ
 from pathlib import Path
-from typing import Any, Collection, Literal, Unpack, cast
+from typing import TYPE_CHECKING, Any, Collection, Literal, Unpack, cast
 
 import numpy as np
 import numpy.typing as npt
 import xarray as xr
 
 from .types import RemapMethod, SourceUnits, WeightOptions
+
+if TYPE_CHECKING:
+    from .weights import WeightsStore
 
 logger = logging.getLogger(__name__)
 
@@ -194,27 +198,38 @@ def cached_weights(
     method: RemapMethod = "conservative",
     nest: bool = True,
     source_units: SourceUnits = "auto",
-    cache_path: str | Path | None = None,
+    store: WeightsStore | str | Path | None = None,
     **kwargs: Unpack[WeightOptions],
 ) -> Path:
-    """Compute or load a cached HEALPix weight file.
+    """Return a local HEALPix weight file, reusing it through a store.
+
+    Weights are identified by their
+    [`WeightsDescription`][grid_doctor.weights.WeightsDescription]: the
+    normalised source geometry, the HEALPix target and the method. The
+    lookup is done by
+    [`WeightsStore.fetch_or_compute`][grid_doctor.weights.WeightsStore.fetch_or_compute].
 
     Parameters
     ----------
     ds:
         Source dataset whose grid geometry defines the weights.
     level:
-        HEALPix level.
+        HEALPix level. Derived from the grid resolution when omitted.
     method:
         Weight-generation method. Supported values are `"nearest"` and
         `"conservative"`.
     nest:
-        Use nested HEALPix ordering when `True`.
+        Deprecated, has no effect: weight files are nested. Choose ring
+        order where the weights are applied, e.g.
+        ``apply_weight_file(..., nest=False)`` or
+        ``create_healpix_pyramid(..., nest=False)``.
     source_units:
         Unit convention of the source coordinates.
-    cache_path:
-        Cache directory or explicit file name. When omitted,
-        the default package cache directory is used.
+    store:
+        Weights store, or its location (see
+        [`WeightsStore`][grid_doctor.weights.WeightsStore]). Defaults to the
+        ``GRID_DOCTOR_WEIGHTS_STORE`` environment variable, else the local
+        weights directory.
     **kwargs:
         Any additional keyword arguments for
         [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights]
@@ -222,65 +237,52 @@ def cached_weights(
     Returns
     -------
     pathlib.Path
-        Path to the cached NetCDF weight file.
+        Path to the local NetCDF weight file.
 
     Examples
     --------
     ```python
-    weight_file = cached_weights(ds, level=8, method="conservative")
+    weight_file = cached_weights(ds, level=8, store="/work/ab1234/weights")
     ```
     """
     from .helpers import get_latlon_resolution, resolution_to_healpix_level
+    from .metadata import HealpixGrid
     from .remap import compute_healpix_weights
+    from .weights import WeightsDescription
+    from .weights import WeightsStore as _WeightsStore
+    from .weights import check_coverage, describe_source
 
-    digest = hashlib.sha256()
-    for candidate in (
-        "clon_vertices",
-        "clat_vertices",
-        "lon_vertices",
-        "lat_vertices",
-        "clon",
-        "clat",
-        "lon",
-        "lat",
-        "longitude",
-        "latitude",
-        "rlon",
-        "rlat",
-        "X",
-        "Y",
-    ):
-        if candidate in ds:
-            digest.update(
-                np.ascontiguousarray(np.asarray(ds[candidate].values)).tobytes()
-            )
-    digest.update(
-        f"level={level};method={method};nest={nest};units={source_units}".encode()
-    )
-    key = digest.hexdigest()[:16]
-
-    if cache_path is None:
-        weight_file = cache_dir() / f"weights_{key}.nc"
-    else:
-        path = Path(cache_path)
-        weight_file = path / f"weights_{key}.nc" if path.is_dir() else path
-    if weight_file.exists():
-        logger.info("Using cached weight file %s", weight_file)
-        return weight_file
-
-    logger.info("Generating HEALPix weight file %s", weight_file)
+    if not nest:
+        warnings.warn(
+            "`nest=False` has no effect: weight files are nested; pass `nest=False` where they are applied.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    if not isinstance(store, _WeightsStore):
+        store = _WeightsStore(store)
     if level is None:
         level = resolution_to_healpix_level(get_latlon_resolution(ds))
 
-    return compute_healpix_weights(
-        ds,
-        level,
-        method=method,
-        nest=nest,
-        source_units=source_units,
-        weights_path=weight_file,
-        **kwargs,
-    )
+    describe_kwargs = {k: kwargs[k] for k in ("grid", "source_kind", "spectral_transform_command") if k in kwargs}
+    source = describe_source(ds, source_units=source_units, **describe_kwargs)  # type: ignore[arg-type]
+    desc = WeightsDescription(source, HealpixGrid(level=level), method)  # stored weights are nested
+
+    def compute(path: Path) -> Path:  # the store holds nested weights; ring is derived from them
+        return compute_healpix_weights(
+            ds,
+            level,
+            method=method,
+            nest=True,
+            source_units=source_units,
+            weights_path=path,
+            source_description=source,
+            **kwargs,
+        )
+
+    path = store.fetch_or_compute(desc, compute)
+    if kwargs.get("ignore_unmapped") is False:
+        check_coverage(path)  # the stored weights may have been computed ignoring unmapped cells
+    return path
 
 
 __all__ = [

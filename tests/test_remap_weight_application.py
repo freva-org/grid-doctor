@@ -153,6 +153,85 @@ class TestWeightGeneration:
             == _FakeESMPy.RegridMethod.NEAREST_STOD
         )
 
+    def _fake_healpix(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
+        for module in (remap_backend, remap):
+            monkeypatch.setattr(module, "_require_healpix_geo_module", lambda nest: (_FakeHealpixModule(), {}))
+
+    def test_write_is_atomic(
+        self, monkeypatch: pytest.MonkeyPatch, regular_ds: xr.Dataset, tmp_path: Path
+    ) -> None:
+        """Only the finished, annotated file appears; no scratch files are left behind."""
+        self._fake_healpix(monkeypatch)
+        out = tmp_path / "out" / "weights.nc"
+        assert compute_healpix_weights(regular_ds, 1, method="nearest", weights_path=out) == out
+        assert [p.name for p in out.parent.iterdir()] == ["weights.nc"]
+        with xr.open_dataset(out) as ds:
+            assert ds.attrs["grid_doctor_method"] == "nearest"
+
+    def test_provenance_matches_weights_ref(
+        self, monkeypatch: pytest.MonkeyPatch, regular_ds: xr.Dataset, tmp_path: Path
+    ) -> None:
+        """A weight file names its whole identity, so a store can be verified from the files alone."""
+        from grid_doctor.metadata import HealpixGrid
+        from grid_doctor.metadata import _keys as keys
+        from grid_doctor.weights import describe_source
+        from grid_doctor.weights import WEIGHTS_VERSION, WeightsDescription
+
+        self._fake_healpix(monkeypatch)
+        out = compute_healpix_weights(regular_ds, 1, method="nearest", nest=False, weights_path=tmp_path / "w.nc")
+        ref = WeightsDescription(describe_source(regular_ds), HealpixGrid(level=1, indexing_scheme="ring"), "nearest").ref
+        with xr.open_dataset(out) as ds:
+            attrs = ds.attrs
+        assert attrs[keys.WEIGHTS_VERSION_ATTR] == WEIGHTS_VERSION
+        assert attrs[keys.SOURCE_HASH_ATTR] == ref.key
+        assert attrs[keys.LEVEL_ATTR] == ref.level
+        assert attrs[keys.ORDER_ATTR] == "ring"  # stored files are nested; this one was renumbered
+        assert attrs[keys.ELLIPSOID_ATTR] == ref.ellipsoid
+        assert attrs[keys.METHOD_ATTR] == ref.method
+        assert keys.VERSION_ATTR in attrs  # grid-doctor version
+        assert attrs[keys.ESMF_VERSION_ATTR]  # installed ESMPy version, or "unknown"
+        assert attrs[keys.UNMAPPED_CELLS_ATTR] >= 0
+
+    def test_failed_generation_leaves_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, regular_ds: xr.Dataset, tmp_path: Path
+    ) -> None:
+        self._fake_healpix(monkeypatch)
+
+        def broken(**kwargs: Any) -> Path:
+            Path(kwargs["weights_path"]).write_bytes(b"partial")
+            raise RuntimeError("ESMF crashed")
+
+        monkeypatch.setattr(remap_backend, "_compute_weights_in_memory", broken)
+        out = tmp_path / "out" / "weights.nc"
+        with pytest.raises(RuntimeError, match="ESMF crashed"):
+            compute_healpix_weights(regular_ds, 1, method="nearest", weights_path=out)
+        assert list(out.parent.iterdir()) == []
+
+    def test_default_path_follows_weights_ref(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        regular_ds: xr.Dataset,
+        tmp_path: Path,
+    ) -> None:
+        """Without ``weights_path`` the same weights always land at the same local path."""
+        from grid_doctor.metadata import HealpixGrid
+        from grid_doctor.weights import WeightsDescription, describe_source
+
+        monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
+        for module in (remap_backend, remap):
+            monkeypatch.setattr(module, "_require_healpix_geo_module", lambda nest: (_FakeHealpixModule(), {}))
+        monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: tmp_path)
+
+        result = compute_healpix_weights(regular_ds, 1, method="nearest", nest=False)
+
+        desc = WeightsDescription(describe_source(regular_ds), HealpixGrid(level=1, indexing_scheme="ring"), "nearest")
+        assert result == tmp_path / "weights" / desc.ref.path  # the default layout holds nested weights
+        assert result.exists()
+        with xr.open_dataset(result) as ds:
+            assert ds.attrs["grid_doctor_order"] == "nested"
+        assert compute_healpix_weights(regular_ds, 1, method="nearest", nest=False) == result
+
     def test_compute_healpix_weights_conservative(
         self,
         monkeypatch: pytest.MonkeyPatch,

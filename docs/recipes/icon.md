@@ -20,15 +20,16 @@ grid_ds = gd.cached_open_dataset(["ICON-DREAM-Global_grid.nc"])
 # Derive the HEALPix level from the grid resolution.
 level =  gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
 weights_file = gd.cached_weights(
-    grids_ds,
-    level=level
-    weights_path="/scratch/{user[0]}/{user}/healpix-weights".format(user=getuser())
+    grid_ds,
+    level=level,
+    store="/scratch/{user[0]}/{user}/healpix-weights".format(user=getuser()),
 )
 ```
 
-The weights are cached as a NetCDF file in `$SCRATCH` (or `/tmp`).
-On subsequent runs with the same grid the cached file is loaded
-instantly.
+The weights are stored as a NetCDF file in the weights store (see
+[Weights store](../api/weights.md)). On subsequent runs with the same
+grid the stored file is loaded instantly; point `store` at a shared
+directory or S3 bucket to share the weights with others.
 
 ## Conversion
 
