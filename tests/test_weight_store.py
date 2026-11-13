@@ -170,60 +170,6 @@ class TestLocalStore:
         siblings = list((tmp_path / "store" / ref.path).parent.iterdir())
         assert [p.name for p in siblings] == [f"{ref.key}.nc"]
 
-    @pytest.mark.skipif(os.name != "posix", reason="needs POSIX permissions")
-    def test_published_file_follows_umask(self, regular_ds: xr.Dataset, tmp_path: Path) -> None:
-        store = WeightsStore(tmp_path / "store")
-        old = os.umask(0o022)
-        try:
-            ref = store.publish(_desc(regular_ds), _weight_file(tmp_path / "w.nc"))
-        finally:
-            os.umask(old)
-        assert (tmp_path / "store" / ref.path).stat().st_mode & 0o777 == 0o644  # not mkstemp's 0600
-
-    @pytest.mark.skipif(os.name != "posix", reason="needs POSIX permissions")
-    @pytest.mark.parametrize("via", ["publish", "compute"])
-    def test_new_dirs_copy_root_mode(self, via: str, regular_ds: xr.Dataset, tmp_path: Path) -> None:
-        """A shared root (sticky, world-writable) stays shared all the way down."""
-        root = tmp_path / "store"
-        root.mkdir()
-        root.chmod(0o1777)
-        store, desc = WeightsStore(root, cache_dir=tmp_path / "cache"), _desc(regular_ds)
-        if via == "publish":
-            store.publish(desc, _weight_file(tmp_path / "w.nc"))
-        else:
-            store.fetch_or_compute(desc, lambda path: _weight_file(path))
-        new_dirs = (root / desc.ref.path).parents[: len(WeightsRef.HIERARCHY)]
-        assert {d.stat().st_mode & 0o7777 for d in new_dirs} == {0o1777}
-
-    @staticmethod
-    def _sticky(*args: object) -> None:
-        raise PermissionError("Operation not permitted")
-
-    def test_publish_keeps_file_of_another_user(
-        self, regular_ds: xr.Dataset, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """In a sticky directory another user's file cannot be replaced; it holds the same weights."""
-        store, desc = WeightsStore(tmp_path / "store"), _desc(regular_ds)
-        theirs = store.local_path(desc)
-        theirs.parent.mkdir(parents=True)
-        _weight_file(theirs, value=2.0)
-        monkeypatch.setattr("grid_doctor.weights.os.replace", self._sticky)
-        assert store.publish(desc, _weight_file(tmp_path / "w.nc")) == desc.ref
-        with xr.open_dataset(theirs) as ds:
-            assert float(ds["S"][0]) == 2.0  # theirs, untouched
-        assert not list(theirs.parent.glob("*.part"))
-
-    def test_compute_keeps_file_of_another_user(self, regular_ds: xr.Dataset, tmp_path: Path) -> None:
-        """Another user finished the same weights first; their file is used."""
-        store, desc = WeightsStore(tmp_path / "store", cache_dir=tmp_path / "cache"), _desc(regular_ds)
-
-        def compute(path: Path) -> Path:
-            _weight_file(path)  # the other user's file lands first...
-            self._sticky()  # ...so ours cannot replace it
-            return path
-
-        assert store.fetch_or_compute(desc, compute) == store.local_path(desc)
-
     def test_read_only(self, regular_ds: xr.Dataset, tmp_path: Path) -> None:
         store = WeightsStore(tmp_path, read_only=True)
         with pytest.raises(PermissionError, match="read-only"):

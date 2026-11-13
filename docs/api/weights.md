@@ -71,24 +71,6 @@ cache instead.
 Only local directories and in-memory filesystems (`memory://`, for tests)
 are supported for now.
 
-### Setting up a shared directory
-
-On POSIX systems, let everyone add weights but only remove their own,
-with the sticky bit (and setgid, so files keep the project group):
-
-```bash
-mkdir /work/ab1234/weights
-chgrp ab1234 /work/ab1234/weights
-chmod 3775 /work/ab1234/weights   # group may add; 3777 lets anyone add
-```
-
-grid-doctor copies the root's mode onto every directory it creates
-below it, and published files follow each user's umask (use `umask 002`
-for group-writable files). Files can only be removed by their owner or
-the owner of the directory, so let a group account own the root to
-clean up. When two users compute the same weights at once, the first
-file stays and the second user uses it.
-
 The same grid is recognised whatever its conventions: coordinates in
 radians or degrees, longitudes in `0..360` or `[-180, 180)` and differing
 variable names all lead to the same weight file.
