@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 __version__ = "2604.0.0"
 
 _SUBMODULES: dict[str, str] = {
+    "config": ".config",
     "helpers": ".helpers",
     "log": ".log",
     "metadata": ".metadata",
@@ -58,7 +59,7 @@ _ATTRS: dict[str, str] = {
 
 
 if TYPE_CHECKING:
-    from . import helpers, log, metadata, remap, select, swath, utils
+    from . import config, helpers, log, metadata, remap, select, swath, utils
     from .helpers import (
         coarsen_healpix,
         create_healpix_pyramid,
@@ -126,6 +127,7 @@ def __dir__() -> list[str]:
 
 __all__ = [
     "__version__",
+    "config",
     "helpers",
     "log",
     "metadata",

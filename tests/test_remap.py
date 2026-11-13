@@ -495,7 +495,7 @@ class TestBackendExternalWorkflows:
         monkeypatch.setattr(
             remap_backend_module,
             "_target_healpix_mesh",
-            lambda level, nest: (np.array([0], dtype=np.int64), target_mesh),
+            lambda level, nest, ellipsoid=None: (np.array([0], dtype=np.int64), target_mesh),
         )
 
         def offline(**kwargs: Any) -> Path:
@@ -698,7 +698,7 @@ class TestHealpixCentres:
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda nest, ellipsoid=None: (_FakeHealpixModule(), {}),
         )
         lat, lon = _healpix_centres(1, nest=True)
         assert lat.shape == lon.shape

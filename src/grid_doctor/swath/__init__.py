@@ -78,6 +78,7 @@ from ..metadata import (
 from ..remap import _attach_healpix_coords
 from ..remap_backend import (
     _canonical_lon,
+    _ellipsoid_or_config,
     _require_healpix_geo_module,
 )
 from ..types import BinAgg, Int64Array, SourceUnits
@@ -114,12 +115,13 @@ def bin_to_healpix(
     min_count: int = 1,
     with_counts: bool = False,
     dense: bool = True,
+    ellipsoid: str | None = None,
 ) -> xr.Dataset:
     """Bin point-sampled data into HEALPix cells.
 
     Every sample is assigned to the HEALPix cell containing its
-    coordinates (perfect-sphere geometry, consistent with all other
-    grid-doctor output) and all samples per cell are reduced with the
+    coordinates (on *ellipsoid*, consistent with all other grid-doctor
+    output) and all samples per cell are reduced with the
     requested aggregation.
 
     Parameters
@@ -180,6 +182,9 @@ def bin_to_healpix(
         convert with
         [`sparse_to_dense`][grid_doctor.swath.sparse_to_dense] before
         coarsening or publishing.
+    ellipsoid:
+        Ellipsoid of the HEALPix geometry, e.g. ``"sphere"`` or
+        ``"WGS84"``.  Defaults to ``grid_doctor.config.healpix.ellipsoid``.
 
     Returns
     -------
@@ -222,7 +227,8 @@ def bin_to_healpix(
     if not valid_coords.any():
         raise ValueError("No samples with valid (finite) coordinates found.")
 
-    module, kwargs = _require_healpix_geo_module(nest)
+    ellipsoid = _ellipsoid_or_config(ellipsoid)
+    module, kwargs = _require_healpix_geo_module(nest, ellipsoid=ellipsoid)
     cell_ids = np.asarray(
         module.lonlat_to_healpix(
             lon[valid_coords], lat[valid_coords], depth=level, **kwargs
@@ -299,10 +305,20 @@ def bin_to_healpix(
 
     if dense:
         return _scatter_to_dense(
-            result_ds, unique_cells, level=level, nest=nest, method=method
+            result_ds,
+            unique_cells,
+            level=level,
+            nest=nest,
+            method=method,
+            ellipsoid=ellipsoid,
         )
     return _attach_sparse_coords(
-        result_ds, unique_cells, level=level, nest=nest, method=method
+        result_ds,
+        unique_cells,
+        level=level,
+        nest=nest,
+        method=method,
+        ellipsoid=ellipsoid,
     )
 
 
@@ -372,6 +388,7 @@ def _scatter_to_dense(
     level: int,
     nest: bool,
     method: str,
+    ellipsoid: str | None = None,
 ) -> xr.Dataset:
     """Scatter compact per-cell arrays onto the full HEALPix grid."""
     npix = 12 * 4**level
@@ -395,7 +412,9 @@ def _scatter_to_dense(
             if "cell" not in ds.coords[coord].dims and str(coord) != "cell"
         }
     )
-    return _attach_healpix_coords(dense, level=level, nest=nest, method=method)
+    return _attach_healpix_coords(
+        dense, level=level, nest=nest, method=method, ellipsoid=ellipsoid
+    )
 
 
 def _attach_sparse_coords(
@@ -405,6 +424,7 @@ def _attach_sparse_coords(
     level: int,
     nest: bool,
     method: str,
+    ellipsoid: str | None = None,
 ) -> xr.Dataset:
     """Attach coordinates and metadata to a compact binned dataset.
 
@@ -412,7 +432,7 @@ def _attach_sparse_coords(
     touched cells (unlike the dense representation, where ``cell`` is a
     positional ``arange``), and the dataset is marked sparse.
     """
-    module, kwargs = _require_healpix_geo_module(nest)
+    module, kwargs = _require_healpix_geo_module(nest, ellipsoid=ellipsoid)
     lon_deg, lat_deg = module.healpix_to_lonlat(cell_ids, level, **kwargs)
     result = ds.assign_coords(
         {
