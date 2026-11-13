@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -139,3 +140,38 @@ class TestHealpixConfig:
         monkeypatch.setattr(gd.config.healpix, "ellipsoid", "WGS84")
         wgs84 = gd.attach_cell_coords(ds, cells, level=1)["latitude"].values
         assert np.all(np.abs(wgs84) > np.abs(sphere))
+
+
+_POINTS = xr.Dataset(
+    {"t": ("obs", np.arange(4.0))},
+    coords={"lat": ("obs", [10.0, 40.0, -30.0, 60.0]), "lon": ("obs", [0.0, 90.0, 180.0, 270.0])},
+)
+
+
+def _bin(ds: xr.Dataset, ellipsoid: str | None = None) -> xr.Dataset:
+    return gd.bin_to_healpix(_POINTS, 1, ellipsoid=ellipsoid)
+
+
+def _bin_sparse(ds: xr.Dataset, ellipsoid: str | None = None) -> xr.Dataset:
+    return gd.bin_to_healpix(_POINTS, 1, dense=False, ellipsoid=ellipsoid)
+
+
+def _regrid(ds: xr.Dataset, ellipsoid: str | None = None) -> xr.Dataset:
+    return gd.regrid_to_healpix(ds, 1, method="nearest", ellipsoid=ellipsoid)
+
+
+class TestExplicitEllipsoid:
+    """An ``ellipsoid=`` argument on grid producers wins over the config."""
+
+    @pytest.mark.parametrize("produce", [_bin, _bin_sparse, _regrid])
+    def test_argument_overrides_config(
+        self, produce: Callable[..., xr.Dataset], regular_ds: xr.Dataset
+    ) -> None:
+        with gd.config.healpix.set(ellipsoid="WGS84"):
+            wgs84 = produce(regular_ds)["latitude"].values
+        sphere = produce(regular_ds)["latitude"].values
+        assert not np.allclose(wgs84, sphere)
+
+        np.testing.assert_array_equal(produce(regular_ds, ellipsoid="WGS84")["latitude"].values, wgs84)
+        with gd.config.healpix.set(ellipsoid="WGS84"):
+            np.testing.assert_array_equal(produce(regular_ds, ellipsoid="sphere")["latitude"].values, sphere)
