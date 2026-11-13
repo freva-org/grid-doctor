@@ -63,6 +63,7 @@ from .types import (
     RemapMethod,
     SourceKind,
     SourceUnits,
+    WeightOptions,
 )
 
 logger = logging.getLogger(__name__)
@@ -708,7 +709,7 @@ def _attach_healpix_coords(
 
 def regrid_to_healpix(
     ds: xr.Dataset,
-    level: int,
+    level: int | None = None,
     *,
     nest: bool = True,
     method: RemapMethod = "conservative",
@@ -735,7 +736,8 @@ def regrid_to_healpix(
     ds:
         Source dataset on a regular, curvilinear, or unstructured grid.
     level:
-        HEALPix refinement level.
+        HEALPix refinement level. Derived from the grid resolution when
+        omitted.
     nest:
         Use nested HEALPix ordering when ``True``.
     method:
@@ -743,7 +745,11 @@ def regrid_to_healpix(
     source_units:
         Coordinate units for the source grid.
     weights_path:
-        Optional existing or target weight file.
+        Optional existing or target weight file. When omitted, the
+        weights come from the default
+        [`WeightsStore`][grid_doctor.weights.WeightsStore] (see
+        [`cached_weights`][grid_doctor.utils.cached_weights]): computed
+        once, then reused.
     missing_policy:
         How NaN values in the source grid are treated.
         ``"renormalize"`` (default) excludes NaN source cells and
@@ -787,26 +793,35 @@ def regrid_to_healpix(
     xarray.Dataset
         Regridded dataset on the HEALPix grid.
     """
-    weight_file = Path(weights_path) if weights_path is not None else None
-    if weight_file is None or not weight_file.exists():
-        weight_file = compute_healpix_weights(
-            ds,
-            level,
-            method=method,
-            nest=nest,
-            source_units=source_units,
-            weights_path=weight_file,
-            grid=grid,
-            source_kind=source_kind,
-            prefer_offline=prefer_offline,
-            nproc=nproc,
-            esmf_regrid_weightgen=esmf_regrid_weightgen,
-            keep_intermediates=keep_intermediates,
-            workdir=workdir,
-            spectral_transform_command=spectral_transform_command,
-            ignore_unmapped=ignore_unmapped,
-            large_file=large_file,
-        )
+    options: WeightOptions = {
+        "grid": grid,
+        "source_kind": source_kind,
+        "prefer_offline": prefer_offline,
+        "nproc": nproc,
+        "esmf_regrid_weightgen": esmf_regrid_weightgen,
+        "keep_intermediates": keep_intermediates,
+        "workdir": workdir,
+        "spectral_transform_command": spectral_transform_command,
+        "ignore_unmapped": ignore_unmapped,
+        "large_file": large_file,
+    }
+    if weights_path is None:
+        from .utils import cached_weights
+
+        weight_file = cached_weights(ds, level, method=method, source_units=source_units, **options)
+    else:
+        weight_file = Path(weights_path)
+        if not weight_file.exists():
+            if level is None:
+                from .helpers import (
+                    get_latlon_resolution,
+                    resolution_to_healpix_level,
+                )
+
+                level = resolution_to_healpix_level(get_latlon_resolution(ds))
+            weight_file = compute_healpix_weights(
+                ds, level, method=method, nest=nest, source_units=source_units, weights_path=weight_file, **options
+            )
     return apply_weight_file(
         ds,
         weight_file,

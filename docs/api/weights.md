@@ -24,6 +24,15 @@ weights_file = gd.cached_weights(ds, level=9, store="/work/ab1234/weights")
 pyramid = gd.create_healpix_pyramid(ds, max_level=9, weights_path=weights_file)
 ```
 
+[`regrid_to_healpix`][grid_doctor.regrid_to_healpix] and
+[`create_healpix_pyramid`][grid_doctor.create_healpix_pyramid] use the
+default store when no `weights_path` is given, so this is enough to
+compute the weights once and reuse them afterwards:
+
+```python
+hp_ds = gd.regrid_to_healpix(ds)  # level derived from the grid resolution
+```
+
 The default store is the `GRID_DOCTOR_WEIGHTS_STORE` environment
 variable, or `<cache_dir()>/weights` when it is unset. To compute into an
 explicit file instead, use
