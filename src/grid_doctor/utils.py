@@ -199,7 +199,6 @@ def cached_weights(
     nest: bool = True,
     source_units: SourceUnits = "auto",
     store: WeightsStore | str | Path | None = None,
-    cache_path: str | Path | None = None,
     **kwargs: Unpack[WeightOptions],
 ) -> Path:
     """Return a local HEALPix weight file, reusing it through a store.
@@ -231,9 +230,6 @@ def cached_weights(
         [`WeightsStore`][grid_doctor.weights.WeightsStore]). Defaults to the
         ``GRID_DOCTOR_WEIGHTS_STORE`` environment variable, else the local
         weights directory.
-    cache_path:
-        Deprecated alias of *store*. For an explicit weight file use
-        ``compute_healpix_weights(weights_path=...)``.
     **kwargs:
         Any additional keyword arguments for
         [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights]
@@ -256,9 +252,6 @@ def cached_weights(
     from .weights import WeightsStore as _WeightsStore
     from .weights import check_coverage, describe_source
 
-    if cache_path is not None:
-        warnings.warn("`cache_path` is deprecated, use `store=`.", DeprecationWarning, stacklevel=2)
-        store = cache_path if store is None else store
     if not nest:
         warnings.warn(
             "`nest=False` has no effect: weight files are nested; pass `nest=False` where they are applied.",

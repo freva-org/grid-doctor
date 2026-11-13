@@ -362,12 +362,4 @@ class TestCachedWeights:
         assert cached_weights(regular_ds, 2, store=store).exists()
         assert not store.exists(self._ref(regular_ds, 2))
 
-    @pytest.mark.usefixtures("computed")
-    def test_cache_path_is_deprecated(
-        self, regular_ds: xr.Dataset, tmp_path: Path
-    ) -> None:
-        with pytest.warns(DeprecationWarning, match="cache_path"):
-            path = cached_weights(regular_ds, 2, cache_path=tmp_path)
-        assert path == tmp_path / self._ref(regular_ds, 2)
-
 
