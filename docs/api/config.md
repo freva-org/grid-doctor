@@ -7,9 +7,9 @@ this order, later ones winning:
 2. the environment variable `GRID_DOCTOR_<NAMESPACE>__<KEY>` (read at import),
 3. assignment at runtime.
 
-| Setting | Default | Environment variable |
-|---|---|---|
-| `healpix.ellipsoid` | `"sphere"` | `GRID_DOCTOR_HEALPIX__ELLIPSOID` |
+| Setting | Default | Values | Environment variable |
+|---|---|---|---|
+| `healpix.ellipsoid` | `"sphere"` | `"sphere"`, `"WGS84"` | `GRID_DOCTOR_HEALPIX__ELLIPSOID` |
 
 ```python
 import grid_doctor as gd

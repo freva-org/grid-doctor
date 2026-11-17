@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 
 from . import config
 from .types import (
+    Ellipsoid,
     FloatArray,
     Int64Array,
     IntArray,
@@ -285,13 +286,13 @@ def _require_esmpy() -> ModuleType:
     return esmpy
 
 
-def _ellipsoid_or_config(ellipsoid: str | None) -> str:
+def _ellipsoid_or_config(ellipsoid: Ellipsoid | None) -> Ellipsoid:
     """Return *ellipsoid*, or ``grid_doctor.config.healpix.ellipsoid`` if ``None``."""
     return config.healpix.ellipsoid if ellipsoid is None else ellipsoid
 
 
 def _require_healpix_geo_module(
-    nest: bool, ellipsoid: str | None = None
+    nest: bool, ellipsoid: Ellipsoid | None = None
 ) -> tuple[ModuleType, dict[str, str]]:
     """Import and return the appropriate ``healpix_geo`` sub-module.
 
@@ -1346,7 +1347,7 @@ def _target_healpix_mesh(
     level: int,
     *,
     nest: bool,
-    ellipsoid: str | None = None,
+    ellipsoid: Ellipsoid | None = None,
 ) -> tuple[Int64Array, PolygonMesh]:
     """Return the HEALPix destination mesh.
 
@@ -1888,7 +1889,7 @@ def compute_healpix_weights_backend(
     large_file: bool = True,
     offline: OfflineWeightConfig | None = None,
     spectral_transform_command: (list[str] | tuple[str, ...] | None) = None,
-    ellipsoid: str | None = None,
+    ellipsoid: Ellipsoid | None = None,
 ) -> Path:
     """Compute reusable HEALPix weights.
 

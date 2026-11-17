@@ -56,6 +56,7 @@ from .remap_backend import (
 )
 from .types import (
     ApplyBackend,
+    Ellipsoid,
     FloatArray,
     MissingPolicy,
     RemapMethod,
@@ -109,7 +110,7 @@ def _healpix_centres(
     level: int,
     *,
     nest: bool,
-    ellipsoid: str | None = None,
+    ellipsoid: Ellipsoid | None = None,
 ) -> tuple[FloatArray, FloatArray]:
     """Return HEALPix cell-centre coordinates in degrees.
 
@@ -197,7 +198,7 @@ def compute_healpix_weights(
     keep_intermediates: bool = False,
     workdir: str | Path | None = None,
     spectral_transform_command: list[str] | tuple[str, ...] | None = None,
-    ellipsoid: str | None = None,
+    ellipsoid: Ellipsoid | None = None,
 ) -> Path:
     """Generate a reusable NetCDF weight file for HEALPix remapping.
 
@@ -236,7 +237,7 @@ def compute_healpix_weights(
     spectral_transform_command:
         External command for ``source_kind="spectral"``.
     ellipsoid:
-        Ellipsoid of the HEALPix geometry, e.g. ``"sphere"`` or
+        Ellipsoid of the HEALPix geometry, ``"sphere"`` or
         ``"WGS84"``.  Defaults to ``grid_doctor.config.healpix.ellipsoid``.
 
     Returns
@@ -505,7 +506,7 @@ def apply_weight_file(
     source_units: SourceUnits = "auto",
     backend: ApplyBackend = "auto",
     cell_chunks: int | Literal["auto"] | None = "auto",
-    ellipsoid: str | None = None,
+    ellipsoid: Ellipsoid | None = None,
 ) -> xr.Dataset:
     """Apply a previously generated ESMF weight file to *ds*.
 
@@ -664,7 +665,7 @@ def _attach_healpix_coords(
     level: int,
     nest: bool,
     method: str | None = None,
-    ellipsoid: str | None = None,
+    ellipsoid: Ellipsoid | None = None,
 ) -> xr.Dataset:
     """Attach dense HEALPix cell coordinates and grid-doctor metadata.
 
@@ -710,7 +711,7 @@ def regrid_to_healpix(
     workdir: str | Path | None = None,
     spectral_transform_command: list[str] | tuple[str, ...] | None = None,
     cell_chunks: int | Literal["auto"] | None = "auto",
-    ellipsoid: str | None = None,
+    ellipsoid: Ellipsoid | None = None,
 ) -> xr.Dataset:
     """Regrid *ds* to a HEALPix target grid.
 
@@ -766,7 +767,7 @@ def regrid_to_healpix(
         [`apply_weight_file`][grid_doctor.remap.apply_weight_file].
         Coarser pyramid levels keep the same chunk size.
     ellipsoid:
-        Ellipsoid of the HEALPix geometry, e.g. ``"sphere"`` or
+        Ellipsoid of the HEALPix geometry, ``"sphere"`` or
         ``"WGS84"``.  Defaults to ``grid_doctor.config.healpix.ellipsoid``.
 
     Returns
@@ -815,7 +816,7 @@ def regrid_unstructured_to_healpix(
     source_units: SourceUnits = "auto",
     weights_path: str | Path | None = None,
     missing_policy: MissingPolicy = "renormalize",
-    ellipsoid: str | None = None,
+    ellipsoid: Ellipsoid | None = None,
 ) -> xr.Dataset:
     """Compatibility wrapper around [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix]."""
     if not _is_unstructured(ds):

@@ -126,6 +126,12 @@ class TestHealpixConfig:
         env = {"GRID_DOCTOR_HEALPIX__ELLIPSOID": "WGS84"}
         assert HealpixConfig.from_env(env).ellipsoid == "WGS84"
 
+    def test_rejects_unknown_ellipsoid(self) -> None:
+        with pytest.raises(ValueError, match="GRID_DOCTOR_HEALPIX__ELLIPSOID.*'wgs84'"):
+            HealpixConfig.from_env({"GRID_DOCTOR_HEALPIX__ELLIPSOID": "wgs84"})
+        with pytest.raises(ValueError, match="healpix.ellipsoid"):
+            HealpixConfig().ellipsoid = "GRS80"  # type: ignore[assignment]
+
     def test_env_var_is_read_at_import(self) -> None:
         src = str(Path(gd.__file__).parents[1])
         env = {**os.environ, "GRID_DOCTOR_HEALPIX__ELLIPSOID": "WGS84", "PYTHONPATH": src}

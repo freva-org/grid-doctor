@@ -81,7 +81,7 @@ from ..remap_backend import (
     _ellipsoid_or_config,
     _require_healpix_geo_module,
 )
-from ..types import BinAgg, Int64Array, SourceUnits
+from ..types import BinAgg, Ellipsoid, Int64Array, SourceUnits
 from .utils import (
     AGG_TO_METHOD,
     FILL_ATTR_NAMES,
@@ -115,7 +115,7 @@ def bin_to_healpix(
     min_count: int = 1,
     with_counts: bool = False,
     dense: bool = True,
-    ellipsoid: str | None = None,
+    ellipsoid: Ellipsoid | None = None,
 ) -> xr.Dataset:
     """Bin point-sampled data into HEALPix cells.
 
@@ -183,7 +183,7 @@ def bin_to_healpix(
         [`sparse_to_dense`][grid_doctor.swath.sparse_to_dense] before
         coarsening or publishing.
     ellipsoid:
-        Ellipsoid of the HEALPix geometry, e.g. ``"sphere"`` or
+        Ellipsoid of the HEALPix geometry, ``"sphere"`` or
         ``"WGS84"``.  Defaults to ``grid_doctor.config.healpix.ellipsoid``.
 
     Returns
@@ -388,7 +388,7 @@ def _scatter_to_dense(
     level: int,
     nest: bool,
     method: str,
-    ellipsoid: str | None = None,
+    ellipsoid: Ellipsoid | None = None,
 ) -> xr.Dataset:
     """Scatter compact per-cell arrays onto the full HEALPix grid."""
     npix = 12 * 4**level
@@ -424,7 +424,7 @@ def _attach_sparse_coords(
     level: int,
     nest: bool,
     method: str,
-    ellipsoid: str | None = None,
+    ellipsoid: Ellipsoid | None = None,
 ) -> xr.Dataset:
     """Attach coordinates and metadata to a compact binned dataset.
 

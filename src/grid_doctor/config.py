@@ -21,6 +21,8 @@ from typing import (
     get_type_hints,
 )
 
+from .types import Ellipsoid
+
 ENV_VAR_PREFIX = "GRID_DOCTOR"
 """Prefix of the environment variables, ``<PREFIX>_<NAMESPACE>__<KEY>``."""
 
@@ -98,12 +100,12 @@ class HealpixConfig(_Namespace):
     ellipsoid:
         Ellipsoid on which HEALPix cell centres and vertices are computed,
         passed to ``healpix_geo``: ``"sphere"`` (consistent with ESMF's
-        spherical area calculation) or a named ellipsoid such as
-        ``"WGS84"``. Environment variable: ``GRID_DOCTOR_HEALPIX__ELLIPSOID``.
+        spherical area calculation) or ``"WGS84"``.
+        Environment variable: ``GRID_DOCTOR_HEALPIX__ELLIPSOID``.
     """
 
     namespace: ClassVar[str] = "healpix"
-    ellipsoid: str = "sphere"
+    ellipsoid: Ellipsoid = "sphere"
 
 
 healpix = HealpixConfig.from_env()
