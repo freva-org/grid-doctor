@@ -655,12 +655,10 @@ def _is_writable(path: Path) -> bool:
 
 
 def _atomic_write(target: Path, write: Callable[[str], object]) -> None:
-    """Call ``write(tmp)`` on a temporary file next to *target*, then rename it."""
+    """Call ``write(tmp)`` on a new file in a scratch dir next to *target*, then rename it."""
     target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".part")
-    os.close(fd)
-    try:
-        write(tmp)
+    # Not mkstemp: its file would stay 0600 (owner only); *write* creates the file, so the umask applies.
+    with tempfile.TemporaryDirectory(dir=target.parent, prefix=f".{target.name}.") as scratch:
+        tmp = Path(scratch) / target.name
+        write(str(tmp))
         os.replace(tmp, target)
-    finally:
-        Path(tmp).unlink(missing_ok=True)

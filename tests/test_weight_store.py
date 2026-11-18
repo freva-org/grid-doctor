@@ -170,6 +170,17 @@ class TestLocalStore:
         siblings = list((tmp_path / "store" / ref.path).parent.iterdir())
         assert [p.name for p in siblings] == [f"{ref.key}.nc"]
 
+    def test_failed_publish_keeps_old_file(self, regular_ds: xr.Dataset, tmp_path: Path) -> None:
+        """A write that fails halfway neither replaces the stored file nor leaves anything behind."""
+        store, desc = WeightsStore(tmp_path / "store"), _desc(regular_ds)
+        old = store.local_path(desc)
+        store.publish(desc, _weight_file(tmp_path / "w.nc", value=2.0))
+        with pytest.raises(FileNotFoundError):
+            store.publish(desc, tmp_path / "missing.nc")
+        assert [p.name for p in old.parent.iterdir()] == [old.name]
+        with xr.open_dataset(old) as ds:
+            assert float(ds["S"][0]) == 2.0
+
     def test_read_only(self, regular_ds: xr.Dataset, tmp_path: Path) -> None:
         store = WeightsStore(tmp_path, read_only=True)
         with pytest.raises(PermissionError, match="read-only"):
@@ -235,7 +246,7 @@ class TestRemoteStore:
 
         memory_fs.rm(f"/weights/{ref.path}")
         assert store.fetch(ref) == local  # served from the local cache, no download
-        assert not list((tmp_path / "cache").rglob("*.part"))
+        assert not list((tmp_path / "cache").rglob(".*"))  # no scratch dirs left
 
     def test_fetch_missing(self, regular_ds: xr.Dataset, tmp_path: Path, memory_fs: fsspec.AbstractFileSystem) -> None:
         store = WeightsStore("memory://weights", cache_dir=tmp_path)
