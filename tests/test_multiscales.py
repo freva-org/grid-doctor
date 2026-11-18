@@ -162,6 +162,16 @@ class TestToAttrs:
         dggs = meta.to_attrs()["multiscales"]["layout"][0]["dggs"]  # type: ignore[index]
         assert dggs["ellipsoid"] == {"name": "sphere", "radius": 6371000.0}
 
+    def test_wgs84_ellipsoid_object(self) -> None:
+        meta = PyramidMetadata(levels=(PyramidLevel("level_1", HealpixGrid(level=1, ellipsoid="WGS84")),))
+        dggs = meta.to_attrs()["multiscales"]["layout"][0]["dggs"]  # type: ignore[index]
+        assert dggs["ellipsoid"] == {
+            "name": "WGS84",
+            "semi_major_axis": 6378137.0,
+            "inverse_flattening": 298.257223563,
+        }
+        _validate({"zarr_conventions": [DGGS_CONVENTION.to_dict()], "dggs": dggs}, "dggs-v1.schema.json")
+
     @pytest.mark.parametrize(
         "pyramid",
         [
@@ -204,6 +214,17 @@ class TestFromAttrs:
     def test_requires_layout(self) -> None:
         with pytest.raises(ValueError, match="no `multiscales` layout"):
             PyramidMetadata.from_attrs({"title": "nope"})
+
+    def test_wgs84_round_trip(self) -> None:
+        meta = PyramidMetadata(levels=(PyramidLevel("level_1", HealpixGrid(level=1, ellipsoid="WGS84")),))
+        stored = json.loads(json.dumps(meta.to_attrs()))
+        assert PyramidMetadata.from_attrs(stored) == meta
+
+    def test_rejects_unsupported_dggs_ellipsoid(self) -> None:
+        dggs = {"name": "healpix", "refinement_level": 1, "indexing_scheme": "nested", "spatial_dimension": "cell"}
+        dggs["ellipsoid"] = {"name": "GRS80", "semi_major_axis": 6378137.0, "inverse_flattening": 298.257222101}
+        with pytest.raises(ValueError, match="Unsupported dggs ellipsoid"):
+            PyramidMetadata.from_attrs({"multiscales": {"layout": [{"asset": "level_1", "dggs": dggs}]}})
 
     def test_rejects_other_dggs(self) -> None:
         attrs = {

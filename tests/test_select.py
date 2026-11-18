@@ -15,7 +15,7 @@ from grid_doctor import (
     select_cone,
 )
 from grid_doctor.helpers import WRITE_COORDS_MAX_LEVEL
-from grid_doctor.metadata import HealpixMetadata
+from grid_doctor.metadata import HealpixGrid, HealpixMetadata
 from grid_doctor.select import _contiguous_runs, _parents_to_ranges
 
 from .helpers import with_healpix_metadata
@@ -173,7 +173,7 @@ class TestWriteCoords:
     def _with_coords(ds: xr.Dataset) -> xr.Dataset:
         from grid_doctor.remap import _attach_healpix_coords
 
-        return _attach_healpix_coords(ds, level=LEVEL, nest=True)
+        return _attach_healpix_coords(ds, HealpixGrid(level=LEVEL))
 
     def test_false_drops_coordinate_arrays(
         self, dense_ds: xr.Dataset, tmp_path: Path

@@ -181,7 +181,7 @@ class TestCoarsenHealpix:
         monkeypatch.setattr(
             pyramid_levels,
             "healpix_coords",
-            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
         assert coarse.sizes["cell"] == 48
@@ -198,7 +198,7 @@ class TestCoarsenHealpix:
         monkeypatch.setattr(
             pyramid_levels,
             "healpix_coords",
-            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = healpix_ds.assign(scale=xr.DataArray(2.0))
         coarse = coarsen_healpix(ds, target_level=1)
@@ -211,7 +211,7 @@ class TestCoarsenHealpix:
         monkeypatch.setattr(
             pyramid_levels,
             "healpix_coords",
-            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = with_healpix_metadata(healpix_ds.copy(), 3, method="conservative")
         # Pattern repeats every 4 cells; groups of 16 contain 4 copies → mean = 3
@@ -226,7 +226,7 @@ class TestCoarsenHealpix:
         monkeypatch.setattr(
             pyramid_levels,
             "healpix_coords",
-            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = with_healpix_metadata(healpix_ds.copy(), 3, method="nearest")
         # Groups of 16: twelve 7s and four 3s → mode = 7
@@ -241,7 +241,7 @@ class TestCoarsenHealpix:
         monkeypatch.setattr(
             pyramid_levels,
             "healpix_coords",
-            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = with_healpix_metadata(healpix_ds.copy(), 3, method="nearest")
         ds["temperature"].values[:] = np.tile([0.0, 2.0, 4.0, 6.0], 192)
@@ -255,7 +255,7 @@ class TestCoarsenHealpix:
         monkeypatch.setattr(
             pyramid_levels,
             "healpix_coords",
-            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = with_healpix_metadata(healpix_ds.copy(), 3, method="conservative")
         ds["temperature"].values[:] = np.tile([5.0, 5.0, 5.0, 9.0], 192)
@@ -268,7 +268,7 @@ class TestCoarsenHealpix:
         monkeypatch.setattr(
             pyramid_levels,
             "healpix_coords",
-            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         ds = healpix_ds.copy()
         # All NaN except every 4th cell → 4 of 16 valid per group (25% < 50%).
@@ -285,7 +285,7 @@ class TestCoarsenHealpix:
         monkeypatch.setattr(
             pyramid_levels,
             "healpix_coords",
-            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
         assert "crs" in coarse.coords
@@ -302,7 +302,7 @@ class TestCoarsenHealpix:
         monkeypatch.setattr(
             pyramid_levels,
             "healpix_coords",
-            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
         for name in coarse.data_vars:
@@ -315,7 +315,7 @@ class TestCoarsenHealpix:
         monkeypatch.setattr(
             pyramid_levels,
             "healpix_coords",
-            lambda level, nest: (np.array([0.0] * 48), np.array([1.0] * 48)),
+            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
         )
         coarse = coarsen_healpix(healpix_ds, target_level=1)
         assert coarse.attrs["grid_doctor_coarsened_from_level"] == 3

@@ -11,13 +11,15 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from grid_doctor import remap, remap_backend
+from grid_doctor import config, remap, remap_backend
+from grid_doctor.metadata import ELLIPSOID_ATTR
 from grid_doctor.remap import (
     apply_weight_file,
     compute_healpix_weights,
 )
-from .helpers import _FakeHealpixModule
+from grid_doctor.types import Ellipsoid
 
+from .helpers import _FakeHealpixModule
 
 # ===================================================================
 # Fake ESMPy objects for in-memory weight generation
@@ -132,12 +134,12 @@ class TestWeightGeneration:
         monkeypatch.setattr(
             remap_backend,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda grid: (_FakeHealpixModule(), {}),
         )
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda grid: (_FakeHealpixModule(), {}),
         )
         path = tmp_path / "weights.nc"
         result = compute_healpix_weights(
@@ -153,6 +155,27 @@ class TestWeightGeneration:
             == _FakeESMPy.RegridMethod.NEAREST_STOD
         )
 
+    @pytest.mark.parametrize(
+        ("argument", "expected"), [(None, "WGS84"), ("sphere", "sphere")], ids=["config", "argument"]
+    )
+    def test_weight_file_records_its_ellipsoid(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        regular_ds: xr.Dataset,
+        tmp_path: Path,
+        argument: Ellipsoid | None,
+        expected: Ellipsoid,
+    ) -> None:
+        monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
+        monkeypatch.setattr(
+            remap_backend, "_require_healpix_geo_module", lambda grid: (_FakeHealpixModule(), {})
+        )
+        path = tmp_path / "weights.nc"
+        with config.healpix.set(ellipsoid="WGS84"):
+            compute_healpix_weights(regular_ds, 1, method="nearest", weights_path=path, ellipsoid=argument)
+        with xr.open_dataset(path) as ds:
+            assert ds.attrs[ELLIPSOID_ATTR] == expected
+
     def test_compute_healpix_weights_conservative(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -165,12 +188,12 @@ class TestWeightGeneration:
         monkeypatch.setattr(
             remap_backend,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda grid: (_FakeHealpixModule(), {}),
         )
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda grid: (_FakeHealpixModule(), {}),
         )
         path = tmp_path / "weights.nc"
         compute_healpix_weights(
@@ -198,12 +221,12 @@ class TestWeightGeneration:
         monkeypatch.setattr(
             remap_backend,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda grid: (_FakeHealpixModule(), {}),
         )
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
-            lambda nest: (_FakeHealpixModule(), {}),
+            lambda grid: (_FakeHealpixModule(), {}),
         )
         path = tmp_path / "weights.nc"
         compute_healpix_weights(

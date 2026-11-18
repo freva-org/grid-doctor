@@ -15,7 +15,7 @@ import numpy as np
 import numpy.typing as npt
 import xarray as xr
 
-from .types import RemapMethod, SourceUnits, WeightOptions
+from .types import Ellipsoid, RemapMethod, SourceUnits, WeightOptions
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +195,7 @@ def cached_weights(
     nest: bool = True,
     source_units: SourceUnits = "auto",
     cache_path: str | Path | None = None,
+    ellipsoid: Ellipsoid | None = None,
     **kwargs: Unpack[WeightOptions],
 ) -> Path:
     """Compute or load a cached HEALPix weight file.
@@ -215,6 +216,10 @@ def cached_weights(
     cache_path:
         Cache directory or explicit file name. When omitted,
         the default package cache directory is used.
+    ellipsoid:
+        Ellipsoid of the HEALPix target, ``"sphere"`` or ``"WGS84"``.
+        Defaults to ``grid_doctor.config.healpix.ellipsoid``.  Part of
+        the cache key, so weights are never reused across ellipsoids.
     **kwargs:
         Any additional keyword arguments for
         [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights]
@@ -232,6 +237,9 @@ def cached_weights(
     """
     from .helpers import get_latlon_resolution, resolution_to_healpix_level
     from .remap import compute_healpix_weights
+    from .remap_backend import _ellipsoid_or_config
+
+    ellipsoid = _ellipsoid_or_config(ellipsoid)
 
     digest = hashlib.sha256()
     for candidate in (
@@ -257,6 +265,10 @@ def cached_weights(
     digest.update(
         f"level={level};method={method};nest={nest};units={source_units}".encode()
     )
+    if ellipsoid != "sphere":
+        # Sphere keys stay as they were before the ellipsoid was recorded,
+        # so existing (spherical) cached weight files remain valid.
+        digest.update(f";ellipsoid={ellipsoid}".encode())
     key = digest.hexdigest()[:16]
 
     if cache_path is None:
@@ -279,6 +291,7 @@ def cached_weights(
         nest=nest,
         source_units=source_units,
         weights_path=weight_file,
+        ellipsoid=ellipsoid,
         **kwargs,
     )
 

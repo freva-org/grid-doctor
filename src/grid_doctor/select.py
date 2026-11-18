@@ -49,8 +49,12 @@ from .metadata import (
     Provenance,
     has_healpix_metadata,
 )
-from .remap_backend import _canonical_lon, _require_healpix_geo_module
-from .types import Int64Array
+from .remap_backend import (
+    _canonical_lon,
+    _ellipsoid_or_config,
+    _require_healpix_geo_module,
+)
+from .types import Ellipsoid, Int64Array
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +95,17 @@ def _dataset_level(ds: xr.Dataset, level: int | None) -> int:
             "Dataset has no HEALPix grid mapping (`crs`); pass `level=` explicitly."
         )
     return HealpixMetadata.from_dataset(ds).grid.level
+
+
+def _dataset_ellipsoid(ds: xr.Dataset) -> Ellipsoid:
+    """Return the ellipsoid recorded in *ds*.
+
+    A dataset without HEALPix metadata (selected with an explicit
+    ``level=``) records none and gets ``grid_doctor.config.healpix.ellipsoid``.
+    """
+    if has_healpix_metadata(ds):
+        return HealpixMetadata.from_dataset(ds).grid.ellipsoid
+    return _ellipsoid_or_config(None)
 
 
 def _require_nested(ds: xr.Dataset) -> None:
@@ -228,7 +243,8 @@ def select_bbox(
     """
     resolved_level = _dataset_level(ds, level)
     query_level = max(0, resolved_level - query_delta)
-    module, kwargs = _require_healpix_geo_module(nest=True)
+    query_grid = HealpixGrid(level=query_level, ellipsoid=_dataset_ellipsoid(ds))
+    module, kwargs = _require_healpix_geo_module(query_grid)
     coverage = np.asarray(
         module.zone_coverage(
             (lon[0], lat[0], lon[1], lat[1]),
@@ -285,7 +301,8 @@ def select_cone(
     """
     resolved_level = _dataset_level(ds, level)
     query_level = max(0, resolved_level - query_delta)
-    module, kwargs = _require_healpix_geo_module(nest=True)
+    query_grid = HealpixGrid(level=query_level, ellipsoid=_dataset_ellipsoid(ds))
+    module, kwargs = _require_healpix_geo_module(query_grid)
     coverage = np.asarray(
         module.cone_coverage((lon, lat), radius, query_level, flat=True, **kwargs)
     )
@@ -311,7 +328,8 @@ def attach_cell_coords(
 
     HEALPix coordinates are a pure function of the cell index; stores
     written with ``write_coords=False`` carry none, and this function
-    reconstructs them for exactly the cells at hand.
+    reconstructs them for exactly the cells at hand, on the ellipsoid
+    recorded in *ds* (the configured one if *ds* has no HEALPix metadata).
 
     Parameters
     ----------
@@ -337,7 +355,8 @@ def attach_cell_coords(
             f"Dataset has {ds.sizes.get('cell')} cells but {cells.size} "
             "IDs were provided."
         )
-    module, kwargs = _require_healpix_geo_module(nest=True)
+    grid = HealpixGrid(level=level, ellipsoid=_dataset_ellipsoid(ds))
+    module, kwargs = _require_healpix_geo_module(grid)
     lon_deg, lat_deg = module.healpix_to_lonlat(cells, level, **kwargs)
 
     result = ds.assign_coords(
@@ -355,7 +374,7 @@ def attach_cell_coords(
         merged.update(result.attrs)
         result.attrs = merged
     metadata = HealpixMetadata(
-        HealpixGrid(level=level),
+        grid,
         Provenance.from_attrs(result.attrs),
         sparse=True,
     )

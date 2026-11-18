@@ -88,6 +88,9 @@ SourceUnits = Literal["auto", "deg", "rad"]
 SourceKind = Literal["auto", "regular", "curvilinear", "unstructured", "spectral"]
 """Explicit source grid classification."""
 
+Ellipsoid = Literal["sphere", "WGS84"]
+"""Reference ellipsoid of the HEALPix geometry, as a ``healpix_geo`` name."""
+
 CoarsenMode = Literal["mean", "mode", "auto"]
 """Coarsening strategy for HEALPix pyramid construction."""
 
