@@ -159,22 +159,39 @@ class TestCF:
         attrs = {"grid_mapping_name": "healpix", "indexing_scheme": "nested", "refinement_level": 1}
         assert grid_from_mapping(attrs).ellipsoid == "sphere"
 
-    def test_wgs84_is_recognised_by_its_parameters(self) -> None:
+    @pytest.mark.parametrize("dtype", [float, np.float64, np.float32])
+    def test_wgs84_is_recognised_by_its_parameters(self, dtype: type) -> None:
+        # float32 attributes cannot hold the exact values; they match at float32 precision.
         attrs = {
             "grid_mapping_name": "healpix",
             "indexing_scheme": "nested",
             "refinement_level": 1,
-            "semi_major_axis": 6378137.0,
-            "inverse_flattening": 298.257223563,
+            "semi_major_axis": dtype(6378137.0),
+            "inverse_flattening": dtype(298.257223563),
         }
         assert grid_from_mapping(attrs).ellipsoid == "WGS84"
+
+    @pytest.mark.parametrize("name", ["WGS 84", "WGS84", np.str_("WGS 84")])
+    def test_wgs84_is_recognised_by_its_name(self, name: str) -> None:
+        attrs = {"grid_mapping_name": "healpix", "indexing_scheme": "nested", "refinement_level": 1}
+        assert grid_from_mapping({**attrs, "reference_ellipsoid_name": name}).ellipsoid == "WGS84"
+
+    def test_name_and_agreeing_parameters_are_accepted(self) -> None:
+        attrs = {"grid_mapping_name": "healpix", "indexing_scheme": "nested", "refinement_level": 1}
+        figure = {"reference_ellipsoid_name": "WGS84", "inverse_flattening": np.float32(298.257223563)}
+        assert grid_from_mapping({**attrs, **figure}).ellipsoid == "WGS84"
 
     @pytest.mark.parametrize(
         "figure",
         [
             {"reference_ellipsoid_name": "GRS 1980"},
+            {"reference_ellipsoid_name": "wgs84"},
+            {"reference_ellipsoid_name": ["WGS 84"]},
             {"semi_major_axis": 6378137.0, "inverse_flattening": 298.257222101},
             {"semi_major_axis": 6378137.0},
+            {"semi_major_axis": np.float16(6378137.0), "inverse_flattening": np.float16(298.257223563)},
+            {"reference_ellipsoid_name": "WGS 84", "inverse_flattening": 298.257222101},
+            {"reference_ellipsoid_name": "WGS 84", "semi_major_axis": "6378137"},
         ],
     )
     def test_rejects_unsupported_figure_of_the_earth(self, figure: dict[str, object]) -> None:
