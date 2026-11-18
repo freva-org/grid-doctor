@@ -25,7 +25,12 @@ from dataclasses import dataclass
 import xarray as xr
 
 from ._dataset import HealpixMetadata, has_healpix_metadata
-from ._grid import WGS84_INVERSE_FLATTENING, WGS84_SEMI_MAJOR_AXIS, HealpixGrid
+from ._grid import (
+    ELLIPSOIDS,
+    WGS84_INVERSE_FLATTENING,
+    WGS84_SEMI_MAJOR_AXIS,
+    HealpixGrid,
+)
 from ._keys import CELL_DIM, GRID_MAPPING_NAME
 
 # ---------------------------------------------------------------------
@@ -353,7 +358,7 @@ def _grid_from_dggs(dggs: Mapping[str, object]) -> HealpixGrid:
     ellipsoid = dggs.get("ellipsoid")
     ellipsoid = ellipsoid if isinstance(ellipsoid, Mapping) else {}
     name = ellipsoid.get("name", "sphere")
-    if name not in ("sphere", "WGS84"):
+    if name not in ELLIPSOIDS:
         raise ValueError(f"Unsupported dggs ellipsoid: {dict(ellipsoid)!r}.")
     return HealpixGrid(
         level=dggs.get("refinement_level"),  # type: ignore[arg-type]
