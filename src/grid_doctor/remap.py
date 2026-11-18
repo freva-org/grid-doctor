@@ -106,26 +106,18 @@ def _source_centre_arrays(
 # ===================================================================
 
 
-def _healpix_centres(
-    level: int,
-    *,
-    nest: bool,
-    ellipsoid: Ellipsoid | None = None,
-) -> tuple[FloatArray, FloatArray]:
+def _healpix_centres(grid: HealpixGrid) -> tuple[FloatArray, FloatArray]:
     """Return HEALPix cell-centre coordinates in degrees.
 
     Args:
-        level: HEALPix refinement level.
-        nest: Nested ordering when *True*, otherwise ring.
-        ellipsoid: Ellipsoid of the geometry; ``None`` uses
-            ``grid_doctor.config.healpix.ellipsoid``.
+        grid: HEALPix grid; its ellipsoid sets the geometry.
 
     Returns:
         ``(lat_deg, lon_deg)`` arrays.
     """
-    module, kwargs = _require_healpix_geo_module(nest, ellipsoid=ellipsoid)
-    ipix = np.arange(12 * (4**level), dtype=np.int64)
-    lon_deg, lat_deg = module.healpix_to_lonlat(ipix, level, **kwargs)
+    module, kwargs = _require_healpix_geo_module(grid)
+    ipix = np.arange(grid.npix, dtype=np.int64)
+    lon_deg, lat_deg = module.healpix_to_lonlat(ipix, grid.level, **kwargs)
     return (
         np.asarray(lat_deg, dtype=np.float64),
         _canonical_lon(np.asarray(lon_deg, dtype=np.float64)),
@@ -644,13 +636,12 @@ def apply_weight_file(
 
     result = xr.Dataset(regridded, attrs=ds.attrs.copy())
     if level >= 0:
-        result = _attach_healpix_coords(
-            result,
-            level=level,
+        target_grid = HealpixGrid.from_nest(
+            level,
             nest=(order == "nested"),
-            method=method,
             ellipsoid=_ellipsoid_or_config(ellipsoid),
         )
+        result = _attach_healpix_coords(result, target_grid, method=method)
     return result
 
 
@@ -661,11 +652,9 @@ def apply_weight_file(
 
 def _attach_healpix_coords(
     ds_hp: xr.Dataset,
+    grid: HealpixGrid,
     *,
-    level: int,
-    nest: bool,
     method: str | None = None,
-    ellipsoid: Ellipsoid | None = None,
 ) -> xr.Dataset:
     """Attach dense HEALPix cell coordinates and grid-doctor metadata.
 
@@ -673,8 +662,7 @@ def _attach_healpix_coords(
     coordinates; everything else (``crs``, CF attributes, provenance)
     is written by [`HealpixMetadata.apply`][grid_doctor.metadata.HealpixMetadata.apply].
     """
-    grid = HealpixGrid.from_nest(level, nest=nest)
-    lat_deg, lon_deg = _healpix_centres(level, nest=nest, ellipsoid=ellipsoid)
+    lat_deg, lon_deg = _healpix_centres(grid)
     ds_hp = ds_hp.assign_coords(
         {
             CELL_DIM: np.arange(grid.npix, dtype=np.int64),

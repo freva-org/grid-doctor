@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from esmpy import Mesh
 
 from . import config
+from .metadata import HealpixGrid
 from .types import (
     Ellipsoid,
     FloatArray,
@@ -292,13 +293,13 @@ def _ellipsoid_or_config(ellipsoid: Ellipsoid | None) -> Ellipsoid:
 
 
 def _require_healpix_geo_module(
-    nest: bool, ellipsoid: Ellipsoid | None = None
+    grid: HealpixGrid,
 ) -> tuple[ModuleType, dict[str, str]]:
     """Import and return the appropriate ``healpix_geo`` sub-module.
 
-    HEALPix geometry is computed on *ellipsoid*, or on
-    ``grid_doctor.config.healpix.ellipsoid`` when it is ``None``.
-    The default, a perfect
+    HEALPix geometry is defined on ``grid.ellipsoid``, or on
+    ``grid_doctor.config.healpix.ellipsoid`` when the grid leaves it
+    unspecified.  The default, a perfect
     sphere, is consistent with ESMF's internal area calculation
     (``CoordSys.SPH_DEG``) and with the geocentric coordinates used
     by climate models.  The maximum latitude discrepancy relative to
@@ -306,10 +307,8 @@ def _require_healpix_geo_module(
     well within the tolerance of conservative remapping.
 
     Args:
-        nest: Select `healpix_geo.nested` when *True*, otherwise
-            `healpix_geo.ring`.
-        ellipsoid: ``healpix_geo`` ellipsoid name; ``None`` uses the
-            configured one.
+        grid: Grid whose indexing scheme selects `healpix_geo.nested`
+            or `healpix_geo.ring` and whose ellipsoid is used.
 
     Returns:
         ``(module, kwargs)`` where *kwargs* should be forwarded to
@@ -319,7 +318,7 @@ def _require_healpix_geo_module(
         ImportError: When `healpix-geo` is not installed.
     """
     try:
-        if nest:
+        if grid.nest:
             from healpix_geo import nested as module
         else:
             from healpix_geo import ring as module
@@ -327,7 +326,7 @@ def _require_healpix_geo_module(
         raise ImportError(
             "healpix-geo is required to construct HEALPix polygons."
         ) from exc
-    return module, {"ellipsoid": _ellipsoid_or_config(ellipsoid)}
+    return module, {"ellipsoid": _ellipsoid_or_config(grid.ellipsoid)}
 
 
 # ===================================================================
@@ -1343,25 +1342,18 @@ def _source_mesh(
 # ===================================================================
 
 
-def _target_healpix_mesh(
-    level: int,
-    *,
-    nest: bool,
-    ellipsoid: Ellipsoid | None = None,
-) -> tuple[Int64Array, PolygonMesh]:
+def _target_healpix_mesh(grid: HealpixGrid) -> tuple[Int64Array, PolygonMesh]:
     """Return the HEALPix destination mesh.
 
     Args:
-        level: HEALPix refinement level.
-        nest: Use nested ordering when *True*.
-        ellipsoid: Ellipsoid of the mesh; ``None`` uses the configured one.
+        grid: Target HEALPix grid.
 
     Returns:
         ``(ipix, mesh)`` where *ipix* is the pixel index array.
     """
-    module, kwargs = _require_healpix_geo_module(nest, ellipsoid=ellipsoid)
-    ipix = np.arange(12 * (4**level), dtype=np.int64)
-    lon_v, lat_v = module.vertices(ipix, level, **kwargs)
+    module, kwargs = _require_healpix_geo_module(grid)
+    ipix = np.arange(grid.npix, dtype=np.int64)
+    lon_v, lat_v = module.vertices(ipix, grid.level, **kwargs)
     cell_lon = _canonical_lon(np.asarray(lon_v, dtype=np.float64))
     cell_lat = np.asarray(lat_v, dtype=np.float64)
     return ipix, _corner_mesh_from_arrays(cell_lon, cell_lat)
@@ -1945,9 +1937,10 @@ def compute_healpix_weights_backend(
         spectral_transform_command=spectral_transform_command,
         workdir=offline_cfg.workdir,
     )
-    _, target_mesh = _target_healpix_mesh(
+    target_grid = HealpixGrid.from_nest(
         level, nest=nest, ellipsoid=_ellipsoid_or_config(ellipsoid)
     )
+    _, target_mesh = _target_healpix_mesh(target_grid)
 
     use_offline = _default_offline_enabled(
         method=method,

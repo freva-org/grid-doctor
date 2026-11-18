@@ -15,6 +15,7 @@ import xarray as xr
 import grid_doctor as gd
 from grid_doctor import remap, swath
 from grid_doctor.config import HealpixConfig, _Namespace
+from grid_doctor.metadata import HealpixGrid
 from grid_doctor.types import Ellipsoid
 
 
@@ -176,12 +177,14 @@ class TestEllipsoidArgument:
         def fake_lonlat_to_healpix(lon: np.ndarray, lat: np.ndarray, **kwargs: object) -> np.ndarray:
             return np.zeros(lon.size, dtype=np.int64)  # every point in cell 0
 
-        def fake_geo_module(nest: bool, ellipsoid: Ellipsoid) -> tuple[SimpleNamespace, dict[str, str]]:
-            passed["cells"] = ellipsoid
+        def fake_geo_module(grid: HealpixGrid) -> tuple[SimpleNamespace, dict[str, str]]:
+            assert grid.ellipsoid is not None
+            passed["cells"] = grid.ellipsoid
             return SimpleNamespace(lonlat_to_healpix=fake_lonlat_to_healpix), {}
 
-        def fake_coords(ds: xr.Dataset, *args: object, ellipsoid: Ellipsoid, **kwargs: object) -> xr.Dataset:
-            passed["coords"] = ellipsoid
+        def fake_coords(ds: xr.Dataset, cell_ids: np.ndarray, grid: HealpixGrid, **kwargs: object) -> xr.Dataset:
+            assert grid.ellipsoid is not None
+            passed["coords"] = grid.ellipsoid
             return ds
 
         monkeypatch.setattr(swath, "_require_healpix_geo_module", fake_geo_module)

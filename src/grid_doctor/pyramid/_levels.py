@@ -44,7 +44,7 @@ FractionShape = Literal["full", "static"]
 
 def healpix_coords(level: int, *, nest: bool) -> tuple[FloatArray, FloatArray]:
     """Return ``(lat_deg, lon_deg)`` HEALPix cell centres for *level*."""
-    return _healpix_centres(level, nest=nest)
+    return _healpix_centres(HealpixGrid.from_nest(level, nest=nest))
 
 
 def resolve_coarsen_mode(ds: xr.Dataset, coarsen_mode: CoarsenMode) -> CoarsenMode:

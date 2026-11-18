@@ -228,7 +228,7 @@ def select_bbox(
     """
     resolved_level = _dataset_level(ds, level)
     query_level = max(0, resolved_level - query_delta)
-    module, kwargs = _require_healpix_geo_module(nest=True)
+    module, kwargs = _require_healpix_geo_module(HealpixGrid(level=query_level))
     coverage = np.asarray(
         module.zone_coverage(
             (lon[0], lat[0], lon[1], lat[1]),
@@ -285,7 +285,7 @@ def select_cone(
     """
     resolved_level = _dataset_level(ds, level)
     query_level = max(0, resolved_level - query_delta)
-    module, kwargs = _require_healpix_geo_module(nest=True)
+    module, kwargs = _require_healpix_geo_module(HealpixGrid(level=query_level))
     coverage = np.asarray(
         module.cone_coverage((lon, lat), radius, query_level, flat=True, **kwargs)
     )
@@ -337,7 +337,8 @@ def attach_cell_coords(
             f"Dataset has {ds.sizes.get('cell')} cells but {cells.size} "
             "IDs were provided."
         )
-    module, kwargs = _require_healpix_geo_module(nest=True)
+    grid = HealpixGrid(level=level)
+    module, kwargs = _require_healpix_geo_module(grid)
     lon_deg, lat_deg = module.healpix_to_lonlat(cells, level, **kwargs)
 
     result = ds.assign_coords(
@@ -355,7 +356,7 @@ def attach_cell_coords(
         merged.update(result.attrs)
         result.attrs = merged
     metadata = HealpixMetadata(
-        HealpixGrid(level=level),
+        grid,
         Provenance.from_attrs(result.attrs),
         sparse=True,
     )

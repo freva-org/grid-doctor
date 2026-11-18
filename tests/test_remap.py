@@ -13,6 +13,7 @@ import xarray as xr
 
 from grid_doctor import remap
 from grid_doctor import remap_backend as remap_backend_module
+from grid_doctor.metadata import HealpixGrid
 from grid_doctor.remap import (
     _attach_healpix_coords,
     _flattened_size,
@@ -191,7 +192,7 @@ class TestBackendCoordinateGuards:
         healpix.ring = ring  # type: ignore[attr-defined]
         monkeypatch.setitem(__import__("sys").modules, "healpix_geo", healpix)
         monkeypatch.setitem(__import__("sys").modules, "healpix_geo.ring", ring)
-        module, kwargs = _require_healpix_geo_module(nest=False)
+        module, kwargs = _require_healpix_geo_module(HealpixGrid(level=1, indexing_scheme="ring"))
         assert module is ring
         assert kwargs == {"ellipsoid": "sphere"}
 
@@ -483,7 +484,7 @@ class TestBackendExternalWorkflows:
         monkeypatch.setattr(
             remap_backend_module,
             "_target_healpix_mesh",
-            lambda level, nest, ellipsoid=None: (np.array([0], dtype=np.int64), target_mesh),
+            lambda grid: (np.array([0], dtype=np.int64), target_mesh),
         )
 
         def offline(**kwargs: Any) -> Path:
@@ -686,9 +687,9 @@ class TestHealpixCentres:
         monkeypatch.setattr(
             remap,
             "_require_healpix_geo_module",
-            lambda nest, ellipsoid=None: (_FakeHealpixModule(), {}),
+            lambda grid: (_FakeHealpixModule(), {}),
         )
-        lat, lon = _healpix_centres(1, nest=True)
+        lat, lon = _healpix_centres(HealpixGrid(level=1))
         assert lat.shape == lon.shape
         assert lat.size == 48
 
@@ -1203,7 +1204,7 @@ class TestPublicRegridding:
 class TestAttachHealpixCoords:
     def test_attach_coords(self) -> None:
         ds = xr.Dataset({"t": ("cell", np.arange(12.0))})
-        result = _attach_healpix_coords(ds, level=0, nest=False, method="nearest")
+        result = _attach_healpix_coords(ds, HealpixGrid(level=0, indexing_scheme="ring"), method="nearest")
         assert "latitude" in result.coords
         assert "longitude" in result.coords
         np.testing.assert_array_equal(result["cell"].values, np.arange(12))
@@ -1219,4 +1220,4 @@ class TestAttachHealpixCoords:
     def test_rejects_wrong_cell_count(self) -> None:
         ds = xr.Dataset({"t": ("cell", np.arange(2.0))})
         with pytest.raises(ValueError, match="conflicting sizes|cells"):
-            _attach_healpix_coords(ds, level=2, nest=True)
+            _attach_healpix_coords(ds, HealpixGrid(level=2))

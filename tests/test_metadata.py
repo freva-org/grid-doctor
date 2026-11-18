@@ -94,6 +94,22 @@ class TestHealpixGrid:
         with pytest.raises(ValueError, match="earth_radius"):
             HealpixGrid(level=1, earth_radius=radius)  # type: ignore[arg-type]
 
+    def test_ellipsoid_is_unspecified_by_default(self) -> None:
+        assert HealpixGrid(level=1).ellipsoid is None
+
+    def test_from_nest_passes_ellipsoid(self) -> None:
+        assert HealpixGrid.from_nest(1, nest=True, ellipsoid="WGS84").ellipsoid == "WGS84"
+
+    @pytest.mark.parametrize("ellipsoid", ["", 84, "GRS80", "wgs84"])
+    def test_rejects_invalid_ellipsoid(self, ellipsoid: object) -> None:
+        with pytest.raises(ValueError, match="ellipsoid"):
+            HealpixGrid(level=1, ellipsoid=ellipsoid)  # type: ignore[arg-type]
+
+    def test_radius_requires_a_sphere(self) -> None:
+        assert HealpixGrid(level=1, earth_radius=6.4e6, ellipsoid="sphere").ellipsoid == "sphere"
+        with pytest.raises(ValueError, match="earth_radius"):
+            HealpixGrid(level=1, earth_radius=6.4e6, ellipsoid="WGS84")
+
     def test_is_immutable(self) -> None:
         grid = HealpixGrid(level=1)
         with pytest.raises(AttributeError):

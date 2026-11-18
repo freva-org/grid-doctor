@@ -5,9 +5,11 @@ from __future__ import annotations
 import math
 import numbers
 from dataclasses import dataclass
-from typing import Final, Literal, get_args
+from typing import Final, Literal, cast, get_args
 
 import numpy as np
+
+from ..types import Ellipsoid
 
 IndexingScheme = Literal["nested", "ring"]
 """HEALPix indexing schemes grid-doctor produces.
@@ -19,6 +21,8 @@ INDEXING_SCHEMES: Final = frozenset(get_args(IndexingScheme))
 
 MAX_LEVEL: Final = 29
 """Deepest HEALPix level addressable with 64-bit nested indices."""
+
+ELLIPSOIDS: Final = frozenset(get_args(Ellipsoid))
 
 
 def _as_level(value: object) -> int:
@@ -43,6 +47,15 @@ def _as_radius(value: object) -> float | None:
     return radius
 
 
+def _as_ellipsoid(value: object) -> Ellipsoid | None:
+    """Return *value* as a supported ellipsoid name, or ``None``."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or value not in ELLIPSOIDS:
+        raise ValueError(f"ellipsoid must be one of {sorted(ELLIPSOIDS)} or None, not {value!r}.")
+    return cast(Ellipsoid, str(value))
+
+
 @dataclass(frozen=True, slots=True)
 class HealpixGrid:
     """A HEALPix grid: refinement level, indexing scheme and figure of the earth.
@@ -62,8 +75,12 @@ class HealpixGrid:
         ``"nested"`` (default) or ``"ring"``.
     earth_radius:
         Radius of the spherical earth in metres, if it should be
-        recorded.  ``None`` leaves the figure of the earth unspecified;
-        grid-doctor's geometry is spherical either way.
+        recorded.  Only valid on a sphere.
+    ellipsoid:
+        Ellipsoid the cell geometry is computed on, as a ``healpix_geo``
+        name: ``"sphere"`` or ``"WGS84"``.  ``None`` leaves it
+        unspecified; geometry then uses
+        ``grid_doctor.config.healpix.ellipsoid``.
 
     Examples
     --------
@@ -75,6 +92,7 @@ class HealpixGrid:
     level: int
     indexing_scheme: IndexingScheme = "nested"
     earth_radius: float | None = None
+    ellipsoid: Ellipsoid | None = None
 
     def __post_init__(self) -> None:
         """Validate and normalise the fields."""
@@ -86,11 +104,16 @@ class HealpixGrid:
             )
         object.__setattr__(self, "indexing_scheme", scheme)
         object.__setattr__(self, "earth_radius", _as_radius(self.earth_radius))
+        object.__setattr__(self, "ellipsoid", _as_ellipsoid(self.ellipsoid))
+        if self.earth_radius is not None and self.ellipsoid not in (None, "sphere"):
+            raise ValueError(
+                f"earth_radius describes a sphere and cannot be combined with ellipsoid={self.ellipsoid!r}."
+            )
 
     @classmethod
-    def from_nest(cls, level: int, *, nest: bool) -> HealpixGrid:
+    def from_nest(cls, level: int, *, nest: bool, ellipsoid: Ellipsoid | None = None) -> HealpixGrid:
         """Build a grid from the healpy-style ``nest`` flag."""
-        return cls(level=level, indexing_scheme="nested" if nest else "ring")
+        return cls(level=level, indexing_scheme="nested" if nest else "ring", ellipsoid=ellipsoid)
 
     @property
     def nside(self) -> int:
