@@ -657,7 +657,7 @@ def _is_writable(path: Path) -> bool:
 def _atomic_write(target: Path, write: Callable[[str], object]) -> None:
     """Call ``write(tmp)`` on a new file in a scratch dir next to *target*, then rename it."""
     target.parent.mkdir(parents=True, exist_ok=True)
-    # Not mkstemp: its file would stay 0600 (owner only); *write* creates the file, so the umask applies.
+    # Not mkstemp: its file would stay 0600 (owner only); *write* creates the file, so the umask or default ACL applies.
     with tempfile.TemporaryDirectory(dir=target.parent, prefix=f".{target.name}.") as scratch:
         tmp = Path(scratch) / target.name
         write(str(tmp))

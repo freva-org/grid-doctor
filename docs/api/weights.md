@@ -71,6 +71,19 @@ cache instead.
 Only local directories and in-memory filesystems (`memory://`, for tests)
 are supported for now.
 
+`grid-doctor` does not manage permissions: directories and weight files are
+created as the user's umask, or the directory's default ACL, allows. A
+store shared between users needs a default ACL on its root, set once by
+whoever administers it, e.g. for the group `ab1234`:
+
+```bash
+setfacl -m g:ab1234:rwx -d -m g:ab1234:rwx /work/ab1234/weights
+```
+
+Every directory and file created below the root then inherits it,
+whatever each user's umask. A `PermissionError` on a shared store
+therefore points at the store's setup, not at grid-doctor.
+
 The same grid is recognised whatever its conventions: coordinates in
 radians or degrees, longitudes in `0..360` or `[-180, 180)` and differing
 variable names all lead to the same weight file.
