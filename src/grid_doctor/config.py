@@ -102,7 +102,10 @@ class HealpixConfig(_Namespace):
         ``healpix_geo``: ``"sphere"`` (consistent with ESMF's spherical
         area calculation) or ``"WGS84"``.  It is recorded in the output
         and in weight files; code reading existing data uses the recorded
-        one (a sphere if none is recorded), never this setting.
+        one instead (a sphere if the HEALPix metadata or weight file
+        records none).  Only a dataset with no HEALPix metadata at all,
+        selected from with an explicit ``level=``, falls back to this
+        setting.
         Environment variable: ``GRID_DOCTOR_HEALPIX__ELLIPSOID``.
     """
 
