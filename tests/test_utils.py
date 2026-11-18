@@ -284,16 +284,6 @@ class TestCachedWeights:
         assert len(paths) == 1
         assert len(computed) == 1
 
-    def test_nest_is_deprecated(
-        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
-    ) -> None:
-        """Weight files are nested; ring order is chosen when applying them."""
-        with pytest.warns(DeprecationWarning, match="nest=False"):
-            ring = cached_weights(regular_ds, 2, nest=False, store=tmp_path)
-        assert ring == cached_weights(regular_ds, 2, store=tmp_path) == tmp_path / self._ref(regular_ds, 2)
-        assert computed[0]["nest"] is True
-        assert len(computed) == 1
-
     def test_ignore_unmapped_false_checks_cache_hits(
         self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
     ) -> None:

@@ -7,7 +7,6 @@ import json
 import logging
 import pickle
 import tempfile
-import warnings
 from os import environ
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Collection, Literal, Unpack, cast
@@ -196,7 +195,6 @@ def cached_weights(
     level: int | None = None,
     *,
     method: RemapMethod = "conservative",
-    nest: bool = True,
     source_units: SourceUnits = "auto",
     store: WeightsStore | str | Path | None = None,
     **kwargs: Unpack[WeightOptions],
@@ -218,11 +216,6 @@ def cached_weights(
     method:
         Weight-generation method. Supported values are `"nearest"` and
         `"conservative"`.
-    nest:
-        Deprecated, has no effect: weight files are nested. Choose ring
-        order where the weights are applied, e.g.
-        ``apply_weight_file(..., nest=False)`` or
-        ``create_healpix_pyramid(..., nest=False)``.
     source_units:
         Unit convention of the source coordinates.
     store:
@@ -252,12 +245,6 @@ def cached_weights(
     from .weights import WeightsStore as _WeightsStore
     from .weights import check_coverage, describe_source
 
-    if not nest:
-        warnings.warn(
-            "`nest=False` has no effect: weight files are nested; pass `nest=False` where they are applied.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
     if not isinstance(store, _WeightsStore):
         store = _WeightsStore(store)
     if level is None:
