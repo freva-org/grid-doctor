@@ -16,6 +16,7 @@ nav:
   - API Reference:
       - High Level API: api/helpers.md
       - Regridding: api/remap.md
+      - Weights Store: api/weights.md
       - Point Binning: api/swath.md
       - Parallel Writes: api/parallel.md
       - Helper Utilities: api/utils.md
