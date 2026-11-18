@@ -33,11 +33,12 @@ levels on the root group (see
 
 from ._cf import grid_mapping_attrs, merge_conventions
 from ._dataset import HealpixMetadata, has_healpix_metadata
-from ._grid import INDEXING_SCHEMES, MAX_LEVEL, HealpixGrid, IndexingScheme
+from ._grid import ELLIPSOIDS, INDEXING_SCHEMES, MAX_LEVEL, HealpixGrid, IndexingScheme
 from ._keys import (
     CELL_DIM,
     CF_VERSION,
     CRS_VAR,
+    ELLIPSOID_ATTR,
     INDEX_STANDARD_NAME,
     LAT_VAR,
     LON_VAR,
@@ -57,6 +58,8 @@ __all__ = [
     "CF_VERSION",
     "CRS_VAR",
     "DGGS_CONVENTION",
+    "ELLIPSOIDS",
+    "ELLIPSOID_ATTR",
     "INDEXING_SCHEMES",
     "INDEX_STANDARD_NAME",
     "LAT_VAR",

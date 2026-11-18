@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
+import grid_doctor as gd
 from grid_doctor.utils import (
     cache_dir,
     cached_open_dataset,
@@ -267,3 +268,39 @@ class TestCachedWeights:
         path1 = cached_weights(regular_ds, 1, method="nearest", cache_path=tmp_path)
         path2 = cached_weights(regular_ds, 2, method="nearest", cache_path=tmp_path)
         assert path1 != path2
+
+    @staticmethod
+    def _recording_compute(calls: list[dict[str, object]]) -> object:
+        """A ``compute_healpix_weights`` stand-in writing an empty weight file where asked."""
+
+        def fake_compute(ds: xr.Dataset, level: int, **kwargs: object) -> Path:
+            calls.append(kwargs)
+            target = Path(str(kwargs["weights_path"]))
+            xr.Dataset({"row": ("nnz", [1]), "col": ("nnz", [1]), "S": ("nnz", [1.0])}).to_netcdf(target)
+            return target
+
+        return fake_compute
+
+    def test_cache_key_depends_on_ellipsoid(
+        self, regular_ds: xr.Dataset, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[dict[str, object]] = []
+        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", self._recording_compute(calls))
+        sphere = cached_weights(regular_ds, 1, cache_path=tmp_path, ellipsoid="sphere")
+        wgs84 = cached_weights(regular_ds, 1, cache_path=tmp_path, ellipsoid="WGS84")
+        assert sphere != wgs84
+        assert [call["ellipsoid"] for call in calls] == ["sphere", "WGS84"]
+
+    def test_configured_ellipsoid_selects_the_cache_entry(
+        self, regular_ds: xr.Dataset, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[dict[str, object]] = []
+        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", self._recording_compute(calls))
+        explicit = cached_weights(regular_ds, 1, cache_path=tmp_path, ellipsoid="WGS84")
+        with gd.config.healpix.set(ellipsoid="WGS84"):
+            configured = cached_weights(regular_ds, 1, cache_path=tmp_path)
+        with gd.config.healpix.set(ellipsoid="sphere"):
+            other = cached_weights(regular_ds, 1, cache_path=tmp_path)
+        assert configured == explicit
+        assert other != explicit
+        assert [call["ellipsoid"] for call in calls] == ["WGS84", "sphere"]

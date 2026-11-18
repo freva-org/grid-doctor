@@ -42,6 +42,13 @@ LON_VAR: Final = "longitude"
 GRID_MAPPING_NAME: Final = "healpix"
 """Value of ``grid_mapping_name`` for HEALPix grids."""
 
+WGS84_CF_NAME: Final = "WGS 84"
+"""CF ``reference_ellipsoid_name`` of WGS84 (its OGC WKT name), as written."""
+
+WGS84_CF_NAMES: Final = frozenset({WGS84_CF_NAME, "WGS84"})
+"""``reference_ellipsoid_name`` values read as WGS84: the OGC WKT name and
+the common spelling without a space (also ``healpix_geo``'s)."""
+
 INDEX_STANDARD_NAME: Final = "healpix_index"
 """CF standard name identifying the HEALPix index coordinate.
 
@@ -65,6 +72,8 @@ COARSEN_MODE_ATTR: Final = f"{ATTR_PREFIX}coarsen_mode"
 MIN_VALID_FRACTION_ATTR: Final = f"{ATTR_PREFIX}min_valid_fraction"
 SPARSE_ATTR: Final = f"{ATTR_PREFIX}sparse"
 IMPLICIT_COORDS_ATTR: Final = f"{ATTR_PREFIX}implicit_coords"
+ELLIPSOID_ATTR: Final = f"{ATTR_PREFIX}ellipsoid"
+"""Ellipsoid of the HEALPix target, on weight files (datasets use the CF ``crs``)."""
 
 OWNED_GLOBAL_ATTRS: Final = frozenset(
     {

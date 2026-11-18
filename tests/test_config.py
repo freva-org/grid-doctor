@@ -15,7 +15,7 @@ import xarray as xr
 import grid_doctor as gd
 from grid_doctor import remap, swath
 from grid_doctor.config import HealpixConfig, _Namespace
-from grid_doctor.metadata import HealpixGrid
+from grid_doctor.metadata import HealpixGrid, HealpixMetadata
 from grid_doctor.types import Ellipsoid
 
 
@@ -142,13 +142,17 @@ class TestHealpixConfig:
         result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
         assert result.stdout.strip() == "WGS84"
 
-    def test_geometry_uses_configured_ellipsoid(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        cells = np.array([0, 1, 2], dtype=np.int64)
-        ds = xr.Dataset({"t": ("cell", np.zeros(3))})
-        sphere = gd.attach_cell_coords(ds, cells, level=1)["latitude"].values
-        monkeypatch.setattr(gd.config.healpix, "ellipsoid", "WGS84")
-        wgs84 = gd.attach_cell_coords(ds, cells, level=1)["latitude"].values
+    def test_new_grids_use_configured_ellipsoid(self) -> None:
+        sphere = gd.bin_to_healpix(_POINTS, 1, dense=False)["latitude"].values
+        with gd.config.healpix.set(ellipsoid="WGS84"):
+            wgs84 = gd.bin_to_healpix(_POINTS, 1, dense=False)["latitude"].values
         assert np.all(np.abs(wgs84) > np.abs(sphere))
+
+    def test_existing_data_ignores_configured_ellipsoid(self) -> None:
+        sphere = gd.bin_to_healpix(_POINTS, 1, dense=False)
+        with gd.config.healpix.set(ellipsoid="WGS84"):
+            again = gd.sparse_to_dense(sphere)
+        assert HealpixMetadata.from_dataset(again).grid.ellipsoid == "sphere"
 
 
 _POINTS = xr.Dataset(
@@ -178,12 +182,10 @@ class TestEllipsoidArgument:
             return np.zeros(lon.size, dtype=np.int64)  # every point in cell 0
 
         def fake_geo_module(grid: HealpixGrid) -> tuple[SimpleNamespace, dict[str, str]]:
-            assert grid.ellipsoid is not None
             passed["cells"] = grid.ellipsoid
             return SimpleNamespace(lonlat_to_healpix=fake_lonlat_to_healpix), {}
 
         def fake_coords(ds: xr.Dataset, cell_ids: np.ndarray, grid: HealpixGrid, **kwargs: object) -> xr.Dataset:
-            assert grid.ellipsoid is not None
             passed["coords"] = grid.ellipsoid
             return ds
 
@@ -193,15 +195,19 @@ class TestEllipsoidArgument:
         return passed
 
     @pytest.fixture
-    def regrid_passed(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Ellipsoid]:
-        """Record the ``ellipsoid`` that regridding's weight generation and application receive."""
-        passed: dict[str, Ellipsoid] = {}
+    def regrid_passed(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Ellipsoid | None]:
+        """Record the ``ellipsoid`` that regridding's weight generation and application receive.
+
+        Application gets ``None`` unless an ellipsoid was given: it then
+        takes the one the weight file was generated on.
+        """
+        passed: dict[str, Ellipsoid | None] = {}
 
         def fake_weights(*args: object, ellipsoid: Ellipsoid, **kwargs: object) -> Path:
             passed["weights"] = ellipsoid
             return tmp_path / "weights.nc"
 
-        def fake_apply(ds: xr.Dataset, *args: object, ellipsoid: Ellipsoid, **kwargs: object) -> xr.Dataset:
+        def fake_apply(ds: xr.Dataset, *args: object, ellipsoid: Ellipsoid | None, **kwargs: object) -> xr.Dataset:
             passed["apply"] = ellipsoid
             return ds
 
@@ -225,18 +231,18 @@ class TestEllipsoidArgument:
             gd.bin_to_healpix(_POINTS, 1, dense=dense, ellipsoid="sphere")
         assert binning_passed == {"cells": "sphere", "coords": "sphere"}
 
-    def test_regrid_default_is_sphere(self, regrid_passed: dict[str, Ellipsoid], regular_ds: xr.Dataset) -> None:
+    def test_regrid_default_is_sphere(self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset) -> None:
         # HealpixConfig() holds the built-in defaults, whatever the environment says.
         with gd.config.set(healpix=HealpixConfig()):
             gd.regrid_to_healpix(regular_ds, 1)
-        assert regrid_passed == {"weights": "sphere", "apply": "sphere"}
+        assert regrid_passed == {"weights": "sphere", "apply": None}
 
-    def test_regrid_none_uses_config(self, regrid_passed: dict[str, Ellipsoid], regular_ds: xr.Dataset) -> None:
+    def test_regrid_none_uses_config(self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset) -> None:
         with gd.config.healpix.set(ellipsoid="WGS84"):
             gd.regrid_to_healpix(regular_ds, 1)
-        assert regrid_passed == {"weights": "WGS84", "apply": "WGS84"}
+        assert regrid_passed == {"weights": "WGS84", "apply": None}
 
-    def test_regrid_argument_overrides_config(self, regrid_passed: dict[str, Ellipsoid], regular_ds: xr.Dataset) -> None:
+    def test_regrid_argument_overrides_config(self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset) -> None:
         with gd.config.healpix.set(ellipsoid="WGS84"):
             gd.regrid_to_healpix(regular_ds, 1, ellipsoid="sphere")
         assert regrid_passed == {"weights": "sphere", "apply": "sphere"}
