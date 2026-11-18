@@ -62,6 +62,7 @@ dev = [
     "ruff>=0.1",
     "black>=23.0",
     "pre-commit>=3.0",
+    "tox>=4",
     "types-requests",
 ]
 tests = [
@@ -175,11 +176,11 @@ deps = -e .
        codespell
        bandit[toml]
 commands =
-    isort --check --profile black --py 312 -l 79 src
-    python3 -m flake8 src --count --max-complexity=10 --ignore=F405,F403,E704,W503,C901 --max-line-length=120 --statistics --show-source
-    codespell {posargs: --quiet-level=2} src/
-    python3 -m pydocstyle src/grid_doctor
-    bandit -r src/grid_doctor --severity-level medium --confidence-level high
+    isort --check --profile black --py 312 -l 79 {posargs:src}
+    python3 -m flake8 --count --max-complexity=10 --ignore=F405,F403,E704,W503,C901 --max-line-length=120 --statistics --show-source {posargs:src}
+    codespell --quiet-level=2 {posargs:src/}
+    python3 -m pydocstyle {posargs:src/grid_doctor}
+    bandit -r --severity-level medium --confidence-level high {posargs:src/grid_doctor}
 [testenv:test]
 setenv =
     VIRTUALENV_SYSTEM_SITE_PACKAGES=true
@@ -203,8 +204,15 @@ deps =
     -e .[docs]
     codespell
 commands =
-    codespell {posargs: --quiet-level=2} docs
+    {[testenv:docs-spell]commands}
     mkdocs build --strict -f mkdocs.yml
+
+[testenv:docs-spell]
+description = Spell-check docs. Usage: tox -e docs-spell [-- FILES]
+skip_install = true
+deps = codespell
+commands =
+    codespell --quiet-level=2 {posargs:docs}
 
 [testenv:docs-serve]
 description = Serve docs locally. Usage: tox -e docs-serve

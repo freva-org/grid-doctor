@@ -342,10 +342,30 @@ python scripts/my-dataset/convert.py my-bucket -vv
 
 
 
-## Type Checking
+## Development checks
+
+All checks run through the tox envs that CI uses. After cloning, install the
+git hooks once so they run automatically:
 
 ```console
-tox -e type-check
+pip install -e .[dev]   # provides pre-commit and tox
+pre-commit install
+```
+
+This installs two hooks (see `.pre-commit-config.yaml`):
+
+* **pre-commit** – quick checks on the staged files only: lint on staged
+  `src/` files, mypy when `src/` changed, and spelling on staged `docs/` files.
+* **pre-push** – the full CI suite on the whole code: `lint`, `types`, `docs`
+  and `test`.
+
+To run the envs by hand:
+
+```console
+tox -e lint      # isort, flake8, codespell, pydocstyle, bandit
+tox -e types     # mypy (strict)
+tox -e docs      # spelling + mkdocs build --strict
+tox -e test      # pytest with coverage
 ```
 
 
