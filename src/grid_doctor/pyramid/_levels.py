@@ -23,6 +23,7 @@ from ..metadata import (
     HealpixGrid,
     HealpixMetadata,
     Provenance,
+    has_healpix_metadata,
 )
 from ..remap import _healpix_centres
 from ..types import CoarsenMode, FloatArray, NumberArray, ValidFraction
@@ -42,9 +43,9 @@ FractionShape = Literal["full", "static"]
 """Resolved shape of one ``<name>_valid_fraction`` variable."""
 
 
-def healpix_coords(level: int, *, nest: bool) -> tuple[FloatArray, FloatArray]:
-    """Return ``(lat_deg, lon_deg)`` HEALPix cell centres for *level*."""
-    return _healpix_centres(HealpixGrid.from_nest(level, nest=nest))
+def healpix_coords(grid: HealpixGrid) -> tuple[FloatArray, FloatArray]:
+    """Return ``(lat_deg, lon_deg)`` HEALPix cell centres of *grid*."""
+    return _healpix_centres(grid)
 
 
 def resolve_coarsen_mode(ds: xr.Dataset, coarsen_mode: CoarsenMode) -> CoarsenMode:
@@ -89,10 +90,22 @@ def assemble_coarse_level(
 
     Records how the level was derived: the source level, the resolved
     coarsening mode and the minimum valid fraction, so that readers can
-    tell masked cells from missing data.
+    tell masked cells from missing data.  The coarse level keeps the
+    ellipsoid recorded in *template*'s HEALPix metadata.
+
+    Raises
+    ------
+    ValueError
+        When *template* has no HEALPix metadata: its ellipsoid would be
+        unknown, and neither a sphere nor the configured one is assumed.
     """
-    grid = HealpixGrid(level=target_level)
-    lat_deg, lon_deg = healpix_coords(target_level, nest=True)
+    if not has_healpix_metadata(template):
+        raise ValueError(
+            "Cannot coarsen a dataset without HEALPix metadata (a `crs` grid mapping): its ellipsoid is unknown."
+        )
+    ellipsoid = HealpixMetadata.from_dataset(template).grid.ellipsoid
+    grid = HealpixGrid(level=target_level, ellipsoid=ellipsoid)
+    lat_deg, lon_deg = healpix_coords(grid)
     result = xr.Dataset(data_vars, attrs=template.attrs.copy()).assign_coords(
         {
             CELL_DIM: np.arange(grid.npix, dtype=np.int64),

@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 
 from .metadata import (
     CELL_DIM,
+    ELLIPSOID_ATTR,
+    ELLIPSOIDS,
     LAT_VAR,
     LON_VAR,
     HealpixGrid,
@@ -139,6 +141,8 @@ class _WeightFile(NamedTuple):
     order: str
     method: str | None
     stored_source_dims: tuple[str, ...] | None
+    ellipsoid: str | None
+    """As stored; ``None`` if the file records none (see `_weights_ellipsoid`)."""
 
 
 def _read_weight_file(weights_path: str | Path) -> _WeightFile:
@@ -162,9 +166,36 @@ def _read_weight_file(weights_path: str | Path) -> _WeightFile:
         stored_source_dims = _parse_source_dims_attr(
             wds.attrs.get("grid_doctor_source_dims")
         )
+        ellipsoid = wds.attrs.get(ELLIPSOID_ATTR)
     return _WeightFile(
-        matrix, n_target, n_source, level, order, method, stored_source_dims
+        matrix,
+        n_target,
+        n_source,
+        level,
+        order,
+        method,
+        stored_source_dims,
+        None if ellipsoid is None else str(ellipsoid),
     )
+
+
+def _weights_ellipsoid(requested: Ellipsoid | None, stored: str | None, path: str | Path) -> Ellipsoid:
+    """Ellipsoid of a weight file; files without the attribute predate WGS84 support and are spherical.
+
+    Raises
+    ------
+    ValueError
+        If the file records an unsupported ellipsoid, or *requested* is
+        not ``None`` and differs from the file's.
+    """
+    if stored is None:
+        logger.warning("Weight file %s records no ellipsoid (%s); assuming 'sphere'.", path, ELLIPSOID_ATTR)
+    elif stored not in ELLIPSOIDS:
+        raise ValueError(f"{path} records an unsupported ellipsoid {stored!r}.")
+    resolved = cast(Ellipsoid, stored or "sphere")
+    if requested is not None and requested != resolved:
+        raise ValueError(f"{path} was computed on {resolved!r}, not {requested!r}.")
+    return resolved
 
 
 # ===================================================================
@@ -558,9 +589,10 @@ def apply_weight_file(
         produces a single chunk.  NumPy-backed input is always computed
         in one piece.
     ellipsoid:
-        Ellipsoid on which the HEALPix cell centres are computed; should
-        match the one the weights were generated on.  Defaults to
-        ``grid_doctor.config.healpix.ellipsoid``.
+        Ellipsoid the weights must have been generated on.  ``None``
+        (default) takes the one recorded in the weight file (a sphere
+        for files that record none); the HEALPix cell centres are
+        computed on it.
 
     Returns
     -------
@@ -576,9 +608,11 @@ def apply_weight_file(
     if missing_policy not in {"renormalize", "propagate"}:
         raise ValueError("missing_policy must be 'renormalize' or 'propagate'.")
 
-    matrix, n_target, n_source, level, order, method, stored_sd = _read_weight_file(
-        weights_path
+    matrix, n_target, n_source, level, order, method, stored_sd, stored_ellipsoid = (
+        _read_weight_file(weights_path)
     )
+    # Checked before regridding, so a mismatch fails fast.
+    ellipsoid = _weights_ellipsoid(ellipsoid, stored_ellipsoid, weights_path)
 
     resolved_sd = _resolve_source_dims_for_weight_application(
         ds,
@@ -639,7 +673,7 @@ def apply_weight_file(
         target_grid = HealpixGrid.from_nest(
             level,
             nest=(order == "nested"),
-            ellipsoid=_ellipsoid_or_config(ellipsoid),
+            ellipsoid=ellipsoid,
         )
         result = _attach_healpix_coords(result, target_grid, method=method)
     return result
@@ -755,15 +789,17 @@ def regrid_to_healpix(
         [`apply_weight_file`][grid_doctor.remap.apply_weight_file].
         Coarser pyramid levels keep the same chunk size.
     ellipsoid:
-        Ellipsoid of the HEALPix geometry, ``"sphere"`` or
-        ``"WGS84"``.  Defaults to ``grid_doctor.config.healpix.ellipsoid``.
+        Ellipsoid of the HEALPix geometry, ``"sphere"`` or ``"WGS84"``.
+        New weights are generated on it, by default on
+        ``grid_doctor.config.healpix.ellipsoid``.  An existing
+        *weights_path* keeps the ellipsoid it was generated on; a
+        different explicit value raises ``ValueError``.
 
     Returns
     -------
     xarray.Dataset
         Regridded dataset on the HEALPix grid.
     """
-    ellipsoid = _ellipsoid_or_config(ellipsoid)
     weight_file = Path(weights_path) if weights_path is not None else None
     if weight_file is None or not weight_file.exists():
         weight_file = compute_healpix_weights(

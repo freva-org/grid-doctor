@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from esmpy import Mesh
 
 from . import config
-from .metadata import HealpixGrid
+from .metadata import ELLIPSOID_ATTR, HealpixGrid
 from .types import (
     Ellipsoid,
     FloatArray,
@@ -297,9 +297,7 @@ def _require_healpix_geo_module(
 ) -> tuple[ModuleType, dict[str, str]]:
     """Import and return the appropriate ``healpix_geo`` sub-module.
 
-    HEALPix geometry is defined on ``grid.ellipsoid``, or on
-    ``grid_doctor.config.healpix.ellipsoid`` when the grid leaves it
-    unspecified.  The default, a perfect
+    HEALPix geometry is defined on ``grid.ellipsoid``.  The default, a perfect
     sphere, is consistent with ESMF's internal area calculation
     (``CoordSys.SPH_DEG``) and with the geocentric coordinates used
     by climate models.  The maximum latitude discrepancy relative to
@@ -326,7 +324,7 @@ def _require_healpix_geo_module(
         raise ImportError(
             "healpix-geo is required to construct HEALPix polygons."
         ) from exc
-    return module, {"ellipsoid": _ellipsoid_or_config(grid.ellipsoid)}
+    return module, {"ellipsoid": grid.ellipsoid}
 
 
 # ===================================================================
@@ -1978,6 +1976,7 @@ def compute_healpix_weights_backend(
         "grid_doctor_method": method,
         "grid_doctor_level": level,
         "grid_doctor_order": "nested" if nest else "ring",
+        ELLIPSOID_ATTR: target_grid.ellipsoid,
         "grid_doctor_backend": ("offline-esmf" if use_offline else "esmpy"),
         "grid_doctor_ignore_unmapped": int(bool(eff_ignore)),
         **source_desc.metadata,

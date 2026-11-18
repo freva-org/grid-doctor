@@ -23,6 +23,15 @@ with gd.config.set(healpix={"ellipsoid": "sphere"}):  # several namespaces at on
     ...
 ```
 
+`healpix.ellipsoid` applies to grids being created (regridding, binning,
+weight generation). The ellipsoid is recorded in the output (CF
+`reference_ellipsoid_name`, `semi_major_axis` and `inverse_flattening` for
+WGS84) and in weight files; reading, selecting from or coarsening existing
+data uses the recorded ellipsoid. HEALPix metadata or a weight file without
+these attributes is spherical. A dataset with no HEALPix metadata at all gets
+this setting when selecting from it with an explicit `level=`; coarsening
+requires the HEALPix metadata.
+
 Passing a whole namespace object, e.g. `gd.config.set(healpix=HealpixConfig())`,
 applies all of its settings, defaults included.
 

@@ -98,9 +98,11 @@ class HealpixConfig(_Namespace):
     Attributes
     ----------
     ellipsoid:
-        Ellipsoid on which HEALPix cell centres and vertices are computed,
-        passed to ``healpix_geo``: ``"sphere"`` (consistent with ESMF's
-        spherical area calculation) or ``"WGS84"``.
+        Ellipsoid on which new HEALPix grids are built, passed to
+        ``healpix_geo``: ``"sphere"`` (consistent with ESMF's spherical
+        area calculation) or ``"WGS84"``.  It is recorded in the output
+        and in weight files; code reading existing data uses the recorded
+        one (a sphere if none is recorded), never this setting.
         Environment variable: ``GRID_DOCTOR_HEALPIX__ELLIPSOID``.
     """
 

@@ -24,6 +24,12 @@ MAX_LEVEL: Final = 29
 
 ELLIPSOIDS: Final = frozenset(get_args(Ellipsoid))
 
+WGS84_SEMI_MAJOR_AXIS: Final = 6378137.0
+"""Semi-major axis of WGS84 in metres."""
+
+WGS84_INVERSE_FLATTENING: Final = 298.257223563
+"""Inverse flattening of WGS84."""
+
 
 def _as_level(value: object) -> int:
     """Return *value* as a plain ``int`` level or raise ``ValueError``."""
@@ -47,12 +53,10 @@ def _as_radius(value: object) -> float | None:
     return radius
 
 
-def _as_ellipsoid(value: object) -> Ellipsoid | None:
-    """Return *value* as a supported ellipsoid name, or ``None``."""
-    if value is None:
-        return None
+def _as_ellipsoid(value: object) -> Ellipsoid:
+    """Return *value* as a supported ellipsoid name or raise ``ValueError``."""
     if not isinstance(value, str) or value not in ELLIPSOIDS:
-        raise ValueError(f"ellipsoid must be one of {sorted(ELLIPSOIDS)} or None, not {value!r}.")
+        raise ValueError(f"ellipsoid must be one of {sorted(ELLIPSOIDS)}, not {value!r}.")
     return cast(Ellipsoid, str(value))
 
 
@@ -78,9 +82,9 @@ class HealpixGrid:
         recorded.  Only valid on a sphere.
     ellipsoid:
         Ellipsoid the cell geometry is computed on, as a ``healpix_geo``
-        name: ``"sphere"`` or ``"WGS84"``.  ``None`` leaves it
-        unspecified; geometry then uses
-        ``grid_doctor.config.healpix.ellipsoid``.
+        name: ``"sphere"`` (default) or ``"WGS84"``.  Grids whose
+        metadata records no ellipsoid, such as those written before it
+        was recorded, are spherical.
 
     Examples
     --------
@@ -92,7 +96,7 @@ class HealpixGrid:
     level: int
     indexing_scheme: IndexingScheme = "nested"
     earth_radius: float | None = None
-    ellipsoid: Ellipsoid | None = None
+    ellipsoid: Ellipsoid = "sphere"
 
     def __post_init__(self) -> None:
         """Validate and normalise the fields."""
@@ -105,13 +109,13 @@ class HealpixGrid:
         object.__setattr__(self, "indexing_scheme", scheme)
         object.__setattr__(self, "earth_radius", _as_radius(self.earth_radius))
         object.__setattr__(self, "ellipsoid", _as_ellipsoid(self.ellipsoid))
-        if self.earth_radius is not None and self.ellipsoid not in (None, "sphere"):
+        if self.earth_radius is not None and self.ellipsoid != "sphere":
             raise ValueError(
                 f"earth_radius describes a sphere and cannot be combined with ellipsoid={self.ellipsoid!r}."
             )
 
     @classmethod
-    def from_nest(cls, level: int, *, nest: bool, ellipsoid: Ellipsoid | None = None) -> HealpixGrid:
+    def from_nest(cls, level: int, *, nest: bool, ellipsoid: Ellipsoid = "sphere") -> HealpixGrid:
         """Build a grid from the healpy-style ``nest`` flag."""
         return cls(level=level, indexing_scheme="nested" if nest else "ring", ellipsoid=ellipsoid)
 

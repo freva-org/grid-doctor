@@ -25,7 +25,7 @@ from dataclasses import dataclass
 import xarray as xr
 
 from ._dataset import HealpixMetadata, has_healpix_metadata
-from ._grid import HealpixGrid
+from ._grid import WGS84_INVERSE_FLATTENING, WGS84_SEMI_MAJOR_AXIS, HealpixGrid
 from ._keys import CELL_DIM, GRID_MAPPING_NAME
 
 # ---------------------------------------------------------------------
@@ -319,6 +319,12 @@ def _dggs_object(level: PyramidLevel) -> dict[str, object]:
     }
     if grid.earth_radius is not None:
         obj["ellipsoid"] = {"name": "sphere", "radius": grid.earth_radius}
+    elif grid.ellipsoid == "WGS84":
+        obj["ellipsoid"] = {
+            "name": "WGS84",
+            "semi_major_axis": WGS84_SEMI_MAJOR_AXIS,
+            "inverse_flattening": WGS84_INVERSE_FLATTENING,
+        }
     if level.coordinate is not None:
         obj["coordinate"] = level.coordinate
         obj["compression"] = "none"
@@ -345,11 +351,15 @@ def _grid_from_dggs(dggs: Mapping[str, object]) -> HealpixGrid:
     if dggs.get("name") != GRID_MAPPING_NAME:
         raise ValueError(f"Not a HEALPix dggs object: name={dggs.get('name')!r}.")
     ellipsoid = dggs.get("ellipsoid")
-    radius = ellipsoid.get("radius") if isinstance(ellipsoid, Mapping) else None
+    ellipsoid = ellipsoid if isinstance(ellipsoid, Mapping) else {}
+    name = ellipsoid.get("name", "sphere")
+    if name not in ("sphere", "WGS84"):
+        raise ValueError(f"Unsupported dggs ellipsoid: {dict(ellipsoid)!r}.")
     return HealpixGrid(
         level=dggs.get("refinement_level"),  # type: ignore[arg-type]
         indexing_scheme=str(dggs.get("indexing_scheme", "")),  # type: ignore[arg-type]
-        earth_radius=radius,
+        earth_radius=ellipsoid.get("radius") if name == "sphere" else None,
+        ellipsoid=name,
     )
 
 
