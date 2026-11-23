@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 
 from .metadata import (
     CELL_DIM,
+    ELLIPSOID_ATTR,
+    ELLIPSOIDS,
     LAT_VAR,
     LON_VAR,
     HealpixGrid,
@@ -48,6 +50,7 @@ from .remap_backend import (
     _UNSTRUCTURED_DIMS,
     OfflineWeightConfig,
     _canonical_lon,
+    _ellipsoid_or_config,
     _get_latlon_arrays,
     _get_spatial_dims,
     _get_unstructured_dim,
@@ -58,6 +61,7 @@ from .remap_backend import (
 )
 from .types import (
     ApplyBackend,
+    Ellipsoid,
     FloatArray,
     MissingPolicy,
     RemapMethod,
@@ -108,26 +112,18 @@ def _source_centre_arrays(
 # ===================================================================
 
 
-def _healpix_centres(
-    level: int,
-    *,
-    nest: bool,
-) -> tuple[FloatArray, FloatArray]:
+def _healpix_centres(grid: HealpixGrid) -> tuple[FloatArray, FloatArray]:
     """Return HEALPix cell-centre coordinates in degrees.
 
-    All geometry uses a spherical ellipsoid, consistent with ESMF's
-    internal area calculation and with climate model coordinates.
-
     Args:
-        level: HEALPix refinement level.
-        nest: Nested ordering when *True*, otherwise ring.
+        grid: HEALPix grid; its ellipsoid sets the geometry.
 
     Returns:
         ``(lat_deg, lon_deg)`` arrays.
     """
-    module, kwargs = _require_healpix_geo_module(nest)
-    ipix = np.arange(12 * (4**level), dtype=np.int64)
-    lon_deg, lat_deg = module.healpix_to_lonlat(ipix, level, **kwargs)
+    module, kwargs = _require_healpix_geo_module(grid)
+    ipix = np.arange(grid.npix, dtype=np.int64)
+    lon_deg, lat_deg = module.healpix_to_lonlat(ipix, grid.level, **kwargs)
     return (
         np.asarray(lat_deg, dtype=np.float64),
         _canonical_lon(np.asarray(lon_deg, dtype=np.float64)),
@@ -149,6 +145,8 @@ class _WeightFile(NamedTuple):
     order: str
     method: str | None
     stored_source_dims: tuple[str, ...] | None
+    ellipsoid: str | None
+    """As stored; ``None`` if the file records none (see `_weights_ellipsoid`)."""
 
 
 def _read_weight_file(weights_path: str | Path, nest: bool | None = None) -> _WeightFile:
@@ -183,9 +181,36 @@ def _read_weight_file(weights_path: str | Path, nest: bool | None = None) -> _We
         stored_source_dims = _parse_source_dims_attr(
             wds.attrs.get(keys.SOURCE_DIMS_ATTR)
         )
+        ellipsoid = wds.attrs.get(ELLIPSOID_ATTR)
     return _WeightFile(
-        matrix, n_target, n_source, level, order, method, stored_source_dims
+        matrix,
+        n_target,
+        n_source,
+        level,
+        order,
+        method,
+        stored_source_dims,
+        None if ellipsoid is None else str(ellipsoid),
     )
+
+
+def _weights_ellipsoid(requested: Ellipsoid | None, stored: str | None, path: str | Path) -> Ellipsoid:
+    """Ellipsoid of a weight file; files without the attribute predate WGS84 support and are spherical.
+
+    Raises
+    ------
+    ValueError
+        If the file records an unsupported ellipsoid, or *requested* is
+        not ``None`` and differs from the file's.
+    """
+    if stored is None:
+        logger.warning("Weight file %s records no ellipsoid (%s); assuming 'sphere'.", path, ELLIPSOID_ATTR)
+    elif stored not in ELLIPSOIDS:
+        raise ValueError(f"{path} records an unsupported ellipsoid {stored!r}.")
+    resolved = cast(Ellipsoid, stored or "sphere")
+    if requested is not None and requested != resolved:
+        raise ValueError(f"{path} was computed on {resolved!r}, not {requested!r}.")
+    return resolved
 
 
 # ===================================================================
@@ -211,6 +236,7 @@ def compute_healpix_weights(
     keep_intermediates: bool = False,
     workdir: str | Path | None = None,
     spectral_transform_command: list[str] | tuple[str, ...] | None = None,
+    ellipsoid: Ellipsoid | None = None,
     source_description: SourceDescription | None = None,
 ) -> Path:
     """Generate a reusable NetCDF weight file for HEALPix remapping.
@@ -252,6 +278,9 @@ def compute_healpix_weights(
         Working directory for offline intermediate files.
     spectral_transform_command:
         External command for ``source_kind="spectral"``.
+    ellipsoid:
+        Ellipsoid of the HEALPix geometry, ``"sphere"`` or
+        ``"WGS84"``.  Defaults to ``grid_doctor.config.healpix.ellipsoid``.
     source_description:
         Description of *ds* from
         [`describe_source`][grid_doctor.weights.describe_source],
@@ -288,6 +317,7 @@ def compute_healpix_weights(
         large_file=large_file,
         offline=offline,
         spectral_transform_command=spectral_transform_command,
+        ellipsoid=_ellipsoid_or_config(ellipsoid),
         source_description=source_description,
     )
 
@@ -524,6 +554,7 @@ def apply_weight_file(
     source_units: SourceUnits = "auto",
     backend: ApplyBackend = "auto",
     cell_chunks: int | Literal["auto"] | None = "auto",
+    ellipsoid: Ellipsoid | None = None,
     nest: bool | None = None,
 ) -> xr.Dataset:
     """Apply a previously generated ESMF weight file to *ds*.
@@ -583,6 +614,11 @@ def apply_weight_file(
         ``DEFAULT_CELL_CHUNK`` cells (rounded to a multiple of 4), ``None``
         produces a single chunk.  NumPy-backed input is always computed
         in one piece.
+    ellipsoid:
+        Ellipsoid the weights must have been generated on.  ``None``
+        (default) takes the one recorded in the weight file (a sphere
+        for files that record none); the HEALPix cell centres are
+        computed on it.
     nest:
         HEALPix order of the output: nested when ``True``, ring when
         ``False``. ``None`` (default) keeps the order of the weight file.
@@ -603,9 +639,11 @@ def apply_weight_file(
     if missing_policy not in {"renormalize", "propagate"}:
         raise ValueError("missing_policy must be 'renormalize' or 'propagate'.")
 
-    matrix, n_target, n_source, level, order, method, stored_sd = _read_weight_file(
-        weights_path, nest=nest
+    matrix, n_target, n_source, level, order, method, stored_sd, stored_ellipsoid = (
+        _read_weight_file(weights_path, nest=nest)
     )
+    # Checked before regridding, so a mismatch fails fast.
+    ellipsoid = _weights_ellipsoid(ellipsoid, stored_ellipsoid, weights_path)
 
     resolved_sd = _resolve_source_dims_for_weight_application(
         ds,
@@ -663,12 +701,12 @@ def apply_weight_file(
 
     result = xr.Dataset(regridded, attrs=ds.attrs.copy())
     if level >= 0:
-        result = _attach_healpix_coords(
-            result,
-            level=level,
+        target_grid = HealpixGrid.from_nest(
+            level,
             nest=(order == "nested"),
-            method=method,
+            ellipsoid=ellipsoid,
         )
+        result = _attach_healpix_coords(result, target_grid, method=method)
     return result
 
 
@@ -679,9 +717,8 @@ def apply_weight_file(
 
 def _attach_healpix_coords(
     ds_hp: xr.Dataset,
+    grid: HealpixGrid,
     *,
-    level: int,
-    nest: bool,
     method: str | None = None,
 ) -> xr.Dataset:
     """Attach dense HEALPix cell coordinates and grid-doctor metadata.
@@ -690,8 +727,7 @@ def _attach_healpix_coords(
     coordinates; everything else (``crs``, CF attributes, provenance)
     is written by [`HealpixMetadata.apply`][grid_doctor.metadata.HealpixMetadata.apply].
     """
-    grid = HealpixGrid.from_nest(level, nest=nest)
-    lat_deg, lon_deg = _healpix_centres(level, nest=nest)
+    lat_deg, lon_deg = _healpix_centres(grid)
     ds_hp = ds_hp.assign_coords(
         {
             CELL_DIM: np.arange(grid.npix, dtype=np.int64),
@@ -728,6 +764,7 @@ def regrid_to_healpix(
     workdir: str | Path | None = None,
     spectral_transform_command: list[str] | tuple[str, ...] | None = None,
     cell_chunks: int | Literal["auto"] | None = "auto",
+    ellipsoid: Ellipsoid | None = None,
 ) -> xr.Dataset:
     """Regrid *ds* to a HEALPix target grid.
 
@@ -787,6 +824,12 @@ def regrid_to_healpix(
         Output chunk size along ``cell`` for dask-backed input, see
         [`apply_weight_file`][grid_doctor.remap.apply_weight_file].
         Coarser pyramid levels keep the same chunk size.
+    ellipsoid:
+        Ellipsoid of the HEALPix geometry, ``"sphere"`` or ``"WGS84"``.
+        New weights are generated on it, by default on
+        ``grid_doctor.config.healpix.ellipsoid``.  An existing
+        *weights_path* keeps the ellipsoid it was generated on; a
+        different explicit value raises ``ValueError``.
 
     Returns
     -------
@@ -808,7 +851,9 @@ def regrid_to_healpix(
     if weights_path is None:
         from .utils import cached_weights
 
-        weight_file = cached_weights(ds, level, method=method, source_units=source_units, **options)
+        weight_file = cached_weights(
+            ds, level, method=method, source_units=source_units, ellipsoid=ellipsoid, **options
+        )
     else:
         weight_file = Path(weights_path)
         if not weight_file.exists():
@@ -820,7 +865,14 @@ def regrid_to_healpix(
 
                 level = resolution_to_healpix_level(get_latlon_resolution(ds))
             weight_file = compute_healpix_weights(
-                ds, level, method=method, nest=nest, source_units=source_units, weights_path=weight_file, **options
+                ds,
+                level,
+                method=method,
+                nest=nest,
+                source_units=source_units,
+                weights_path=weight_file,
+                ellipsoid=ellipsoid,
+                **options,
             )
     return apply_weight_file(
         ds,
@@ -828,6 +880,7 @@ def regrid_to_healpix(
         missing_policy=missing_policy,
         backend=backend,
         cell_chunks=cell_chunks,
+        ellipsoid=ellipsoid,
         nest=nest,
     )
 
@@ -841,6 +894,7 @@ def regrid_unstructured_to_healpix(
     source_units: SourceUnits = "auto",
     weights_path: str | Path | None = None,
     missing_policy: MissingPolicy = "renormalize",
+    ellipsoid: Ellipsoid | None = None,
 ) -> xr.Dataset:
     """Compatibility wrapper around [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix]."""
     if not _is_unstructured(ds):
@@ -853,6 +907,7 @@ def regrid_unstructured_to_healpix(
         source_units=source_units,
         weights_path=weights_path,
         missing_policy=missing_policy,
+        ellipsoid=ellipsoid,
     )
 
 

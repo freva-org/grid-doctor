@@ -24,7 +24,6 @@ from typing import (
     Callable,
     ClassVar,
     Final,
-    Literal,
     cast,
     get_args,
 )
@@ -34,6 +33,7 @@ import numpy.typing as npt
 import xarray as xr
 
 from .metadata import (
+    ELLIPSOIDS,
     GRID_MAPPING_NAME,
     MAX_LEVEL,
     HealpixGrid,
@@ -225,7 +225,7 @@ class WeightsDescription:
         [`apply_weight_file`][grid_doctor.remap.apply_weight_file]), so
         both indexing schemes share one reference.
         """
-        return WeightsRef(self.method, self.target.level, self.source.digest)
+        return WeightsRef(self.method, self.target.level, self.source.digest, ellipsoid=self.target.ellipsoid)
 
     def _identity(self) -> tuple[str, HealpixGrid, RemapMethod]:
         return (self.source.digest, self.target, self.method)
@@ -277,6 +277,9 @@ def _source_hash(ds: xr.Dataset) -> str:
 
 _SHA256_HEX: Final = re.compile(r"[0-9a-f]{64}")
 
+_REF_ELLIPSOIDS: Final = frozenset(e.lower() for e in ELLIPSOIDS)
+"""Ellipsoids as spelled in [`WeightsRef`][grid_doctor.weights.WeightsRef] paths."""
+
 WEIGHTS_VERSION: Final = 1
 """Version of the [`WeightsRef`][grid_doctor.weights.WeightsRef] path scheme.
 
@@ -307,8 +310,8 @@ class WeightsRef:
         key: Source digest (sha256 hex digest); see
             [`SourceDescription.digest`][grid_doctor.weights.SourceDescription.digest].
         grid: Target grid; always ``"healpix"``.
-        ellipsoid: Ellipsoid of the HEALPix cell vertices; always
-            ``"sphere"`` until other ellipsoids are supported.
+        ellipsoid: Ellipsoid of the HEALPix cell vertices, lowercased
+            (``"sphere"`` or ``"wgs84"``).
         version: Version of the path scheme.
     """
 
@@ -325,7 +328,7 @@ class WeightsRef:
     level: int
     key: str
     grid: str = GRID_MAPPING_NAME
-    ellipsoid: Literal["sphere"] = "sphere"
+    ellipsoid: str = "sphere"
     version: int = WEIGHTS_VERSION
 
     def __post_init__(self) -> None:
@@ -343,7 +346,7 @@ class WeightsRef:
             "level": type(self.level) is int and 0 <= self.level <= MAX_LEVEL,
             "key": isinstance(self.key, str) and _SHA256_HEX.fullmatch(self.key) is not None,
             "grid": self.grid == GRID_MAPPING_NAME,
-            "ellipsoid": self.ellipsoid == "sphere",
+            "ellipsoid": self.ellipsoid in _REF_ELLIPSOIDS,
             "version": self.version == WEIGHTS_VERSION,
         }
         for name, ok in valid.items():
@@ -379,7 +382,7 @@ class WeightsRef:
                 level=int(values["level"]),
                 key=file.removesuffix(".nc"),
                 grid=values["grid"],
-                ellipsoid=cast(Literal["sphere"], values["ellipsoid"]),
+                ellipsoid=values["ellipsoid"],
                 version=int(values["version"]),
             )
         except ValueError as exc:

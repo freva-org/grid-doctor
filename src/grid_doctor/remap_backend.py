@@ -44,9 +44,11 @@ if TYPE_CHECKING:
 
     from .weights import SourceDescription
 
+from . import config
 from .metadata import LAT_UNITS, LON_UNITS, HealpixGrid, Provenance
 from .metadata import _keys as keys
 from .types import (
+    Ellipsoid,
     FloatArray,
     Int64Array,
     IntArray,
@@ -264,19 +266,26 @@ def _require_esmpy() -> ModuleType:
     return esmpy
 
 
-def _require_healpix_geo_module(nest: bool) -> tuple[ModuleType, dict[str, str]]:
+def _ellipsoid_or_config(ellipsoid: Ellipsoid | None) -> Ellipsoid:
+    """Return *ellipsoid*, or ``grid_doctor.config.healpix.ellipsoid`` if ``None``."""
+    return config.healpix.ellipsoid if ellipsoid is None else ellipsoid
+
+
+def _require_healpix_geo_module(
+    grid: HealpixGrid,
+) -> tuple[ModuleType, dict[str, str]]:
     """Import and return the appropriate ``healpix_geo`` sub-module.
 
-    All HEALPix geometry is computed on a perfect sphere.  This is
-    consistent with ESMF's internal area calculation
+    HEALPix geometry is defined on ``grid.ellipsoid``.  The default, a perfect
+    sphere, is consistent with ESMF's internal area calculation
     (``CoordSys.SPH_DEG``) and with the geocentric coordinates used
     by climate models.  The maximum latitude discrepancy relative to
     WGS84 geodetic coordinates is ~0.19° at 45° latitude, which is
     well within the tolerance of conservative remapping.
 
     Args:
-        nest: Select `healpix_geo.nested` when *True*, otherwise
-            `healpix_geo.ring`.
+        grid: Grid whose indexing scheme selects `healpix_geo.nested`
+            or `healpix_geo.ring` and whose ellipsoid is used.
 
     Returns:
         ``(module, kwargs)`` where *kwargs* should be forwarded to
@@ -286,7 +295,7 @@ def _require_healpix_geo_module(nest: bool) -> tuple[ModuleType, dict[str, str]]
         ImportError: When `healpix-geo` is not installed.
     """
     try:
-        if nest:
+        if grid.nest:
             from healpix_geo import nested as module
         else:
             from healpix_geo import ring as module
@@ -294,7 +303,7 @@ def _require_healpix_geo_module(nest: bool) -> tuple[ModuleType, dict[str, str]]
         raise ImportError(
             "healpix-geo is required to construct HEALPix polygons."
         ) from exc
-    return module, {"ellipsoid": "sphere"}
+    return module, {"ellipsoid": grid.ellipsoid}
 
 
 # ===================================================================
@@ -1598,23 +1607,18 @@ def _source_mesh(
 # ===================================================================
 
 
-def _target_healpix_mesh(
-    level: int,
-    *,
-    nest: bool,
-) -> tuple[Int64Array, PolygonMesh]:
+def _target_healpix_mesh(grid: HealpixGrid) -> tuple[Int64Array, PolygonMesh]:
     """Return the HEALPix destination mesh.
 
     Args:
-        level: HEALPix refinement level.
-        nest: Use nested ordering when *True*.
+        grid: Target HEALPix grid.
 
     Returns:
         ``(ipix, mesh)`` where *ipix* is the pixel index array.
     """
-    module, kwargs = _require_healpix_geo_module(nest)
-    ipix = np.arange(12 * (4**level), dtype=np.int64)
-    lon_v, lat_v = module.vertices(ipix, level, **kwargs)
+    module, kwargs = _require_healpix_geo_module(grid)
+    ipix = np.arange(grid.npix, dtype=np.int64)
+    lon_v, lat_v = module.vertices(ipix, grid.level, **kwargs)
     cell_lon = _canonical_lon(np.asarray(lon_v, dtype=np.float64))
     cell_lat = np.asarray(lat_v, dtype=np.float64)
     return ipix, _corner_mesh_from_arrays(cell_lon, cell_lat)
@@ -2046,6 +2050,7 @@ def compute_healpix_weights_backend(
     large_file: bool = True,
     offline: OfflineWeightConfig | None = None,
     spectral_transform_command: (list[str] | tuple[str, ...] | None) = None,
+    ellipsoid: Ellipsoid | None = None,
     source_description: SourceDescription | None = None,
 ) -> Path:
     """Compute reusable HEALPix weights.
@@ -2079,6 +2084,8 @@ def compute_healpix_weights_backend(
         offline: Offline weight-generation configuration.
         spectral_transform_command: External command used when
             ``source_kind="spectral"``.
+        ellipsoid: Ellipsoid of the target geometry; ``None`` uses
+            ``grid_doctor.config.healpix.ellipsoid``.
         source_description: Description of *source* from
             [`describe_source`][grid_doctor.weights.describe_source];
             skips describing the source again.
@@ -2110,11 +2117,13 @@ def compute_healpix_weights_backend(
         spectral_transform_command=spectral_transform_command,
         workdir=offline_cfg.workdir,
     )
-    desc = WeightsDescription(source_desc, HealpixGrid.from_nest(level, nest=nest), method)
+    target_grid = HealpixGrid.from_nest(level, nest=nest, ellipsoid=_ellipsoid_or_config(ellipsoid))
+    desc = WeightsDescription(source_desc, target_grid, method)
     target = Path(weights_path) if weights_path is not None else local_weights_dir() / desc.ref.path
     ring = not nest and weights_path is not None  # the default (store) layout holds nested weights
     target.parent.mkdir(parents=True, exist_ok=True)
-    _, target_mesh = _target_healpix_mesh(level, nest=True)  # ring: rows renumbered below
+    # ring: rows renumbered below
+    _, target_mesh = _target_healpix_mesh(HealpixGrid(level=level, ellipsoid=target_grid.ellipsoid))
 
     use_offline = _default_offline_enabled(
         method=method,
@@ -2134,7 +2143,7 @@ def compute_healpix_weights_backend(
         keys.SOURCE_HASH_ATTR: source_desc.digest,
         keys.LEVEL_ATTR: level,
         keys.ORDER_ATTR: "ring" if ring else "nested",
-        keys.ELLIPSOID_ATTR: desc.ref.ellipsoid,
+        keys.ELLIPSOID_ATTR: target_grid.ellipsoid,  # as spelled in ELLIPSOIDS (the ref is lowercase)
         keys.BACKEND_ATTR: "offline-esmf" if use_offline else "esmpy",
         keys.ESMF_VERSION_ATTR: _esmf_version(use_offline, offline_cfg),
         keys.IGNORE_UNMAPPED_ATTR: int(bool(eff_ignore)),

@@ -1,3 +1,4 @@
+from . import config as config
 from . import helpers as helpers
 from . import log as log
 from . import metadata as metadata
@@ -40,6 +41,7 @@ from .utils import get_s3_options as get_s3_options
 
 __all__ = [
     "__version__",
+    "config",
     "helpers",
     "log",
     "metadata",

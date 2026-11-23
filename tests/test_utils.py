@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
+import grid_doctor as gd
 from grid_doctor.utils import (
     cache_dir,
     cached_open_dataset,
@@ -353,3 +354,23 @@ class TestCachedWeights:
         assert not store.exists(self._ref(regular_ds, 2))
 
 
+    def test_weights_depend_on_ellipsoid(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+    ) -> None:
+        sphere = cached_weights(regular_ds, 1, store=tmp_path, ellipsoid="sphere")
+        wgs84 = cached_weights(regular_ds, 1, store=tmp_path, ellipsoid="WGS84")
+        assert sphere != wgs84
+        assert "ellipsoid=wgs84" in wgs84.parts[-4]
+        assert [call["ellipsoid"] for call in computed] == ["sphere", "WGS84"]
+
+    def test_configured_ellipsoid_selects_the_weights(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+    ) -> None:
+        explicit = cached_weights(regular_ds, 1, store=tmp_path, ellipsoid="WGS84")
+        with gd.config.healpix.set(ellipsoid="WGS84"):
+            configured = cached_weights(regular_ds, 1, store=tmp_path)
+        with gd.config.healpix.set(ellipsoid="sphere"):
+            other = cached_weights(regular_ds, 1, store=tmp_path)
+        assert configured == explicit
+        assert other != explicit
+        assert [call["ellipsoid"] for call in computed] == ["WGS84", "sphere"]

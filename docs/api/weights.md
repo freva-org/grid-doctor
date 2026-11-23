@@ -95,6 +95,7 @@ digest of the source grid:
 
 ```
 <root>/version=1/grid=healpix/ellipsoid=sphere/level=9/method=conservative/<digest>.nc
+<root>/version=1/grid=healpix/ellipsoid=wgs84/level=9/method=conservative/<digest>.nc
 ```
 
 Tools such as pyarrow, DuckDB or Polars read the directory names as

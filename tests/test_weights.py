@@ -326,6 +326,15 @@ class TestWeightRef:
         assert ref.path == expected
         assert WeightsRef.parse(expected) == ref
 
+    def test_ellipsoid_comes_from_the_target(self, regular_ds: xr.Dataset) -> None:
+        """WGS84 weights get their own (lowercase) path, never the spherical one."""
+        source = describe_source(regular_ds)
+        wgs84 = WeightsDescription(source, HealpixGrid(level=3, ellipsoid="WGS84"), "nearest").ref
+        sphere = WeightsDescription(source, HealpixGrid(level=3), "nearest").ref
+        assert wgs84.path == f"version=1/grid=healpix/ellipsoid=wgs84/level=3/method=nearest/{source.digest}.nc"
+        assert wgs84 != sphere
+        assert WeightsRef.parse(wgs84.path) == wgs84
+
     @pytest.mark.parametrize(
         "bad",
         [
@@ -335,7 +344,7 @@ class TestWeightRef:
             f"version=2/grid=healpix/ellipsoid=sphere/level=3/method=nearest/{KEY}.nc",
             f"version=1/grid=other/ellipsoid=sphere/level=3/method=nearest/{KEY}.nc",
             f"version=1/grid=healpix/level=3/method=nearest/{KEY}.nc",  # no ellipsoid
-            f"version=1/grid=healpix/ellipsoid=wgs84/level=3/method=nearest/{KEY}.nc",
+            f"version=1/grid=healpix/ellipsoid=grs80/level=3/method=nearest/{KEY}.nc",  # unsupported
             f"{PREFIX}/indexing_scheme=nested/level=3/method=nearest/{KEY}.nc",  # indexing scheme is not a level
             f"{PREFIX}/level=x/method=nearest/{KEY}.nc",
             f"{PREFIX}/level=3/method=bilinear/{KEY}.nc",
@@ -359,7 +368,7 @@ class TestWeightRef:
             ("key", "abc123"),  # not a sha256 digest
             ("key", "../" + KEY[3:]),  # would escape the directory
             ("grid", "other"),
-            ("ellipsoid", "wgs84"),
+            ("ellipsoid", "grs80"),  # unsupported
             ("version", 2),
         ],
     )

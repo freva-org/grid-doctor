@@ -15,7 +15,7 @@ import numpy as np
 import numpy.typing as npt
 import xarray as xr
 
-from .types import RemapMethod, SourceUnits, WeightOptions
+from .types import Ellipsoid, RemapMethod, SourceUnits, WeightOptions
 
 if TYPE_CHECKING:
     from .weights import WeightsStore
@@ -197,6 +197,7 @@ def cached_weights(
     method: RemapMethod = "conservative",
     source_units: SourceUnits = "auto",
     store: WeightsStore | str | Path | None = None,
+    ellipsoid: Ellipsoid | None = None,
     **kwargs: Unpack[WeightOptions],
 ) -> Path:
     """Return a local HEALPix weight file, reusing it through a store.
@@ -223,6 +224,10 @@ def cached_weights(
         [`WeightsStore`][grid_doctor.weights.WeightsStore]). Defaults to the
         ``GRID_DOCTOR_WEIGHTS_STORE`` environment variable, else the local
         weights directory.
+    ellipsoid:
+        Ellipsoid of the HEALPix target, ``"sphere"`` or ``"WGS84"``.
+        Defaults to ``grid_doctor.config.healpix.ellipsoid``.  Part of
+        the weights' identity, so weights are never reused across ellipsoids.
     **kwargs:
         Any additional keyword arguments for
         [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights]
@@ -241,10 +246,12 @@ def cached_weights(
     from .helpers import get_latlon_resolution, resolution_to_healpix_level
     from .metadata import HealpixGrid
     from .remap import compute_healpix_weights
+    from .remap_backend import _ellipsoid_or_config
     from .weights import WeightsDescription
     from .weights import WeightsStore as _WeightsStore
     from .weights import check_coverage, describe_source
 
+    ellipsoid = _ellipsoid_or_config(ellipsoid)
     if not isinstance(store, _WeightsStore):
         store = _WeightsStore(store)
     if level is None:
@@ -252,7 +259,8 @@ def cached_weights(
 
     describe_kwargs = {k: kwargs[k] for k in ("grid", "source_kind", "spectral_transform_command") if k in kwargs}
     source = describe_source(ds, source_units=source_units, **describe_kwargs)  # type: ignore[arg-type]
-    desc = WeightsDescription(source, HealpixGrid(level=level), method)  # stored weights are nested
+    target = HealpixGrid(level=level, ellipsoid=ellipsoid)  # stored weights are nested
+    desc = WeightsDescription(source, target, method)
 
     def compute(path: Path) -> Path:  # the store holds nested weights; ring is derived from them
         return compute_healpix_weights(
@@ -263,6 +271,7 @@ def cached_weights(
             source_units=source_units,
             weights_path=path,
             source_description=source,
+            ellipsoid=ellipsoid,
             **kwargs,
         )
 

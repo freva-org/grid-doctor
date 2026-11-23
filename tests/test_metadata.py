@@ -94,6 +94,22 @@ class TestHealpixGrid:
         with pytest.raises(ValueError, match="earth_radius"):
             HealpixGrid(level=1, earth_radius=radius)  # type: ignore[arg-type]
 
+    def test_ellipsoid_is_sphere_by_default(self) -> None:
+        assert HealpixGrid(level=1).ellipsoid == "sphere"
+
+    def test_from_nest_passes_ellipsoid(self) -> None:
+        assert HealpixGrid.from_nest(1, nest=True, ellipsoid="WGS84").ellipsoid == "WGS84"
+
+    @pytest.mark.parametrize("ellipsoid", ["", 84, None, "GRS80", "wgs84"])
+    def test_rejects_invalid_ellipsoid(self, ellipsoid: object) -> None:
+        with pytest.raises(ValueError, match="ellipsoid"):
+            HealpixGrid(level=1, ellipsoid=ellipsoid)  # type: ignore[arg-type]
+
+    def test_radius_requires_a_sphere(self) -> None:
+        assert HealpixGrid(level=1, earth_radius=6.4e6, ellipsoid="sphere").ellipsoid == "sphere"
+        with pytest.raises(ValueError, match="earth_radius"):
+            HealpixGrid(level=1, earth_radius=6.4e6, ellipsoid="WGS84")
+
     def test_is_immutable(self) -> None:
         grid = HealpixGrid(level=1)
         with pytest.raises(AttributeError):
@@ -123,10 +139,65 @@ class TestCF:
             HealpixGrid(level=0),
             HealpixGrid(level=7, indexing_scheme="ring"),
             HealpixGrid(level=29, earth_radius=6371008.8),
+            HealpixGrid(level=3, ellipsoid="WGS84"),
         ],
     )
     def test_mapping_round_trip(self, grid: HealpixGrid) -> None:
         assert grid_from_mapping(grid_mapping_attrs(grid)) == grid
+
+    def test_sphere_writes_no_figure_of_the_earth(self) -> None:
+        attrs = grid_mapping_attrs(HealpixGrid(level=1, ellipsoid="sphere"))
+        assert not {"reference_ellipsoid_name", "semi_major_axis", "inverse_flattening"} & set(attrs)
+
+    def test_wgs84_writes_cf_figure_of_the_earth(self) -> None:
+        attrs = grid_mapping_attrs(HealpixGrid(level=1, ellipsoid="WGS84"))
+        assert attrs["reference_ellipsoid_name"] == "WGS 84"
+        assert attrs["semi_major_axis"] == 6378137.0
+        assert attrs["inverse_flattening"] == 298.257223563
+
+    def test_mapping_without_figure_of_the_earth_is_a_sphere(self) -> None:
+        attrs = {"grid_mapping_name": "healpix", "indexing_scheme": "nested", "refinement_level": 1}
+        assert grid_from_mapping(attrs).ellipsoid == "sphere"
+
+    @pytest.mark.parametrize("dtype", [float, np.float64, np.float32])
+    def test_wgs84_is_recognised_by_its_parameters(self, dtype: type) -> None:
+        # float32 attributes cannot hold the exact values; they match at float32 precision.
+        attrs = {
+            "grid_mapping_name": "healpix",
+            "indexing_scheme": "nested",
+            "refinement_level": 1,
+            "semi_major_axis": dtype(6378137.0),
+            "inverse_flattening": dtype(298.257223563),
+        }
+        assert grid_from_mapping(attrs).ellipsoid == "WGS84"
+
+    @pytest.mark.parametrize("name", ["WGS 84", "WGS84", np.str_("WGS 84")])
+    def test_wgs84_is_recognised_by_its_name(self, name: str) -> None:
+        attrs = {"grid_mapping_name": "healpix", "indexing_scheme": "nested", "refinement_level": 1}
+        assert grid_from_mapping({**attrs, "reference_ellipsoid_name": name}).ellipsoid == "WGS84"
+
+    def test_name_and_agreeing_parameters_are_accepted(self) -> None:
+        attrs = {"grid_mapping_name": "healpix", "indexing_scheme": "nested", "refinement_level": 1}
+        figure = {"reference_ellipsoid_name": "WGS84", "inverse_flattening": np.float32(298.257223563)}
+        assert grid_from_mapping({**attrs, **figure}).ellipsoid == "WGS84"
+
+    @pytest.mark.parametrize(
+        "figure",
+        [
+            {"reference_ellipsoid_name": "GRS 1980"},
+            {"reference_ellipsoid_name": "wgs84"},
+            {"reference_ellipsoid_name": ["WGS 84"]},
+            {"semi_major_axis": 6378137.0, "inverse_flattening": 298.257222101},
+            {"semi_major_axis": 6378137.0},
+            {"semi_major_axis": np.float16(6378137.0), "inverse_flattening": np.float16(298.257223563)},
+            {"reference_ellipsoid_name": "WGS 84", "inverse_flattening": 298.257222101},
+            {"reference_ellipsoid_name": "WGS 84", "semi_major_axis": "6378137"},
+        ],
+    )
+    def test_rejects_unsupported_figure_of_the_earth(self, figure: dict[str, object]) -> None:
+        attrs = {"grid_mapping_name": "healpix", "indexing_scheme": "nested", "refinement_level": 1, **figure}
+        with pytest.raises(ValueError, match="Unsupported figure of the earth"):
+            grid_from_mapping(attrs)
 
     def test_rejects_other_grid_mapping(self) -> None:
         with pytest.raises(ValueError, match="Not a HEALPix"):
