@@ -513,7 +513,7 @@ class _FakeS3(MemoryFileSystem):  # type: ignore[misc]
 
     protocol = ("s3", "memory")
     root_marker = ""
-    cachable = False
+    cacheable = False
 
     @classmethod
     def _strip_protocol(cls, path: str) -> str:

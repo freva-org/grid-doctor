@@ -202,105 +202,175 @@ class TestCachedOpenDataset:
 
 
 class TestCachedWeights:
-    def test_creates_cached_weight_file(
-        self, regular_ds: xr.Dataset, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def fake_compute(ds: xr.Dataset, level: int, **kwargs: object) -> Path:
-            del ds, level, kwargs
-            target = tmp_path / "weights_fake.nc"
-            xr.Dataset(
-                {
-                    "row": ("nnz", np.array([1])),
-                    "col": ("nnz", np.array([1])),
-                    "S": ("nnz", np.array([1.0])),
-                }
-            ).to_netcdf(target)
-            return target
-
-        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", fake_compute)
-        path = cached_weights(regular_ds, 2, cache_path=tmp_path)
-        assert path.exists()
-        assert path.suffix == ".nc"
-
-    def test_reuses_cached_weight_file(
-        self, regular_ds: xr.Dataset, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        calls = {"count": 0}
-
-        def fake_compute(ds: xr.Dataset, level: int, **kwargs: object) -> Path:
-            del ds, level, kwargs
-            calls["count"] += 1
-            target = tmp_path / "cache.nc"
-            xr.Dataset(
-                {
-                    "row": ("nnz", np.array([1])),
-                    "col": ("nnz", np.array([1])),
-                    "S": ("nnz", np.array([1.0])),
-                }
-            ).to_netcdf(target)
-            return target
-
-        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", fake_compute)
-        path1 = cached_weights(regular_ds, 2, cache_path=tmp_path / "cache.nc")
-        path2 = cached_weights(regular_ds, 2, cache_path=tmp_path / "cache.nc")
-        assert path1 == path2
-        assert calls["count"] == 1
-
-    def test_hash_depends_on_method_and_level(
-        self, regular_ds: xr.Dataset, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        created: list[Path] = []
-
-        def fake_compute(ds: xr.Dataset, level: int, **kwargs: object) -> Path:
-            del ds, kwargs
-            target = tmp_path / f"weights_{level}_{len(created)}.nc"
-            xr.Dataset(
-                {
-                    "row": ("nnz", np.array([1])),
-                    "col": ("nnz", np.array([1])),
-                    "S": ("nnz", np.array([1.0])),
-                }
-            ).to_netcdf(target)
-            created.append(target)
-            return target
-
-        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", fake_compute)
-        path1 = cached_weights(regular_ds, 1, method="nearest", cache_path=tmp_path)
-        path2 = cached_weights(regular_ds, 2, method="nearest", cache_path=tmp_path)
-        assert path1 != path2
+    """``cached_weights`` looks weights up by their description: local copy, store, else compute."""
 
     @staticmethod
-    def _recording_compute(calls: list[dict[str, object]]) -> object:
-        """A ``compute_healpix_weights`` stand-in writing an empty weight file where asked."""
+    @pytest.fixture(autouse=True)
+    def _default_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Keep the default cache in ``tmp_path``, never in the user's cache."""
+        monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: tmp_path / "default-cache")
+
+    @staticmethod
+    @pytest.fixture
+    def computed(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+        """Fake ``compute_healpix_weights`` writing to ``weights_path``; records each call."""
+        calls: list[dict[str, object]] = []
 
         def fake_compute(ds: xr.Dataset, level: int, **kwargs: object) -> Path:
-            calls.append(kwargs)
+            calls.append({"level": level, **kwargs})
             target = Path(str(kwargs["weights_path"]))
-            xr.Dataset({"row": ("nnz", [1]), "col": ("nnz", [1]), "S": ("nnz", [1.0])}).to_netcdf(target)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            from grid_doctor.metadata import _keys as keys
+
+            data = {"row": ("nnz", np.array([1])), "col": ("nnz", np.array([1])), "S": ("nnz", np.array([1.0]))}
+            xr.Dataset(data, attrs={keys.LEVEL_ATTR: level, keys.ORDER_ATTR: "nested"}).to_netcdf(target)
             return target
 
-        return fake_compute
+        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", fake_compute)
+        return calls
 
-    def test_cache_key_depends_on_ellipsoid(
-        self, regular_ds: xr.Dataset, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    @staticmethod
+    def _ref(ds: xr.Dataset, level: int, method: str = "conservative") -> str:
+        from grid_doctor.metadata import HealpixGrid
+        from grid_doctor.weights import describe_source
+        from grid_doctor.weights import WeightsDescription
+
+        return WeightsDescription(describe_source(ds), HealpixGrid(level=level), method).ref.path  # type: ignore[arg-type]
+
+    def test_computes_into_store_layout(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
     ) -> None:
-        calls: list[dict[str, object]] = []
-        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", self._recording_compute(calls))
-        sphere = cached_weights(regular_ds, 1, cache_path=tmp_path, ellipsoid="sphere")
-        wgs84 = cached_weights(regular_ds, 1, cache_path=tmp_path, ellipsoid="WGS84")
+        path = cached_weights(regular_ds, 2, store=tmp_path)
+        assert path == tmp_path / self._ref(regular_ds, 2)
+        assert path.exists()
+        assert computed[0]["source_description"] is not None  # source described once
+
+    @pytest.mark.usefixtures("computed")
+    def test_cache_hit_does_not_mesh(
+        self,
+        regular_ds: xr.Dataset,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = cached_weights(regular_ds, 2, store=tmp_path)
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise AssertionError("mesh built on a cache hit")
+
+        monkeypatch.setattr("grid_doctor.weights._source_mesh", boom)
+        assert cached_weights(regular_ds, 2, store=tmp_path) == path
+
+    def test_reuses_weights(self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]) -> None:
+        assert cached_weights(regular_ds, 2, store=tmp_path) == cached_weights(regular_ds, 2, store=tmp_path)
+        assert len(computed) == 1
+
+    def test_same_grid_in_radians_shares_weights(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+    ) -> None:
+        radians = regular_ds.assign_coords(
+            lat=np.radians(regular_ds["lat"]).assign_attrs(units="radian"),
+            lon=np.radians(regular_ds["lon"]).assign_attrs(units="radian"),
+        )
+        assert cached_weights(radians, 2, store=tmp_path) == cached_weights(regular_ds, 2, store=tmp_path)
+        assert len(computed) == 1
+
+    def test_growing_along_time_reuses_weights(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+    ) -> None:
+        longer = xr.concat([regular_ds, regular_ds.assign_coords(time=regular_ds.time + 100)], "time")
+        paths = {
+            cached_weights(ds, 2, store=tmp_path)
+            for ds in (regular_ds.isel(time=slice(0, 1)), regular_ds, longer)
+        }
+        assert len(paths) == 1
+        assert len(computed) == 1
+
+    def test_ignore_unmapped_false_checks_cache_hits(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+    ) -> None:
+        """Weights stored while ignoring unmapped cells must not pass a full-coverage request."""
+        from grid_doctor.metadata import _keys as keys
+
+        path = cached_weights(regular_ds, 2, store=tmp_path, ignore_unmapped=True)
+        with xr.open_dataset(path) as ds:
+            ds = ds.load()
+        ds.assign_attrs({keys.UNMAPPED_CELLS_ATTR: 5}).to_netcdf(path)  # e.g. a regional grid
+
+        with pytest.raises(ValueError, match="5 HEALPix target cells"):
+            cached_weights(regular_ds, 2, store=tmp_path, ignore_unmapped=False)
+        assert cached_weights(regular_ds, 2, store=tmp_path) == path  # default: unmapped cells accepted
+        assert len(computed) == 1
+
+    def test_level_derived_before_lookup(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+    ) -> None:
+        derived = cached_weights(regular_ds, store=tmp_path)
+        level = computed[0]["level"]
+        assert isinstance(level, int)
+        assert cached_weights(regular_ds, level, store=tmp_path) == derived
+        assert len(computed) == 1
+
+    @pytest.mark.usefixtures("computed")
+    def test_method_and_level_get_own_files(
+        self, regular_ds: xr.Dataset, tmp_path: Path
+    ) -> None:
+        paths = {
+            cached_weights(regular_ds, 1, method="nearest", store=tmp_path),
+            cached_weights(regular_ds, 2, method="nearest", store=tmp_path),
+            cached_weights(regular_ds, 2, method="conservative", store=tmp_path),
+        }
+        assert len(paths) == 3
+
+    def test_publishes_to_remote_store(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+    ) -> None:
+        import fsspec
+
+        from grid_doctor.weights import WeightsStore
+
+        fsspec.filesystem("memory").store.clear()
+        store = WeightsStore("memory://weights", cache_dir=tmp_path / "cache")
+        path = cached_weights(regular_ds, 2, store=store)
+        assert path == tmp_path / "cache" / self._ref(regular_ds, 2)
+        assert store.exists(self._ref(regular_ds, 2))
+
+        # another user with an empty local cache downloads instead of computing
+        other = WeightsStore("memory://weights", cache_dir=tmp_path / "other")
+        assert cached_weights(regular_ds, 2, store=other).exists()
+        assert len(computed) == 1
+        fsspec.filesystem("memory").store.clear()
+
+    @pytest.mark.usefixtures("computed")
+    def test_read_only_store_keeps_local_copy(
+        self, regular_ds: xr.Dataset, tmp_path: Path
+    ) -> None:
+        import fsspec
+
+        from grid_doctor.weights import WeightsStore
+
+        fsspec.filesystem("memory").store.clear()
+        store = WeightsStore("memory://weights", cache_dir=tmp_path, read_only=True)
+        assert cached_weights(regular_ds, 2, store=store).exists()
+        assert not store.exists(self._ref(regular_ds, 2))
+
+
+    def test_weights_depend_on_ellipsoid(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
+    ) -> None:
+        sphere = cached_weights(regular_ds, 1, store=tmp_path, ellipsoid="sphere")
+        wgs84 = cached_weights(regular_ds, 1, store=tmp_path, ellipsoid="WGS84")
         assert sphere != wgs84
-        assert [call["ellipsoid"] for call in calls] == ["sphere", "WGS84"]
+        assert "ellipsoid=wgs84" in wgs84.parts[-4]
+        assert [call["ellipsoid"] for call in computed] == ["sphere", "WGS84"]
 
-    def test_configured_ellipsoid_selects_the_cache_entry(
-        self, regular_ds: xr.Dataset, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_configured_ellipsoid_selects_the_weights(
+        self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
     ) -> None:
-        calls: list[dict[str, object]] = []
-        monkeypatch.setattr("grid_doctor.remap.compute_healpix_weights", self._recording_compute(calls))
-        explicit = cached_weights(regular_ds, 1, cache_path=tmp_path, ellipsoid="WGS84")
+        explicit = cached_weights(regular_ds, 1, store=tmp_path, ellipsoid="WGS84")
         with gd.config.healpix.set(ellipsoid="WGS84"):
-            configured = cached_weights(regular_ds, 1, cache_path=tmp_path)
+            configured = cached_weights(regular_ds, 1, store=tmp_path)
         with gd.config.healpix.set(ellipsoid="sphere"):
-            other = cached_weights(regular_ds, 1, cache_path=tmp_path)
+            other = cached_weights(regular_ds, 1, store=tmp_path)
         assert configured == explicit
         assert other != explicit
-        assert [call["ellipsoid"] for call in calls] == ["WGS84", "sphere"]
+        assert [call["ellipsoid"] for call in computed] == ["WGS84", "sphere"]
