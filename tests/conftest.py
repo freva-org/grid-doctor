@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -116,6 +117,15 @@ def _make_unstructured_dataset(ncells: int = 4, cell_size: int = 10, *, radians:
         },
         attrs={"source": "icon-synthetic"},
     )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_weights_store(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Keep the default weights store and cache out of the user's cache directory."""
+    cache = tmp_path_factory.mktemp("cache")
+    monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: cache)
+    monkeypatch.delenv("GRID_DOCTOR_WEIGHTS_STORE", raising=False)
+    return cache
 
 
 @pytest.fixture

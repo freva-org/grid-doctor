@@ -50,6 +50,12 @@ Accepted in standard name table v94
 discussion (cf-convention discussions #447); if one is adopted, only
 this constant changes."""
 
+LAT_UNITS: Final = "degrees_north"
+"""CF ``units`` of latitude coordinates in degrees."""
+
+LON_UNITS: Final = "degrees_east"
+"""CF ``units`` of longitude coordinates in degrees."""
+
 # ---------------------------------------------------------------------
 # grid-doctor attributes
 # ---------------------------------------------------------------------
@@ -65,6 +71,32 @@ COARSEN_MODE_ATTR: Final = f"{ATTR_PREFIX}coarsen_mode"
 MIN_VALID_FRACTION_ATTR: Final = f"{ATTR_PREFIX}min_valid_fraction"
 SPARSE_ATTR: Final = f"{ATTR_PREFIX}sparse"
 IMPLICIT_COORDS_ATTR: Final = f"{ATTR_PREFIX}implicit_coords"
+
+# ---------------------------------------------------------------------
+# Weight-file attributes
+# ---------------------------------------------------------------------
+# Global attributes of HEALPix weight files. Existing names are kept so
+# weight files written by older versions stay readable.
+
+WEIGHTS_VERSION_ATTR: Final = f"{ATTR_PREFIX}weights_version"
+"""Version of the weights path scheme (``WEIGHTS_VERSION``)."""
+SOURCE_HASH_ATTR: Final = f"{ATTR_PREFIX}source_hash"
+"""Digest of the normalised source geometry; the weight file name."""
+LEVEL_ATTR: Final = f"{ATTR_PREFIX}level"
+ORDER_ATTR: Final = f"{ATTR_PREFIX}order"
+"""HEALPix indexing scheme of the weight rows (``"nested"``/``"ring"``)."""
+ELLIPSOID_ATTR: Final = f"{ATTR_PREFIX}ellipsoid"
+BACKEND_ATTR: Final = f"{ATTR_PREFIX}backend"
+IGNORE_UNMAPPED_ATTR: Final = f"{ATTR_PREFIX}ignore_unmapped"
+UNMAPPED_CELLS_ATTR: Final = f"{ATTR_PREFIX}unmapped_cells"
+"""Number of HEALPix target cells without weights (not covered by the source)."""
+ESMF_VERSION_ATTR: Final = f"{ATTR_PREFIX}esmf_version"
+"""Version of the ESMF (ESMPy or ``ESMF_RegridWeightGen``) that computed the weights."""
+SOURCE_KIND_ATTR: Final = f"{ATTR_PREFIX}source_kind"
+SOURCE_DIMS_ATTR: Final = f"{ATTR_PREFIX}source_dims"
+SOURCE_SIZE_ATTR: Final = f"{ATTR_PREFIX}source_size"
+SOURCE_UNITS_ATTR: Final = f"{ATTR_PREFIX}source_units"
+SOURCE_LOOKS_GLOBAL_ATTR: Final = f"{ATTR_PREFIX}source_looks_global"
 
 OWNED_GLOBAL_ATTRS: Final = frozenset(
     {

@@ -22,12 +22,14 @@ Two weight-generation paths are available:
 from __future__ import annotations
 
 import importlib
-import json
+import importlib.metadata
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -40,6 +42,10 @@ import xarray as xr
 if TYPE_CHECKING:
     from esmpy import Mesh
 
+    from .weights import SourceDescription
+
+from .metadata import LAT_UNITS, LON_UNITS, HealpixGrid, Provenance
+from .metadata import _keys as keys
 from .types import (
     FloatArray,
     Int64Array,
@@ -151,6 +157,8 @@ _X_CANDIDATES: tuple[str, ...] = (
 )
 """Lower-cased dimension names considered as longitude / x axes."""
 
+_MICRO_SCALE = 1_000_000
+
 
 # ===================================================================
 # Data-classes
@@ -227,34 +235,6 @@ class PolygonMesh:
     def max_face_nodes(self) -> int:
         """Return the padded face-node width."""
         return int(self.face_nodes.shape[1])
-
-
-@dataclass(frozen=True, slots=True)
-class SourceDescription:
-    """Resolved description of the source representation.
-
-    Produced by [`describe_source`][grid_doctor.remap_backend.describe_source]
-    and consumed by the weight-generation entry point.
-
-    Attributes:
-        dataset: Materialised gridpoint dataset used for weight
-            generation.
-        kind: Source representation class.
-        source_dims: Source dimensions in flattening order.
-        source_mesh: Source mesh stored as compact node/connectivity
-            arrays.
-        ignore_unmapped: Recommended default for ESMF unmapped
-            handling.
-        metadata: Metadata that should be persisted into the output
-            weight file.
-    """
-
-    dataset: xr.Dataset
-    kind: SourceKind
-    source_dims: tuple[str, ...]
-    source_mesh: PolygonMesh
-    ignore_unmapped: bool
-    metadata: dict[str, str | int | float | bool]
 
 
 class SpectralTransformError(RuntimeError):
@@ -334,16 +314,28 @@ def _to_float64(values: npt.ArrayLike) -> FloatArray:
     return np.asarray(values, dtype=np.float64)
 
 
-def _canonical_lon(lon_deg: FloatArray) -> FloatArray:
+def _canonical_lon(lon_deg: FloatArray, *, scale: int | None = None) -> FloatArray:
     """Map longitudes into the range ``[-180, 180)``.
+
+    Without *scale* the values are wrapped with float arithmetic. With
+    *scale* they are first rounded to multiples of ``1 / scale`` and
+    wrapped exactly on integers, so equivalent longitudes (``-10`` and
+    ``350``, ``-180`` and ``180``) give bit-identical results. NaN is
+    kept in both cases; with *scale* Inf raises.
 
     Args:
         lon_deg: Longitude values in degrees.
+        scale: Rounding resolution, e.g. ``1_000_000`` for micro-degrees.
 
     Returns:
         Canonicalised longitude array (same shape as input).
     """
-    return ((lon_deg + 180.0) % 360.0) - 180.0
+    if scale is None:
+        return ((lon_deg + 180.0) % 360.0) - 180.0
+    q, nan = _to_micro(lon_deg, scale)
+    half = 180 * scale
+    q = (q + half) % (2 * half) - half
+    return np.where(nan, np.nan, q / scale)
 
 
 def _looks_like_radians(values: FloatArray) -> bool:
@@ -531,6 +523,44 @@ def _ensure_ccw(
 # ===================================================================
 
 
+def _get_latlon_names(ds: xr.Dataset) -> tuple[str, str]:
+    """Return the names of the latitude and longitude variables in *ds*.
+
+    The function searches coordinate and variables names
+    using the priority-ordered name lists
+    [`_LAT_NAMES`][grid_doctor.remap_backend._LAT_NAMES] and
+    [`_LON_NAMES`][grid_doctor.remap_backend._LON_NAMES].
+
+    Args:
+        ds: Source dataset.
+
+    Returns:
+        ``(lat_name, lon_name)`` as strings.
+    Raises:
+        ValueError: When no latitude/longitude coordinates are present.
+    """
+    lat_name: str | None = None
+    lon_name: str | None = None
+    for name in _LAT_NAMES:
+        if name in ds.coords or name in ds.data_vars:
+            lat_name = name
+            break
+
+    for name in _LON_NAMES:
+        if name in ds.coords or name in ds.data_vars:
+            lon_name = name
+            break
+
+    if lat_name is None or lon_name is None:
+        available = sorted({*map(str, ds.coords), *map(str, ds.data_vars)})
+        raise ValueError(
+            "Could not locate latitude/longitude coordinates. "
+            f"Available names are: {available}."
+        )
+
+    return lat_name, lon_name
+
+
 def _get_latlon_arrays(ds: xr.Dataset) -> tuple[FloatArray, FloatArray]:
     """Extract latitude and longitude arrays from *ds*.
 
@@ -548,25 +578,8 @@ def _get_latlon_arrays(ds: xr.Dataset) -> tuple[FloatArray, FloatArray]:
     Raises:
         ValueError: When no recognised coordinate names are found.
     """
-    lat: FloatArray | None = None
-    lon: FloatArray | None = None
-
-    for name in _LAT_NAMES:
-        if name in ds.coords or name in ds.data_vars:
-            lat = _to_float64(ds[name].values)
-            break
-    for name in _LON_NAMES:
-        if name in ds.coords or name in ds.data_vars:
-            lon = _to_float64(ds[name].values)
-            break
-
-    if lat is None or lon is None:
-        available = sorted({*map(str, ds.coords), *map(str, ds.data_vars)})
-        raise ValueError(
-            "Could not locate latitude/longitude coordinates. "
-            f"Available names are: {available}."
-        )
-    return lat, lon
+    lat_name, lon_name = _get_latlon_names(ds)
+    return _to_float64(ds[lat_name].values), _to_float64(ds[lon_name].values)
 
 
 def _is_unstructured(ds: xr.Dataset) -> bool:
@@ -687,6 +700,260 @@ def _get_spatial_dims(ds: xr.Dataset) -> tuple[str, str]:
             f"Could not determine spatial dimensions from {list(ds.dims)}."
         )
     return y_dim, x_dim
+
+
+def _get_vertex_names(ds: xr.Dataset) -> tuple[str, str]:
+    """Return ``(lat_name, lon_name)`` of the per-cell vertex coordinates.
+
+    Recognises ICON-style names, ``lat_bnds``/``lon_bnds`` and CF bounds
+    variables referenced from the cell-centre coordinates. Names are
+    always returned as a matching pair.
+
+    Raises:
+        ValueError: When no vertex coordinates are present.
+    """
+    for lat_name, lon_name in (
+        ("clat_vertices", "clon_vertices"),
+        ("lat_vertices", "lon_vertices"),
+        ("lat_bnds", "lon_bnds"),
+    ):
+        if lat_name in ds and lon_name in ds:
+            return lat_name, lon_name
+
+    for lat_c, lon_c in (("lat", "lon"), ("clat", "clon")):
+        if lat_c not in ds or lon_c not in ds:
+            continue
+        lat_b = ds[lat_c].attrs.get("bounds")
+        lon_b = ds[lon_c].attrs.get("bounds")
+        if isinstance(lat_b, str) and isinstance(lon_b, str) and lat_b in ds and lon_b in ds:
+            return lat_b, lon_b
+
+    raise ValueError(
+        "Could not find per-cell vertex coordinates "
+        "(e.g. 'clat_vertices'/'clon_vertices' or CF 'bounds')."
+    )
+
+
+# ===================================================================
+# Dataset normalisation
+# ===================================================================
+
+
+def _replace_values(ds: xr.Dataset, mapping: Mapping[str, xr.DataArray]) -> xr.Dataset:
+    """Return *ds* with each variable in *mapping* replaced, as coordinate or data variable."""
+    for name, new in mapping.items():
+        ds = ds.assign_coords({name: new}) if name in ds.coords else ds.assign({name: new})
+    return ds
+
+
+def _to_micro(a: FloatArray, scale: int) -> tuple[FloatArray, FloatArray]:
+    """Return *a* as integer multiples of ``1 / scale`` plus its NaN mask.
+
+    NaN (e.g. padding vertices) cannot be cast to an integer, so it is
+    returned as 0 and must be restored by the caller via the mask.
+    """
+    a = _to_float64(a)
+    if np.isinf(a).any():
+        raise ValueError("Cannot scale Inf values.")
+    nan = np.isnan(a)
+    return np.rint(np.where(nan, 0.0, a) * scale).astype(np.int64), nan
+
+
+def _check_coordinate(da: xr.DataArray, *, allow_nan: bool) -> None:
+    """Raise when coordinate *da* is empty or holds non-finite values.
+
+    Inf is never valid. NaN is accepted only when *allow_nan* is set,
+    e.g. for padding vertices of cells with fewer corners.
+    """
+    if da.size == 0:
+        raise ValueError(f"Located coordinate `{da.name}` is empty.")
+    values = _to_float64(da.values)
+    invalid = np.isinf(values) if allow_nan else ~np.isfinite(values)
+    if invalid.any():
+        what = "Inf" if allow_nan else "Inf or NaN"
+        raise ValueError(f"Located coordinate `{da.name}` contains {what} values.")
+
+
+def normalise_lon(lon: xr.DataArray, *, allow_nan: bool = False) -> xr.DataArray:
+    """Convert longitudes to the expected [-180, 180) range.
+
+    Values are expected in degrees (see ``normalise_degrees``).
+
+    Args:
+        lon: xr.DataArray - longitude coordinate in degree
+        allow_nan: Accept NaN values (e.g. padding vertices). Inf is always
+            rejected.
+    Raises:
+        ValueError: When *lon* is empty or holds invalid values.
+    Return:
+        xr.DataArray with values and `unit` attribute adjusted (`degrees_east`)
+    """
+    _check_coordinate(lon, allow_nan=allow_nan)
+
+    return xr.DataArray(
+        _canonical_lon(lon.values, scale=_MICRO_SCALE), dims=lon.dims, attrs=lon.attrs | {"units": LON_UNITS}
+    )
+
+
+def _norm_lat(lat: FloatArray, *, scale: int = _MICRO_SCALE) -> FloatArray:
+    """Convention lat: [-90, 90]°."""
+    q, nan = _to_micro(lat, scale)
+    if np.any(np.abs(q) > 90 * scale):
+        raise ValueError("outside [-90, 90]")
+    return np.where(nan, np.nan, q / scale)
+
+
+def normalise_lat(lat: xr.DataArray, *, allow_nan: bool = False) -> xr.DataArray:
+    """Convert latitudes to expected [-90, 90] range.
+
+    Values are expected in degrees (see ``normalise_degrees``).
+
+    Args:
+        lat: xr.DataArray - latitude coordinate in degree
+        allow_nan: Accept NaN values (e.g. padding vertices). Inf is always
+            rejected.
+    Raises:
+        ValueError: When *lat* is empty, holds invalid values or lies
+            outside ``[-90, 90]``.
+    Return:
+        xr.DataArray with values and `unit` attribute adjusted (`degrees_north`)
+    """
+    _check_coordinate(lat, allow_nan=allow_nan)
+
+    try:
+        values = _norm_lat(lat.values)
+    except ValueError as exc:
+        raise ValueError(f"Located coordinate `{lat.name}` has values {exc}.") from exc
+    return xr.DataArray(values, dims=lat.dims, attrs=lat.attrs | {"units": LAT_UNITS})
+
+
+def normalise_degrees(array: xr.DataArray, source_units: SourceUnits = "auto") -> xr.DataArray:
+    """Return a copy of *array* in degrees.
+
+    Args:
+        array: Angular coordinate.
+        source_units: Angular unit convention of *array*. With ``"auto"``
+            the ``units`` attribute decides: values are converted only when
+            it says radians. Missing or unrecognised units are assumed to be
+            degrees, with a warning.
+
+    Returns:
+        ``xr.DataArray`` in degrees.
+    """
+    if source_units == "auto":
+        units = str(array.attrs.get("units", "")).lower()
+        if units.startswith("rad"):
+            source_units = "rad"
+        else:
+            if not units.startswith("deg"):
+                logger.warning(
+                    "No angular units found for `%s` (units=%r); assuming degrees.",
+                    array.name,
+                    array.attrs.get("units"),
+                )
+            source_units = "deg"
+
+    d_array = array.copy(deep=True)
+    if source_units == "rad":
+        d_array = d_array.copy(data=np.rad2deg(_to_float64(d_array.values)))
+    d_array.attrs["units"] = "degree"
+    return d_array
+
+
+def _attr_units(da: xr.DataArray) -> Literal["deg", "rad"] | None:
+    """Angular unit stated by the ``units`` attribute of *da*, if any."""
+    units = str(da.attrs.get("units", "")).lower()
+    if units.startswith("rad"):
+        return "rad"
+    if units.startswith("deg"):
+        return "deg"
+    return None
+
+
+def _resolve_pair_units(
+    lat: xr.DataArray,
+    lon: xr.DataArray,
+    source_units: SourceUnits,
+    default: Literal["deg", "rad"] | None = None,
+) -> Literal["deg", "rad"]:
+    """Decide the angular unit shared by a latitude/longitude pair.
+
+    An explicit *source_units* wins. Otherwise the ``units`` attributes
+    decide; they must not contradict each other. Without attributes the
+    pair falls back to *default* (e.g. the unit of the cell centres for
+    their vertices) and, failing that, to a value check: the pair is taken
+    as radians only when both lie within ``[-2*pi, 2*pi]``.
+
+    Raises:
+        ValueError: When the ``units`` attributes of *lat* and *lon* disagree.
+    """
+    if source_units != "auto":
+        return source_units
+    stated = {u for u in (_attr_units(lat), _attr_units(lon)) if u is not None}
+    if len(stated) > 1:
+        raise ValueError(
+            f"`{lat.name}` and `{lon.name}` state different angular units "
+            f"({lat.attrs.get('units')!r} vs {lon.attrs.get('units')!r}); pass `source_units`."
+        )
+    if stated:
+        return stated.pop()
+    if default is not None:
+        return default
+    guess: Literal["deg", "rad"] = (
+        "rad"
+        if _looks_like_radians(_to_float64(lat.values)) and _looks_like_radians(_to_float64(lon.values))
+        else "deg"
+    )
+    logger.warning(
+        "No angular units found for `%s`/`%s`; values suggest %s.",
+        lat.name,
+        lon.name,
+        "radians" if guess == "rad" else "degrees",
+    )
+    return guess
+
+
+def normalise_dataset(ds: xr.Dataset, source_units: SourceUnits = "auto") -> xr.Dataset:
+    """Return a normalised copy of the input dataset.
+
+    Latitude/longitude coordinates and their units are inferred and
+    normalised. On unstructured grids, the cell vertices are normalised
+    as well when present.
+
+    Args:
+        ds: Source geometry dataset.
+        source_units: Angular unit convention of the coordinates. With
+            ``"auto"`` the ``units`` attributes decide per latitude/longitude
+            pair; without them, vertices follow their cell centres and the
+            centres are taken as radians only when both lie within
+            ``[-2*pi, 2*pi]`` (with a warning).
+
+    Returns:
+        Normalised copy of *ds*.
+
+    Raises:
+        ValueError: When no latitude/longitude coordinates are present,
+            a coordinate is empty, the cell centres contain NaN or Inf
+            (masked grids are not supported), the vertices contain Inf,
+            a latitude lies outside ``[-90, 90]``, or the ``units``
+            attributes of a latitude/longitude pair disagree.
+    """
+    # Cell centres are required and must be finite; vertices are optional
+    # and may be NaN-padded.
+    names = [(_get_latlon_names(ds), False)]
+    try:
+        names.append((_get_vertex_names(ds), True))
+    except ValueError:
+        pass  # vertices are optional
+
+    mapping: dict[str, xr.DataArray] = {}
+    units: Literal["deg", "rad"] | None = None  # vertices follow their centres
+    for (lat_name, lon_name), allow_nan in names:
+        lat, lon = ds[lat_name], ds[lon_name]
+        units = _resolve_pair_units(lat, lon, source_units, default=units)
+        mapping[lat_name] = normalise_lat(normalise_degrees(lat, units), allow_nan=allow_nan)
+        mapping[lon_name] = normalise_lon(normalise_degrees(lon, units), allow_nan=allow_nan)
+    return _replace_values(ds, mapping)
 
 
 # ===================================================================
@@ -978,18 +1245,19 @@ def _regular_grid_mesh(
     [`_infer_bounds_1d`][grid_doctor.remap_backend._infer_bounds_1d].
     No Python-level cell loops are used.
 
-    The caller must pass *lon* as a monotonic sequence (i.e. **not**
-    pre-canonicalised to ``[-180, 180)``).  Canonicalisation of face
-    centres is applied internally.
+    *lon* may be wrapped, e.g. a ``0..360`` axis normalised to
+    ``[-180, 180)`` jumps from ``179`` to ``-179``.  It is unwrapped to a
+    continuous sequence before the bounds are inferred, keeping the cell
+    order.  Canonicalisation of face centres is applied internally.
 
     Args:
         lat: 1-D latitude centres in degrees, shape ``(ny,)``.
         lon: 1-D longitude centres in degrees, shape ``(nx,)``.
-            Must be monotonic.
 
     Returns:
         Compact polygon mesh.
     """
+    lon = np.unwrap(lon.astype(np.float64, copy=False), period=360.0)
     lat_bounds = _infer_bounds_1d(lat)
     lon_bounds = _infer_bounds_1d(lon)
     ny, nx = lat.size, lon.size
@@ -1699,102 +1967,6 @@ def _materialise_spectral_source(
 
 
 # ===================================================================
-# Source description facade
-# ===================================================================
-
-
-def describe_source(
-    source: xr.Dataset | str | Path,
-    *,
-    grid: xr.Dataset | None = None,
-    source_kind: SourceKind = "auto",
-    source_units: SourceUnits = "auto",
-    spectral_transform_command: (list[str] | tuple[str, ...] | None) = None,
-    workdir: Path | None = None,
-) -> SourceDescription:
-    """Resolve the source representation for HEALPix weight generation.
-
-    This function classifies the source grid, constructs the compact
-    polygon mesh, and assembles the metadata dictionary that will be
-    written into the output weight file.
-
-    Args:
-        source: Source dataset or source path.  A path is mainly
-            useful for spectral inputs that need an external transform.
-        grid: Optional grid dataset that supplies geometry when the
-            data file itself only contains values on dimensions such
-            as ``cell``.
-        source_kind: Explicit source representation.  Use ``"auto"``
-            to infer it from the available coordinates.
-        source_units: Angular unit convention of the source
-            coordinates.
-        spectral_transform_command: External command used when
-            ``source_kind="spectral"``.  The command may use
-            ``{input}`` and ``{output}`` placeholders.
-        workdir: Optional working directory for temporary files.
-
-    Returns:
-        Fully resolved source description.
-    """
-    if workdir is None:
-        workdir = Path(tempfile.mkdtemp(prefix="grid_doctor_source_"))
-
-    if isinstance(source, xr.Dataset):
-        dataset = source
-    else:
-        dataset = xr.load_dataset(source)
-
-    effective_kind = source_kind
-    if effective_kind == "spectral":
-        dataset = _materialise_spectral_source(
-            source,
-            transform_command=spectral_transform_command,
-            workdir=workdir,
-        )
-        effective_kind = "auto"
-
-    geometry_ds = grid if grid is not None else dataset
-    resolved_kind = _classify_source_kind(geometry_ds, explicit_kind=effective_kind)
-    source_mesh, source_dims = _source_mesh(geometry_ds, source_units=source_units)
-
-    # The HEALPix target is a complete global tessellation. A source that
-    # does not fully tile the sphere -- ocean/land-masked grids, regional
-    # domains, polar gaps -- leaves some destination cells with no
-    # overlapping source cell. Those cells must become missing values, not
-    # abort weight generation, so unmapped destinations are ignored by
-    # default. Callers can pass ignore_unmapped=False to require full
-    # coverage (e.g. for a source that is expected to be globally complete).
-    #
-    # _looks_global is retained as a diagnostic: a source that *does* look
-    # global yet still leaves cells unmapped may indicate a grid problem
-    # (e.g. NaN coordinates or broken corner inference) rather than a mask.
-    looks_global = _looks_global(geometry_ds, source_units=source_units)
-    ignore_unmapped = True
-    if not looks_global:
-        logger.debug(
-            "Source grid does not look global (lon/lat extent below "
-            "thresholds); unmapped HEALPix destinations are expected."
-        )
-
-    metadata: dict[str, str | int | float | bool] = {
-        "grid_doctor_source_kind": resolved_kind,
-        "grid_doctor_source_dims": json.dumps(list(source_dims)),
-        "grid_doctor_source_size": source_mesh.face_count,
-        "grid_doctor_source_units": source_units,
-        "grid_doctor_source_looks_global": int(looks_global),
-    }
-
-    return SourceDescription(
-        dataset=dataset,
-        kind=resolved_kind,
-        source_dims=source_dims,
-        source_mesh=source_mesh,
-        ignore_unmapped=ignore_unmapped,
-        metadata=metadata,
-    )
-
-
-# ===================================================================
 # In-memory weight computation
 # ===================================================================
 
@@ -1874,6 +2046,7 @@ def compute_healpix_weights_backend(
     large_file: bool = True,
     offline: OfflineWeightConfig | None = None,
     spectral_transform_command: (list[str] | tuple[str, ...] | None) = None,
+    source_description: SourceDescription | None = None,
 ) -> Path:
     """Compute reusable HEALPix weights.
 
@@ -1886,11 +2059,18 @@ def compute_healpix_weights_backend(
         source: Source dataset or source path.
         level: HEALPix refinement level.
         method: Weight method (``"nearest"`` or ``"conservative"``).
-        nest: Use nested HEALPix ordering when *True*.
+        nest: Write ring-order rows to an explicit *weights_path* when
+            *False*. ESMF always computes nested weights; ring rows are
+            renumbered (see
+            [`nested_to_ring`][grid_doctor.weights.nested_to_ring]). Files
+            at the default path are always nested.
         source_units: Angular unit convention of the source
             coordinates.
-        weights_path: Output weight file path.  A temporary file is
-            created when omitted.
+        weights_path: Output weight file path. Defaults to the local
+            weights directory in the
+            [`WeightsRef`][grid_doctor.weights.WeightsRef] layout (see
+            [`local_weights_dir`][grid_doctor.weights.local_weights_dir]),
+            in nested order; choose ring order when applying them.
         grid: Optional external geometry dataset.
         source_kind: Explicit source representation or ``"auto"``.
         ignore_unmapped: Whether destination cells without source
@@ -1899,6 +2079,9 @@ def compute_healpix_weights_backend(
         offline: Offline weight-generation configuration.
         spectral_transform_command: External command used when
             ``source_kind="spectral"``.
+        source_description: Description of *source* from
+            [`describe_source`][grid_doctor.weights.describe_source];
+            skips describing the source again.
 
     Returns:
         Path to the generated weight file.
@@ -1911,15 +2094,15 @@ def compute_healpix_weights_backend(
     if method not in {"nearest", "conservative"}:
         raise ValueError("Only 'nearest' and 'conservative' are supported.")
 
-    offline_cfg = offline or OfflineWeightConfig()
-    target = (
-        Path(weights_path)
-        if weights_path is not None
-        else Path(tempfile.mkstemp(suffix=".nc")[1])
+    from .weights import (
+        WEIGHTS_VERSION,
+        WeightsDescription,
+        describe_source,
+        local_weights_dir,
     )
-    target.parent.mkdir(parents=True, exist_ok=True)
 
-    source_desc = describe_source(
+    offline_cfg = offline or OfflineWeightConfig()
+    source_desc = source_description or describe_source(
         source,
         grid=grid,
         source_kind=source_kind,
@@ -1927,7 +2110,11 @@ def compute_healpix_weights_backend(
         spectral_transform_command=spectral_transform_command,
         workdir=offline_cfg.workdir,
     )
-    _, target_mesh = _target_healpix_mesh(level, nest=nest)
+    desc = WeightsDescription(source_desc, HealpixGrid.from_nest(level, nest=nest), method)
+    target = Path(weights_path) if weights_path is not None else local_weights_dir() / desc.ref.path
+    ring = not nest and weights_path is not None  # the default (store) layout holds nested weights
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _, target_mesh = _target_healpix_mesh(level, nest=True)  # ring: rows renumbered below
 
     use_offline = _default_offline_enabled(
         method=method,
@@ -1939,41 +2126,88 @@ def compute_healpix_weights_backend(
         source_desc.ignore_unmapped if ignore_unmapped is None else ignore_unmapped
     )
 
-    if use_offline:
-        generated = _run_offline_esmf(
-            source_desc=source_desc,
-            target_mesh=target_mesh,
-            target_path=target,
-            level=level,
-            nest=nest,
-            method=method,
-            config=offline_cfg,
-            ignore_unmapped=eff_ignore,
-        )
-    else:
-        generated = _compute_weights_in_memory(
-            source_mesh=source_desc.source_mesh,
-            target_mesh=target_mesh,
-            weights_path=target,
-            method=method,
-            ignore_unmapped=eff_ignore,
-            large_file=large_file,
-        )
-
-    # Annotate the weight file with provenance metadata.
+    # Provenance: every part of the weights' identity, so a store can be
+    # re-verified from the files alone.
     meta: dict[str, str | int | float | bool] = {
-        "grid_doctor_method": method,
-        "grid_doctor_level": level,
-        "grid_doctor_order": "nested" if nest else "ring",
-        "grid_doctor_backend": ("offline-esmf" if use_offline else "esmpy"),
-        "grid_doctor_ignore_unmapped": int(bool(eff_ignore)),
+        **Provenance(method=method).to_attrs(),
+        keys.WEIGHTS_VERSION_ATTR: WEIGHTS_VERSION,
+        keys.SOURCE_HASH_ATTR: source_desc.digest,
+        keys.LEVEL_ATTR: level,
+        keys.ORDER_ATTR: "ring" if ring else "nested",
+        keys.ELLIPSOID_ATTR: desc.ref.ellipsoid,
+        keys.BACKEND_ATTR: "offline-esmf" if use_offline else "esmpy",
+        keys.ESMF_VERSION_ATTR: _esmf_version(use_offline, offline_cfg),
+        keys.IGNORE_UNMAPPED_ATTR: int(bool(eff_ignore)),
         **source_desc.metadata,
     }
-    with xr.open_dataset(generated) as raw_weights:
-        annotated = raw_weights.load()
-    annotated.attrs.update(meta)
-    annotated.to_netcdf(generated, mode="w")
-    return generated
+    # Generate and annotate next to *target*, then rename: readers never
+    # see a partial weight file, and the scratch dir is always removed.
+    with tempfile.TemporaryDirectory(dir=target.parent, prefix=f".{target.name}.") as scratch:
+        raw, annotated = Path(scratch) / "raw.nc", Path(scratch) / "annotated.nc"
+        if use_offline:
+            _run_offline_esmf(
+                source_desc=source_desc,
+                target_mesh=target_mesh,
+                target_path=raw,
+                level=level,
+                nest=True,
+                method=method,
+                config=offline_cfg,
+                ignore_unmapped=eff_ignore,
+            )
+        else:
+            _compute_weights_in_memory(
+                source_mesh=source_desc.source_mesh,
+                target_mesh=target_mesh,
+                weights_path=raw,
+                method=method,
+                ignore_unmapped=eff_ignore,
+                large_file=large_file,
+            )
+        with xr.open_dataset(raw) as weights:
+            weights = weights.load()
+        rows = weights["row" if "row" in weights else "dst_address"].values
+        meta[keys.UNMAPPED_CELLS_ATTR] = target_mesh.face_count - np.unique(rows).size
+        if ring:
+            weights = _renumber_to_ring(weights, level)
+        weights.assign_attrs(meta).to_netcdf(annotated)
+        os.replace(annotated, target)
+    return target
+
+
+def _renumber_to_ring(weights: xr.Dataset, level: int) -> xr.Dataset:
+    """Return nested-order *weights* with their target cells numbered in ring order.
+
+    Renumbers the (1-based) rows and reorders ESMF's per-target-cell
+    arrays (dimension ``n_b``).
+    """
+    from .weights import nested_to_ring
+
+    row = "row" if "row" in weights else "dst_address"
+    ring_of = nested_to_ring(np.arange(12 * 4**level), level)
+    weights[row] = weights[row].copy(data=(ring_of[weights[row].values.astype(np.int64) - 1] + 1))
+    nested_of = np.argsort(ring_of)  # ring cell i holds nested cell nested_of[i]
+    for name in [n for n, v in weights.data_vars.items() if "n_b" in v.dims]:
+        weights[name] = weights[name].isel(n_b=nested_of)
+    return weights
+
+
+def _esmf_version(offline: bool, config: OfflineWeightConfig) -> str:
+    """Return the version of the ESMF that computes the weights, or ``"unknown"``."""
+    if not offline:  # from the package metadata: importing ESMPy would start ESMF and write logs
+        try:
+            return importlib.metadata.version("esmpy")
+        except importlib.metadata.PackageNotFoundError:
+            return "unknown"
+    try:
+        with tempfile.TemporaryDirectory() as scratch:  # ESMF writes PET*.Log files into its working dir
+            out = subprocess.run(
+                [config.esmf_regrid_weightgen, "--version"], capture_output=True, text=True, timeout=60, cwd=scratch
+            ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    match = re.search(r"\d+\.\d+\.\d+\S*", out)
+    return match.group() if match else "unknown"
 
 
 # ===================================================================
