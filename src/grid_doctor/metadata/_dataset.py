@@ -227,4 +227,3 @@ def _flag(attrs: Mapping[Hashable, object], key: str) -> bool:
 def has_healpix_metadata(ds: xr.Dataset) -> bool:
     """Whether *ds* carries a HEALPix grid mapping variable."""
     return any(is_healpix_grid_mapping(var.attrs) for var in ds.variables.values())
-
