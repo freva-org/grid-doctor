@@ -1,4 +1,4 @@
-"""Tests for grid_doctor.log."""
+"""Tests for grid_doctor._log (the logging knob behind setup_logging)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from grid_doctor.log import (
+from grid_doctor._log import (
     decrease,
     get_level,
     increase,

@@ -82,7 +82,7 @@ from ..metadata import (
     variable_method_attrs,
 )
 from ..types import BinAgg, Ellipsoid, Int64Array, SourceUnits
-from .utils import (
+from ._binning import (
     AGG_TO_METHOD,
     FILL_ATTR_NAMES,
     MAX_NESTED_LEVEL,

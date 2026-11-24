@@ -10,7 +10,7 @@ import pytest
 import xarray as xr
 
 from grid_doctor import coarsen_healpix, init_pyramid_store, save_pyramid
-from grid_doctor.io import maybe_drop_coordinates
+from grid_doctor.io._xarray import maybe_drop_coordinates
 from grid_doctor.metadata import (
     DGGS_CONVENTION,
     MULTISCALES_CONVENTION,

@@ -9,20 +9,9 @@ from typing import Literal, overload
 import s3fs
 import xarray as xr
 
-from ..io import (
-    DeferredWrite,
-    deferred_writes,
-    get_common_coordinates,
-    get_filesystem,
-    get_store,
-    get_zarr_options,
-    maybe_drop_coordinates,
-    prepare_region_dataset,
-    prepare_template,
-    pyramid_to_multiscales_tree,
-    store_all,
-)
-from ..io._fanout import (
+from ..metadata import level_group
+from ..types import PyramidEncoding, Region, S3Options
+from ._fanout import (
     IfExists,
     StoreExistsError,
     begin_init,
@@ -31,9 +20,22 @@ from ..io._fanout import (
     inspect_target,
     resume_init,
 )
-from ..io._manifest import LevelSpec, PyramidManifest
-from ..metadata import level_group
-from ..types import PyramidEncoding, Region, S3Options
+from ._manifest import LevelSpec, PyramidManifest
+from ._xarray import (
+    get_common_coordinates,
+    maybe_drop_coordinates,
+    prepare_region_dataset,
+    prepare_template,
+    pyramid_to_multiscales_tree,
+)
+from ._zarr import (
+    DeferredWrite,
+    deferred_writes,
+    get_filesystem,
+    get_store,
+    get_zarr_options,
+    store_all,
+)
 
 logger = logging.getLogger(__name__)
 

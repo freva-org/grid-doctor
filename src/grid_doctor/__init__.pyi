@@ -1,31 +1,32 @@
 from . import cli as cli
 from . import config as config
-from . import log as log
+from . import io as io
 from . import metadata as metadata
+from . import pyramid as pyramid
 from . import remap as remap
 from . import select as select
 from . import swath as swath
+from . import types as types
+from . import weights as weights
 from ._geometry.coords import get_latlon_resolution as get_latlon_resolution
 from ._geometry.healpix import (
     resolution_to_healpix_level as resolution_to_healpix_level,
 )
+from ._log import setup_logging as setup_logging
 from .io import PyramidManifest as PyramidManifest
 from .io import StoreReport as StoreReport
 from .io import WriteTask as WriteTask
 from .io import check_pyramid_store as check_pyramid_store
+from .io import chunk_for_target_store_size as chunk_for_target_store_size
+from .io import get_s3_options as get_s3_options
+from .io import init_pyramid_store as init_pyramid_store
 from .io import is_current as is_current
 from .io import is_task_done as is_task_done
 from .io import load_manifest as load_manifest
+from .io import save_pyramid as save_pyramid
 from .io import write_pyramid_task as write_pyramid_task
-from .io._options import (
-    chunk_for_target_store_size as chunk_for_target_store_size,
-)
-from .io._options import get_s3_options as get_s3_options
-from .io._save import init_pyramid_store as init_pyramid_store
-from .io._save import save_pyramid as save_pyramid
-from .log import setup_logging as setup_logging
-from .pyramid._build import coarsen_healpix as coarsen_healpix
-from .pyramid._build import create_healpix_pyramid as create_healpix_pyramid
+from .pyramid import coarsen_healpix as coarsen_healpix
+from .pyramid import create_healpix_pyramid as create_healpix_pyramid
 from .remap import apply_weight_file as apply_weight_file
 from .remap import compute_healpix_weights as compute_healpix_weights
 from .remap import regrid_to_healpix as regrid_to_healpix
@@ -41,11 +42,14 @@ __all__ = [
     "__version__",
     "cli",
     "config",
-    "log",
+    "io",
     "metadata",
+    "pyramid",
     "remap",
     "select",
     "swath",
+    "types",
+    "weights",
     "apply_weight_file",
     "attach_cell_coords",
     "bin_to_healpix",

@@ -62,7 +62,7 @@ def get_parser(name: str, description: str | None = None) -> argparse.ArgumentPa
 
 
 class LoggingOptions(TypedDict, total=False):
-    """Options of [`grid_doctor.setup_logging`][grid_doctor.log.setup_logging]."""
+    """Options of [`grid_doctor.setup_logging`][grid_doctor.setup_logging]."""
 
     level: int | str | None
     fmt: str
@@ -80,7 +80,7 @@ def setup_logging_from_args(
         Parsed arguments containing a `verbose` attribute.
     **kwargs:
         Extra keyword arguments forwarded to
-        [`grid_doctor.setup_logging`][grid_doctor.log.setup_logging].
+        [`grid_doctor.setup_logging`][grid_doctor.setup_logging].
     """
     import grid_doctor as gd
 

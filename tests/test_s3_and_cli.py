@@ -48,7 +48,7 @@ class TestSetupLoggingFromArgs:
     def test_sets_verbosity(self) -> None:
         args = argparse.Namespace(verbose=2)
         setup_logging_from_args(args)
-        import grid_doctor.log as log_mod
+        import grid_doctor._log as log_mod
 
         assert log_mod.get_level() == 10
 

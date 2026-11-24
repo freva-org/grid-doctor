@@ -144,6 +144,11 @@ cells and need no shared node numbering between tools.
 
 ## API
 
+::: grid_doctor.cached_weights
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+
 ::: grid_doctor.weights.WeightsStore
     options:
       show_root_heading: true

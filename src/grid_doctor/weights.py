@@ -763,3 +763,19 @@ def cached_weights(
     if kwargs.get("ignore_unmapped") is False:
         check_coverage(path)  # the stored weights may have been computed ignoring unmapped cells
     return path
+
+
+__all__ = [
+    "WEIGHTS_STORE_ENV",
+    "WEIGHTS_VERSION",
+    "SourceDescription",
+    "WeightsDescription",
+    "WeightsRef",
+    "WeightsStore",
+    "cached_weights",
+    "check_coverage",
+    "describe_source",
+    "local_weights_dir",
+    "nested_to_ring",
+    "ring_to_nested",
+]

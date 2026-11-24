@@ -20,7 +20,11 @@ from grid_doctor.pyramid._build import (
     coarsen_healpix,
     create_healpix_pyramid,
 )
-from grid_doctor.pyramid import MeanPartials, coarsen_mean, coarsen_mean_steps
+from grid_doctor.pyramid._blocks import (
+    MeanPartials,
+    coarsen_mean_steps,
+)
+from grid_doctor.pyramid._kernels import coarsen_mean
 from grid_doctor.remap import _apply as apply_module
 
 from .helpers import with_healpix_metadata

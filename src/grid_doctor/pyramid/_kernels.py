@@ -92,7 +92,7 @@ def coarsen_mean(
 
     Exact only when ``values`` is the finest level: means of means
     weight every valid parent equally. Chain partials instead
-    (see [`MeanPartials`][grid_doctor.pyramid.MeanPartials]).
+    (see [`MeanPartials`][grid_doctor.pyramid._blocks.MeanPartials]).
 
     Args:
         values: Input array with shape ``(*batch, n_cells)``.
@@ -128,7 +128,7 @@ def _coarsen_array(
     dimensions are batch dimensions that are preserved.
 
     Thin wrapper around
-    [`coarsen_mean`][grid_doctor.pyramid.coarsen_mean], which
+    [`coarsen_mean`][grid_doctor.pyramid._kernels.coarsen_mean], which
     is exact only when ``values`` is the finest level.
 
     Args:

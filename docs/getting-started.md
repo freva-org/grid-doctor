@@ -81,12 +81,10 @@ Each repetition increases log verbosity:
 | `-v` | INFO |
 | `-vv` | DEBUG |
 
-You can also control logging programmatically:
+You can also set the level programmatically:
 
 ```python
-from grid_doctor.log import set_level, increase, decrease
+import grid_doctor as gd
 
-set_level("DEBUG")
-increase()   # one step more verbose
-decrease(2)  # two steps less verbose
+gd.setup_logging(level="DEBUG")  # or verbosity=2
 ```

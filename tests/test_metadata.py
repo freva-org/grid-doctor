@@ -430,7 +430,7 @@ def test_xdggs_decodes_cf_output(scheme: str) -> None:
 
 class TestMaybeDropCoordinates:
     def test_dense_store_drops_coords_and_is_marked(self) -> None:
-        from grid_doctor.io import maybe_drop_coordinates
+        from grid_doctor.io._xarray import maybe_drop_coordinates
 
         ds = HealpixMetadata(HealpixGrid(level=LEVEL)).apply(_dense())
         out = maybe_drop_coordinates(ds, LEVEL, write_coords=False)
@@ -438,7 +438,7 @@ class TestMaybeDropCoordinates:
         assert HealpixMetadata.from_dataset(out).implicit_coords
 
     def test_sparse_subset_keeps_cell_ids(self) -> None:
-        from grid_doctor.io import maybe_drop_coordinates
+        from grid_doctor.io._xarray import maybe_drop_coordinates
 
         ds = HealpixMetadata(HealpixGrid(level=LEVEL), sparse=True).apply(_sparse([5, 9]))
         out = maybe_drop_coordinates(ds, LEVEL, write_coords=False)

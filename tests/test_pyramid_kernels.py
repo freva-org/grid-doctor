@@ -10,7 +10,10 @@ from grid_doctor.pyramid._build import (
     coarsen_healpix,
     create_healpix_pyramid,
 )
-from grid_doctor.pyramid import coarsen_mean, min_valid_count
+from grid_doctor.pyramid._kernels import (
+    coarsen_mean,
+    min_valid_count,
+)
 
 from .helpers import with_healpix_metadata
 
