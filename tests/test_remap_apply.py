@@ -1,4 +1,4 @@
-"""Tests for `grid_doctor.remap_apply`."""
+"""Tests for `grid_doctor.remap._sparse`."""
 
 from __future__ import annotations
 
@@ -6,13 +6,12 @@ import numpy as np
 import pytest
 from scipy.sparse import csr_matrix
 
-from grid_doctor.remap_apply import (
-    ApplyBackend,
+from grid_doctor.remap._sparse import (
     _apply_scipy_batched,
     apply_weights_nd,
     extract_sparse_weights,
 )
-
+from grid_doctor.types import ApplyBackend
 
 # ===================================================================
 # Fixtures

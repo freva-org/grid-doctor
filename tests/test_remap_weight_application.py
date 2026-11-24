@@ -11,14 +11,13 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from grid_doctor import config, remap, remap_backend
+from grid_doctor import config, remap
 from grid_doctor._geometry import healpix as healpix_module
 from grid_doctor._geometry import mesh as mesh_module
 from grid_doctor.metadata import ELLIPSOID_ATTR
-from grid_doctor.remap import (
-    apply_weight_file,
-    compute_healpix_weights,
-)
+from grid_doctor.remap import _apply as apply_module
+from grid_doctor.remap import _esmf as esmf_module
+from grid_doctor.remap import apply_weight_file, compute_healpix_weights
 from grid_doctor.types import Ellipsoid
 
 from .helpers import _FakeHealpixModule
@@ -131,7 +130,7 @@ class TestWeightGeneration:
         tmp_path: Path,
     ) -> None:
         monkeypatch.setattr(
-            remap_backend, "_require_esmpy", lambda: _FakeESMPy()
+            esmf_module, "_require_esmpy", lambda: _FakeESMPy()
         )
         monkeypatch.setattr(
             mesh_module,
@@ -158,7 +157,7 @@ class TestWeightGeneration:
         )
 
     def _fake_healpix(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
+        monkeypatch.setattr(esmf_module, "_require_esmpy", lambda: _FakeESMPy())
         for module in (mesh_module, healpix_module):
             monkeypatch.setattr(module, "_require_healpix_geo_module", lambda grid: (_FakeHealpixModule(), {}))
 
@@ -179,8 +178,11 @@ class TestWeightGeneration:
         """A weight file names its whole identity, so a store can be verified from the files alone."""
         from grid_doctor.metadata import HealpixGrid
         from grid_doctor.metadata import _keys as keys
-        from grid_doctor.weights import describe_source
-        from grid_doctor.weights import WEIGHTS_VERSION, WeightsDescription
+        from grid_doctor.weights import (
+            WEIGHTS_VERSION,
+            WeightsDescription,
+            describe_source,
+        )
 
         self._fake_healpix(monkeypatch)
         out = compute_healpix_weights(regular_ds, 1, method="nearest", nest=False, weights_path=tmp_path / "w.nc")
@@ -206,7 +208,7 @@ class TestWeightGeneration:
             Path(kwargs["weights_path"]).write_bytes(b"partial")
             raise RuntimeError("ESMF crashed")
 
-        monkeypatch.setattr(remap_backend, "_compute_weights_in_memory", broken)
+        monkeypatch.setattr(esmf_module, "_compute_weights_in_memory", broken)
         out = tmp_path / "out" / "weights.nc"
         with pytest.raises(RuntimeError, match="ESMF crashed"):
             compute_healpix_weights(regular_ds, 1, method="nearest", weights_path=out)
@@ -222,7 +224,7 @@ class TestWeightGeneration:
         from grid_doctor.metadata import HealpixGrid
         from grid_doctor.weights import WeightsDescription, describe_source
 
-        monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
+        monkeypatch.setattr(esmf_module, "_require_esmpy", lambda: _FakeESMPy())
         for module in (mesh_module, healpix_module):
             monkeypatch.setattr(module, "_require_healpix_geo_module", lambda grid: (_FakeHealpixModule(), {}))
         monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: tmp_path)
@@ -247,7 +249,7 @@ class TestWeightGeneration:
         argument: Ellipsoid | None,
         expected: Ellipsoid,
     ) -> None:
-        monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
+        monkeypatch.setattr(esmf_module, "_require_esmpy", lambda: _FakeESMPy())
         monkeypatch.setattr(
             mesh_module, "_require_healpix_geo_module", lambda grid: (_FakeHealpixModule(), {})
         )
@@ -264,7 +266,7 @@ class TestWeightGeneration:
         tmp_path: Path,
     ) -> None:
         monkeypatch.setattr(
-            remap_backend, "_require_esmpy", lambda: _FakeESMPy()
+            esmf_module, "_require_esmpy", lambda: _FakeESMPy()
         )
         monkeypatch.setattr(
             mesh_module,
@@ -297,7 +299,7 @@ class TestWeightGeneration:
         tmp_path: Path,
     ) -> None:
         monkeypatch.setattr(
-            remap_backend, "_require_esmpy", lambda: _FakeESMPy()
+            esmf_module, "_require_esmpy", lambda: _FakeESMPy()
         )
         monkeypatch.setattr(
             mesh_module,
@@ -365,8 +367,7 @@ class TestApplyWeightFileWithGrid:
         weights.to_netcdf(path)
 
         monkeypatch.setattr(
-            remap,
-            "_source_centre_arrays",
+            apply_module, "_source_centre_arrays",
             lambda obj, source_units="auto": (
                 np.array([0.0, 1.0, 2.0], dtype=np.float64),
                 np.array([10.0, 20.0, 30.0], dtype=np.float64),

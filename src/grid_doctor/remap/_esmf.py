@@ -1,21 +1,10 @@
-"""Backend utilities for reusable HEALPix remapping weights.
+"""Generate HEALPix weight files with ESMF.
 
-This module encapsulates the low-level mechanics needed by
-[`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights] while
-keeping the public API in `grid_doctor.remap` small.
-
-The backend supports the following source representations:
-
-- regular lon/lat grids
-- curvilinear lon/lat grids
-- unstructured polygon meshes such as UGRID or ICON
-- spectral inputs indirectly, via an external transform command that converts
-  them to a temporary gridpoint dataset before weight generation
-
-Two weight-generation paths are available:
+Turns the source and target [`PolygonMesh`][grid_doctor._geometry.mesh.PolygonMesh]
+objects into ESMF meshes and computes the weights, on one of two paths:
 
 - **In-memory** via ESMPy for moderate-size grids.
-- **Offline** via `ESMF_RegridWeightGen` under MPI for large conservative
+- **Offline** via ``ESMF_RegridWeightGen`` under MPI for large conservative
   jobs where parallel overlap calculation is beneficial.
 """
 
@@ -40,19 +29,19 @@ import xarray as xr
 if TYPE_CHECKING:
     from esmpy import Mesh
 
-    from .weights import SourceDescription
+    from ..weights import SourceDescription
 
-from ._geometry.healpix import _ellipsoid_or_config
-from ._geometry.mesh import (
+from .._geometry.healpix import _ellipsoid_or_config
+from .._geometry.mesh import (
     PolygonMesh,
     _corner_mesh_from_arrays,
     _polygons_to_corner_arrays,
     _target_healpix_mesh,
 )
-from ._geometry.spectral import _run_subprocess
-from .metadata import HealpixGrid, Provenance
-from .metadata import _keys as keys
-from .types import (
+from .._geometry.spectral import _run_subprocess
+from ..metadata import HealpixGrid, Provenance
+from ..metadata import _keys as keys
+from ..types import (
     Ellipsoid,
     FloatArray,
     RemapMethod,
@@ -209,7 +198,7 @@ def write_ugrid_mesh_file(
 
     Args:
         polygons: Either a
-            [`PolygonMesh`][grid_doctor.remap_backend.PolygonMesh] or
+            [`PolygonMesh`][grid_doctor._geometry.mesh.PolygonMesh] or
             a list of ``(lon_deg, lat_deg)`` polygon tuples.
         path: Output file path.
         mesh_name: Name used for the mesh topology variable.
@@ -527,7 +516,7 @@ def compute_healpix_weights_backend(
     if method not in {"nearest", "conservative"}:
         raise ValueError("Only 'nearest' and 'conservative' are supported.")
 
-    from .weights import (
+    from ..weights import (
         WEIGHTS_VERSION,
         WeightsDescription,
         describe_source,
@@ -616,7 +605,7 @@ def _renumber_to_ring(weights: xr.Dataset, level: int) -> xr.Dataset:
     Renumbers the (1-based) rows and reorders ESMF's per-target-cell
     arrays (dimension ``n_b``).
     """
-    from .weights import nested_to_ring
+    from ..weights import nested_to_ring
 
     row = "row" if "row" in weights else "dst_address"
     ring_of = nested_to_ring(np.arange(12 * 4**level), level)

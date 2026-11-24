@@ -36,7 +36,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy.sparse import coo_matrix, csr_matrix
 
-from .types import ApplyBackend, FloatArray, IntArray, MissingPolicy
+from ..types import ApplyBackend, FloatArray, IntArray, MissingPolicy
 
 #: A fused sparse-apply kernel: ``(indptr, indices, data, values, out)``.
 _Kernel = Callable[[IntArray, IntArray, FloatArray, FloatArray, FloatArray], None]

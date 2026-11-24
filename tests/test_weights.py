@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from grid_doctor.metadata import HealpixGrid
 from grid_doctor._geometry.mesh import _source_mesh
+from grid_doctor.metadata import HealpixGrid
 from grid_doctor.weights import (
     WEIGHTS_VERSION,
     WeightsDescription,
@@ -397,7 +397,7 @@ class TestNestedToRing:
 
     @staticmethod
     def _apply(path: Path, data: np.ndarray, nest: bool | None = None) -> np.ndarray:
-        from grid_doctor.remap import _read_weight_file
+        from grid_doctor.remap._apply import _read_weight_file
 
         return np.asarray(_read_weight_file(path, nest=nest).matrix @ data)
 
@@ -410,7 +410,7 @@ class TestNestedToRing:
 
     def test_nested_file_must_be_permuted_for_ring(self, tmp_path: Path) -> None:
         """Read as is, a nested file puts ring output into the wrong cells; renumbering fixes that."""
-        from grid_doctor.remap import _read_weight_file
+        from grid_doctor.remap._apply import _read_weight_file
 
         nested = self._nested_file(tmp_path / "w.nc")
         data = np.arange(self.N, dtype=np.float64) + 1.0

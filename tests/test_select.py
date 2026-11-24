@@ -171,7 +171,7 @@ class TestSelectCone:
 class TestWriteCoords:
     @staticmethod
     def _with_coords(ds: xr.Dataset) -> xr.Dataset:
-        from grid_doctor.remap import _attach_healpix_coords
+        from grid_doctor._geometry.healpix import _attach_healpix_coords
 
         return _attach_healpix_coords(ds, HealpixGrid(level=LEVEL))
 

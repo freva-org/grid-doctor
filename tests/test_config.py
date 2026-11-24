@@ -16,6 +16,7 @@ import grid_doctor as gd
 from grid_doctor import remap, swath
 from grid_doctor.config import HealpixConfig, _Namespace
 from grid_doctor.metadata import HealpixGrid, HealpixMetadata
+from grid_doctor.remap import _regrid as regrid_module
 from grid_doctor.types import Ellipsoid
 
 
@@ -211,8 +212,8 @@ class TestEllipsoidArgument:
             passed["apply"] = ellipsoid
             return ds
 
-        monkeypatch.setattr(remap, "compute_healpix_weights_backend", fake_weights)
-        monkeypatch.setattr(remap, "apply_weight_file", fake_apply)
+        monkeypatch.setattr(regrid_module, "compute_healpix_weights_backend", fake_weights)
+        monkeypatch.setattr(regrid_module, "apply_weight_file", fake_apply)
         return passed
 
     def test_binning_default_is_sphere(self, binning_passed: dict[str, Ellipsoid], dense: bool) -> None:
