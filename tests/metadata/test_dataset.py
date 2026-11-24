@@ -1,4 +1,4 @@
-"""Tests for grid_doctor.metadata: the single place metadata is written and read."""
+"""HEALPix grid, CF attributes, provenance and ``HealpixMetadata`` (``grid_doctor.metadata``)."""
 
 from __future__ import annotations
 
@@ -114,8 +114,6 @@ class TestHealpixGrid:
         grid = HealpixGrid(level=1)
         with pytest.raises(AttributeError):
             grid.level = 2  # type: ignore[misc]
-
-
 # ===================================================================
 # CF spelling
 # ===================================================================
@@ -227,8 +225,6 @@ class TestCF:
     )
     def test_merge_conventions(self, existing: str | None, expected: str) -> None:
         assert merge_conventions(existing) == expected
-
-
 # ===================================================================
 # Provenance
 # ===================================================================
@@ -250,8 +246,6 @@ class TestProvenance:
 
     def test_missing_version_is_unknown(self) -> None:
         assert Provenance.from_attrs({}).version == "unknown"
-
-
 # ===================================================================
 # HealpixMetadata.apply
 # ===================================================================
@@ -342,8 +336,6 @@ class TestApply:
     def test_rejects_sparse_and_implicit(self) -> None:
         with pytest.raises(ValueError, match="cannot have implicit"):
             HealpixMetadata(HealpixGrid(level=LEVEL), sparse=True, implicit_coords=True)
-
-
 # ===================================================================
 # HealpixMetadata.from_dataset
 # ===================================================================
@@ -410,8 +402,6 @@ class TestFromDataset:
         ds.attrs["grid_doctor_metadata_version"] = METADATA_VERSION + 1
         with pytest.raises(ValueError, match="Upgrade grid-doctor"):
             HealpixMetadata.from_dataset(ds)
-
-
 # ===================================================================
 # Interoperability
 # ===================================================================
@@ -426,21 +416,3 @@ def test_xdggs_decodes_cf_output(scheme: str) -> None:
     info = decoded.dggs.grid_info
     assert info.level == LEVEL
     assert info.indexing_scheme == scheme
-
-
-class TestMaybeDropCoordinates:
-    def test_dense_store_drops_coords_and_is_marked(self) -> None:
-        from grid_doctor.io._xarray import maybe_drop_coordinates
-
-        ds = HealpixMetadata(HealpixGrid(level=LEVEL)).apply(_dense())
-        out = maybe_drop_coordinates(ds, LEVEL, write_coords=False)
-        assert not {"cell", "latitude", "longitude"} & set(out.variables)
-        assert HealpixMetadata.from_dataset(out).implicit_coords
-
-    def test_sparse_subset_keeps_cell_ids(self) -> None:
-        from grid_doctor.io._xarray import maybe_drop_coordinates
-
-        ds = HealpixMetadata(HealpixGrid(level=LEVEL), sparse=True).apply(_sparse([5, 9]))
-        out = maybe_drop_coordinates(ds, LEVEL, write_coords=False)
-        np.testing.assert_array_equal(out["cell"].values, [5, 9])
-        assert not HealpixMetadata.from_dataset(out).implicit_coords

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 
-import pytest
-
 from grid_doctor._log import (
     decrease,
     get_level,

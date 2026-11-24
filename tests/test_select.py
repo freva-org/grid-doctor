@@ -1,4 +1,4 @@
-"""Tests for `grid_doctor.select` and `save_pyramid(write_coords=...)`."""
+"""Cell, bounding-box and cone selection (``grid_doctor.select``)."""
 
 from __future__ import annotations
 

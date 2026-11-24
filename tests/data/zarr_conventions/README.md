@@ -1,6 +1,6 @@
 # Vendored Zarr convention schemas
 
-JSON schemas used by `tests/test_multiscales.py` to validate the root
+JSON schemas used by `tests/metadata/test_multiscales.py` to validate the root
 attributes grid-doctor writes for multiscales pyramids.  They are copied
 verbatim from the convention repositories (Apache-2.0 licensed) so the
 tests run offline and notice when we drift from a pinned version.

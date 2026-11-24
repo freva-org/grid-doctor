@@ -3,17 +3,15 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar, Literal
 
 import numpy as np
 import pytest
 import xarray as xr
 
 import grid_doctor as gd
-from grid_doctor import config, remap, swath
+from grid_doctor import config, swath
 from grid_doctor.metadata import HealpixGrid, HealpixMetadata
 from grid_doctor.remap import _regrid as regrid_module
 from grid_doctor.types import Ellipsoid

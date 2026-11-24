@@ -122,8 +122,6 @@ class TestResolvePointCoords:
         result = bin_to_healpix(rad, LEVEL, source_units="rad")
         expected = bin_to_healpix(ds, LEVEL)
         xr.testing.assert_allclose(result["field"], expected["field"])
-
-
 # ===================================================================
 # Fill-value handling
 # ===================================================================
@@ -175,8 +173,6 @@ class TestFillValues:
         da = xr.DataArray(np.array([1, 255], dtype=np.uint8))
         masked = masked_float64(da, fill_value=255)
         assert masked[0] == 1.0 and np.isnan(masked[1])
-
-
 # ===================================================================
 # Mode reduction
 # ===================================================================
@@ -205,8 +201,6 @@ class TestBinMode:
         values = np.arange(10.0)
         with pytest.raises(ValueError, match="distinct classes"):
             bin_mode(np.zeros(10, dtype=np.int64), values, n_cells=1, max_classes=5)
-
-
 # ===================================================================
 # bin_to_healpix — dense path
 # ===================================================================
@@ -345,8 +339,6 @@ class TestBinToHealpixDense:
             result["field"].values[target_cells[1:]],
             np.arange(1, len(target_cells), dtype=np.float64),
         )
-
-
 # ===================================================================
 # bin_to_healpix — sparse path
 # ===================================================================
@@ -374,8 +366,6 @@ class TestBinToHealpixSparse:
         dense = bin_to_healpix(swath_ds, LEVEL)
         with pytest.raises(ValueError, match="sparse"):
             sparse_to_dense(dense)
-
-
 # ===================================================================
 # Pyramid integration
 # ===================================================================

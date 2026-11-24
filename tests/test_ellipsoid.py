@@ -30,7 +30,6 @@ from grid_doctor.types import Ellipsoid
 
 LEVEL = 2
 NPIX = 12 * 4**LEVEL
-
 _POINTS = xr.Dataset(
     {"t": ("obs", np.arange(4.0))},
     coords={"lat": ("obs", [10.0, 40.0, -30.0, 60.0]), "lon": ("obs", [0.0, 90.0, 180.0, 270.0])},

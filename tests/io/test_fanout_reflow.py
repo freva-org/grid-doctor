@@ -14,12 +14,11 @@ import xarray as xr
 
 import grid_doctor as gd
 
-from .test_chunked_pyramid import _weight_file
-from .test_fanout import MAX_LEVEL, _source
+from ..helpers import _weight_file
+from ..io.fanout_helpers import MAX_LEVEL, _source
 
 reflow = pytest.importorskip("reflow")
 Param, Result, Workflow = reflow.Param, reflow.Result, reflow.Workflow
-
 wf = Workflow("healpix-fanout-test")
 
 
