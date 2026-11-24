@@ -12,6 +12,7 @@ from unittest import mock
 import numpy as np
 import pytest
 import xarray as xr
+import zarr
 
 import grid_doctor as gd
 from grid_doctor.io._save import (
@@ -749,3 +750,60 @@ class TestCoordinatesAttribute:
         out = omit_coordinates_attribute(ds)
         assert all(var.encoding.get("coordinates", "") is None for var in out.data_vars.values())
         assert {name: dict(var.encoding) for name, var in ds.data_vars.items()} == before
+
+    def test_other_coordinates_stay_listed(self, tmp_path: Path) -> None:
+        """Reviewer's example: a scalar ``height`` stays on ``tas``."""
+        ds = xr.Dataset({"tas": ("cell", [280.0] * 12)}, coords={"height": ((), 2.0, {"units": "m"})})
+        save_pyramid({0: ds}, str(tmp_path), mode="w")
+        group = zarr.open_group(f"{tmp_path}/level_0.zarr", mode="r")
+        assert group["tas"].attrs.get("coordinates") == "height"
+        assert "height" not in str(group.attrs.get("coordinates", ""))
+        assert "height" in xr.open_zarr(f"{tmp_path}/level_0.zarr").coords
+
+    @pytest.mark.parametrize("where", ["attrs", "encoding"])
+    @pytest.mark.parametrize(
+        ("given", "expected"),
+        [
+            ("height latitude longitude", "height"),  # explicit HEALPix names are stripped
+            ("crs latitude longitude", None),  # nothing left: no attribute
+            ("clat clon", None),  # source grid names that do not exist any more
+            ("clat clon height", "height"),
+            ("level height", "level height"),  # other names keep their order
+        ],
+    )
+    def test_given_coordinates_are_filtered(
+        self, tmp_path: Path, where: Literal["attrs", "encoding"], given: str, expected: str | None
+    ) -> None:
+        """An existing value keeps its names, minus HEALPix and missing ones.
+
+        ``xr.open_dataset`` moves a source file's ``coordinates`` into
+        ``encoding``, where it survives e.g. a rename.
+        """
+        level = _coords_pyramid(tmp_path)[2].assign_coords(height=2.0, level=0)
+        getattr(level["ta"], where)["coordinates"] = given
+        store = tmp_path / "store"
+        save_pyramid({2: level}, str(store), mode="w")
+        group = zarr.open_group(f"{store}/level_2.zarr", mode="r")
+        assert group["ta"].attrs.get("coordinates") == expected
+        self._assert_coords_round_trip(store, "flat")
+
+    def test_given_coordinates_survive_region_writes(self, tmp_path: Path) -> None:
+        """Region writes in mode 'a' keep the per-variable value of the init."""
+        pyramid = {
+            level: ds.assign_coords(height=2.0) for level, ds in _coords_pyramid(tmp_path).items()
+        }
+        pyramid[2]["ta"].attrs["coordinates"] = "height latitude longitude"
+        store = tmp_path / "store"
+        init_pyramid_store(pyramid, str(store))
+        save_pyramid(pyramid, str(store), mode="a", region={"time": slice(2, 4)})
+        group = zarr.open_group(f"{store}/level_2.zarr", mode="r")
+        assert group["ta"].attrs.get("coordinates") == "height"
+        assert group["pr"].attrs.get("coordinates") == "height"
+
+    def test_given_attribute_is_not_removed_from_input(self, tmp_path: Path) -> None:
+        """Moving ``coordinates`` from attrs to encoding happens on a copy."""
+        ds = _coords_pyramid(tmp_path)[1]
+        ds["ta"].attrs["coordinates"] = "latitude longitude"
+        out = omit_coordinates_attribute(ds)
+        assert ds["ta"].attrs["coordinates"] == "latitude longitude"
+        assert "coordinates" not in out["ta"].attrs

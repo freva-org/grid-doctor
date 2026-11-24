@@ -46,22 +46,41 @@ def maybe_drop_coordinates(
     return omit_coordinates_attribute(metadata.replace(implicit_coords=True).apply(dataset))
 
 
+HEALPIX_COORDS = frozenset({CRS_VAR, LAT_VAR, LON_VAR})
+
+
 def omit_coordinates_attribute(dataset: xr.Dataset) -> xr.Dataset:
-    """Keep the coordinates out of each data variable's ``coordinates`` attribute.
+    """Keep the HEALPix coordinates out of each data variable's ``coordinates``.
 
     xarray lists every non-index coordinate a data variable spans in that
     variable's CF ``coordinates`` attribute.  For HEALPix data this names
     ``latitude``, ``longitude`` and ``crs`` on every variable, so CF tools
     such as CDO read latitude and longitude with each variable, although
     both follow from the cell index and ``crs``, and ``crs`` is already
-    referenced through ``grid_mapping``.  Without the per-variable
-    attribute, xarray lists the coordinates once in the dataset-level
-    ``coordinates`` attribute, so they still come back as coordinates on
-    read.  The input dataset is not modified.
+    referenced through ``grid_mapping``.
+
+    Only those three are removed.  A ``coordinates`` value that is already
+    set (in ``attrs``, or in ``encoding`` as ``xr.open_dataset`` leaves it)
+    keeps its other names in their order; without one, the variable lists
+    what xarray would list.  Names that are not a variable of *dataset*,
+    such as the source grid's ``clat clon``, are dropped as well, because
+    they would point at nothing.  xarray lists the HEALPix coordinates once
+    in the dataset-level ``coordinates`` attribute, so they still come back
+    as coordinates on read.  The input dataset is not modified.
     """
     dataset = dataset.copy(deep=False)
     for var in dataset.data_vars.values():
-        var.encoding["coordinates"] = None
+        given = var.attrs.pop("coordinates", None) or var.encoding.get("coordinates")
+        if given is None:
+            names = [
+                str(name)
+                for name, coord in dataset.coords.items()
+                if name not in dataset.dims and set(coord.dims) <= set(var.dims)
+            ]
+        else:
+            names = str(given).split()
+        keep = [name for name in names if name in dataset.variables and name not in HEALPIX_COORDS]
+        var.encoding["coordinates"] = " ".join(keep) or None
     return dataset
 
 
