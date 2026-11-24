@@ -24,6 +24,7 @@ from typing import (
     Callable,
     ClassVar,
     Final,
+    Unpack,
     cast,
     get_args,
 )
@@ -32,7 +33,15 @@ import numpy as np
 import numpy.typing as npt
 import xarray as xr
 
-from ._geometry.coords import _get_latlon_names, _get_vertex_names
+from ._geometry.coords import (
+    _get_latlon_names,
+    _get_vertex_names,
+    get_latlon_resolution,
+)
+from ._geometry.healpix import (
+    _ellipsoid_or_config,
+    resolution_to_healpix_level,
+)
 from ._geometry.mesh import (
     PolygonMesh,
     _classify_source_kind,
@@ -48,7 +57,13 @@ from .metadata import (
     HealpixGrid,
 )
 from .metadata import _keys as keys
-from .types import RemapMethod, SourceKind, SourceUnits
+from .types import (
+    Ellipsoid,
+    RemapMethod,
+    SourceKind,
+    SourceUnits,
+    WeightOptions,
+)
 
 if TYPE_CHECKING:
     from fsspec import AbstractFileSystem
@@ -397,13 +412,13 @@ _SUPPORTED_PROTOCOLS: Final = _LOCAL_PROTOCOLS | {"memory"}
 def local_weights_dir() -> Path:
     """Local directory holding weight files in the [`WeightsRef`][grid_doctor.weights.WeightsRef] layout.
 
-    ``<cache_dir()>/weights``. Generated weights land here by default and
+    ``$XDG_CACHE_HOME/grid-doctor/weights``, where ``XDG_CACHE_HOME``
+    defaults to ``~/.cache``. Generated weights land here by default and
     remote [`WeightsStore`][grid_doctor.weights.WeightsStore]s download
     into it, so one set of weights has one local path.
     """
-    from .utils import cache_dir
-
-    return cache_dir() / "weights"
+    cache_home = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+    return Path(cache_home) / "grid-doctor" / "weights"
 
 
 class WeightsStore:
@@ -419,10 +434,10 @@ class WeightsStore:
         location: Root of the store: a local path, a ``file://`` or
             ``memory://`` URL, or an fsspec mapper of either. Defaults to the
             ``GRID_DOCTOR_WEIGHTS_STORE`` environment variable, else
-            ``<cache_dir()>/weights``.
+            ``$XDG_CACHE_HOME/grid-doctor/weights``.
         cache_dir: Local directory for copies of in-memory weights and for
             weights computed while the store is read-only. Defaults to
-            ``<cache_dir()>/weights``.
+            ``$XDG_CACHE_HOME/grid-doctor/weights``.
         read_only: Forbid [`publish`][grid_doctor.weights.WeightsStore.publish].
             When omitted, local stores are read-only if their directory is
             not writable.
@@ -663,3 +678,88 @@ def _atomic_write(target: Path, write: Callable[[str], object]) -> None:
         tmp = Path(scratch) / target.name
         write(str(tmp))
         os.replace(tmp, target)
+
+
+def cached_weights(
+    ds: xr.Dataset,
+    level: int | None = None,
+    *,
+    method: RemapMethod = "conservative",
+    source_units: SourceUnits = "auto",
+    store: WeightsStore | str | Path | None = None,
+    ellipsoid: Ellipsoid | None = None,
+    **kwargs: Unpack[WeightOptions],
+) -> Path:
+    """Return a local HEALPix weight file, reusing it through a store.
+
+    Weights are identified by their
+    [`WeightsDescription`][grid_doctor.weights.WeightsDescription]: the
+    normalised source geometry, the HEALPix target and the method. The
+    lookup is done by
+    [`WeightsStore.fetch_or_compute`][grid_doctor.weights.WeightsStore.fetch_or_compute].
+
+    Parameters
+    ----------
+    ds:
+        Source dataset whose grid geometry defines the weights.
+    level:
+        HEALPix level. Derived from the grid resolution when omitted.
+    method:
+        Weight-generation method. Supported values are `"nearest"` and
+        `"conservative"`.
+    source_units:
+        Unit convention of the source coordinates.
+    store:
+        Weights store, or its location (see
+        [`WeightsStore`][grid_doctor.weights.WeightsStore]). Defaults to the
+        ``GRID_DOCTOR_WEIGHTS_STORE`` environment variable, else the local
+        weights directory.
+    ellipsoid:
+        Ellipsoid of the HEALPix target, ``"sphere"`` or ``"WGS84"``.
+        Defaults to ``grid_doctor.config.healpix.ellipsoid``.  Part of
+        the weights' identity, so weights are never reused across ellipsoids.
+    **kwargs:
+        Any additional keyword arguments for
+        [`compute_healpix_weights`][grid_doctor.remap.compute_healpix_weights]
+
+    Returns
+    -------
+    pathlib.Path
+        Path to the local NetCDF weight file.
+
+    Examples
+    --------
+    ```python
+    weight_file = cached_weights(ds, level=8, store="/work/ab1234/weights")
+    ```
+    """
+    from .remap import compute_healpix_weights  # remap builds on this module
+
+    ellipsoid = _ellipsoid_or_config(ellipsoid)
+    if not isinstance(store, WeightsStore):
+        store = WeightsStore(store)
+    if level is None:
+        level = resolution_to_healpix_level(get_latlon_resolution(ds))
+
+    describe_kwargs = {k: kwargs[k] for k in ("grid", "source_kind", "spectral_transform_command") if k in kwargs}
+    source = describe_source(ds, source_units=source_units, **describe_kwargs)  # type: ignore[arg-type]
+    target = HealpixGrid(level=level, ellipsoid=ellipsoid)  # stored weights are nested
+    desc = WeightsDescription(source, target, method)
+
+    def compute(path: Path) -> Path:  # the store holds nested weights; ring is derived from them
+        return compute_healpix_weights(
+            ds,
+            level,
+            method=method,
+            nest=True,
+            source_units=source_units,
+            weights_path=path,
+            source_description=source,
+            ellipsoid=ellipsoid,
+            **kwargs,
+        )
+
+    path = store.fetch_or_compute(desc, compute)
+    if kwargs.get("ignore_unmapped") is False:
+        check_coverage(path)  # the stored weights may have been computed ignoring unmapped cells
+    return path

@@ -3,33 +3,12 @@
 from __future__ import annotations
 
 import logging
-from getpass import getuser
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
 
 logger = logging.getLogger(__name__)
-
-
-def get_scratch(*parts: str) -> Path:
-    """Return a writable scratch directory.
-
-    Parameters
-    ----------
-    *parts:
-        Extra path components appended to the scratch root.
-
-    Returns
-    -------
-    pathlib.Path
-        Scratch directory on `/scratch/<initial>/<user>` when available,
-        otherwise below `/tmp`.
-    """
-    scratch = Path("/scratch/{0:.1}/{0}".format(getuser()))
-    if scratch.is_dir():
-        return scratch.joinpath(*parts)
-    return Path("/tmp").joinpath(*parts)
 
 
 class AutoRaiseSession(requests.Session):

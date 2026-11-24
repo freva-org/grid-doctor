@@ -1,4 +1,4 @@
-"""Tests for `grid_doctor.utils`."""
+"""Tests for store options (chunking, S3) and `cached_weights`."""
 
 from __future__ import annotations
 
@@ -12,13 +12,11 @@ import pytest
 import xarray as xr
 
 import grid_doctor as gd
-from grid_doctor.utils import (
-    cache_dir,
-    cached_open_dataset,
-    cached_weights,
+from grid_doctor.io._options import (
     get_s3_options,
     chunk_for_target_store_size,
 )
+from grid_doctor.weights import cached_weights
 
 
 class TestChunkSizeEstimator:
@@ -175,32 +173,6 @@ class TestGetS3Options:
         assert options["region"] == "eu"
 
 
-class TestCacheDir:
-    def test_returns_writable_path(self) -> None:
-        with mock.patch.dict(os.environ, {"USER": "tester"}):
-            result = cache_dir()
-            assert isinstance(result, Path)
-            assert result.is_dir()
-
-
-class TestCachedOpenDataset:
-    def test_opens_and_caches(self, tmp_path: Path) -> None:
-        source = tmp_path / "input.nc"
-        xr.Dataset({"t": (("x",), np.arange(5.0))}).to_netcdf(source)
-        with mock.patch("grid_doctor.utils.cache_dir", return_value=tmp_path):
-            result = cached_open_dataset([str(source)])
-        assert "t" in result.data_vars
-        assert list(tmp_path.glob("*.pickle"))
-
-    def test_loads_from_cache(self, tmp_path: Path) -> None:
-        source = tmp_path / "input.nc"
-        xr.Dataset({"t": (("x",), np.arange(5.0))}).to_netcdf(source)
-        with mock.patch("grid_doctor.utils.cache_dir", return_value=tmp_path):
-            result1 = cached_open_dataset([str(source)])
-            result2 = cached_open_dataset([str(source)])
-        xr.testing.assert_equal(result1, result2)
-
-
 class TestCachedWeights:
     """``cached_weights`` looks weights up by their description: local copy, store, else compute."""
 
@@ -208,7 +180,7 @@ class TestCachedWeights:
     @pytest.fixture(autouse=True)
     def _default_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Keep the default cache in ``tmp_path``, never in the user's cache."""
-        monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: tmp_path / "default-cache")
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "default-cache"))
 
     @staticmethod
     @pytest.fixture

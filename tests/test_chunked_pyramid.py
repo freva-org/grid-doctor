@@ -12,11 +12,13 @@ import pytest
 import xarray as xr
 
 from grid_doctor import remap
-from grid_doctor.helpers import (
-    coarsen_healpix,
-    create_healpix_pyramid,
+from grid_doctor.io._save import (
     init_pyramid_store,
     save_pyramid,
+)
+from grid_doctor.pyramid._build import (
+    coarsen_healpix,
+    create_healpix_pyramid,
 )
 from grid_doctor.pyramid import MeanPartials, coarsen_mean, coarsen_mean_steps
 from grid_doctor.remap import _apply as apply_module
@@ -157,7 +159,7 @@ class TestSinglePassPyramid:
 
         monkeypatch.setattr(apply_module, "apply_weights_nd", counting)
         monkeypatch.setattr(
-            "grid_doctor.helpers.regrid_to_healpix",
+            "grid_doctor.pyramid._build.regrid_to_healpix",
             lambda ds, level, **kw: remap.apply_weight_file(
                 ds, weights, cell_chunks=256
             ),

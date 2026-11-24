@@ -109,3 +109,31 @@ def _attach_healpix_coords(
         }
     )
     return HealpixMetadata(grid, Provenance(method=method)).apply(ds_hp)
+
+
+def resolution_to_healpix_level(resolution_deg: float) -> int:
+    """Convert an approximate source resolution to a HEALPix level.
+
+    The heuristic uses a characteristic HEALPix pixel spacing of about
+    ``58.6° / 2**level``.
+
+    Parameters
+    ----------
+    resolution_deg:
+        Approximate source resolution in degrees.
+
+    Returns
+    -------
+    int
+        Suggested HEALPix level.
+
+    Examples
+    --------
+    ```python
+    level = resolution_to_healpix_level(0.25)
+    ```
+    """
+    if resolution_deg <= 0.0:
+        raise ValueError("resolution_deg must be positive.")
+    level = int(np.round(np.log2(58.6 / resolution_deg)))
+    return max(0, level)

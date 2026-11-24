@@ -11,10 +11,12 @@ data and applying *conservative* remapping:
 ```python
 from getpass import getuser
 
+import xarray as xr
+
 import grid_doctor as gd
 
 # 1. Open
-ds = gd.cached_open_dataset(["era5_2m_temperature_*.nc"])
+ds = xr.open_mfdataset("era5_2m_temperature_*.nc")
 
 # 2. Weights file (computed once, then reused from the weights store)
 weights_store = "/scratch/{user[0]}/{user}/healpix-weights".format(user=getuser())
@@ -76,6 +78,8 @@ Scripts under `scripts/<name>/convert.py` use the shared CLI parser:
 ```python
 from getpass import getuser
 
+import xarray as xr
+
 import grid_doctor as gd
 import grid_doctor.cli as gd_cli
 
@@ -89,7 +93,7 @@ parser.add_argument(
 args = parser.parse_args()
 gd_cli.setup_logging_from_args(args)
 
-ds = gd.cached_open_dataset(args.files)
+ds = xr.open_mfdataset(args.files)
 weights_file = gd.cached_weights(
     ds,
     store=args.weights_store,

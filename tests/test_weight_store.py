@@ -51,7 +51,7 @@ class TestWeightsStore:
     @pytest.fixture(autouse=True)
     def _default_cache(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Keep the default cache in ``tmp_path``, never in the user's cache."""
-        monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: tmp_path)
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
 
     @pytest.mark.parametrize(
         ("location", "url_root"),

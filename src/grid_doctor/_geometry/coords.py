@@ -347,3 +347,44 @@ def _to_float64(values: npt.ArrayLike) -> FloatArray:
         Float64 NumPy array.
     """
     return np.asarray(values, dtype=np.float64)
+
+
+# ===================================================================
+# Resolution estimation
+# ===================================================================
+
+
+def get_latlon_resolution(ds: xr.Dataset) -> float:
+    """Estimate the horizontal resolution of *ds* in degrees.
+
+    Parameters
+    ----------
+    ds:
+        Dataset on a regular lon/lat grid, a curvilinear grid, or an
+        unstructured grid.
+
+    Returns
+    -------
+    float
+        Approximate grid spacing in degrees.
+
+    Examples
+    --------
+    ```python
+    resolution = get_latlon_resolution(ds)
+    level = resolution_to_healpix_level(resolution)
+    ```
+    """
+    if _is_unstructured(ds):
+        cell_dim = _get_unstructured_dim(ds)
+        n_cells = ds.sizes[cell_dim]
+        return float(np.degrees(np.sqrt(4.0 * np.pi / float(n_cells))))
+
+    lat, lon = _get_latlon_arrays(ds)
+    if lat.ndim == 1:
+        lat_res = float(np.nanmin(np.abs(np.diff(lat))))
+        lon_res = float(np.nanmin(np.abs(np.diff(lon))))
+    else:
+        lat_res = float(np.nanmean(np.abs(np.diff(lat, axis=0))))
+        lon_res = float(np.nanmean(np.abs(np.diff(lon, axis=1))))
+    return min(lat_res, lon_res)

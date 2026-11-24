@@ -18,12 +18,10 @@ from ._apply import apply_weight_file
 from ._regrid import (
     compute_healpix_weights,
     regrid_to_healpix,
-    regrid_unstructured_to_healpix,
 )
 
 __all__ = [
     "apply_weight_file",
     "compute_healpix_weights",
     "regrid_to_healpix",
-    "regrid_unstructured_to_healpix",
 ]

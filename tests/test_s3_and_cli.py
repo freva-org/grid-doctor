@@ -11,8 +11,8 @@ import pytest
 import xarray as xr
 
 from grid_doctor.cli.parser import get_parser, setup_logging_from_args
-from grid_doctor.cli.script_utils import AutoRaiseSession, get_scratch
-from grid_doctor.helpers import save_pyramid
+from grid_doctor.cli.script_utils import AutoRaiseSession
+from grid_doctor.io._save import save_pyramid
 
 
 def _tiny_pyramid() -> dict[int, xr.Dataset]:
@@ -53,19 +53,6 @@ class TestSetupLoggingFromArgs:
         assert log_mod.get_level() == 10
 
 
-class TestGetScratch:
-    def test_falls_back_to_tmp(self) -> None:
-        with mock.patch("grid_doctor.cli.script_utils.getuser", return_value="nobody"):
-            result = get_scratch("subdir")
-            assert str(result).startswith("/tmp")
-            assert result.name == "subdir"
-
-    def test_appends_args(self) -> None:
-        with mock.patch("grid_doctor.cli.script_utils.getuser", return_value="nobody"):
-            result = get_scratch("a", "b", "c")
-            assert result == Path("/tmp/a/b/c")
-
-
 class TestAutoRaiseSession:
     @mock.patch("grid_doctor.cli.script_utils.requests.Session.request")
     def test_raises_on_error(self, mock_request: mock.Mock) -> None:
@@ -103,7 +90,7 @@ class TestSavePyramidToS3Local:
         # since no s3_options supplied a local write must
         # not construct an S3 client.
         out = tmp_path / "pyramid"
-        with mock.patch("grid_doctor.helpers.s3fs.S3FileSystem") as fs:
+        with mock.patch("s3fs.S3FileSystem") as fs:
             save_pyramid(_tiny_pyramid(), str(out), mode="w")
         fs.assert_not_called()
 
@@ -119,9 +106,9 @@ class TestSavePyramidToS3Remote:
 
         dataset = _FakeDataset()
         with (
-            mock.patch("grid_doctor.helpers.s3fs.S3FileSystem") as fs,
+            mock.patch("s3fs.S3FileSystem") as fs,
             mock.patch(
-                "grid_doctor.helpers.s3fs.S3Map", return_value="s3-store"
+                "s3fs.S3Map", return_value="s3-store"
             ) as s3_map,
         ):
             save_pyramid(

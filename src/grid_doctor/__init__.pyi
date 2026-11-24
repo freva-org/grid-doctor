@@ -1,18 +1,14 @@
+from . import cli as cli
 from . import config as config
-from . import helpers as helpers
 from . import log as log
 from . import metadata as metadata
 from . import remap as remap
 from . import select as select
 from . import swath as swath
-from . import utils as utils
-from .helpers import coarsen_healpix as coarsen_healpix
-from .helpers import create_healpix_pyramid as create_healpix_pyramid
-from .helpers import get_latlon_resolution as get_latlon_resolution
-from .helpers import init_pyramid_store as init_pyramid_store
-from .helpers import latlon_to_healpix_pyramid as latlon_to_healpix_pyramid
-from .helpers import resolution_to_healpix_level as resolution_to_healpix_level
-from .helpers import save_pyramid as save_pyramid
+from ._geometry.coords import get_latlon_resolution as get_latlon_resolution
+from ._geometry.healpix import (
+    resolution_to_healpix_level as resolution_to_healpix_level,
+)
 from .io import PyramidManifest as PyramidManifest
 from .io import StoreReport as StoreReport
 from .io import WriteTask as WriteTask
@@ -21,38 +17,38 @@ from .io import is_current as is_current
 from .io import is_task_done as is_task_done
 from .io import load_manifest as load_manifest
 from .io import write_pyramid_task as write_pyramid_task
+from .io._options import (
+    chunk_for_target_store_size as chunk_for_target_store_size,
+)
+from .io._options import get_s3_options as get_s3_options
+from .io._save import init_pyramid_store as init_pyramid_store
+from .io._save import save_pyramid as save_pyramid
 from .log import setup_logging as setup_logging
+from .pyramid._build import coarsen_healpix as coarsen_healpix
+from .pyramid._build import create_healpix_pyramid as create_healpix_pyramid
 from .remap import apply_weight_file as apply_weight_file
 from .remap import compute_healpix_weights as compute_healpix_weights
 from .remap import regrid_to_healpix as regrid_to_healpix
-from .remap import (
-    regrid_unstructured_to_healpix as regrid_unstructured_to_healpix,
-)
 from .select import attach_cell_coords as attach_cell_coords
 from .select import select_bbox as select_bbox
 from .select import select_cells as select_cells
 from .select import select_cone as select_cone
 from .swath import bin_to_healpix as bin_to_healpix
 from .swath import sparse_to_dense as sparse_to_dense
-from .utils import cached_open_dataset as cached_open_dataset
-from .utils import cached_weights as cached_weights
-from .utils import chunk_for_target_store_size as chunk_for_target_store_size
-from .utils import get_s3_options as get_s3_options
+from .weights import cached_weights as cached_weights
 
 __all__ = [
     "__version__",
+    "cli",
     "config",
-    "helpers",
     "log",
     "metadata",
     "remap",
     "select",
     "swath",
-    "utils",
     "apply_weight_file",
     "attach_cell_coords",
     "bin_to_healpix",
-    "cached_open_dataset",
     "cached_weights",
     "check_pyramid_store",
     "chunk_for_target_store_size",
@@ -64,10 +60,8 @@ __all__ = [
     "init_pyramid_store",
     "is_current",
     "is_task_done",
-    "latlon_to_healpix_pyramid",
     "load_manifest",
     "regrid_to_healpix",
-    "regrid_unstructured_to_healpix",
     "resolution_to_healpix_level",
     "save_pyramid",
     "select_bbox",

@@ -38,15 +38,10 @@ chunk layout for a desired target store size.
       show_root_heading: true
       show_root_full_path: false
 
-## Caching
+## Weight caching
 
-These helpers provide lightweight caching for repeatedly used datasets
-and weight files to avoid unnecessary reopen or recomputation overhead.
-
-::: grid_doctor.cached_open_dataset
-    options:
-      show_root_heading: true
-      show_root_full_path: false
+Weight files are computed once per source grid, target and method, and
+reused from the weights store afterwards.
 
 ::: grid_doctor.cached_weights
     options:

@@ -43,6 +43,10 @@ S3Options: TypeAlias = Mapping[str, object]
 """Keyword arguments for :class:`s3fs.S3FileSystem`, e.g. ``key``,
 ``secret`` and ``endpoint_url``.  Never stored in a manifest."""
 
+Region: TypeAlias = "dict[str, slice[int | None, int | None, int | None]]"
+"""Zarr write region: one slice of the ``cell`` (and other) dimensions."""
+
+
 ZarrStore: TypeAlias = str | MutableMapping[str, bytes]
 """Where a zarr store lives: a local path or an fsspec mapping (S3)."""
 
@@ -129,7 +133,7 @@ class WeightOptions(TypedDict, total=False):
     Shared by
     [`compute_healpix_weights`][grid_doctor.compute_healpix_weights] and
     [`regrid_to_healpix`][grid_doctor.regrid_to_healpix].  Functions that pass them through unchanged (e.g.
-    [`cached_weights`][grid_doctor.utils.cached_weights]) accept them as
+    [`cached_weights`][grid_doctor.weights.cached_weights]) accept them as
     keyword arguments; see ``compute_healpix_weights`` for what each one
     does.
     """

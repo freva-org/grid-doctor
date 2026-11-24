@@ -20,10 +20,11 @@ import xarray as xr
 if TYPE_CHECKING:
     from ..weights import SourceDescription
 
-from .._geometry.coords import (
-    _is_unstructured,
+from .._geometry.coords import get_latlon_resolution
+from .._geometry.healpix import (
+    _ellipsoid_or_config,
+    resolution_to_healpix_level,
 )
-from .._geometry.healpix import _ellipsoid_or_config
 from ..types import (
     ApplyBackend,
     Ellipsoid,
@@ -33,6 +34,7 @@ from ..types import (
     SourceUnits,
     WeightOptions,
 )
+from ..weights import cached_weights
 from ._apply import apply_weight_file
 from ._esmf import (
     OfflineWeightConfig,
@@ -198,7 +200,7 @@ def regrid_to_healpix(
         Optional existing or target weight file. When omitted, the
         weights come from the default
         [`WeightsStore`][grid_doctor.weights.WeightsStore] (see
-        [`cached_weights`][grid_doctor.utils.cached_weights]): computed
+        [`cached_weights`][grid_doctor.weights.cached_weights]): computed
         once, then reused.
     missing_policy:
         How NaN values in the source grid are treated.
@@ -262,8 +264,6 @@ def regrid_to_healpix(
         "large_file": large_file,
     }
     if weights_path is None:
-        from ..utils import cached_weights
-
         weight_file = cached_weights(
             ds, level, method=method, source_units=source_units, ellipsoid=ellipsoid, **options
         )
@@ -271,11 +271,6 @@ def regrid_to_healpix(
         weight_file = Path(weights_path)
         if not weight_file.exists():
             if level is None:
-                from ..helpers import (
-                    get_latlon_resolution,
-                    resolution_to_healpix_level,
-                )
-
                 level = resolution_to_healpix_level(get_latlon_resolution(ds))
             weight_file = compute_healpix_weights(
                 ds,
@@ -298,34 +293,7 @@ def regrid_to_healpix(
     )
 
 
-def regrid_unstructured_to_healpix(
-    ds: xr.Dataset,
-    level: int,
-    *,
-    nest: bool = True,
-    method: RemapMethod = "conservative",
-    source_units: SourceUnits = "auto",
-    weights_path: str | Path | None = None,
-    missing_policy: MissingPolicy = "renormalize",
-    ellipsoid: Ellipsoid | None = None,
-) -> xr.Dataset:
-    """Compatibility wrapper around [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix]."""
-    if not _is_unstructured(ds):
-        raise ValueError("Expected an unstructured source grid.")
-    return regrid_to_healpix(
-        ds,
-        level,
-        nest=nest,
-        method=method,
-        source_units=source_units,
-        weights_path=weights_path,
-        missing_policy=missing_policy,
-        ellipsoid=ellipsoid,
-    )
-
-
 __all__ = [
     "compute_healpix_weights",
     "regrid_to_healpix",
-    "regrid_unstructured_to_healpix",
 ]

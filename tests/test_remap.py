@@ -69,7 +69,6 @@ from grid_doctor.remap import _regrid as regrid_module
 from grid_doctor.remap import (
     apply_weight_file,
     regrid_to_healpix,
-    regrid_unstructured_to_healpix,
 )
 from grid_doctor.remap._apply import (
     _flattened_size,
@@ -1204,29 +1203,6 @@ class TestPublicRegridding:
         result = regrid_to_healpix(regular_ds, 2, method="nearest", weights_path=path)
         assert called == {"computed": True, "applied": True}
         assert result.sizes["cell"] == 3
-
-    def test_regrid_unstructured_rejects_structured(
-        self,
-        regular_ds: xr.Dataset,
-    ) -> None:
-        with pytest.raises(ValueError, match="unstructured"):
-            regrid_unstructured_to_healpix(regular_ds, 1)
-
-    def test_regrid_unstructured_delegates(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        unstructured_ds: xr.Dataset,
-    ) -> None:
-        monkeypatch.setattr(
-            regrid_module,
-            "regrid_to_healpix",
-            lambda ds, level, **kw: xr.Dataset(
-                {"t": ("cell", np.arange(2))}, attrs=ds.attrs.copy()
-            ),
-        )
-        result = regrid_unstructured_to_healpix(unstructured_ds, 1)
-        assert result.sizes["cell"] == 2
-
 
 # ===================================================================
 # Attach HEALPix coords

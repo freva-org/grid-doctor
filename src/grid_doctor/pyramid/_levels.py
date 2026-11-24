@@ -4,8 +4,8 @@ Turns the array kernels in [`_blocks`][grid_doctor.pyramid._blocks] into
 datasets: picks the coarsening strategy, wraps results with the right
 dimensions and coordinates, and chains levels so that each one builds on
 the previous one (a pyramid computed in one pass regrids every chunk only
-once).  The public entry points stay in
-[`grid_doctor.helpers`][grid_doctor.helpers].
+once).  The public entry points are in
+[`_build`][grid_doctor.pyramid._build].
 """
 
 from __future__ import annotations

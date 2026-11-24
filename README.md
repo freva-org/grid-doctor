@@ -212,18 +212,13 @@ tox -e docs-serve    # live preview at http://127.0.0.1:8000
 ## Quick Start
 Running the example will likely require ESMF to be installed, see above.
 ```python
+import xarray as xr
+
 import grid_doctor as gd
 
-ds = gd.cached_open_dataset(["path/to/*.nc"])
+ds = xr.open_mfdataset("path/to/*.nc")
 max_level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
-weights_dir="/scratch/{user[0]}/{user}/grid-doctor/weights"\
-    .format(user=getuser(), level=level)
-weights_file = gd.cached_weights(
-    ds,
-    level=max_level,
-    prefer_offline=True,
-    cache_path=weights_dir
-)
+weights_file = gd.cached_weights(ds, level=max_level, prefer_offline=True)
 pyramid = gd.create_healpix_pyramid(
     ds,
     weights_path=weights_file,
@@ -308,19 +303,20 @@ mkdir -p scripts/<yourname>
 A minimal script using the built-in CLI helpers:
 
 ```python
+import xarray as xr
+
 import grid_doctor as gd
 import grid_doctor.cli as gd_cli
-from data_portal_worker.rechunker import ChunkOptimizer
 
 parser = gd_cli.get_parser("my-dataset", "Convert my-dataset to HEALPix.")
 parser.add_argument("--variables", nargs="*", default=["t_2m"])
 args = parser.parse_args()
 gd_cli.setup_logging_from_args(args)
 
-ds = gd.cached_open_dataset(["path/to/*.nc"])
+ds = xr.open_mfdataset("path/to/*.nc")
 pyramid = gd.create_healpix_pyramid(ds)
 gd.save_pyramid(
-    chunked,
+    pyramid,
     f"s3://{args.s3_bucket}/my-dataset.zarr",
     s3_options=gd.get_s3_options(args.s3_endpoint, args.s3_credentials_file),
 )

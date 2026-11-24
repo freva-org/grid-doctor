@@ -12,10 +12,12 @@ all variables and time steps:
 
 ```python
 from getpass import getuser
+import xarray as xr
+
 import grid_doctor as gd
 
 # The grid file contains clat/clon but no data variables.
-grid_ds = gd.cached_open_dataset(["ICON-DREAM-Global_grid.nc"])
+grid_ds = xr.open_dataset("ICON-DREAM-Global_grid.nc")
 
 # Derive the HEALPix level from the grid resolution.
 level =  gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
@@ -37,7 +39,7 @@ Once you have the weights, conversion works just like for structured
 grids:
 
 ```python
-ds = gd.cached_open_dataset(["icon_dream_hourly_*.grb"])
+ds = xr.open_mfdataset("icon_dream_hourly_*.grb")
 
 # ICON GRIB files may use "values" instead of "cell" — rename:
 ds = ds.rename_dims({"values": "cell"}).chunk({"cell": -1})

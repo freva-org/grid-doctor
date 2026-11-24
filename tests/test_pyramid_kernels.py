@@ -6,7 +6,10 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from grid_doctor.helpers import coarsen_healpix, create_healpix_pyramid
+from grid_doctor.pyramid._build import (
+    coarsen_healpix,
+    create_healpix_pyramid,
+)
 from grid_doctor.pyramid import coarsen_mean, min_valid_count
 
 from .helpers import with_healpix_metadata
@@ -57,7 +60,7 @@ class TestPyramidConsistency:
     ) -> None:
         finest = self._dataset_with_nans()
         monkeypatch.setattr(
-            "grid_doctor.helpers.regrid_to_healpix", lambda ds, level, **kw: finest
+            "grid_doctor.pyramid._build.regrid_to_healpix", lambda ds, level, **kw: finest
         )
         pyramid = create_healpix_pyramid(
             finest, max_level=4, min_level=0, min_valid_fraction=0.0

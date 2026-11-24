@@ -14,7 +14,7 @@ from grid_doctor import (
     select_cells,
     select_cone,
 )
-from grid_doctor.helpers import WRITE_COORDS_MAX_LEVEL
+from grid_doctor.io._save import WRITE_COORDS_MAX_LEVEL
 from grid_doctor.metadata import HealpixGrid, HealpixMetadata
 from grid_doctor.select import _contiguous_runs, _parents_to_ranges
 

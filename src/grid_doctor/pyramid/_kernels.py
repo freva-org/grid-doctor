@@ -109,3 +109,92 @@ def coarsen_mean(
         n_fine=factor,
         min_valid_fraction=min_valid_fraction,
     )
+
+
+# ===================================================================
+# Coarsening
+# ===================================================================
+
+
+def _coarsen_array(
+    values: FloatingArray,
+    *,
+    factor: int,
+    min_valid_fraction: float = 0.5,
+) -> FloatArray:
+    """Coarsen a HEALPix array by grouping contiguous nested cells.
+
+    The last dimension is treated as the cell dimension.  All leading
+    dimensions are batch dimensions that are preserved.
+
+    Thin wrapper around
+    [`coarsen_mean`][grid_doctor.pyramid.coarsen_mean], which
+    is exact only when ``values`` is the finest level.
+
+    Args:
+        values: Input array with shape ``(*batch, n_cells)``.
+        factor: Number of child cells per parent (``4**delta_level``).
+        min_valid_fraction: Minimum fraction of valid (non-NaN)
+            children required.  Parent cells with fewer valid
+            children are set to NaN.  Default ``0.5`` (at least
+            half of the children must be valid).
+
+    Returns:
+        Array with shape ``(*batch, n_cells // factor)``.
+    """
+    return coarsen_mean(values, factor=factor, min_valid_fraction=min_valid_fraction)
+
+
+def _coarsen_array_mode(
+    values: FloatingArray,
+    *,
+    factor: int,
+    min_valid_fraction: float = 0.5,
+) -> FloatArray:
+    """Coarsen a HEALPix array by taking the mode of grouped children.
+
+    Intended for categorical / discrete data (land cover, soil type,
+    …) where averaging class labels would be meaningless.
+
+    For each parent cell the most frequent value among its children is
+    selected.  Ties are broken by choosing the value that appears
+    first (lowest child index).  When fewer than
+    ``min_valid_fraction * factor`` children are valid, the parent is
+    set to NaN.
+
+    Args:
+        values: Input array with shape ``(*batch, n_cells)``.
+        factor: Number of child cells per parent (``4**delta_level``).
+        min_valid_fraction: Minimum fraction of valid children.
+
+    Returns:
+        Array with shape ``(*batch, n_cells // factor)``.
+    """
+    arr = np.asarray(values, dtype=np.float64)
+    batch_shape = arr.shape[:-1]
+    n_cells = arr.shape[-1]
+    n_target = n_cells // factor
+    grouped = arr.reshape(*batch_shape, n_target, factor)
+
+    valid = np.isfinite(grouped)
+    valid_count = valid.sum(axis=-1)
+
+    # For each child position, count how many of the other children
+    # share the same value.  This vectorises the mode calculation
+    # without any Python-level loops over cells.
+    counts = np.zeros_like(grouped)
+    for i in range(factor):
+        for j in range(factor):
+            counts[..., i] += (grouped[..., i] == grouped[..., j]) & valid[..., j]
+    counts[~valid] = -1  # invalid positions cannot win
+
+    best = np.argmax(counts, axis=-1)
+    result = np.take_along_axis(
+        grouped,
+        best[..., np.newaxis],
+        axis=-1,
+    ).squeeze(-1)
+
+    min_count = max(1, int(np.ceil(min_valid_fraction * factor)))
+    result[valid_count < min_count] = np.nan
+    return result

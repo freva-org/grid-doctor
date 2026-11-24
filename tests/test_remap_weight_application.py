@@ -227,12 +227,12 @@ class TestWeightGeneration:
         monkeypatch.setattr(esmf_module, "_require_esmpy", lambda: _FakeESMPy())
         for module in (mesh_module, healpix_module):
             monkeypatch.setattr(module, "_require_healpix_geo_module", lambda grid: (_FakeHealpixModule(), {}))
-        monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: tmp_path)
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
 
         result = compute_healpix_weights(regular_ds, 1, method="nearest", nest=False)
 
         desc = WeightsDescription(describe_source(regular_ds), HealpixGrid(level=1, indexing_scheme="ring"), "nearest")
-        assert result == tmp_path / "weights" / desc.ref.path  # the default layout holds nested weights
+        assert result == tmp_path / "grid-doctor" / "weights" / desc.ref.path  # the default layout holds nested weights
         assert result.exists()
         with xr.open_dataset(result) as ds:
             assert ds.attrs["grid_doctor_order"] == "nested"

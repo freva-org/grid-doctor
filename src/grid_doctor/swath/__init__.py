@@ -22,7 +22,7 @@ while the per-cell **mode** is the analogue of nearest-neighbour remapping
 for categorical fields.  Choose the target level accordingly: the HEALPix
 cell spacing (``58.6° / 2**level``) should be coarser than the sample
 spacing, exactly as
-[`resolution_to_healpix_level`][grid_doctor.helpers.resolution_to_healpix_level]
+[`resolution_to_healpix_level`][grid_doctor.resolution_to_healpix_level]
 would suggest.
 
 All cell geometry uses a perfect sphere, consistent with remapping in
@@ -34,8 +34,8 @@ offsets only when both use the same definition.
 
 The output of the dense path carries the full grid-doctor metadata
 (see [`grid_doctor.metadata`][grid_doctor.metadata]) so that
-[`coarsen_healpix`][grid_doctor.helpers.coarsen_healpix],
-[`save_pyramid`][grid_doctor.helpers.save_pyramid], and CF-aware viewers
+[`coarsen_healpix`][grid_doctor.coarsen_healpix],
+[`save_pyramid`][grid_doctor.save_pyramid], and CF-aware viewers
 work unchanged.
 
 Acknowledgments
@@ -174,8 +174,8 @@ def bin_to_healpix(
         When *True* (default), return the full ``12 * 4**level`` cell
         array with standard grid-doctor coordinates, CRS variable, and
         attributes — directly consumable by
-        [`coarsen_healpix`][grid_doctor.helpers.coarsen_healpix] and
-        [`save_pyramid`][grid_doctor.helpers.save_pyramid].  When
+        [`coarsen_healpix`][grid_doctor.coarsen_healpix] and
+        [`save_pyramid`][grid_doctor.save_pyramid].  When
         *False*, return a compact dataset containing only the touched
         cells (the ``cell`` coordinate holds the actual HEALPix
         indices) — useful as a per-granule intermediate at high levels;
@@ -323,7 +323,7 @@ def sparse_to_dense(ds: xr.Dataset) -> xr.Dataset:
     xarray.Dataset
         Dense dataset with the standard grid-doctor HEALPix coordinates
         and metadata, ready for
-        [`coarsen_healpix`][grid_doctor.helpers.coarsen_healpix].
+        [`coarsen_healpix`][grid_doctor.coarsen_healpix].
 
     Raises
     ------

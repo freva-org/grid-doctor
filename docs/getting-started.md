@@ -38,6 +38,8 @@ mkdir -p scripts/my-dataset
 A minimal script looks like this:
 
 ```python
+import xarray as xr
+
 import grid_doctor as gd
 import grid_doctor.cli as gd_cli
 
@@ -46,7 +48,7 @@ parser = gd_cli.get_parser("my-dataset", "Convert my-dataset to HEALPix.")
 args = parser.parse_args()
 gd_cli.setup_logging_from_args(args)
 
-ds = gd.cached_open_dataset(["path/to/*.nc"])
+ds = xr.open_mfdataset("path/to/*.nc")
 weights_file = gd.cached_weights(ds, store="~/weights", nproc=4)
 pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_file)
 gd.save_pyramid(

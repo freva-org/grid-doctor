@@ -1,5 +1,8 @@
-"""Reading and writing HEALPix data (internal, work in progress).
+"""Write HEALPix pyramids to Zarr stores, in one pass or as parallel tasks.
 
+- ``_save``: [`save_pyramid`][grid_doctor.save_pyramid] and
+  [`init_pyramid_store`][grid_doctor.init_pyramid_store].
+- ``_options``: S3 options and chunk sizes for HEALPix stores.
 - ``_zarr``: single-pass Zarr writes for whole pyramids.
 - ``_xarray``: preparing templates, regions and multiscales datatrees
   for writing.
@@ -8,11 +11,7 @@
 - ``_fanout``: init-time manifest persistence, per-task worker writes
   and the completeness check.
 
-The public entry points
-[`save_pyramid`][grid_doctor.helpers.save_pyramid] and
-[`init_pyramid_store`][grid_doctor.init_pyramid_store] still
-live in [`grid_doctor.helpers`][grid_doctor.helpers]; the fan-out names
-are re-exported from ``grid_doctor``.
+The public names are re-exported from ``grid_doctor``.
 """
 
 from ._fanout import (
