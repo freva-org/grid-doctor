@@ -1,4 +1,4 @@
-# High Level HEALPix API
+# Pyramids
 
 This section contains the main functionality for creating and working with
 HEALPix-based dataset representations, including pyramid construction and

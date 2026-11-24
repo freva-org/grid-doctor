@@ -10,39 +10,10 @@ import pytest
 import xarray as xr
 
 from grid_doctor import remap
-from grid_doctor.helpers import latlon_to_healpix_pyramid
+from grid_doctor.remap import _regrid as regrid_module
 from grid_doctor.remap import regrid_to_healpix
 
 from .helpers import with_healpix_metadata
-
-
-@pytest.mark.parametrize("method", ["nearest", "conservative"])
-def test_latlon_to_healpix_pyramid_weight_methods(
-    regular_ds: xr.Dataset,
-    method: str,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
-        del kwargs
-        hp = xr.Dataset(
-            {
-                name: (("cell",), np.arange(12 * (4**level), dtype=np.float64))
-                for name in ds.data_vars
-            },
-            attrs=ds.attrs,
-        )
-        return with_healpix_metadata(hp, level)
-
-    monkeypatch.setattr("grid_doctor.helpers.regrid_to_healpix", fake_regrid)
-    pyramid = latlon_to_healpix_pyramid(
-        regular_ds,
-        min_level=1,
-        max_level=2,
-        method=method,
-        weights_path=str(tmp_path / "weights.nc"),
-    )
-    assert set(pyramid) == {1, 2}
 
 
 @pytest.mark.parametrize(
@@ -77,8 +48,9 @@ def test_regrid_to_healpix_weight_methods_delegate(
             attrs=ds.attrs.copy(),
         )
 
-    monkeypatch.setattr(remap, "compute_healpix_weights", fake_compute)
-    monkeypatch.setattr(remap, "apply_weight_file", fake_apply)
+    monkeypatch.setattr(regrid_module, "compute_healpix_weights", fake_compute)
+    monkeypatch.setattr(remap, "compute_healpix_weights", fake_compute)  # cached_weights
+    monkeypatch.setattr(regrid_module, "apply_weight_file", fake_apply)
 
     result = regrid_to_healpix(
         regular_ds, level=1, method="nearest", missing_policy=missing_policy
@@ -106,8 +78,9 @@ def test_regrid_to_healpix_reuses_default_store(
         applied.append(Path(path))
         return xr.Dataset({"temperature": (("cell",), np.zeros(3))})
 
-    monkeypatch.setattr(remap, "compute_healpix_weights", fake_compute)
-    monkeypatch.setattr(remap, "apply_weight_file", fake_apply)
+    monkeypatch.setattr(regrid_module, "compute_healpix_weights", fake_compute)
+    monkeypatch.setattr(remap, "compute_healpix_weights", fake_compute)  # cached_weights
+    monkeypatch.setattr(regrid_module, "apply_weight_file", fake_apply)
 
     regrid_to_healpix(regular_ds)  # level derived from the grid resolution
     regrid_to_healpix(regular_ds)

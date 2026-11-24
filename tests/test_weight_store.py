@@ -12,9 +12,9 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from grid_doctor import config
 from grid_doctor.metadata import HealpixGrid
 from grid_doctor.weights import (
-    WEIGHTS_STORE_ENV,
     WeightsDescription,
     WeightsRef,
     WeightsStore,
@@ -51,7 +51,7 @@ class TestWeightsStore:
     @pytest.fixture(autouse=True)
     def _default_cache(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Keep the default cache in ``tmp_path``, never in the user's cache."""
-        monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: tmp_path)
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
 
     @pytest.mark.parametrize(
         ("location", "url_root"),
@@ -135,9 +135,9 @@ class TestLocation:
         assert store.fs is memory_fs
         assert store.root == "/weights"
 
-    def test_env_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv(WEIGHTS_STORE_ENV, str(tmp_path / "from-env"))
-        assert WeightsStore().root == str(tmp_path / "from-env")
+    def test_configured_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(config, "weights_store", str(tmp_path / "configured"))
+        assert WeightsStore().root == str(tmp_path / "configured")
 
     @pytest.mark.parametrize("url", ["s3://bucket/weights", "https://example.com/weights"])
     def test_rejects_other_filesystems(self, url: str) -> None:

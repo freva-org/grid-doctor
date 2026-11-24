@@ -6,74 +6,91 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
 import xarray as xr
 
 from grid_doctor import remap
-from grid_doctor import remap_backend as remap_backend_module
 from grid_doctor import weights as weights_module
-from grid_doctor.metadata import HealpixGrid
-from grid_doctor.remap import (
-    _attach_healpix_coords,
-    _flattened_size,
-    _guess_source_dims_from_size,
-    _healpix_centres,
-    _parse_source_dims_attr,
-    _resolve_source_dims_for_weight_application,
-    apply_weight_file,
-    regrid_to_healpix,
-    regrid_unstructured_to_healpix,
-)
-from grid_doctor.remap_backend import (
-    _get_latlon_names,
-    _canonical_lon,
+from grid_doctor._geometry import healpix as healpix_module
+from grid_doctor._geometry import spectral as spectral_module
+from grid_doctor._geometry import sphere as sphere_module
+from grid_doctor._geometry.coords import (
     _get_latlon_arrays,
-    _looks_like_radians,
+    _get_latlon_names,
+    _get_spatial_dims,
+    _get_unstructured_dim,
+    _get_unstructured_vertices,
+)
+from grid_doctor._geometry.healpix import (
+    _attach_healpix_coords,
+    _healpix_centres,
+    _require_healpix_geo_module,
+)
+from grid_doctor._geometry.mesh import (
     _classify_source_kind,
     _collapse_repeated_corners,
     _corner_mesh_from_arrays,
-    _default_offline_enabled,
-    _ensure_ccw,
-    _get_unstructured_vertices,
-    _get_unstructured_dim,
-    _get_spatial_dims,
     _infer_bounds_1d,
     _infer_curvilinear_corners,
     _lat_coverage_from_centres,
-    _looks_global,
     _lon_coverage_from_centres,
-    _materialise_spectral_source,
+    _looks_global,
     _median_positive_step,
     _mesh_to_polygons,
-    _normalise_angle_units,
     _polygons_to_corner_arrays,
     _regular_grid_mesh,
-    _require_esmpy,
-    _require_healpix_geo_module,
-    _run_offline_esmf,
-    _run_subprocess,
     _source_mesh,
+)
+from grid_doctor._geometry.normalise import (
+    _canonical_lon,
+    _looks_like_radians,
+    _normalise_angle_units,
+    normalise_dataset,
+)
+from grid_doctor._geometry.spectral import (
+    SpectralTransformError,
+    _materialise_spectral_source,
+    _run_subprocess,
+)
+from grid_doctor._geometry.sphere import (
+    _ensure_ccw,
     _spherical_centroid,
     _vectorized_polygon_centres,
     _xyz_to_lonlat,
+)
+from grid_doctor.metadata import HealpixGrid
+from grid_doctor.remap import _apply as apply_module
+from grid_doctor.remap import _esmf as esmf_module
+from grid_doctor.remap import _regrid as regrid_module
+from grid_doctor.remap import (
+    apply_weight_file,
+    regrid_to_healpix,
+)
+from grid_doctor.remap._apply import (
+    _flattened_size,
+    _guess_source_dims_from_size,
+    _parse_source_dims_attr,
+    _resolve_source_dims_for_weight_application,
+)
+from grid_doctor.remap._esmf import (
     OfflineWeightConfig,
-    SpectralTransformError,
+    _default_offline_enabled,
+    _require_esmpy,
+    _run_offline_esmf,
     compute_healpix_weights_backend,
     run_esmf_regrid_weightgen,
     write_ugrid_mesh_file,
-    normalise_dataset,
 )
 from grid_doctor.weights import describe_source
 
 from .helpers import _FakeHealpixModule
 
-
 # ===================================================================
-# Primitive helpers (live in remap_backend, tested here for coverage)
+# Primitive helpers (live in _geometry and remap._esmf, tested here for coverage)
 # ===================================================================
 
 
@@ -310,7 +327,7 @@ class TestBackendPolygonMeshes:
                 np.array([[np.nan]]), np.array([[np.nan]])
             )
         monkeypatch.setattr(
-            remap_backend_module.np, "sqrt", lambda values: np.zeros_like(values)
+            sphere_module.np, "sqrt", lambda values: np.zeros_like(values)
         )
         with pytest.raises(ValueError, match="zero-length"):
             _vectorized_polygon_centres(
@@ -376,7 +393,7 @@ class TestBackendExternalWorkflows:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setattr(
-            remap_backend_module.subprocess,
+            spectral_module.subprocess,
             "run",
             lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="out", stderr="err"),
         )
@@ -385,7 +402,7 @@ class TestBackendExternalWorkflows:
 
         captured: list[str] = []
         monkeypatch.setattr(
-            remap_backend_module, "_run_subprocess", lambda cmd: captured.extend(cmd)
+            esmf_module, "_run_subprocess", lambda cmd: captured.extend(cmd)
         )
         config = OfflineWeightConfig(
             nproc=2, weight_only=True, netcdf4=True
@@ -421,7 +438,7 @@ class TestBackendExternalWorkflows:
         def write_transformed(cmd: list[str]) -> None:
             xr.Dataset(coords={"lat": ("y", [0.0, 1.0]), "lon": ("x", [0.0, 1.0])}).to_netcdf(cmd[-1])
 
-        monkeypatch.setattr(remap_backend_module, "_run_subprocess", write_transformed)
+        monkeypatch.setattr(spectral_module, "_run_subprocess", write_transformed)
         transformed = _materialise_spectral_source(
             regular_ds,
             transform_command=["transform", "{input}", "{output}"],
@@ -439,7 +456,7 @@ class TestBackendExternalWorkflows:
         assert set(transformed_from_path.coords) == {"lat", "lon"}
 
         monkeypatch.setattr(
-            remap_backend_module,
+            spectral_module,
             "_run_subprocess",
             lambda cmd: (_ for _ in ()).throw(RuntimeError("bad transform")),
         )
@@ -500,7 +517,7 @@ class TestBackendExternalWorkflows:
             weights_module, "describe_source", lambda *args, **kwargs: description
         )
         monkeypatch.setattr(
-            remap_backend_module,
+            esmf_module,
             "_target_healpix_mesh",
             lambda grid: (np.array([0], dtype=np.int64), target_mesh),
         )
@@ -510,7 +527,7 @@ class TestBackendExternalWorkflows:
             xr.Dataset({k: ("n_s", np.array([v])) for k, v in (("row", 1), ("col", 1), ("S", 1.0))}).to_netcdf(output)
             return output
 
-        monkeypatch.setattr(remap_backend_module, "_run_offline_esmf", offline)
+        monkeypatch.setattr(esmf_module, "_run_offline_esmf", offline)
         output = tmp_path / "weights.nc"
         result = compute_healpix_weights_backend(
             regular_ds,
@@ -538,7 +555,7 @@ class TestBackendExternalWorkflows:
         config = OfflineWeightConfig(
             esmf_regrid_weightgen="missing-esmf"
         )
-        monkeypatch.setattr(remap_backend_module.shutil, "which", lambda executable: None)
+        monkeypatch.setattr(esmf_module.shutil, "which", lambda executable: None)
         with pytest.raises(FileNotFoundError, match="missing-esmf"):
             _run_offline_esmf(
                 source_desc=description,
@@ -555,7 +572,7 @@ class TestBackendExternalWorkflows:
         def executable(name: str) -> str | None:
             return "/bin/esmf" if name == config.esmf_regrid_weightgen else None
 
-        monkeypatch.setattr(remap_backend_module.shutil, "which", executable)
+        monkeypatch.setattr(esmf_module.shutil, "which", executable)
         with pytest.raises(FileNotFoundError, match="MPI launcher"):
             _run_offline_esmf(
                 source_desc=description,
@@ -569,14 +586,14 @@ class TestBackendExternalWorkflows:
             )
 
         written: list[Path] = []
-        monkeypatch.setattr(remap_backend_module.shutil, "which", lambda executable: "/bin/tool")
+        monkeypatch.setattr(esmf_module.shutil, "which", lambda executable: "/bin/tool")
         monkeypatch.setattr(
-            remap_backend_module,
+            esmf_module,
             "write_ugrid_mesh_file",
             lambda mesh, path, **kwargs: written.append(Path(path)) or Path(path),
         )
         monkeypatch.setattr(
-            remap_backend_module,
+            esmf_module,
             "run_esmf_regrid_weightgen",
             lambda **kwargs: kwargs["weights_path"],
         )
@@ -703,7 +720,7 @@ class TestGlobalCoverage:
 class TestHealpixCentres:
     def test_uses_healpix_geo_module(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            remap,
+            healpix_module,
             "_require_healpix_geo_module",
             lambda grid: (_FakeHealpixModule(), {}),
         )
@@ -830,8 +847,7 @@ class TestResolveSourceDims:
         grid = xr.Dataset(coords={"cell": np.arange(5)})
 
         monkeypatch.setattr(
-            remap,
-            "_source_centre_arrays",
+            apply_module, "_source_centre_arrays",
             lambda obj, source_units="auto": (
                 np.arange(5, dtype=np.float64),
                 np.arange(5, dtype=np.float64),
@@ -862,7 +878,7 @@ class TestResolveSourceDims:
         ) -> tuple[np.ndarray, np.ndarray, tuple[str, ...]]:
             raise ValueError("no geometry")
 
-        monkeypatch.setattr(remap, "_source_centre_arrays", raise_no_geometry)
+        monkeypatch.setattr(apply_module, "_source_centre_arrays", raise_no_geometry)
         result = _resolve_source_dims_for_weight_application(
             ds,
             n_source=5,
@@ -882,8 +898,7 @@ class TestResolveSourceDims:
             coords={"time": [0, 1], "cell": np.arange(5)},
         )
         monkeypatch.setattr(
-            remap,
-            "_source_centre_arrays",
+            apply_module, "_source_centre_arrays",
             lambda obj, source_units="auto": (
                 np.arange(8, dtype=np.float64),
                 np.arange(8, dtype=np.float64),
@@ -932,8 +947,7 @@ class TestApplyWeightFile:
         ).to_netcdf(path)
 
         monkeypatch.setattr(
-            remap,
-            "_source_centre_arrays",
+            apply_module, "_source_centre_arrays",
             lambda ds, source_units="auto": (
                 np.zeros(n_source),
                 np.arange(float(n_source)),
@@ -992,8 +1006,7 @@ class TestApplyWeightFile:
         weights.to_netcdf(path)
 
         monkeypatch.setattr(
-            remap,
-            "_source_centre_arrays",
+            apply_module, "_source_centre_arrays",
             lambda ds, source_units="auto": (
                 np.array([0.0, 1.0, 2.0], dtype=np.float64),
                 np.array([10.0, 20.0, 30.0], dtype=np.float64),
@@ -1074,7 +1087,7 @@ class TestApplyWeightFile:
         ) -> tuple[np.ndarray, np.ndarray, tuple[str, ...]]:
             raise ValueError("geometry not embedded")
 
-        monkeypatch.setattr(remap, "_source_centre_arrays", no_geometry)
+        monkeypatch.setattr(apply_module, "_source_centre_arrays", no_geometry)
 
         result = apply_weight_file(ds, path)
         out = result["temperature"].isel(time=0).values
@@ -1184,35 +1197,12 @@ class TestPublicRegridding:
                 attrs=ds.attrs.copy(),
             )
 
-        monkeypatch.setattr(remap, "compute_healpix_weights", fake_compute)
-        monkeypatch.setattr(remap, "apply_weight_file", fake_apply)
+        monkeypatch.setattr(regrid_module, "compute_healpix_weights", fake_compute)
+        monkeypatch.setattr(regrid_module, "apply_weight_file", fake_apply)
 
         result = regrid_to_healpix(regular_ds, 2, method="nearest", weights_path=path)
         assert called == {"computed": True, "applied": True}
         assert result.sizes["cell"] == 3
-
-    def test_regrid_unstructured_rejects_structured(
-        self,
-        regular_ds: xr.Dataset,
-    ) -> None:
-        with pytest.raises(ValueError, match="unstructured"):
-            regrid_unstructured_to_healpix(regular_ds, 1)
-
-    def test_regrid_unstructured_delegates(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        unstructured_ds: xr.Dataset,
-    ) -> None:
-        monkeypatch.setattr(
-            remap,
-            "regrid_to_healpix",
-            lambda ds, level, **kw: xr.Dataset(
-                {"t": ("cell", np.arange(2))}, attrs=ds.attrs.copy()
-            ),
-        )
-        result = regrid_unstructured_to_healpix(unstructured_ds, 1)
-        assert result.sizes["cell"] == 2
-
 
 # ===================================================================
 # Attach HEALPix coords
@@ -1376,7 +1366,7 @@ class TestNormaliseDataset:
     )
     def test_normalise_missing_units_guesses_from_pair(self, caplog, lat, lon, expected):
         ds = xr.Dataset(coords={"lat": lat, "lon": lon})
-        with caplog.at_level(logging.WARNING, logger="grid_doctor.remap_backend"):
+        with caplog.at_level(logging.WARNING, logger="grid_doctor._geometry.normalise"):
             norm_ds = normalise_dataset(ds)
         factor = np.degrees(1.0) if expected == "radians" else 1.0
         np.testing.assert_allclose(norm_ds["lat"], np.asarray(lat) * factor, atol=1e-6)
@@ -1405,7 +1395,7 @@ class TestNormaliseDataset:
         ds = xr.Dataset(coords={"lat": [0.0, 0.5], "lon": [0.0, 1.0]})
         for c in ds.coords:
             ds[c].attrs["units"] = "degrees"
-        with caplog.at_level(logging.WARNING, logger="grid_doctor.remap_backend"):
+        with caplog.at_level(logging.WARNING, logger="grid_doctor._geometry.normalise"):
             norm_ds = normalise_dataset(ds, source_units="rad")
         np.testing.assert_allclose(norm_ds["lat"], np.degrees([0.0, 0.5]), atol=1e-6)
         assert not caplog.text

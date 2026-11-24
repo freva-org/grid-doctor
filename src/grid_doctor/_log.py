@@ -1,21 +1,12 @@
-"""Logging configuration for grid-doctor.
+"""Logging configuration for grid-doctor (private).
 
 Provides a single knob that controls the log level of **all** loggers —
-those that already exist and those created later.
+those that already exist and those created later.  The public entry point
+is [`grid_doctor.setup_logging`][grid_doctor.setup_logging]::
 
-Examples
---------
-In a CLI entry point::
-
-    from grid_doctor.log import setup_logging
-    setup_logging(verbosity=2)          # WARNING → INFO → DEBUG
-
-At runtime::
-
-    from grid_doctor.log import increase, decrease, set_level
-    increase()                          # one step more verbose
-    decrease()                          # one step less verbose
-    set_level("DEBUG")                  # explicit level
+    import grid_doctor as gd
+    gd.setup_logging(verbosity=2)       # WARNING → INFO → DEBUG
+    gd.setup_logging(level="DEBUG")     # explicit level
 """
 
 from __future__ import annotations
@@ -78,9 +69,7 @@ def set_level(level: Union[int, str]) -> None:
     try:
         _current_index = _LEVELS.index(level)
     except ValueError:
-        _current_index = min(
-            range(len(_LEVELS)), key=lambda i: abs(_LEVELS[i] - level)
-        )
+        _current_index = min(range(len(_LEVELS)), key=lambda i: abs(_LEVELS[i] - level))
     _apply_level(_LEVELS[_current_index])
 
 

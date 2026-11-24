@@ -11,8 +11,8 @@ import pytest
 import xarray as xr
 
 from grid_doctor.cli.parser import get_parser, setup_logging_from_args
-from grid_doctor.cli.script_utils import AutoRaiseSession, get_scratch
-from grid_doctor.helpers import save_pyramid
+from grid_doctor.cli.script_utils import AutoRaiseSession
+from grid_doctor.io._save import save_pyramid
 
 
 def _tiny_pyramid() -> dict[int, xr.Dataset]:
@@ -37,10 +37,16 @@ class TestGetParser:
         with pytest.raises(SystemExit):
             parser.parse_args([])
 
+    def test_s3_endpoint_required(self) -> None:
+        parser = get_parser("test-prog")
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--s3-bucket", "my-bucket"])
+
     def test_defaults(self) -> None:
         parser = get_parser("test-prog")
-        args = parser.parse_args(["--s3-bucket", "my-bucket"])
+        args = parser.parse_args(["--s3-bucket", "my-bucket", "--s3-endpoint", "https://s3.example.org"])
         assert args.s3_bucket == "my-bucket"
+        assert args.s3_endpoint == "https://s3.example.org"
         assert args.verbose == 0
 
 
@@ -48,22 +54,9 @@ class TestSetupLoggingFromArgs:
     def test_sets_verbosity(self) -> None:
         args = argparse.Namespace(verbose=2)
         setup_logging_from_args(args)
-        import grid_doctor.log as log_mod
+        import grid_doctor._log as log_mod
 
         assert log_mod.get_level() == 10
-
-
-class TestGetScratch:
-    def test_falls_back_to_tmp(self) -> None:
-        with mock.patch("grid_doctor.cli.script_utils.getuser", return_value="nobody"):
-            result = get_scratch("subdir")
-            assert str(result).startswith("/tmp")
-            assert result.name == "subdir"
-
-    def test_appends_args(self) -> None:
-        with mock.patch("grid_doctor.cli.script_utils.getuser", return_value="nobody"):
-            result = get_scratch("a", "b", "c")
-            assert result == Path("/tmp/a/b/c")
 
 
 class TestAutoRaiseSession:
@@ -103,7 +96,7 @@ class TestSavePyramidToS3Local:
         # since no s3_options supplied a local write must
         # not construct an S3 client.
         out = tmp_path / "pyramid"
-        with mock.patch("grid_doctor.helpers.s3fs.S3FileSystem") as fs:
+        with mock.patch("s3fs.S3FileSystem") as fs:
             save_pyramid(_tiny_pyramid(), str(out), mode="w")
         fs.assert_not_called()
 
@@ -119,9 +112,9 @@ class TestSavePyramidToS3Remote:
 
         dataset = _FakeDataset()
         with (
-            mock.patch("grid_doctor.helpers.s3fs.S3FileSystem") as fs,
+            mock.patch("s3fs.S3FileSystem") as fs,
             mock.patch(
-                "grid_doctor.helpers.s3fs.S3Map", return_value="s3-store"
+                "s3fs.S3Map", return_value="s3-store"
             ) as s3_map,
         ):
             save_pyramid(

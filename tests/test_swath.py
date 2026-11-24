@@ -13,7 +13,7 @@ from grid_doctor.swath import (
     bin_to_healpix,
     sparse_to_dense,
 )
-from grid_doctor.swath.utils import (
+from grid_doctor.swath._binning import (
     _declared_fill_value,
     bin_mode,
     masked_float64,

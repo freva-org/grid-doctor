@@ -10,7 +10,7 @@ These functions prepare reusable remapping weights so that later
 transformations can be applied efficiently without recomputing the full
 mapping each time.
 
-::: grid_doctor.utils.cached_weights
+::: grid_doctor.weights.cached_weights
     options:
       show_root_heading: true
 

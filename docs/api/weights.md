@@ -34,7 +34,7 @@ hp_ds = gd.regrid_to_healpix(ds)  # level derived from the grid resolution
 ```
 
 The default store is the `GRID_DOCTOR_WEIGHTS_STORE` environment
-variable, or `<cache_dir()>/weights` when it is unset. To compute into an
+variable, or `$XDG_CACHE_HOME/grid-doctor/weights` (`~/.cache/grid-doctor/weights`) when it is unset. To compute into an
 explicit file instead, use
 [`compute_healpix_weights(weights_path=...)`][grid_doctor.compute_healpix_weights].
 
@@ -143,6 +143,11 @@ instead of a node/connectivity list (`face_nodes`): they describe the same
 cells and need no shared node numbering between tools.
 
 ## API
+
+::: grid_doctor.cached_weights
+    options:
+      show_root_heading: true
+      show_root_full_path: false
 
 ::: grid_doctor.weights.WeightsStore
     options:

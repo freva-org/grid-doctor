@@ -13,144 +13,96 @@ import pytest
 import xarray as xr
 
 import grid_doctor as gd
-from grid_doctor import remap, swath
-from grid_doctor.config import HealpixConfig, _Namespace
+from grid_doctor import config, remap, swath
 from grid_doctor.metadata import HealpixGrid, HealpixMetadata
+from grid_doctor.remap import _regrid as regrid_module
 from grid_doctor.types import Ellipsoid
 
 
-@dataclass(slots=True)
-class _ExampleConfig(_Namespace):
-    namespace: ClassVar[str] = "toy"
-    mode: Literal["a", "b", "c"] = "a"
-    label: str = "x"
+@pytest.fixture
+def restore_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Undo any change a test makes to the process-wide settings."""
+    for name in config.SETTINGS:
+        monkeypatch.setattr(config, name, getattr(config, name))
 
 
+@pytest.mark.usefixtures("restore_config")
+class TestSettings:
+    """Precedence, validation and ``set`` for the flat settings."""
 
-class TestNamespace:
-    """Behaviour shared by every settings namespace."""
+    def test_defaults(self) -> None:
+        assert config._read_env({}) == {}
+        assert (config.ellipsoid, config.weights_store) == ("sphere", None)
 
-    def test_precedence_default_env_assignment(self) -> None:
-        assert _ExampleConfig.from_env({}).mode == "a"
-        cfg = _ExampleConfig.from_env({"GRID_DOCTOR_TOY__MODE": "b"})
-        assert cfg.mode == "b"
-        cfg.mode = "c"
-        assert cfg.mode == "c"
+    def test_env_var_names(self) -> None:
+        assert [config.env_var(name) for name in config.SETTINGS] == [
+            "GRID_DOCTOR_ELLIPSOID",
+            "GRID_DOCTOR_WEIGHTS_STORE",
+        ]
 
-    def test_env_values_are_stripped(self) -> None:
-        cfg = _ExampleConfig.from_env({"GRID_DOCTOR_TOY__MODE": " b ", "GRID_DOCTOR_TOY__LABEL": " y "})
-        assert (cfg.mode, cfg.label) == ("b", "y")
+    def test_env_values_are_read_and_stripped(self) -> None:
+        env = {"GRID_DOCTOR_ELLIPSOID": " WGS84 ", "GRID_DOCTOR_WEIGHTS_STORE": " /data/w "}
+        assert config._read_env(env) == {"ellipsoid": "WGS84", "weights_store": "/data/w"}
+
+    def test_empty_weights_store_counts_as_unset(self) -> None:
+        assert config._read_env({"GRID_DOCTOR_WEIGHTS_STORE": " "}) == {"weights_store": None}
 
     def test_invalid_env_var_is_named_in_error(self) -> None:
-        with pytest.raises(ValueError, match="GRID_DOCTOR_TOY__MODE.*'z'"):
-            _ExampleConfig.from_env({"GRID_DOCTOR_TOY__MODE": "z"})
+        with pytest.raises(ValueError, match="GRID_DOCTOR_ELLIPSOID.*'wgs84'"):
+            config._read_env({"GRID_DOCTOR_ELLIPSOID": "wgs84"})
+
+    def test_assignment_overrides(self) -> None:
+        gd.config.ellipsoid = "WGS84"
+        assert config.ellipsoid == "WGS84"
 
     def test_invalid_assignment_is_rejected(self) -> None:
-        cfg = _ExampleConfig()
-        with pytest.raises(ValueError, match="toy.mode"):
-            cfg.mode = "z"  # type: ignore[assignment]
-        assert cfg.mode == "a"
+        with pytest.raises(ValueError, match="ellipsoid"):
+            gd.config.ellipsoid = "GRS80"  # type: ignore[assignment]
+        assert config.ellipsoid == "sphere"
 
-    def test_unknown_setting_is_rejected(self) -> None:
-        with pytest.raises(AttributeError):
-            _ExampleConfig().mod = "a"  # type: ignore[attr-defined]
+    def test_unknown_setting_is_rejected_by_set(self) -> None:
+        with pytest.raises(AttributeError, match="elipsoid"), gd.config.set(elipsoid="WGS84"):
+            pass
 
     def test_set_restores_previous_value(self) -> None:
-        cfg = _ExampleConfig(mode="b")
-        with cfg.set(mode="c"):
-            inside = cfg.mode
-        assert (inside, cfg.mode) == ("c", "b")
+        with gd.config.set(ellipsoid="WGS84", weights_store="/data/w"):
+            inside = (config.ellipsoid, config.weights_store)
+        assert inside == ("WGS84", "/data/w")
+        assert (config.ellipsoid, config.weights_store) == ("sphere", None)
 
     def test_set_restores_on_error(self) -> None:
-        cfg = _ExampleConfig(mode="b")
-        with pytest.raises(RuntimeError), cfg.set(mode="c"):
+        with pytest.raises(RuntimeError), gd.config.set(ellipsoid="WGS84"):
             raise RuntimeError
-        assert cfg.mode == "b"
+        assert config.ellipsoid == "sphere"
 
     def test_set_invalid_value_changes_nothing(self) -> None:
-        cfg = _ExampleConfig(mode="b")
-        with pytest.raises(ValueError), cfg.set(label="y", mode="z"):
+        with pytest.raises(ValueError), gd.config.set(weights_store="/data/w", ellipsoid="GRS80"):
             pass
-        assert (cfg.mode, cfg.label) == ("b", "x")
+        assert (config.ellipsoid, config.weights_store) == ("sphere", None)
 
-
-class TestConfigSet:
-    """``grid_doctor.config.set`` across namespaces."""
-
-    @pytest.fixture
-    def toy(self, monkeypatch: pytest.MonkeyPatch) -> _ExampleConfig:
-        cfg = _ExampleConfig(mode="b", label="y")
-        monkeypatch.setattr(gd.config, "toy", cfg, raising=False)
-        return cfg
-
-    def test_keyword_mapping_changes_only_named_settings(self, toy: _ExampleConfig) -> None:
-        with gd.config.set(toy={"mode": "c"}):
-            inside = (toy.mode, toy.label)
-        assert inside == ("c", "y")
-        assert (toy.mode, toy.label) == ("b", "y")
-
-    def test_keyword_namespace_replaces_all_settings(self, toy: _ExampleConfig) -> None:
-        with gd.config.set(toy=_ExampleConfig(mode="c")):
-            inside = (toy.mode, toy.label)
-        assert inside == ("c", "x")
-        assert (toy.mode, toy.label) == ("b", "y")
-
-    def test_positional_mapping(self, toy: _ExampleConfig) -> None:
-        with gd.config.set({"toy": _ExampleConfig(mode="c")}):
-            inside = toy.mode
-        assert (inside, toy.mode) == ("c", "b")
-
-    def test_keeps_namespace_identity(self, toy: _ExampleConfig) -> None:
-        with gd.config.set(toy=_ExampleConfig(mode="c")):
-            assert gd.config.toy is toy  # type: ignore[attr-defined]
-
-    def test_unknown_namespace_is_rejected(self) -> None:
-        with pytest.raises(AttributeError, match="healpx"), gd.config.set(healpx={"ellipsoid": "WGS84"}):
-            pass
-
-    def test_wrong_namespace_type_is_rejected(self, toy: _ExampleConfig) -> None:
-        with pytest.raises(TypeError), gd.config.set(toy=HealpixConfig()):
-            pass
-
-    def test_invalid_value_restores_earlier_namespaces(self, toy: _ExampleConfig) -> None:
-        previous = gd.config.healpix.ellipsoid
-        other = "WGS84" if previous != "WGS84" else "sphere"
-        with pytest.raises(ValueError), gd.config.set(healpix={"ellipsoid": other}, toy={"mode": "z"}):
-            pass
-        assert gd.config.healpix.ellipsoid == previous
-        assert toy.mode == "b"
-
-
-class TestHealpixConfig:
-    def test_default_ellipsoid_is_sphere(self) -> None:
-        assert HealpixConfig.from_env({}).ellipsoid == "sphere"
-
-    def test_env_var_name(self) -> None:
-        env = {"GRID_DOCTOR_HEALPIX__ELLIPSOID": "WGS84"}
-        assert HealpixConfig.from_env(env).ellipsoid == "WGS84"
-
-    def test_rejects_unknown_ellipsoid(self) -> None:
-        with pytest.raises(ValueError, match="GRID_DOCTOR_HEALPIX__ELLIPSOID.*'wgs84'"):
-            HealpixConfig.from_env({"GRID_DOCTOR_HEALPIX__ELLIPSOID": "wgs84"})
-        with pytest.raises(ValueError, match="healpix.ellipsoid"):
-            HealpixConfig().ellipsoid = "GRS80"  # type: ignore[assignment]
-
-    def test_env_var_is_read_at_import(self) -> None:
+    @pytest.mark.parametrize(
+        ("var", "code", "expected"),
+        [
+            ("GRID_DOCTOR_ELLIPSOID", "print(gd.config.ellipsoid)", "WGS84"),
+            ("GRID_DOCTOR_WEIGHTS_STORE", "print(gd.config.weights_store)", "WGS84"),
+        ],
+    )
+    def test_env_var_is_read_at_import(self, var: str, code: str, expected: str) -> None:
         src = str(Path(gd.__file__).parents[1])
-        env = {**os.environ, "GRID_DOCTOR_HEALPIX__ELLIPSOID": "WGS84", "PYTHONPATH": src}
-        code = "import grid_doctor as gd; print(gd.config.healpix.ellipsoid)"
-        result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
-        assert result.stdout.strip() == "WGS84"
+        env = {**os.environ, var: "WGS84", "PYTHONPATH": src}
+        script = f"import grid_doctor as gd; {code}"
+        result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, check=True)
+        assert result.stdout.strip() == expected
 
     def test_new_grids_use_configured_ellipsoid(self) -> None:
         sphere = gd.bin_to_healpix(_POINTS, 1, dense=False)["latitude"].values
-        with gd.config.healpix.set(ellipsoid="WGS84"):
+        with gd.config.set(ellipsoid="WGS84"):
             wgs84 = gd.bin_to_healpix(_POINTS, 1, dense=False)["latitude"].values
         assert np.all(np.abs(wgs84) > np.abs(sphere))
 
     def test_existing_data_ignores_configured_ellipsoid(self) -> None:
         sphere = gd.bin_to_healpix(_POINTS, 1, dense=False)
-        with gd.config.healpix.set(ellipsoid="WGS84"):
+        with gd.config.set(ellipsoid="WGS84"):
             again = gd.sparse_to_dense(sphere)
         assert HealpixMetadata.from_dataset(again).grid.ellipsoid == "sphere"
 
@@ -211,38 +163,38 @@ class TestEllipsoidArgument:
             passed["apply"] = ellipsoid
             return ds
 
-        monkeypatch.setattr(remap, "compute_healpix_weights_backend", fake_weights)
-        monkeypatch.setattr(remap, "apply_weight_file", fake_apply)
+        monkeypatch.setattr(regrid_module, "compute_healpix_weights_backend", fake_weights)
+        monkeypatch.setattr(regrid_module, "apply_weight_file", fake_apply)
         return passed
 
     def test_binning_default_is_sphere(self, binning_passed: dict[str, Ellipsoid], dense: bool) -> None:
-        # HealpixConfig() holds the built-in defaults, whatever the environment says.
-        with gd.config.set(healpix=HealpixConfig()):
+        # Pin the built-in default, whatever the environment says.
+        with gd.config.set(ellipsoid="sphere"):
             gd.bin_to_healpix(_POINTS, 1, dense=dense)
         assert binning_passed == {"cells": "sphere", "coords": "sphere"}
 
     def test_binning_none_uses_config(self, binning_passed: dict[str, Ellipsoid], dense: bool) -> None:
-        with gd.config.healpix.set(ellipsoid="WGS84"):
+        with gd.config.set(ellipsoid="WGS84"):
             gd.bin_to_healpix(_POINTS, 1, dense=dense)
         assert binning_passed == {"cells": "WGS84", "coords": "WGS84"}
 
     def test_binning_argument_overrides_config(self, binning_passed: dict[str, Ellipsoid], dense: bool) -> None:
-        with gd.config.healpix.set(ellipsoid="WGS84"):
+        with gd.config.set(ellipsoid="WGS84"):
             gd.bin_to_healpix(_POINTS, 1, dense=dense, ellipsoid="sphere")
         assert binning_passed == {"cells": "sphere", "coords": "sphere"}
 
     def test_regrid_default_is_sphere(self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset) -> None:
-        # HealpixConfig() holds the built-in defaults, whatever the environment says.
-        with gd.config.set(healpix=HealpixConfig()):
+        # Pin the built-in default, whatever the environment says.
+        with gd.config.set(ellipsoid="sphere"):
             gd.regrid_to_healpix(regular_ds, 1)
         assert regrid_passed == {"weights": "sphere", "apply": None}
 
     def test_regrid_none_uses_config(self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset) -> None:
-        with gd.config.healpix.set(ellipsoid="WGS84"):
+        with gd.config.set(ellipsoid="WGS84"):
             gd.regrid_to_healpix(regular_ds, 1)
         assert regrid_passed == {"weights": "WGS84", "apply": None}
 
     def test_regrid_argument_overrides_config(self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset) -> None:
-        with gd.config.healpix.set(ellipsoid="WGS84"):
+        with gd.config.set(ellipsoid="WGS84"):
             gd.regrid_to_healpix(regular_ds, 1, ellipsoid="sphere")
         assert regrid_passed == {"weights": "sphere", "apply": "sphere"}

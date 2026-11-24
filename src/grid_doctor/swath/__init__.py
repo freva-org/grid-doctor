@@ -22,7 +22,7 @@ while the per-cell **mode** is the analogue of nearest-neighbour remapping
 for categorical fields.  Choose the target level accordingly: the HEALPix
 cell spacing (``58.6° / 2**level``) should be coarser than the sample
 spacing, exactly as
-[`resolution_to_healpix_level`][grid_doctor.helpers.resolution_to_healpix_level]
+[`resolution_to_healpix_level`][grid_doctor.resolution_to_healpix_level]
 would suggest.
 
 All cell geometry uses a perfect sphere, consistent with remapping in
@@ -34,8 +34,8 @@ offsets only when both use the same definition.
 
 The output of the dense path carries the full grid-doctor metadata
 (see [`grid_doctor.metadata`][grid_doctor.metadata]) so that
-[`coarsen_healpix`][grid_doctor.helpers.coarsen_healpix],
-[`save_pyramid`][grid_doctor.helpers.save_pyramid], and CF-aware viewers
+[`coarsen_healpix`][grid_doctor.coarsen_healpix],
+[`save_pyramid`][grid_doctor.save_pyramid], and CF-aware viewers
 work unchanged.
 
 Acknowledgments
@@ -64,6 +64,12 @@ from collections.abc import Mapping
 import numpy as np
 import xarray as xr
 
+from .._geometry.healpix import (
+    _attach_healpix_coords,
+    _ellipsoid_or_config,
+    _require_healpix_geo_module,
+)
+from .._geometry.normalise import _canonical_lon
 from ..metadata import (
     CELL_DIM,
     LAT_VAR,
@@ -75,14 +81,8 @@ from ..metadata import (
     variable_method,
     variable_method_attrs,
 )
-from ..remap import _attach_healpix_coords
-from ..remap_backend import (
-    _canonical_lon,
-    _ellipsoid_or_config,
-    _require_healpix_geo_module,
-)
 from ..types import BinAgg, Ellipsoid, Int64Array, SourceUnits
-from .utils import (
+from ._binning import (
     AGG_TO_METHOD,
     FILL_ATTR_NAMES,
     MAX_NESTED_LEVEL,
@@ -174,8 +174,8 @@ def bin_to_healpix(
         When *True* (default), return the full ``12 * 4**level`` cell
         array with standard grid-doctor coordinates, CRS variable, and
         attributes — directly consumable by
-        [`coarsen_healpix`][grid_doctor.helpers.coarsen_healpix] and
-        [`save_pyramid`][grid_doctor.helpers.save_pyramid].  When
+        [`coarsen_healpix`][grid_doctor.coarsen_healpix] and
+        [`save_pyramid`][grid_doctor.save_pyramid].  When
         *False*, return a compact dataset containing only the touched
         cells (the ``cell`` coordinate holds the actual HEALPix
         indices) — useful as a per-granule intermediate at high levels;
@@ -184,7 +184,7 @@ def bin_to_healpix(
         coarsening or publishing.
     ellipsoid:
         Ellipsoid of the HEALPix geometry, ``"sphere"`` or
-        ``"WGS84"``.  Defaults to ``grid_doctor.config.healpix.ellipsoid``.
+        ``"WGS84"``.  Defaults to ``grid_doctor.config.ellipsoid``.
 
     Returns
     -------
@@ -217,9 +217,7 @@ def bin_to_healpix(
     if min_count < 1:
         raise ValueError("min_count must be at least 1.")
 
-    lat, lon, sample_dims = resolve_point_coords(
-        ds, lat_name=lat_name, lon_name=lon_name, source_units=source_units
-    )
+    lat, lon, sample_dims = resolve_point_coords(ds, lat_name=lat_name, lon_name=lon_name, source_units=source_units)
     # Fail-fast: validate every aggregation before any data is loaded.
     methods = resolve_methods(ds, sample_dims, agg)
 
@@ -227,14 +225,10 @@ def bin_to_healpix(
     if not valid_coords.any():
         raise ValueError("No samples with valid (finite) coordinates found.")
 
-    grid = HealpixGrid.from_nest(
-        level, nest=nest, ellipsoid=_ellipsoid_or_config(ellipsoid)
-    )
+    grid = HealpixGrid.from_nest(level, nest=nest, ellipsoid=_ellipsoid_or_config(ellipsoid))
     module, kwargs = _require_healpix_geo_module(grid)
     cell_ids = np.asarray(
-        module.lonlat_to_healpix(
-            lon[valid_coords], lat[valid_coords], depth=level, **kwargs
-        ),
+        module.lonlat_to_healpix(lon[valid_coords], lat[valid_coords], depth=level, **kwargs),
         dtype=np.int64,
     )
 
@@ -276,14 +270,10 @@ def bin_to_healpix(
             result = bin_mode(group_idx, values, n_cells=n_cells)
             result[valid_count < min_count] = np.nan
         else:
-            result = bin_simple(
-                group_idx, values, n_cells=n_cells, func=NPG_FUNC[method]
-            )
+            result = bin_simple(group_idx, values, n_cells=n_cells, func=NPG_FUNC[method])
             result[valid_count < min_count] = np.nan
 
-        attrs = {
-            key: value for key, value in da.attrs.items() if key not in FILL_ATTR_NAMES
-        }
+        attrs = {key: value for key, value in da.attrs.items() if key not in FILL_ATTR_NAMES}
         attrs.update(variable_method_attrs(AGG_TO_METHOD[method]))
         binned[var_name] = xr.DataArray(result, dims=(*batch_dims, "cell"), attrs=attrs)
         if with_counts and method != "count":
@@ -323,7 +313,7 @@ def sparse_to_dense(ds: xr.Dataset) -> xr.Dataset:
     xarray.Dataset
         Dense dataset with the standard grid-doctor HEALPix coordinates
         and metadata, ready for
-        [`coarsen_healpix`][grid_doctor.helpers.coarsen_healpix].
+        [`coarsen_healpix`][grid_doctor.coarsen_healpix].
 
     Raises
     ------
@@ -358,11 +348,7 @@ def _dominant_method(ds: xr.Dataset) -> str:
     variables should be coarsened separately or with an explicit
     ``coarsen_mode``.
     """
-    methods = {
-        method
-        for da in ds.data_vars.values()
-        if (method := variable_method(da.attrs)) is not None
-    }
+    methods = {method for da in ds.data_vars.values() if (method := variable_method(da.attrs)) is not None}
     if methods == {"binned-mode"}:
         return "binned-mode"
     return "binned-mean"

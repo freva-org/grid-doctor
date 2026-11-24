@@ -28,7 +28,6 @@ class TestPublicCallables:
         "name",
         [
             "apply_weight_file",
-            "cached_open_dataset",
             "cached_weights",
             "chunk_for_target_store_size",
             "coarsen_healpix",
@@ -36,9 +35,7 @@ class TestPublicCallables:
             "create_healpix_pyramid",
             "get_latlon_resolution",
             "get_s3_options",
-            "latlon_to_healpix_pyramid",
             "regrid_to_healpix",
-            "regrid_unstructured_to_healpix",
             "resolution_to_healpix_level",
             "save_pyramid",
             "setup_logging",

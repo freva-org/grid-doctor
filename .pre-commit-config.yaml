@@ -12,6 +12,16 @@ repos:
   - repo: local
     hooks:
       # --- pre-commit: staged files only ---------------------------------
+      # Reformats staged files in place. If it changes anything, pre-commit
+      # stops the commit: review, `git add` the files and commit again.
+      - id: format
+        name: format (staged files, ruff)
+        entry: tox -q -e format --skip-pkg-install --
+        language: system
+        types: [python]
+        files: ^src/grid_doctor/
+        require_serial: true
+        stages: [pre-commit]
       - id: lint
         name: lint (staged files)
         entry: tox -q -e lint --skip-pkg-install --

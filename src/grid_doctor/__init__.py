@@ -9,18 +9,22 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING
 
+from . import xarray_accessor  # noqa: F401  registers on import
+
 __version__ = "2604.0.0"
 
 _SUBMODULES: dict[str, str] = {
+    "cli": ".cli",
     "config": ".config",
-    "helpers": ".helpers",
-    "log": ".log",
+    "io": ".io",
     "metadata": ".metadata",
+    "pyramid": ".pyramid",
     "remap": ".remap",
     "select": ".select",
     "swath": ".swath",
-    "utils": ".utils",
-    "cli": ".cli",
+    "types": ".types",
+    "weights": ".weights",
+    "xarray_accessor": ".xarray_accessor",
 }
 
 
@@ -28,63 +32,77 @@ _ATTRS: dict[str, str] = {
     "apply_weight_file": ".remap",
     "attach_cell_coords": ".select",
     "bin_to_healpix": ".swath",
-    "compute_healpix_weights": ".remap",
-    "chunk_for_target_store_size": ".utils",
-    "coarsen_healpix": ".helpers",
-    "create_healpix_pyramid": ".helpers",
-    "cached_open_dataset": ".utils",
-    "cached_weights": ".utils",
-    "get_latlon_resolution": ".helpers",
-    "get_s3_options": ".utils",
-    "init_pyramid_store": ".helpers",
+    "cached_weights": ".weights",
     "check_pyramid_store": ".io",
-    "load_manifest": ".io",
+    "chunk_for_target_store_size": ".io",
+    "coarsen_healpix": ".pyramid",
+    "compute_healpix_weights": ".remap",
+    "create_healpix_pyramid": ".pyramid",
+    "get_latlon_resolution": "._geometry.coords",
+    "get_s3_options": ".io",
+    "init_pyramid_store": ".io",
     "is_current": ".io",
     "is_task_done": ".io",
-    "write_pyramid_task": ".io",
-    "PyramidManifest": ".io",
-    "WriteTask": ".io",
-    "StoreReport": ".io",
-    "latlon_to_healpix_pyramid": ".helpers",
+    "load_manifest": ".io",
     "regrid_to_healpix": ".remap",
-    "regrid_unstructured_to_healpix": ".remap",
-    "resolution_to_healpix_level": ".helpers",
-    "save_pyramid": ".helpers",
+    "resolution_to_healpix_level": "._geometry.healpix",
+    "save_pyramid": ".io",
     "select_bbox": ".select",
     "select_cells": ".select",
     "select_cone": ".select",
-    "setup_logging": ".log",
+    "setup_logging": "._log",
     "sparse_to_dense": ".swath",
+    "write_pyramid_task": ".io",
+    "PyramidManifest": ".io",
+    "StoreReport": ".io",
+    "WriteTask": ".io",
 }
 
 
 if TYPE_CHECKING:
-    from . import config, helpers, log, metadata, remap, select, swath, utils
-    from .helpers import (
-        coarsen_healpix,
-        create_healpix_pyramid,
+    from . import (
+        cli,
+        config,
+        io,
+        metadata,
+        pyramid,
+        remap,
+        select,
+        swath,
+        types,
+        weights,
+    )
+    from ._geometry.coords import (
         get_latlon_resolution,
-        init_pyramid_store,
-        latlon_to_healpix_pyramid,
+    )
+    from ._geometry.healpix import (
         resolution_to_healpix_level,
-        save_pyramid,
+    )
+    from ._log import (
+        setup_logging,
     )
     from .io import (
         PyramidManifest,
         StoreReport,
         WriteTask,
         check_pyramid_store,
+        chunk_for_target_store_size,
+        get_s3_options,
+        init_pyramid_store,
         is_current,
         is_task_done,
         load_manifest,
+        save_pyramid,
         write_pyramid_task,
     )
-    from .log import setup_logging
+    from .pyramid import (
+        coarsen_healpix,
+        create_healpix_pyramid,
+    )
     from .remap import (
         apply_weight_file,
         compute_healpix_weights,
         regrid_to_healpix,
-        regrid_unstructured_to_healpix,
     )
     from .select import (
         attach_cell_coords,
@@ -92,12 +110,12 @@ if TYPE_CHECKING:
         select_cells,
         select_cone,
     )
-    from .swath import bin_to_healpix, sparse_to_dense
-    from .utils import (
-        cached_open_dataset,
+    from .swath import (
+        bin_to_healpix,
+        sparse_to_dense,
+    )
+    from .weights import (
         cached_weights,
-        chunk_for_target_store_size,
-        get_s3_options,
     )
 
 
@@ -127,18 +145,20 @@ def __dir__() -> list[str]:
 
 __all__ = [
     "__version__",
+    "cli",
     "config",
-    "helpers",
-    "log",
+    "io",
     "metadata",
+    "pyramid",
     "remap",
     "select",
     "swath",
-    "utils",
+    "types",
+    "weights",
+    "xarray_accessor",
     "apply_weight_file",
     "attach_cell_coords",
     "bin_to_healpix",
-    "cached_open_dataset",
     "cached_weights",
     "check_pyramid_store",
     "chunk_for_target_store_size",
@@ -150,10 +170,8 @@ __all__ = [
     "init_pyramid_store",
     "is_current",
     "is_task_done",
-    "latlon_to_healpix_pyramid",
     "load_manifest",
     "regrid_to_healpix",
-    "regrid_unstructured_to_healpix",
     "resolution_to_healpix_level",
     "save_pyramid",
     "select_bbox",

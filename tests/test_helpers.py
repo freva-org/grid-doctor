@@ -1,4 +1,4 @@
-"""Tests for `grid_doctor.helpers`."""
+"""Tests for pyramid building, resolution helpers and saving pyramids."""
 
 from __future__ import annotations
 
@@ -13,20 +13,25 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from grid_doctor import helpers
-from grid_doctor.helpers import (
-    _coarsen_array,
-    _coarsen_array_mode,
+from grid_doctor.pyramid import _build as build_module
+from grid_doctor._geometry.coords import (
     _get_latlon_arrays,
     _get_unstructured_dim,
     _is_unstructured,
+    get_latlon_resolution,
+)
+from grid_doctor._geometry.healpix import resolution_to_healpix_level
+from grid_doctor.io._save import (
+    init_pyramid_store,
+    save_pyramid,
+)
+from grid_doctor.pyramid._build import (
     coarsen_healpix,
     create_healpix_pyramid,
-    get_latlon_resolution,
-    init_pyramid_store,
-    latlon_to_healpix_pyramid,
-    resolution_to_healpix_level,
-    save_pyramid,
+)
+from grid_doctor.pyramid._kernels import (
+    _coarsen_array,
+    _coarsen_array_mode,
 )
 from grid_doctor.metadata import HealpixMetadata, PyramidMetadata
 from grid_doctor.pyramid import _levels as pyramid_levels
@@ -336,9 +341,9 @@ class TestPyramidBuilders:
                 level,
             )
 
-        monkeypatch.setattr(helpers, "regrid_to_healpix", fake_regrid)
+        monkeypatch.setattr(build_module, "regrid_to_healpix", fake_regrid)
         monkeypatch.setattr(
-            helpers,
+            build_module,
             "coarsen_healpix",
             lambda ds, level, **kwargs: with_healpix_metadata(
                 xr.Dataset(
@@ -365,31 +370,12 @@ class TestPyramidBuilders:
                 level, nest=False,
             )
 
-        monkeypatch.setattr(helpers, "regrid_to_healpix", fake_regrid)
+        monkeypatch.setattr(build_module, "regrid_to_healpix", fake_regrid)
         pyramid = create_healpix_pyramid(
             regular_ds, max_level=2, min_level=0, nest=False
         )
         assert set(pyramid) == {0, 1, 2}
         assert calls == [2, 1, 0]
-
-    @pytest.mark.parametrize("method", ["nearest", "linear", "conservative"])
-    def test_latlon_to_healpix_pyramid_passes_arguments(
-        self, regular_ds: xr.Dataset, method: str, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        captured: dict[str, Any] = {}
-
-        def fake_create(
-            ds: xr.Dataset, max_level: int, min_level: int = 0, **kwargs: Any
-        ) -> dict[int, xr.Dataset]:
-            captured.update(kwargs)
-            return {max_level: ds}
-
-        monkeypatch.setattr(helpers, "create_healpix_pyramid", fake_create)
-        pyramid = latlon_to_healpix_pyramid(
-            regular_ds, max_level=2, min_level=1, method=method
-        )
-        assert set(pyramid) == {2}
-        assert captured["method"] == method
 
     def test_create_healpix_pyramid_forwards_coarsen_params(
         self, regular_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
@@ -412,8 +398,8 @@ class TestPyramidBuilders:
             coarsen_calls.append(kwargs)
             return {}
 
-        monkeypatch.setattr(helpers, "regrid_to_healpix", fake_regrid)
-        monkeypatch.setattr(helpers, "coarse_levels", fake_coarse_levels)
+        monkeypatch.setattr(build_module, "regrid_to_healpix", fake_regrid)
+        monkeypatch.setattr(build_module, "coarse_levels", fake_coarse_levels)
         create_healpix_pyramid(
             regular_ds,
             max_level=2,
@@ -487,8 +473,8 @@ class TestSavePyramid:
 
         return {level: _create_dataset(level) for level in (0, 1)}
 
-    @mock.patch("grid_doctor.helpers.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.helpers.s3fs.S3Map")
+    @mock.patch("s3fs.S3FileSystem")
+    @mock.patch("s3fs.S3Map")
     def test_calls_to_zarr(self, mock_s3map: mock.Mock, mock_s3fs: mock.Mock) -> None:
         del mock_s3fs
         pyramid = self._make_pyramid()
@@ -497,8 +483,8 @@ class TestSavePyramid:
             save_pyramid(pyramid, "s3://bucket/test", s3_options={}, mode="w")
             assert mock_zarr.call_count == 2
 
-    @mock.patch("grid_doctor.helpers.s3fs.S3FileSystem")
-    @mock.patch("grid_doctor.helpers.s3fs.S3Map")
+    @mock.patch("s3fs.S3FileSystem")
+    @mock.patch("s3fs.S3Map")
     def test_zarr_format_3_omits_consolidated(
         self, mock_s3map: mock.Mock, mock_s3fs: mock.Mock
     ) -> None:

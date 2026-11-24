@@ -1,8 +1,7 @@
-# Helper utilities
+# Writing stores
 
-This section provides supporting utilities for storage access, caching,
-and chunk-size selection. These helpers are mainly intended to support
-efficient IO and scalable data layout decisions.
+Write HEALPix pyramids to Zarr stores on S3 or local disk, and choose
+storage options and chunk sizes for them.
 
 ## S3 Output handling
 
@@ -34,21 +33,6 @@ efficiency and access performance. The function below helps determine a
 chunk layout for a desired target store size.
 
 ::: grid_doctor.chunk_for_target_store_size
-    options:
-      show_root_heading: true
-      show_root_full_path: false
-
-## Caching
-
-These helpers provide lightweight caching for repeatedly used datasets
-and weight files to avoid unnecessary reopen or recomputation overhead.
-
-::: grid_doctor.cached_open_dataset
-    options:
-      show_root_heading: true
-      show_root_full_path: false
-
-::: grid_doctor.cached_weights
     options:
       show_root_heading: true
       show_root_full_path: false

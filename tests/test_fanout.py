@@ -21,7 +21,8 @@ import xarray as xr
 from fsspec.implementations.memory import MemoryFileSystem
 
 import grid_doctor as gd
-from grid_doctor.helpers import create_healpix_pyramid, save_pyramid
+from grid_doctor.io._save import save_pyramid
+from grid_doctor.pyramid._build import create_healpix_pyramid
 from grid_doctor.io import (
     ArraySpec,
     LevelSpec,
@@ -883,7 +884,7 @@ class TestIfExists:
             raise KeyboardInterrupt  # stands in for SIGTERM/SIGKILL
 
         with monkeypatch.context() as patch:
-            patch.setattr("grid_doctor.helpers.finish_init", killed)
+            patch.setattr("grid_doctor.io._save.finish_init", killed)
             with pytest.raises(KeyboardInterrupt):
                 gd.init_pyramid_store(_pyramid(), str(tmp_path), split={"time": 4})
         assert (tmp_path / "_grid_doctor" / "init.json").is_file()

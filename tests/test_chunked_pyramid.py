@@ -12,13 +12,20 @@ import pytest
 import xarray as xr
 
 from grid_doctor import remap
-from grid_doctor.helpers import (
-    coarsen_healpix,
-    create_healpix_pyramid,
+from grid_doctor.io._save import (
     init_pyramid_store,
     save_pyramid,
 )
-from grid_doctor.pyramid import MeanPartials, coarsen_mean, coarsen_mean_steps
+from grid_doctor.pyramid._build import (
+    coarsen_healpix,
+    create_healpix_pyramid,
+)
+from grid_doctor.pyramid._blocks import (
+    MeanPartials,
+    coarsen_mean_steps,
+)
+from grid_doctor.pyramid._kernels import coarsen_mean
+from grid_doctor.remap import _apply as apply_module
 
 from .helpers import with_healpix_metadata
 
@@ -148,15 +155,15 @@ class TestSinglePassPyramid:
     ) -> None:
         weights = _weight_file(tmp_path / "w.nc")
         calls: list[int] = []
-        original = remap.apply_weights_nd
+        original = apply_module.apply_weights_nd
 
         def counting(values: Any, **kwargs: Any) -> Any:
             calls.append(1)
             return original(values, **kwargs)
 
-        monkeypatch.setattr(remap, "apply_weights_nd", counting)
+        monkeypatch.setattr(apply_module, "apply_weights_nd", counting)
         monkeypatch.setattr(
-            "grid_doctor.helpers.regrid_to_healpix",
+            "grid_doctor.pyramid._build.regrid_to_healpix",
             lambda ds, level, **kw: remap.apply_weight_file(
                 ds, weights, cell_chunks=256
             ),
@@ -275,7 +282,7 @@ def test_row_blocks_share_weight_buffers() -> None:
     from scipy.sparse import random as sparse_random
 
     matrix = sparse_random(100, 40, density=0.2, format="csr", random_state=0)
-    blocks = remap._row_blocks(matrix, 32)
+    blocks = apply_module._row_blocks(matrix, 32)
     assert [b.shape[0] for b in blocks] == [32, 32, 32, 4]
     assert all(np.shares_memory(b.data, matrix.data) for b in blocks)
     from scipy.sparse import vstack
@@ -296,13 +303,13 @@ def test_dask_tasks_use_serial_kernels(
 ) -> None:
     """Dask threads must not start their own thread teams (thread limits)."""
     seen: list[bool] = []
-    original = remap.apply_weights_nd
+    original = apply_module.apply_weights_nd
 
     def recording(values: Any, **kwargs: Any) -> Any:
         seen.append(kwargs["parallel"])
         return original(values, **kwargs)
 
-    monkeypatch.setattr(remap, "apply_weights_nd", recording)
+    monkeypatch.setattr(apply_module, "apply_weights_nd", recording)
     weights = _weight_file(tmp_path / "w.nc")
     remap.apply_weight_file(
         _source(chunked), weights, cell_chunks=cell_chunks
@@ -321,7 +328,7 @@ def test_float32_sources_are_not_upcast_copied(
     """float32 input skips the full-field float64 copy without changing results."""
     from scipy.sparse import random as sparse_random
 
-    from grid_doctor.remap_apply import apply_weights_nd
+    from grid_doctor.remap._sparse import apply_weights_nd
 
     matrix = sparse_random(500, 300, density=0.02, format="csr", random_state=3)
     values = np.random.default_rng(4).normal(size=(batch, 300)).astype(np.float32)

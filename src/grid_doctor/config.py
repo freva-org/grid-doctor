@@ -1,161 +1,128 @@
 """Library-wide settings.
 
-Each setting has a default that can be overridden by an environment variable
-``GRID_DOCTOR_<NAMESPACE>__<KEY>`` (read at import) or by assignment, e.g.
-``grid_doctor.config.healpix.ellipsoid = "WGS84"``.
+Each setting has a built-in default, which the environment variable
+``GRID_DOCTOR_<SETTING>`` overrides (read when ``grid_doctor.config`` is
+imported), which assignment at runtime overrides in turn::
+
+    import grid_doctor as gd
+
+    gd.config.ellipsoid = "WGS84"
+
+    with gd.config.set(ellipsoid="sphere"):  # restored after the block
+        ...
+
+Settings are process-wide: a ``with gd.config.set(...)`` block also affects
+other threads while it is open.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator, Mapping
-from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, fields
-from typing import (
-    Any,
-    ClassVar,
-    Literal,
-    Self,
-    get_args,
-    get_origin,
-    get_type_hints,
-)
+from contextlib import contextmanager
+from types import ModuleType
+from typing import Any, get_args
 
 from .types import Ellipsoid
 
 ENV_VAR_PREFIX = "GRID_DOCTOR"
-"""Prefix of the environment variables, ``<PREFIX>_<NAMESPACE>__<KEY>``."""
+"""Prefix of the environment variables, ``<PREFIX>_<SETTING>``."""
 
-_HINTS: dict[type, dict[str, Any]] = {}
+ellipsoid: Ellipsoid = "sphere"
+"""Ellipsoid on which new HEALPix grids are built, passed to ``healpix_geo``:
+``"sphere"`` (consistent with ESMF's spherical area calculation) or
+``"WGS84"``.  It is recorded in the output and in weight files; code reading
+existing data uses the recorded one instead (a sphere if the HEALPix
+metadata or weight file records none).  Only a dataset with no HEALPix
+metadata at all, selected from with an explicit ``level=``, falls back to
+this setting.  Environment variable: ``GRID_DOCTOR_ELLIPSOID``."""
+
+weights_store: str | None = None
+"""Location of the default
+[`WeightsStore`][grid_doctor.weights.WeightsStore]: a local path or a
+``file://`` or ``memory://`` URL.  ``None`` uses
+``$XDG_CACHE_HOME/grid-doctor/weights`` (``~/.cache/grid-doctor/weights``).
+Environment variable: ``GRID_DOCTOR_WEIGHTS_STORE``."""
+
+SETTINGS: tuple[str, ...] = ("ellipsoid", "weights_store")
+"""Names of all settings."""
+
+_CHOICES: dict[str, tuple[object, ...]] = {"ellipsoid": get_args(Ellipsoid)}
 
 
-def _type_hints(cls: type) -> dict[str, Any]:
-    """Return the resolved annotations of ``cls``, computed once per class."""
-    if cls not in _HINTS:
-        _HINTS[cls] = get_type_hints(cls)
-    return _HINTS[cls]
+def env_var(name: str) -> str:
+    """Return the environment variable of setting *name*."""
+    return f"{ENV_VAR_PREFIX}_{name.upper()}"
 
 
-class _Namespace:
-    """Base for a group of settings; subclasses are slotted dataclasses.
+def _check(name: str, value: object) -> None:
+    """Raise unless *value* is valid for setting *name*."""
+    if name not in SETTINGS:
+        raise AttributeError(f"Unknown setting {name!r}; settings are {SETTINGS}")
+    choices = _CHOICES.get(name)
+    if choices is not None and value not in choices:
+        raise ValueError(f"{name} must be one of {choices}, got {value!r}")
 
-    ``Literal``-typed fields only accept their listed values. Values from the
-    environment are read as stripped strings.
+
+def _read_env(environ: Mapping[str, str]) -> dict[str, Any]:
+    """Return the settings given in *environ*, validated and stripped.
+
+    An empty ``GRID_DOCTOR_WEIGHTS_STORE`` counts as unset.
+
+    Raises
+    ------
+    ValueError
+        If a variable holds an invalid value; the message names the variable.
     """
-
-    __slots__ = ()
-    namespace: ClassVar[str]
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        """Validate ``Literal`` settings before assigning them."""
-        hint = _type_hints(type(self)).get(name)
-        if get_origin(hint) is Literal and value not in get_args(hint):
-            raise ValueError(f"{self.namespace}.{name} must be one of {get_args(hint)}, got {value!r}")
-        object.__setattr__(self, name, value)
-
-    @contextmanager
-    def set(self, **settings: Any) -> Iterator[None]:
-        """Change settings inside a ``with`` block, restoring them afterwards.
-
-        Raises
-        ------
-        ValueError
-            If a value is invalid; no setting is changed then.
-        """
-        previous = {name: getattr(self, name) for name in settings}
+    values: dict[str, Any] = {}
+    for name in SETTINGS:
+        var = env_var(name)
+        if var not in environ:
+            continue
+        value: str | None = environ[var].strip()
+        if name == "weights_store" and not value:
+            value = None
         try:
-            for name, value in settings.items():
-                setattr(self, name, value)
-            yield
-        finally:
-            for name, value in previous.items():
-                object.__setattr__(self, name, value)
-
-    @classmethod
-    def from_env(cls, environ: Mapping[str, str] = os.environ) -> Self:
-        """Return the defaults, overridden by ``GRID_DOCTOR_<NAMESPACE>__<KEY>`` variables.
-
-        Raises
-        ------
-        ValueError
-            If a variable holds an invalid value; the message names the variable.
-        """
-        settings = cls()
-        for field in fields(settings):  # type: ignore[arg-type]
-            var = f"{ENV_VAR_PREFIX}_{cls.namespace.upper()}__{field.name.upper()}"
-            if var in environ:
-                try:
-                    setattr(settings, field.name, environ[var].strip())
-                except ValueError as error:
-                    raise ValueError(f"Invalid {var}: {error}") from None
-        return settings
-
-
-@dataclass(slots=True)
-class HealpixConfig(_Namespace):
-    """HEALPix geometry settings.
-
-    Attributes
-    ----------
-    ellipsoid:
-        Ellipsoid on which new HEALPix grids are built, passed to
-        ``healpix_geo``: ``"sphere"`` (consistent with ESMF's spherical
-        area calculation) or ``"WGS84"``.  It is recorded in the output
-        and in weight files; code reading existing data uses the recorded
-        one instead (a sphere if the HEALPix metadata or weight file
-        records none).  Only a dataset with no HEALPix metadata at all,
-        selected from with an explicit ``level=``, falls back to this
-        setting.
-        Environment variable: ``GRID_DOCTOR_HEALPIX__ELLIPSOID``.
-    """
-
-    namespace: ClassVar[str] = "healpix"
-    ellipsoid: Ellipsoid = "sphere"
-
-
-healpix = HealpixConfig.from_env()
-"""Active HEALPix settings, e.g. ``grid_doctor.config.healpix.ellipsoid``."""
+            _check(name, value)
+        except ValueError as error:
+            raise ValueError(f"Invalid {var}: {error}") from None
+        values[name] = value
+    return values
 
 
 @contextmanager
-def set(
-    namespaces: Mapping[str, _Namespace | Mapping[str, Any]] | None = None,
-    /,
-    **kwargs: _Namespace | Mapping[str, Any],
-) -> Iterator[None]:
-    """Change settings of several namespaces inside a ``with`` block.
-
-    Each namespace is given by name, either as a mapping of the settings to
-    change or as a whole namespace object, whose every setting is applied::
-
-        with grid_doctor.config.set(healpix={"ellipsoid": "WGS84"}):
-            ...
-        with grid_doctor.config.set({"healpix": HealpixConfig()}):
-            ...
-
-    The namespace objects themselves are kept; only their values change and
-    are restored afterwards.
+def set(**settings: Any) -> Iterator[None]:
+    """Change settings inside a ``with`` block, restoring them afterwards.
 
     Raises
     ------
     AttributeError
-        If a namespace does not exist.
-    TypeError
-        If a namespace object is of the wrong type.
+        If a setting does not exist.
     ValueError
         If a value is invalid; no setting is changed then.
     """
-    with ExitStack() as stack:
-        for name, values in {**(namespaces or {}), **kwargs}.items():
-            target = globals().get(name)
-            if not isinstance(target, _Namespace):
-                raise AttributeError(f"Unknown config namespace {name!r}")
-            if isinstance(values, _Namespace):
-                if type(values) is not type(target):
-                    raise TypeError(
-                        f"{name} expects {type(target).__name__}, "
-                        f"got {type(values).__name__}"
-                    )
-                values = {f.name: getattr(values, f.name) for f in fields(values)}  # type: ignore[arg-type]
-            stack.enter_context(target.set(**values))
+    for name, value in settings.items():
+        _check(name, value)
+    module = sys.modules[__name__]
+    previous = {name: getattr(module, name) for name in settings}
+    try:
+        for name, value in settings.items():
+            setattr(module, name, value)
         yield
+    finally:
+        for name, value in previous.items():
+            setattr(module, name, value)
+
+
+class _ConfigModule(ModuleType):
+    """Module type that validates assignments to settings."""
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in SETTINGS:
+            _check(name, value)
+        super().__setattr__(name, value)
+
+
+globals().update(_read_env(os.environ))
+sys.modules[__name__].__class__ = _ConfigModule

@@ -14,14 +14,13 @@ nav:
   - Technical decisions: technical-decisions.md
   - Grid-doctor software: getting-started.md
   - API Reference:
-      - High Level API: api/helpers.md
+      - Pyramids: api/pyramid.md
       - Regridding: api/remap.md
       - Weights Store: api/weights.md
       - Point Binning: api/swath.md
       - Parallel Writes: api/parallel.md
-      - Helper Utilities: api/utils.md
+      - Writing Stores: api/io.md
       - Configuration: api/config.md
-      - Logging: api/log.md
       - CLI: api/cli.md
       - Data selection: api/select.md
       - Metadata: api/metadata.md

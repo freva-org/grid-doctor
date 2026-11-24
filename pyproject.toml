@@ -71,6 +71,7 @@ tests = [
     "mock",
     "pytest-mock",
     "pytest-cov",
+    "pytest-xdist",
     "healpy",
     "pandas>=2.2",
     "bottleneck",
@@ -120,15 +121,28 @@ allow_untyped_calls = true
 module = ["grid_doctor.io.*", "grid_doctor.metadata.*"]
 disallow_any_explicit = true
 
-[tool.isort]
-known_first_party = [
-    "grid_doctor",
-]
-sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
-
-[tool.black]
+[tool.ruff]
 line-length = 120
-target-version = ["py310", "py311", "py312"]
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+# E/W/F: pycodestyle and pyflakes (was flake8), I: import order (was isort),
+# D: docstrings (was pydocstyle), S: security (was bandit).
+select = ["E", "W", "F", "I", "D", "S"]
+ignore = [
+    "F403",  # star imports, as with flake8 before
+    "F405",
+    # bandit only failed on medium severity and above; these are low:
+    "S101",  # assert
+    "S603",  # subprocess call without shell=True
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.isort]
+known-first-party = ["grid_doctor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -137,7 +151,7 @@ python_functions = ["test_*"]
 addopts = "-v --cov=grid_doctor --cov-report=term-missing"
 
 [tool.coverage.run]
-source = ["grid-doctor"]
+source = ["grid_doctor"]
 branch = false
 
 [tool.coverage.report]
@@ -167,30 +181,37 @@ passenv = *
 parallel_show_output = false
 
 [testenv:lint]
-description = "Check code quality."
-deps = -e .
-       black
-       isort
-       flake8
-       pydocstyle
+description = "Check code quality. Usage: tox -e lint [-- FILES]"
+skip_install = true
+deps = ruff
        codespell
-       bandit[toml]
 commands =
-    isort --check --profile black --py 312 -l 79 {posargs:src}
-    python3 -m flake8 --count --max-complexity=10 --ignore=F405,F403,E704,W503,C901 --max-line-length=120 --statistics --show-source {posargs:src}
+    ruff check {posargs:src}
+    ruff format --check {posargs:src}
     codespell --quiet-level=2 {posargs:src/}
-    python3 -m pydocstyle {posargs:src/grid_doctor}
-    bandit -r --severity-level medium --confidence-level high {posargs:src/grid_doctor}
+
+[testenv:format]
+description = "Apply ruff fixes and formatting. Usage: tox -e format [-- FILES]"
+skip_install = true
+deps = ruff
+commands =
+    ruff check --fix {posargs:src}
+    ruff format {posargs:src}
+
 [testenv:test]
+# System site packages (conda) provide ESMF/ESMPy. pytest would also
+# auto-load every plugin registered there, even ones whose module the env
+# shadows (e.g. platformdirs.pytest_plugin), so load plugins explicitly.
 setenv =
     VIRTUALENV_SYSTEM_SITE_PACKAGES=true
+    PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 description = "Run the unit tests."
 # Keep system packages available for external libraries, but install declared
 # dependencies locally so they take precedence over inherited packages.
 install_command = python -I -m pip install --ignore-installed {opts} {packages}
 deps = -e .[tests]
 commands =
-    python3 -m pytest -vv --cov=grid_doctor --cov-report=html:coverage_report --junitxml report.xml --cov-report xml tests/
+    python3 -m pytest -vv -p pytest_cov -p xdist.plugin -n auto --cov=grid_doctor --cov-report=html:coverage_report --junitxml report.xml --cov-report xml tests/
     python3 -m coverage report --fail-under=65 --precision=2
 
 [testenv:docs]

@@ -6,10 +6,13 @@ import argparse
 from pathlib import Path
 from typing import TypedDict, Unpack
 
+ArgFormatter: type[argparse.HelpFormatter]
 try:
-    from rich_argparse import ArgumentDefaultsRichHelpFormatter as ArgFormatter
+    from rich_argparse import ArgumentDefaultsRichHelpFormatter
 except ImportError:  # pragma: no cover - optional dependency
     ArgFormatter = argparse.ArgumentDefaultsHelpFormatter
+else:
+    ArgFormatter = ArgumentDefaultsRichHelpFormatter
 
 
 def get_parser(name: str, description: str | None = None) -> argparse.ArgumentParser:
@@ -40,11 +43,7 @@ def get_parser(name: str, description: str | None = None) -> argparse.ArgumentPa
         formatter_class=ArgFormatter,
     )
     parser.add_argument("--s3-bucket", help="S3 target bucket.", required=True)
-    parser.add_argument(
-        "--s3-endpoint",
-        default="https://s3.eu-dkrz-3.dkrz.cloud",
-        help="S3 endpoint URL.",
-    )
+    parser.add_argument("--s3-endpoint", help="S3 endpoint URL.", required=True)
     parser.add_argument(
         "--s3-credentials-file",
         default=Path.home() / ".s3-credentials.json",
@@ -62,16 +61,14 @@ def get_parser(name: str, description: str | None = None) -> argparse.ArgumentPa
 
 
 class LoggingOptions(TypedDict, total=False):
-    """Options of [`grid_doctor.setup_logging`][grid_doctor.log.setup_logging]."""
+    """Options of [`grid_doctor.setup_logging`][grid_doctor.setup_logging]."""
 
     level: int | str | None
     fmt: str
     datefmt: str
 
 
-def setup_logging_from_args(
-    args: argparse.Namespace, **kwargs: Unpack[LoggingOptions]
-) -> None:
+def setup_logging_from_args(args: argparse.Namespace, **kwargs: Unpack[LoggingOptions]) -> None:
     """Initialise logging from parsed CLI arguments.
 
     Parameters
@@ -80,7 +77,7 @@ def setup_logging_from_args(
         Parsed arguments containing a `verbose` attribute.
     **kwargs:
         Extra keyword arguments forwarded to
-        [`grid_doctor.setup_logging`][grid_doctor.log.setup_logging].
+        [`grid_doctor.setup_logging`][grid_doctor.setup_logging].
     """
     import grid_doctor as gd
 

@@ -33,11 +33,7 @@ def maybe_drop_coordinates(
     ``cell`` coordinate is the only record of which cells they hold.
     Datasets without HEALPix metadata just lose the coordinates.
     """
-    include_coords = (
-        write_coords
-        if isinstance(write_coords, bool)
-        else level <= max_level_to_auto_write
-    )
+    include_coords = write_coords if isinstance(write_coords, bool) else level <= max_level_to_auto_write
     if include_coords:
         return dataset
     coords = [CELL_DIM, LAT_VAR, LON_VAR]
@@ -125,9 +121,7 @@ def prepare_template(
             # names of dask arrays are used for keeping track of results, so arrays
             # with the same name cannot have different shape or dtype
             name = f"template_{'x'.join(map(str, v.shape))}_{v.dtype}"
-            template[k].data = dask.array.from_delayed(
-                delayed, v.shape, v.dtype, name=name
-            )
+            template[k].data = dask.array.from_delayed(delayed, v.shape, v.dtype, name=name)
 
     # Remove old chunk encoding.
     for var in template.variables.values():
@@ -157,11 +151,7 @@ def prepare_region_dataset(dataset: xr.Dataset, region: dict[str, IndexSlice]) -
     """
     region_keys = set(region)
     to_drop = (
-        {
-            name
-            for name, var in dataset.data_vars.items()
-            if region_keys.isdisjoint(set(var.dims))
-        }
+        {name for name, var in dataset.data_vars.items() if region_keys.isdisjoint(set(var.dims))}
         | {str(dim) for dim in dataset.dims if str(dim) not in region_keys}
         | {str(coord) for coord in dataset.coords if str(coord) not in region_keys}
     )

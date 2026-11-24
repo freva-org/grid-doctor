@@ -19,7 +19,7 @@ import numpy as np
 import xarray as xr
 import grid_doctor as gd
 
-ds = gd.cached_open_dataset(["/pool/data/CORDEX/EUR-11/.../tas_*.nc"])
+ds = xr.open_mfdataset("/pool/data/CORDEX/EUR-11/.../tas_*.nc")
 
 # EUR-11: 0.11 deg -> level 9 (~0.115 deg cell spacing)
 level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))

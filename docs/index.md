@@ -26,9 +26,11 @@ curvilinear, or unstructured grids to multi-resolution
 ## Quick Example
 
 ```python
+import xarray as xr
+
 import grid_doctor as gd
 
-ds = gd.cached_open_dataset(["data/*.nc"])
+ds = xr.open_mfdataset("data/*.nc")
 weights_file = gd.cached_weights(ds, store="/path/to/weights", nproc=4)
 pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_file)
 gd.save_pyramid(

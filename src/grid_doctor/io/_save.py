@@ -1,39 +1,17 @@
-"""High-level helpers for HEALPix pyramids.
-
-The functions in this module cover three tasks:
-
-- estimating source-grid resolution,
-- building a HEALPix pyramid with
-  [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix],
-- and writing the resulting pyramid to Zarr stores.
-
-Remapping itself lives in [`grid_doctor.remap`][grid_doctor.remap].
-"""
+"""Write HEALPix pyramids to Zarr stores, in one go or as parallel tasks."""
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Literal, Unpack, overload
+from typing import Literal, overload
 
-import numpy as np
 import s3fs
 import xarray as xr
 
-from .io import (
-    DeferredWrite,
-    deferred_writes,
-    get_common_coordinates,
-    get_filesystem,
-    get_store,
-    get_zarr_options,
-    maybe_drop_coordinates,
-    prepare_region_dataset,
-    prepare_template,
-    pyramid_to_multiscales_tree,
-    store_all,
-)
-from .io._fanout import (
+from ..metadata import level_group
+from ..types import PyramidEncoding, Region, S3Options
+from ._fanout import (
     IfExists,
     StoreExistsError,
     begin_init,
@@ -42,36 +20,25 @@ from .io._fanout import (
     inspect_target,
     resume_init,
 )
-from .io._manifest import LevelSpec, PyramidManifest
-from .metadata import HealpixMetadata, level_group
-from .pyramid import (
-    coarse_levels,
-    coarsen_dataset,
-    coarsen_mean,
-    resolve_coarsen_mode,
-    resolve_valid_fraction,
-    with_finest_fractions,
+from ._manifest import LevelSpec, PyramidManifest
+from ._xarray import (
+    get_common_coordinates,
+    maybe_drop_coordinates,
+    prepare_region_dataset,
+    prepare_template,
+    pyramid_to_multiscales_tree,
 )
-from .remap import (
-    regrid_to_healpix,
-    regrid_unstructured_to_healpix,
-)
-from .remap_backend import (
-    _get_latlon_arrays,
-    _get_unstructured_dim,
-    _is_unstructured,
-)
-from .types import (
-    CoarsenMode,
-    FloatArray,
-    FloatingArray,
-    PyramidEncoding,
-    RegridOptions,
-    S3Options,
-    ValidFraction,
+from ._zarr import (
+    DeferredWrite,
+    deferred_writes,
+    get_filesystem,
+    get_store,
+    get_zarr_options,
+    store_all,
 )
 
 logger = logging.getLogger(__name__)
+
 
 WRITE_COORDS_MAX_LEVEL = 10
 """Highest level for which ``save_pyramid(write_coords="auto")``
@@ -79,355 +46,6 @@ materialises coordinate arrays.  At level 10 the two float64 coordinate
 arrays cost ~200 MB per store; one level up they double, and by level 16
 they would reach hundreds of GB while carrying no information that is not
 already implied by the cell index."""
-
-# ===================================================================
-# Resolution estimation
-# ===================================================================
-
-
-def get_latlon_resolution(ds: xr.Dataset) -> float:
-    """Estimate the horizontal resolution of *ds* in degrees.
-
-    Parameters
-    ----------
-    ds:
-        Dataset on a regular lon/lat grid, a curvilinear grid, or an
-        unstructured grid.
-
-    Returns
-    -------
-    float
-        Approximate grid spacing in degrees.
-
-    Examples
-    --------
-    ```python
-    resolution = get_latlon_resolution(ds)
-    level = resolution_to_healpix_level(resolution)
-    ```
-    """
-    if _is_unstructured(ds):
-        cell_dim = _get_unstructured_dim(ds)
-        n_cells = ds.sizes[cell_dim]
-        return float(np.degrees(np.sqrt(4.0 * np.pi / float(n_cells))))
-
-    lat, lon = _get_latlon_arrays(ds)
-    if lat.ndim == 1:
-        lat_res = float(np.nanmin(np.abs(np.diff(lat))))
-        lon_res = float(np.nanmin(np.abs(np.diff(lon))))
-    else:
-        lat_res = float(np.nanmean(np.abs(np.diff(lat, axis=0))))
-        lon_res = float(np.nanmean(np.abs(np.diff(lon, axis=1))))
-    return min(lat_res, lon_res)
-
-
-def resolution_to_healpix_level(resolution_deg: float) -> int:
-    """Convert an approximate source resolution to a HEALPix level.
-
-    The heuristic uses a characteristic HEALPix pixel spacing of about
-    ``58.6° / 2**level``.
-
-    Parameters
-    ----------
-    resolution_deg:
-        Approximate source resolution in degrees.
-
-    Returns
-    -------
-    int
-        Suggested HEALPix level.
-
-    Examples
-    --------
-    ```python
-    level = resolution_to_healpix_level(0.25)
-    ```
-    """
-    if resolution_deg <= 0.0:
-        raise ValueError("resolution_deg must be positive.")
-    level = int(np.round(np.log2(58.6 / resolution_deg)))
-    return max(0, level)
-
-
-# ===================================================================
-# Coarsening
-# ===================================================================
-
-
-def _coarsen_array(
-    values: FloatingArray,
-    *,
-    factor: int,
-    min_valid_fraction: float = 0.5,
-) -> FloatArray:
-    """Coarsen a HEALPix array by grouping contiguous nested cells.
-
-    The last dimension is treated as the cell dimension.  All leading
-    dimensions are batch dimensions that are preserved.
-
-    Thin wrapper around
-    [`coarsen_mean`][grid_doctor.pyramid.coarsen_mean], which
-    is exact only when ``values`` is the finest level.
-
-    Args:
-        values: Input array with shape ``(*batch, n_cells)``.
-        factor: Number of child cells per parent (``4**delta_level``).
-        min_valid_fraction: Minimum fraction of valid (non-NaN)
-            children required.  Parent cells with fewer valid
-            children are set to NaN.  Default ``0.5`` (at least
-            half of the children must be valid).
-
-    Returns:
-        Array with shape ``(*batch, n_cells // factor)``.
-    """
-    return coarsen_mean(values, factor=factor, min_valid_fraction=min_valid_fraction)
-
-
-def _coarsen_array_mode(
-    values: FloatingArray,
-    *,
-    factor: int,
-    min_valid_fraction: float = 0.5,
-) -> FloatArray:
-    """Coarsen a HEALPix array by taking the mode of grouped children.
-
-    Intended for categorical / discrete data (land cover, soil type,
-    …) where averaging class labels would be meaningless.
-
-    For each parent cell the most frequent value among its children is
-    selected.  Ties are broken by choosing the value that appears
-    first (lowest child index).  When fewer than
-    ``min_valid_fraction * factor`` children are valid, the parent is
-    set to NaN.
-
-    Args:
-        values: Input array with shape ``(*batch, n_cells)``.
-        factor: Number of child cells per parent (``4**delta_level``).
-        min_valid_fraction: Minimum fraction of valid children.
-
-    Returns:
-        Array with shape ``(*batch, n_cells // factor)``.
-    """
-    arr = np.asarray(values, dtype=np.float64)
-    batch_shape = arr.shape[:-1]
-    n_cells = arr.shape[-1]
-    n_target = n_cells // factor
-    grouped = arr.reshape(*batch_shape, n_target, factor)
-
-    valid = np.isfinite(grouped)
-    valid_count = valid.sum(axis=-1)
-
-    # For each child position, count how many of the other children
-    # share the same value.  This vectorises the mode calculation
-    # without any Python-level loops over cells.
-    counts = np.zeros_like(grouped)
-    for i in range(factor):
-        for j in range(factor):
-            counts[..., i] += (grouped[..., i] == grouped[..., j]) & valid[..., j]
-    counts[~valid] = -1  # invalid positions cannot win
-
-    best = np.argmax(counts, axis=-1)
-    result = np.take_along_axis(
-        grouped,
-        best[..., np.newaxis],
-        axis=-1,
-    ).squeeze(-1)
-
-    min_count = max(1, int(np.ceil(min_valid_fraction * factor)))
-    result[valid_count < min_count] = np.nan
-    return result
-
-
-def coarsen_healpix(
-    ds: xr.Dataset,
-    target_level: int,
-    coarsen_mode: CoarsenMode = "auto",
-    min_valid_fraction: float = 0.5,
-    valid_fraction: ValidFraction = False,
-) -> xr.Dataset:
-    """Coarsen a HEALPix dataset to a lower-resolution level.
-
-    The coarsening is performed as a single reshape + reduction over
-    all batch dimensions simultaneously — no per-slice Python loops.
-
-    Parameters
-    ----------
-    ds:
-        HEALPix dataset with a ``cell`` dimension and grid-doctor
-        metadata (see [`grid_doctor.metadata`][grid_doctor.metadata]).
-    target_level:
-        Target HEALPix level (must be lower than the current level).
-    coarsen_mode:
-        ``"mean"`` — NaN-aware averaging for continuous fields.
-        ``"mode"`` — most-frequent-value for categorical fields.
-        ``"auto"`` — infer from the recorded production method:
-        ``"nearest"`` → mode, everything else → mean.
-    min_valid_fraction:
-        Minimum fraction of valid (non-NaN) children required to
-        produce a valid parent cell.  Parents with fewer valid
-        children are set to NaN.  Default ``0.5`` (at least half
-        of the children must be valid).
-    valid_fraction:
-        Add ``<name>_valid_fraction`` variables: the fraction of valid
-        cells of *ds* under each coarse cell (see
-        [`create_healpix_pyramid`][grid_doctor.helpers.create_healpix_pyramid]).
-        Fractions are relative to the level of *ds*, so coarsen from the
-        finest level to get weights for exact global means.
-
-    Returns
-    -------
-    xarray.Dataset
-        Coarsened dataset.
-
-    Notes
-    -----
-    Nested HEALPix indices have a direct parent-child relationship:
-    pixel *i* at level *L* contains children ``4*i`` to ``4*i+3`` at
-    level *L+1*.  Coarsening therefore reduces to grouping contiguous
-    blocks of ``4**delta_level`` child cells and averaging (or taking
-    the mode for categorical data).
-
-    Ring-ordered datasets do not have contiguous parent-child layout
-    and must be remapped directly at each target level.
-
-    With ``coarsen_mode="mean"``, always coarsen from the finest level
-    rather than chaining level by level.  A chained mean weights every
-    valid parent equally, regardless of how many valid finest-level
-    cells it was built from, so data with NaNs (land, sea ice,
-    observation gaps) drifts between levels.
-
-    Raises
-    ------
-    ValueError
-        When the ordering is not nested, or *target_level* is not
-        lower than the current level.
-    """
-    grid = HealpixMetadata.from_dataset(ds).grid
-    if not grid.nest:
-        raise ValueError(
-            "coarsen_healpix only supports nested HEALPix ordering. "
-            "Use create_healpix_pyramid(..., nest=False) to "
-            "regenerate ring levels directly."
-        )
-    current_level = grid.level
-    if target_level >= current_level:
-        raise ValueError("target_level must be lower than the current HEALPix level.")
-
-    return coarsen_dataset(
-        ds,
-        source_level=current_level,
-        target_level=target_level,
-        coarsen_mode=resolve_coarsen_mode(ds, coarsen_mode),
-        min_valid_fraction=min_valid_fraction,
-        mode_kernel=_coarsen_array_mode,
-        valid_fraction=valid_fraction,
-    )
-
-
-# ===================================================================
-# Pyramid construction
-# ===================================================================
-
-
-def create_healpix_pyramid(
-    ds: xr.Dataset,
-    max_level: int | None = None,
-    min_level: int = 0,
-    *,
-    coarsen_mode: CoarsenMode = "auto",
-    min_valid_fraction: float = 0.5,
-    valid_fraction: ValidFraction = False,
-    **kwargs: Unpack[RegridOptions],
-) -> dict[int, xr.Dataset]:
-    """Create a multi-resolution HEALPix pyramid.
-
-    The input dataset is first remapped to *max_level* with
-    [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix].
-    For nested output ordering, lower levels are derived efficiently
-    with
-    [`coarsen_healpix`][grid_doctor.helpers.coarsen_healpix].
-    For ring ordering, each lower level is regenerated directly from
-    the source dataset.
-
-    For dask-backed input the result is lazy and chunked along ``cell``
-    (``cell_chunks``, forwarded to
-    [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix]); coarser
-    levels keep that chunk size.  Every level builds on the finest one,
-    so write the pyramid with
-    [`save_pyramid`][grid_doctor.helpers.save_pyramid], which computes
-    all levels in one pass.  Calling ``.compute()`` per level instead
-    regrids the source once per level.
-
-    Parameters
-    ----------
-    ds:
-        Source dataset.
-    max_level:
-        Finest HEALPix level.
-    min_level:
-        Coarsest HEALPix level to keep.
-    coarsen_mode:
-        Coarsening strategy for building lower pyramid levels.
-        ``"mean"`` for continuous data, ``"mode"`` for categorical,
-        ``"auto"`` to infer from the remapping method.
-    min_valid_fraction:
-        Minimum fraction of valid children for a parent cell to be
-        valid.  Default ``0.5``.
-    valid_fraction:
-        Store ``<name>_valid_fraction`` next to the selected variables on
-        every level: the fraction of valid finest-level cells under each
-        cell, as float32, linked via the CF ``ancillary_variables``
-        attribute.  Cell values are means over their valid area, so
-        global or regional means over a coarse level need these weights,
-        e.g. ``ds.sst.weighted(ds.sst_valid_fraction.fillna(0)).mean("cell")``.
-
-        ``False`` (default) stores nothing.  ``True`` gives every cell
-        variable a fraction of its full shape (correct for masks that
-        change over time or height).  ``"static"`` stores one ``cell``-only
-        fraction from the first slice along all other dimensions -- small,
-        but only correct when the mask never changes (e.g. land/sea).
-        A list of names selects variables (full shape); a mapping such as
-        ``{"sst": "static", "ice": True}`` sets the shape per variable.
-        Requires nested ordering.
-    **kwargs:
-        Forwarded to
-        [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix].
-
-    Returns
-    -------
-    dict[int, xarray.Dataset]
-        Pyramid keyed by level.
-    """
-    if max_level is None:
-        max_level = resolution_to_healpix_level(get_latlon_resolution(ds))
-
-    is_nested = bool(kwargs.get("nest", True))
-    if not is_nested and valid_fraction is not False:
-        raise ValueError("valid_fraction requires nested ordering (nest=True).")
-
-    pyramid: dict[int, xr.Dataset] = {}
-    finest = regrid_to_healpix(ds, max_level, **kwargs)
-    pyramid[max_level] = finest
-
-    if is_nested:
-        fractions = resolve_valid_fraction(valid_fraction, finest)
-        pyramid[max_level] = with_finest_fractions(finest, fractions, max_level)
-        pyramid.update(
-            coarse_levels(
-                finest,
-                max_level=max_level,
-                min_level=min_level,
-                coarsen_mode=resolve_coarsen_mode(finest, coarsen_mode),
-                min_valid_fraction=min_valid_fraction,
-                mode_kernel=_coarsen_array_mode,
-                valid_fraction=fractions,
-            )
-        )
-        return pyramid
-
-    for level in range(max_level - 1, min_level - 1, -1):
-        pyramid[level] = regrid_to_healpix(ds, level, **kwargs)
-    return pyramid
 
 
 # ===================================================================
@@ -607,13 +225,9 @@ def init_pyramid_store(
     ```
     """
     if if_exists not in ("error", "resume", "overwrite"):
-        raise ValueError(
-            f"if_exists must be 'error', 'resume' or 'overwrite', got {if_exists!r}"
-        )
+        raise ValueError(f"if_exists must be 'error', 'resume' or 'overwrite', got {if_exists!r}")
     if structure not in ("flat", "multiscales"):
-        raise ValueError(
-            f"structure must be 'flat' or 'multiscales', got {structure!r}"
-        )
+        raise ValueError(f"structure must be 'flat' or 'multiscales', got {structure!r}")
     materialise = list(materialise or [])
     if structure == "multiscales":
         unsupported = [
@@ -644,9 +258,7 @@ def init_pyramid_store(
 
     # Workers rebuild store paths from the manifest; keep them identical.
     path = path.rstrip("/")
-    existing = inspect_target(
-        path, s3_options, [f"level_{level}.zarr" for level in pyramid]
-    )
+    existing = inspect_target(path, s3_options, [f"level_{level}.zarr" for level in pyramid])
     if existing.exists and if_exists == "error":
         raise StoreExistsError(
             f"{path} already holds a pyramid ({existing.describe()}).  Pass "
@@ -660,28 +272,19 @@ def init_pyramid_store(
                 f"({existing.describe()}).  Use if_exists='overwrite'."
             )
         templates = {
-            level: maybe_drop_coordinates(
-                ds, level, write_coords, WRITE_COORDS_MAX_LEVEL
-            )
+            level: maybe_drop_coordinates(ds, level, write_coords, WRITE_COORDS_MAX_LEVEL)
             for level, ds in pyramid.items()
         }
         return resume_init(
             existing.manifest,
             path,
             templates,
-            {
-                level: [str(k) for k in ds.data_vars if str(k) not in materialise]
-                for level, ds in templates.items()
-            },
+            {level: [str(k) for k in ds.data_vars if str(k) not in materialise] for level, ds in templates.items()},
             s3_options,
             zarr_format=zarr_format,
             split=split,
             variables_per_task=variables_per_task,
-            materialised=[
-                m
-                for m in materialise
-                if m in {str(v) for ds in pyramid.values() for v in ds}
-            ],
+            materialised=[m for m in materialise if m in {str(v) for ds in pyramid.values() for v in ds}],
         )
     fs = get_filesystem(path, s3_options)
     begin_init(path, s3_options)
@@ -772,7 +375,7 @@ def save_pyramid(
     s3_options: S3Options | None = None,
     *,
     mode: Literal["a", "w", "r+"] = "a",
-    region: Literal["auto"] | dict[str, slice] = "auto",
+    region: Literal["auto"] | Region = "auto",
     zarr_format: Literal[2, 3] = 2,
     encoding: PyramidEncoding | None = None,
     write_coords: bool | Literal["auto"] = "auto",
@@ -839,9 +442,7 @@ def save_pyramid(
     deferred: list[DeferredWrite] = []
     encoding = encoding or {}
     for level, dataset in pyramid.items():
-        dataset = maybe_drop_coordinates(
-            dataset, level, write_coords, WRITE_COORDS_MAX_LEVEL
-        )
+        dataset = maybe_drop_coordinates(dataset, level, write_coords, WRITE_COORDS_MAX_LEVEL)
         store_name = f"level_{level}"
         root_path = f"{path}/{store_name}.zarr"
         store = get_store(root_path, fs)
@@ -877,7 +478,7 @@ def _save_multiscale(
     path: str,
     fs: s3fs.S3FileSystem | None,
     mode: Literal["a", "w", "r+"],
-    region: Literal["auto"] | dict[str, slice],
+    region: Literal["auto"] | Region,
     zarr_format: Literal[2, 3],
     encoding: PyramidEncoding | None,
     write_coords: bool | Literal["auto"],
@@ -886,8 +487,7 @@ def _save_multiscale(
     encoding = encoding or {}
 
     dropped_pyramid = {
-        lev: maybe_drop_coordinates(ds, lev, write_coords, WRITE_COORDS_MAX_LEVEL)
-        for lev, ds in pyramid.items()
+        lev: maybe_drop_coordinates(ds, lev, write_coords, WRITE_COORDS_MAX_LEVEL) for lev, ds in pyramid.items()
     }
     if region == "auto":
         template = pyramid_to_multiscales_tree(dropped_pyramid)
@@ -898,9 +498,7 @@ def _save_multiscale(
         for level, dataset in pyramid.items():
             templates[level] = prepare_region_dataset(dataset, region)
 
-        template = pyramid_to_multiscales_tree(
-            templates, common_coords=list(region.keys())
-        )
+        template = pyramid_to_multiscales_tree(templates, common_coords=list(region.keys()))
         write_region = region
 
     encodings = {f"/{level_group(level)}": enc for level, enc in encoding.items()}
@@ -913,62 +511,3 @@ def _save_multiscale(
         region=write_region,
         **zarr_options,
     )
-
-
-# ===================================================================
-# Convenience aliases
-# ===================================================================
-
-
-def latlon_to_healpix_pyramid(
-    ds: xr.Dataset,
-    *,
-    min_level: int = 0,
-    max_level: int | None = None,
-    **kwargs: Unpack[RegridOptions],
-) -> dict[int, xr.Dataset]:
-    """Convert a source dataset into a HEALPix pyramid.
-
-    Parameters
-    ----------
-    ds:
-        Source dataset.
-    min_level:
-        Coarsest level to keep.
-    max_level:
-        Finest level to generate.  When omitted, the level is
-        estimated from the source-grid resolution.
-    **kwargs:
-        Forwarded to
-        [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix].
-
-    Returns
-    -------
-    dict[int, xarray.Dataset]
-        HEALPix pyramid keyed by level.
-
-    Examples
-    --------
-    ```python
-    pyramid = latlon_to_healpix_pyramid(ds, method="nearest")
-    ```
-    """
-    return create_healpix_pyramid(
-        ds,
-        max_level=max_level,
-        min_level=min_level,
-        **kwargs,
-    )
-
-
-__all__ = [
-    "coarsen_healpix",
-    "create_healpix_pyramid",
-    "get_latlon_resolution",
-    "init_pyramid_store",
-    "latlon_to_healpix_pyramid",
-    "regrid_to_healpix",
-    "regrid_unstructured_to_healpix",
-    "resolution_to_healpix_level",
-    "save_pyramid",
-]

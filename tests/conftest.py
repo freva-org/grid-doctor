@@ -121,11 +121,14 @@ def _make_unstructured_dataset(ncells: int = 4, cell_size: int = 10, *, radians:
 
 @pytest.fixture(autouse=True)
 def _isolated_weights_store(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Keep the default weights store and cache out of the user's cache directory."""
+    """Keep the default weights store out of the user's cache directory.
+
+    Returns ``$XDG_CACHE_HOME/grid-doctor``; the default store is its ``weights``.
+    """
     cache = tmp_path_factory.mktemp("cache")
-    monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: cache)
-    monkeypatch.delenv("GRID_DOCTOR_WEIGHTS_STORE", raising=False)
-    return cache
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
+    monkeypatch.setattr("grid_doctor.config.weights_store", None)
+    return cache / "grid-doctor"
 
 
 @pytest.fixture
