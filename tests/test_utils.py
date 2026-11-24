@@ -339,9 +339,9 @@ class TestCachedWeights:
         self, regular_ds: xr.Dataset, tmp_path: Path, computed: list[dict[str, object]]
     ) -> None:
         explicit = cached_weights(regular_ds, 1, store=tmp_path, ellipsoid="WGS84")
-        with gd.config.healpix.set(ellipsoid="WGS84"):
+        with gd.config.set(ellipsoid="WGS84"):
             configured = cached_weights(regular_ds, 1, store=tmp_path)
-        with gd.config.healpix.set(ellipsoid="sphere"):
+        with gd.config.set(ellipsoid="sphere"):
             other = cached_weights(regular_ds, 1, store=tmp_path)
         assert configured == explicit
         assert other != explicit

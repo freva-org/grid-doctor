@@ -127,7 +127,7 @@ def _isolated_weights_store(tmp_path_factory: pytest.TempPathFactory, monkeypatc
     """
     cache = tmp_path_factory.mktemp("cache")
     monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
-    monkeypatch.delenv("GRID_DOCTOR_WEIGHTS_STORE", raising=False)
+    monkeypatch.setattr("grid_doctor.config.weights_store", None)
     return cache / "grid-doctor"
 
 

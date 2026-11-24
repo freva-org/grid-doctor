@@ -500,7 +500,7 @@ def compute_healpix_weights_backend(
         spectral_transform_command: External command used when
             ``source_kind="spectral"``.
         ellipsoid: Ellipsoid of the target geometry; ``None`` uses
-            ``grid_doctor.config.healpix.ellipsoid``.
+            ``grid_doctor.config.ellipsoid``.
         source_description: Description of *source* from
             [`describe_source`][grid_doctor.weights.describe_source];
             skips describing the source again.

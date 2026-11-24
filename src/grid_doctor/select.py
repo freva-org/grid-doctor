@@ -101,7 +101,7 @@ def _dataset_ellipsoid(ds: xr.Dataset) -> Ellipsoid:
     """Return the ellipsoid recorded in *ds*.
 
     A dataset without HEALPix metadata (selected with an explicit
-    ``level=``) records none and gets ``grid_doctor.config.healpix.ellipsoid``.
+    ``level=``) records none and gets ``grid_doctor.config.ellipsoid``.
     """
     if has_healpix_metadata(ds):
         return HealpixMetadata.from_dataset(ds).grid.ellipsoid

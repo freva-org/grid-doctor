@@ -37,10 +37,16 @@ class TestGetParser:
         with pytest.raises(SystemExit):
             parser.parse_args([])
 
+    def test_s3_endpoint_required(self) -> None:
+        parser = get_parser("test-prog")
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--s3-bucket", "my-bucket"])
+
     def test_defaults(self) -> None:
         parser = get_parser("test-prog")
-        args = parser.parse_args(["--s3-bucket", "my-bucket"])
+        args = parser.parse_args(["--s3-bucket", "my-bucket", "--s3-endpoint", "https://s3.example.org"])
         assert args.s3_bucket == "my-bucket"
+        assert args.s3_endpoint == "https://s3.example.org"
         assert args.verbose == 0
 
 

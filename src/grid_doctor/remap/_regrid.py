@@ -111,7 +111,7 @@ def compute_healpix_weights(
         External command for ``source_kind="spectral"``.
     ellipsoid:
         Ellipsoid of the HEALPix geometry, ``"sphere"`` or
-        ``"WGS84"``.  Defaults to ``grid_doctor.config.healpix.ellipsoid``.
+        ``"WGS84"``.  Defaults to ``grid_doctor.config.ellipsoid``.
     source_description:
         Description of *ds* from
         [`describe_source`][grid_doctor.weights.describe_source],
@@ -242,7 +242,7 @@ def regrid_to_healpix(
     ellipsoid:
         Ellipsoid of the HEALPix geometry, ``"sphere"`` or ``"WGS84"``.
         New weights are generated on it, by default on
-        ``grid_doctor.config.healpix.ellipsoid``.  An existing
+        ``grid_doctor.config.ellipsoid``.  An existing
         *weights_path* keeps the ellipsoid it was generated on; a
         different explicit value raises ``ValueError``.
 

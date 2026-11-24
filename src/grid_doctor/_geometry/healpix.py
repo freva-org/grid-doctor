@@ -21,8 +21,8 @@ from .normalise import _canonical_lon
 
 
 def _ellipsoid_or_config(ellipsoid: Ellipsoid | None) -> Ellipsoid:
-    """Return *ellipsoid*, or ``grid_doctor.config.healpix.ellipsoid`` if ``None``."""
-    return config.healpix.ellipsoid if ellipsoid is None else ellipsoid
+    """Return *ellipsoid*, or ``grid_doctor.config.ellipsoid`` if ``None``."""
+    return config.ellipsoid if ellipsoid is None else ellipsoid
 
 
 def _require_healpix_geo_module(

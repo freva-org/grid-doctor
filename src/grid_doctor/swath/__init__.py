@@ -184,7 +184,7 @@ def bin_to_healpix(
         coarsening or publishing.
     ellipsoid:
         Ellipsoid of the HEALPix geometry, ``"sphere"`` or
-        ``"WGS84"``.  Defaults to ``grid_doctor.config.healpix.ellipsoid``.
+        ``"WGS84"``.  Defaults to ``grid_doctor.config.ellipsoid``.
 
     Returns
     -------

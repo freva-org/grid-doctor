@@ -254,7 +254,7 @@ class TestWeightGeneration:
             mesh_module, "_require_healpix_geo_module", lambda grid: (_FakeHealpixModule(), {})
         )
         path = tmp_path / "weights.nc"
-        with config.healpix.set(ellipsoid="WGS84"):
+        with config.set(ellipsoid="WGS84"):
             compute_healpix_weights(regular_ds, 1, method="nearest", weights_path=path, ellipsoid=argument)
         with xr.open_dataset(path) as ds:
             assert ds.attrs[ELLIPSOID_ATTR] == expected

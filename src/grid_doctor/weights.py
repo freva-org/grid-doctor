@@ -33,6 +33,7 @@ import numpy as np
 import numpy.typing as npt
 import xarray as xr
 
+from . import config
 from ._geometry.coords import (
     _get_latlon_names,
     _get_vertex_names,
@@ -402,9 +403,6 @@ class WeightsRef:
             raise ValueError(f"Not a weight reference: {path!r} ({exc})") from None
 
 
-WEIGHTS_STORE_ENV: Final = "GRID_DOCTOR_WEIGHTS_STORE"
-"""Environment variable naming the default [`WeightsStore`][grid_doctor.weights.WeightsStore] location."""
-
 _LOCAL_PROTOCOLS: Final = frozenset({"file", "local"})
 _SUPPORTED_PROTOCOLS: Final = _LOCAL_PROTOCOLS | {"memory"}
 
@@ -432,8 +430,9 @@ class WeightsStore:
 
     Args:
         location: Root of the store: a local path, a ``file://`` or
-            ``memory://`` URL, or an fsspec mapper of either. Defaults to the
-            ``GRID_DOCTOR_WEIGHTS_STORE`` environment variable, else
+            ``memory://`` URL, or an fsspec mapper of either. Defaults to
+            [`grid_doctor.config.weights_store`][grid_doctor.config.weights_store]
+            (environment variable ``GRID_DOCTOR_WEIGHTS_STORE``), else
             ``$XDG_CACHE_HOME/grid-doctor/weights``.
         cache_dir: Local directory for copies of in-memory weights and for
             weights computed while the store is read-only. Defaults to
@@ -464,7 +463,7 @@ class WeightsStore:
         from fsspec.mapping import FSMap
 
         if location is None:
-            location = os.environ.get(WEIGHTS_STORE_ENV) or local_weights_dir()
+            location = config.weights_store or local_weights_dir()
         fs: AbstractFileSystem
         if isinstance(location, FSMap):
             fs, root = location.fs, location.root
@@ -711,12 +710,12 @@ def cached_weights(
         Unit convention of the source coordinates.
     store:
         Weights store, or its location (see
-        [`WeightsStore`][grid_doctor.weights.WeightsStore]). Defaults to the
-        ``GRID_DOCTOR_WEIGHTS_STORE`` environment variable, else the local
-        weights directory.
+        [`WeightsStore`][grid_doctor.weights.WeightsStore]). Defaults to
+        [`grid_doctor.config.weights_store`][grid_doctor.config.weights_store],
+        else the local weights directory.
     ellipsoid:
         Ellipsoid of the HEALPix target, ``"sphere"`` or ``"WGS84"``.
-        Defaults to ``grid_doctor.config.healpix.ellipsoid``.  Part of
+        Defaults to ``grid_doctor.config.ellipsoid``.  Part of
         the weights' identity, so weights are never reused across ellipsoids.
     **kwargs:
         Any additional keyword arguments for
@@ -766,7 +765,6 @@ def cached_weights(
 
 
 __all__ = [
-    "WEIGHTS_STORE_ENV",
     "WEIGHTS_VERSION",
     "SourceDescription",
     "WeightsDescription",

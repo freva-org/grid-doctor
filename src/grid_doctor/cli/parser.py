@@ -40,11 +40,7 @@ def get_parser(name: str, description: str | None = None) -> argparse.ArgumentPa
         formatter_class=ArgFormatter,
     )
     parser.add_argument("--s3-bucket", help="S3 target bucket.", required=True)
-    parser.add_argument(
-        "--s3-endpoint",
-        default="https://s3.eu-dkrz-3.dkrz.cloud",
-        help="S3 endpoint URL.",
-    )
+    parser.add_argument("--s3-endpoint", help="S3 endpoint URL.", required=True)
     parser.add_argument(
         "--s3-credentials-file",
         default=Path.home() / ".s3-credentials.json",

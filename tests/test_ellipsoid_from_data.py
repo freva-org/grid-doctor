@@ -80,7 +80,7 @@ class TestRecordedEllipsoid:
     def ellipsoid(self, request: pytest.FixtureRequest) -> Iterator[Ellipsoid]:
         """The ellipsoid the data is built on; the config is set to the other one."""
         ellipsoid: Ellipsoid = request.param
-        with gd.config.healpix.set(ellipsoid="WGS84" if ellipsoid == "sphere" else "sphere"):
+        with gd.config.set(ellipsoid="WGS84" if ellipsoid == "sphere" else "sphere"):
             yield ellipsoid
 
     def test_apply_weight_file_uses_the_weight_file(
@@ -167,7 +167,7 @@ class TestUnrecordedEllipsoid:
 
     def test_weight_file_without_ellipsoid_is_a_sphere(self, tmp_path: Path, regular_ds: xr.Dataset) -> None:
         weights = _weight_file(tmp_path / "weights.nc", regular_ds, None)
-        with gd.config.healpix.set(ellipsoid="WGS84"):
+        with gd.config.set(ellipsoid="WGS84"):
             result = gd.apply_weight_file(regular_ds, weights)
         assert _recorded(result) == "sphere"
         np.testing.assert_array_equal(result["latitude"].values, _latitudes("sphere"))
@@ -205,7 +205,7 @@ class TestUnrecordedEllipsoid:
     def test_dataset_without_metadata_uses_the_config(self, configured: Ellipsoid) -> None:
         ds = xr.Dataset({"t": ("cell", np.zeros(2))})
         cells = np.array([3, 4], dtype=np.int64)
-        with gd.config.healpix.set(ellipsoid=configured):
+        with gd.config.set(ellipsoid=configured):
             result = gd.attach_cell_coords(ds, cells, level=LEVEL)
         assert _recorded(result) == configured
         np.testing.assert_array_equal(result["latitude"].values, _latitudes(configured)[cells])
