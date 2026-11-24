@@ -129,9 +129,7 @@ def _read_weight_file(weights_path: str | Path, nest: bool | None = None) -> _We
         )
         method_raw = wds.attrs.get(keys.METHOD_ATTR)
         method = str(method_raw) if method_raw is not None else None
-        stored_source_dims = _parse_source_dims_attr(
-            wds.attrs.get(keys.SOURCE_DIMS_ATTR)
-        )
+        stored_source_dims = _parse_source_dims_attr(wds.attrs.get(keys.SOURCE_DIMS_ATTR))
         ellipsoid = wds.attrs.get(ELLIPSOID_ATTR)
     return _WeightFile(
         matrix,
@@ -176,9 +174,7 @@ def _flattened_size(
     """Return the product of ``source_dims`` sizes in *ds*."""
     missing = [d for d in source_dims if d not in ds.dims]
     if missing:
-        raise ValueError(
-            f"source_dims {source_dims!r} not in dataset. Missing: {missing!r}."
-        )
+        raise ValueError(f"source_dims {source_dims!r} not in dataset. Missing: {missing!r}.")
     size = 1
     for d in source_dims:
         size *= int(ds.sizes[d])
@@ -248,9 +244,7 @@ def _resolve_source_dims_for_weight_application(
     if grid is not None:
         grid_lat, _, grid_dims = _source_centre_arrays(grid, source_units=source_units)
         if grid_lat.size != n_source:
-            raise ValueError(
-                f"Grid mismatch: expected {n_source}, got {grid_lat.size}."
-            )
+            raise ValueError(f"Grid mismatch: expected {n_source}, got {grid_lat.size}.")
         flat = _flattened_size(ds, grid_dims)
         if flat != n_source:
             raise ValueError(f"Grid dims mismatch: expected {n_source}, got {flat}.")
@@ -262,9 +256,7 @@ def _resolve_source_dims_for_weight_application(
         guessed = _guess_source_dims_from_size(ds, n_source)
         if guessed is not None:
             return guessed
-        raise ValueError(
-            "Could not infer source geometry. Pass source_dims= or grid=."
-        ) from None
+        raise ValueError("Could not infer source geometry. Pass source_dims= or grid=.") from None
 
     if src_lat.size == n_source:
         return inferred
@@ -274,8 +266,7 @@ def _resolve_source_dims_for_weight_application(
         return guessed
 
     raise ValueError(
-        f"Weight file expects {n_source} source cells, dataset has "
-        f"{src_lat.size}. Pass source_dims= or grid=."
+        f"Weight file expects {n_source} source cells, dataset has {src_lat.size}. Pass source_dims= or grid=."
     )
 
 
@@ -292,9 +283,7 @@ count is also the parallelism of a single time step (12 tasks at
 level 10)."""
 
 
-def _resolve_cell_chunk(
-    cell_chunks: int | Literal["auto"] | None, n_target: int
-) -> int | None:
+def _resolve_cell_chunk(cell_chunks: int | Literal["auto"] | None, n_target: int) -> int | None:
     """Validate the cell chunk size; ``None`` when no chunking is needed."""
     if cell_chunks is None:
         return None
@@ -322,7 +311,7 @@ def _row_blocks(matrix: csr_array, size: int) -> list[csr_matrix]:
         block = csr_matrix((stop - start, matrix.shape[1]), dtype=matrix.dtype)
         block.data = matrix.data[lo:hi]
         block.indices = matrix.indices[lo:hi]
-        block.indptr = matrix.indptr[start:stop + 1] - lo
+        block.indptr = matrix.indptr[start : stop + 1] - lo
         blocks.append(block)
     return blocks
 
@@ -369,15 +358,12 @@ def _apply_weights_rowblocked(
             chunks=(*flat.chunks[:-1], (block.shape[0],)),
             dtype=np.float64,
             meta=np.empty((0,) * flat.ndim, dtype=np.float64),
-            name="regrid-"
-            + tokenize(flat.name, matrix_id, index, sorted(kwargs.items())),
+            name="regrid-" + tokenize(flat.name, matrix_id, index, sorted(kwargs.items())),
             **kwargs,
         )
         for index, block in enumerate(row_blocks)
     ]
-    coords = {
-        str(k): v for k, v in ordered.coords.items() if set(v.dims) <= set(batch_dims)
-    }
+    coords = {str(k): v for k, v in ordered.coords.items() if set(v.dims) <= set(batch_dims)}
     return xr.DataArray(
         da.concatenate(parts, axis=-1),
         dims=(*batch_dims, "cell"),
@@ -481,8 +467,8 @@ def apply_weight_file(
     if missing_policy not in {"renormalize", "propagate"}:
         raise ValueError("missing_policy must be 'renormalize' or 'propagate'.")
 
-    matrix, n_target, n_source, level, order, method, stored_sd, stored_ellipsoid = (
-        _read_weight_file(weights_path, nest=nest)
+    matrix, n_target, n_source, level, order, method, stored_sd, stored_ellipsoid = _read_weight_file(
+        weights_path, nest=nest
     )
     # Checked before regridding, so a mismatch fails fast.
     ellipsoid = _weights_ellipsoid(ellipsoid, stored_ellipsoid, weights_path)

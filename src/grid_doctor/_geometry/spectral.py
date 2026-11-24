@@ -72,8 +72,7 @@ def _materialise_spectral_source(
     """
     if transform_command is None:
         raise ValueError(
-            "source_kind='spectral' requires an external transform "
-            "command, for example a CDO sp2gp invocation."
+            "source_kind='spectral' requires an external transform command, for example a CDO sp2gp invocation."
         )
 
     if isinstance(source, xr.Dataset):
@@ -83,10 +82,7 @@ def _materialise_spectral_source(
         spectral_in = Path(source)
 
     spectral_out = workdir / "spectral_gridpoint.nc"
-    cmd = [
-        arg.format(input=str(spectral_in), output=str(spectral_out))
-        for arg in transform_command
-    ]
+    cmd = [arg.format(input=str(spectral_in), output=str(spectral_out)) for arg in transform_command]
     try:
         _run_subprocess(cmd)
     except RuntimeError as exc:  # pragma: no cover

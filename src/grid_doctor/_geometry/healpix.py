@@ -54,9 +54,7 @@ def _require_healpix_geo_module(
         else:
             from healpix_geo import ring as module
     except ImportError as exc:  # pragma: no cover
-        raise ImportError(
-            "healpix-geo is required to construct HEALPix polygons."
-        ) from exc
+        raise ImportError("healpix-geo is required to construct HEALPix polygons.") from exc
     return module, {"ellipsoid": grid.ellipsoid}
 
 

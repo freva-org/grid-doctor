@@ -78,9 +78,7 @@ EncodingDict: TypeAlias = dict[str, dict[str, object]]
 # JSON
 # ---------------------------------------------------------------------
 
-JSONValue: TypeAlias = (
-    "None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]"
-)
+JSONValue: TypeAlias = "None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]"
 """Any value ``json.loads`` can return."""
 
 RemapMethod = Literal["nearest", "conservative"]
@@ -98,9 +96,7 @@ Ellipsoid = Literal["sphere", "WGS84"]
 CoarsenMode = Literal["mean", "mode", "auto"]
 """Coarsening strategy for HEALPix pyramid construction."""
 
-ValidFraction = (
-    bool | Literal["static"] | Collection[str] | Mapping[str, bool | Literal["static"]]
-)
+ValidFraction = bool | Literal["static"] | Collection[str] | Mapping[str, bool | Literal["static"]]
 """Which variables get a ``<name>_valid_fraction`` companion, and its shape.
 
 ``True``/``"static"`` apply to every variable with a ``cell`` dimension;

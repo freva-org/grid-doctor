@@ -151,10 +151,7 @@ def _get_latlon_names(ds: xr.Dataset) -> tuple[str, str]:
 
     if lat_name is None or lon_name is None:
         available = sorted({*map(str, ds.coords), *map(str, ds.data_vars)})
-        raise ValueError(
-            "Could not locate latitude/longitude coordinates. "
-            f"Available names are: {available}."
-        )
+        raise ValueError(f"Could not locate latitude/longitude coordinates. Available names are: {available}.")
 
     return lat_name, lon_name
 
@@ -196,10 +193,7 @@ def _is_unstructured(ds: xr.Dataset) -> bool:
     """
     if _UNSTRUCTURED_DIMS & {str(dim) for dim in ds.dims}:
         return True
-    return any(
-        var.attrs.get("CDI_grid_type") == "unstructured"
-        for var in ds.data_vars.values()
-    )
+    return any(var.attrs.get("CDI_grid_type") == "unstructured" for var in ds.data_vars.values())
 
 
 def _get_unstructured_vertices(ds: xr.Dataset) -> tuple[str | None, str | None]:
@@ -222,12 +216,7 @@ def _get_unstructured_vertices(ds: xr.Dataset) -> tuple[str | None, str | None]:
             continue
         lon_bounds = ds[lon_center].attrs.get("bounds")
         lat_bounds = ds[lat_center].attrs.get("bounds")
-        if (
-            isinstance(lon_bounds, str)
-            and isinstance(lat_bounds, str)
-            and lon_bounds in ds
-            and lat_bounds in ds
-        ):
+        if isinstance(lon_bounds, str) and isinstance(lat_bounds, str) and lon_bounds in ds and lat_bounds in ds:
             return lon_bounds, lat_bounds
 
     return None, None
@@ -253,9 +242,7 @@ def _get_unstructured_dim(ds: xr.Dataset) -> str:
         for name in _LAT_NAMES:
             if name in ds and ds[name].ndim == 1:
                 return str(ds[name].dims[0])
-    raise ValueError(
-        "Could not determine the source cell dimension for the unstructured grid."
-    )
+    raise ValueError("Could not determine the source cell dimension for the unstructured grid.")
 
 
 def _get_spatial_dims(ds: xr.Dataset) -> tuple[str, str]:
@@ -294,9 +281,7 @@ def _get_spatial_dims(ds: xr.Dataset) -> tuple[str, str]:
                         return dims[0], dims[1]
 
     if y_dim is None or x_dim is None:
-        raise ValueError(
-            f"Could not determine spatial dimensions from {list(ds.dims)}."
-        )
+        raise ValueError(f"Could not determine spatial dimensions from {list(ds.dims)}.")
     return y_dim, x_dim
 
 
@@ -327,8 +312,7 @@ def _get_vertex_names(ds: xr.Dataset) -> tuple[str, str]:
             return lat_b, lon_b
 
     raise ValueError(
-        "Could not find per-cell vertex coordinates "
-        "(e.g. 'clat_vertices'/'clon_vertices' or CF 'bounds')."
+        "Could not find per-cell vertex coordinates (e.g. 'clat_vertices'/'clon_vertices' or CF 'bounds')."
     )
 
 

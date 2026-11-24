@@ -78,7 +78,7 @@ class HealpixMetadata:
     def __post_init__(self) -> None:
         """Reject contradictory layouts."""
         if self.sparse and self.implicit_coords:
-            raise ValueError("A sparse dataset needs its `cell` coordinate; " "it cannot have implicit coordinates.")
+            raise ValueError("A sparse dataset needs its `cell` coordinate; it cannot have implicit coordinates.")
 
     def replace(self, **changes: object) -> HealpixMetadata:
         """Return a copy with *changes* applied (see ``dataclasses.replace``)."""
@@ -148,8 +148,7 @@ class HealpixMetadata:
                 raise ValueError(f"implicit_coords=True but the dataset has a `{CELL_DIM}` coordinate.")
             if not np.issubdtype(ds[CELL_DIM].dtype, np.integer):
                 raise ValueError(
-                    f"The `{CELL_DIM}` coordinate must hold integer HEALPix indices, "
-                    f"got dtype {ds[CELL_DIM].dtype}."
+                    f"The `{CELL_DIM}` coordinate must hold integer HEALPix indices, got dtype {ds[CELL_DIM].dtype}."
                 )
         elif self.sparse:
             raise ValueError(f"A sparse dataset needs a `{CELL_DIM}` coordinate.")
@@ -206,7 +205,7 @@ def _grid_mapping_attrs(ds: xr.Dataset) -> Mapping[Hashable, object]:
         return candidates[0]
     if not candidates:
         raise ValueError(
-            "Dataset has no HEALPix grid mapping variable " "(a variable with grid_mapping_name = 'healpix')."
+            "Dataset has no HEALPix grid mapping variable (a variable with grid_mapping_name = 'healpix')."
         )
     raise ValueError(f"Dataset has {len(candidates)} HEALPix grid mapping variables; expected one.")
 

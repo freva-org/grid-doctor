@@ -76,9 +76,7 @@ def finalize_mean(
     s = np.asarray(sums, dtype=np.float64)
     c = np.asarray(counts)
     with np.errstate(invalid="ignore", divide="ignore"):
-        result = np.where(
-            c >= min_valid_count(min_valid_fraction, n_fine), s / c, np.nan
-        )
+        result = np.where(c >= min_valid_count(min_valid_fraction, n_fine), s / c, np.nan)
     return cast(FloatArray, result)
 
 

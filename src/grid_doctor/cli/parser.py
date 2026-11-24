@@ -6,10 +6,13 @@ import argparse
 from pathlib import Path
 from typing import TypedDict, Unpack
 
+ArgFormatter: type[argparse.HelpFormatter]
 try:
-    from rich_argparse import ArgumentDefaultsRichHelpFormatter as ArgFormatter
+    from rich_argparse import ArgumentDefaultsRichHelpFormatter
 except ImportError:  # pragma: no cover - optional dependency
     ArgFormatter = argparse.ArgumentDefaultsHelpFormatter
+else:
+    ArgFormatter = ArgumentDefaultsRichHelpFormatter
 
 
 def get_parser(name: str, description: str | None = None) -> argparse.ArgumentParser:
@@ -65,9 +68,7 @@ class LoggingOptions(TypedDict, total=False):
     datefmt: str
 
 
-def setup_logging_from_args(
-    args: argparse.Namespace, **kwargs: Unpack[LoggingOptions]
-) -> None:
+def setup_logging_from_args(args: argparse.Namespace, **kwargs: Unpack[LoggingOptions]) -> None:
     """Initialise logging from parsed CLI arguments.
 
     Parameters

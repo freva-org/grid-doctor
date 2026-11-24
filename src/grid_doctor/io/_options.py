@@ -74,9 +74,7 @@ def chunk_for_target_store_size(
         elif ntime is not None:
             time_chunk = ntime
         else:
-            raise ValueError(
-                "For access='time_series', provide either ntime or max_time_chunk."
-            )
+            raise ValueError("For access='time_series', provide either ntime or max_time_chunk.")
 
         if ntime is not None:
             time_chunk = min(time_chunk, ntime)

@@ -33,14 +33,10 @@ from grid_doctor.types import (
 )
 
 # ``encode_zarr_variable`` gained ``zarr_format`` in recent xarray releases.
-_ENCODE_TAKES_FORMAT = (
-    "zarr_format" in inspect.signature(_xr_encode_zarr_variable).parameters
-)
+_ENCODE_TAKES_FORMAT = "zarr_format" in inspect.signature(_xr_encode_zarr_variable).parameters
 
 
-def encode_zarr_variable(
-    var: xr.Variable, *, name: str, zarr_format: Literal[2, 3]
-) -> xr.Variable:
+def encode_zarr_variable(var: xr.Variable, *, name: str, zarr_format: Literal[2, 3]) -> xr.Variable:
     """Encode *var* exactly as ``to_zarr`` would, across xarray versions."""
     kwargs: dict[str, str | Literal[2, 3]] = {"name": name}
     if _ENCODE_TAKES_FORMAT:
@@ -75,9 +71,7 @@ def stored_encodings(store: ZarrStore, *, zarr_format: Literal[2, 3]) -> Encodin
     """
     existing = xr.open_zarr(store, zarr_format=zarr_format, chunks=None)
     try:
-        return {
-            str(name): dict(var.encoding) for name, var in existing.variables.items()
-        }
+        return {str(name): dict(var.encoding) for name, var in existing.variables.items()}
     finally:
         existing.close()
 
@@ -92,11 +86,7 @@ def deferred_writes(
 ) -> list[DeferredWrite]:
     """Collect encoded dask sources and zarr targets of an initialised store."""
     # NumPy-backed variables were already written by ``to_zarr(compute=False)``.
-    lazy = {
-        str(name): var
-        for name, var in dataset.variables.items()
-        if var.chunks is not None
-    }
+    lazy = {str(name): var for name, var in dataset.variables.items() if var.chunks is not None}
     if not lazy:
         return []
     group = zarr.open_group(store, mode="r+", zarr_format=zarr_format)
@@ -112,12 +102,8 @@ def deferred_writes(
         else:
             var.encoding = {**var.encoding, **(encoding or {}).get(name, {})}
         encoded = encode_zarr_variable(var, name=name, zarr_format=zarr_format)
-        target_region = tuple(
-            (region or {}).get(str(dim), slice(None)) for dim in var.dims
-        )
-        writes.append(
-            DeferredWrite(encoded.data, get_array(group, name), target_region)
-        )
+        target_region = tuple((region or {}).get(str(dim), slice(None)) for dim in var.dims)
+        writes.append(DeferredWrite(encoded.data, get_array(group, name), target_region))
     return writes
 
 

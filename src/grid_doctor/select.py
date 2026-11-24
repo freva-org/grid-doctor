@@ -81,9 +81,7 @@ def _contiguous_runs(ids: Int64Array) -> list[tuple[int, int]]:
 def _parents_to_ranges(parents: Int64Array, delta: int) -> list[tuple[int, int]]:
     """Convert coarse parent IDs into fine-level ``[start, stop)`` ranges."""
     factor = 4**delta
-    return [
-        (start * factor, stop * factor) for start, stop in _contiguous_runs(parents)
-    ]
+    return [(start * factor, stop * factor) for start, stop in _contiguous_runs(parents)]
 
 
 def _dataset_level(ds: xr.Dataset, level: int | None) -> int:
@@ -91,9 +89,7 @@ def _dataset_level(ds: xr.Dataset, level: int | None) -> int:
     if level is not None:
         return level
     if not has_healpix_metadata(ds):
-        raise ValueError(
-            "Dataset has no HEALPix grid mapping (`crs`); pass `level=` explicitly."
-        )
+        raise ValueError("Dataset has no HEALPix grid mapping (`crs`); pass `level=` explicitly.")
     return HealpixMetadata.from_dataset(ds).grid.level
 
 
@@ -114,9 +110,7 @@ def _require_nested(ds: xr.Dataset) -> None:
         return
     grid = HealpixMetadata.from_dataset(ds).grid
     if not grid.nest:
-        raise ValueError(
-            f"Region selection requires nested ordering, got {grid.indexing_scheme!r}."
-        )
+        raise ValueError(f"Region selection requires nested ordering, got {grid.indexing_scheme!r}.")
 
 
 # ===================================================================
@@ -168,9 +162,7 @@ def select_cells(
         raise ValueError("No cells requested.")
     npix = 12 * 4**resolved_level
     if int(wanted[0]) < 0 or int(wanted[-1]) >= npix:
-        raise ValueError(
-            f"Cell IDs must be within [0, {npix}) for level {resolved_level}."
-        )
+        raise ValueError(f"Cell IDs must be within [0, {npix}) for level {resolved_level}.")
 
     if "cell" in ds.coords:
         # Compact dataset (or legacy dense store with coordinates):
@@ -182,8 +174,7 @@ def select_cells(
         if not present.all():
             missing = wanted[~present]
             raise KeyError(
-                f"{missing.size} requested cells are not present in the "
-                f"dataset (first missing: {int(missing[0])})."
+                f"{missing.size} requested cells are not present in the dataset (first missing: {int(missing[0])})."
             )
         pieces = [ds.isel(cell=slice(a, b)) for a, b in _contiguous_runs(pos)]
     else:
@@ -191,11 +182,7 @@ def select_cells(
         # index *is* the cell ID.
         pieces = [ds.isel(cell=slice(a, b)) for a, b in _contiguous_runs(wanted)]
 
-    subset = (
-        pieces[0]
-        if len(pieces) == 1
-        else xr.concat(pieces, dim="cell", data_vars="minimal", coords="minimal")
-    )
+    subset = pieces[0] if len(pieces) == 1 else xr.concat(pieces, dim="cell", data_vars="minimal", coords="minimal")
     if load:
         subset = subset.load()
     return attach_cell_coords(subset, wanted, level=resolved_level, attrs=ds.attrs)
@@ -256,8 +243,7 @@ def select_bbox(
     parents = coverage[0].astype(np.int64)
     ranges = _parents_to_ranges(parents, resolved_level - query_level)
     logger.info(
-        "Bounding box resolves to %d parent cells at level %d "
-        "(%d contiguous ranges at level %d).",
+        "Bounding box resolves to %d parent cells at level %d (%d contiguous ranges at level %d).",
         parents.size,
         query_level,
         len(ranges),
@@ -303,9 +289,7 @@ def select_cone(
     query_level = max(0, resolved_level - query_delta)
     query_grid = HealpixGrid(level=query_level, ellipsoid=_dataset_ellipsoid(ds))
     module, kwargs = _require_healpix_geo_module(query_grid)
-    coverage = np.asarray(
-        module.cone_coverage((lon, lat), radius, query_level, flat=True, **kwargs)
-    )
+    coverage = np.asarray(module.cone_coverage((lon, lat), radius, query_level, flat=True, **kwargs))
     parents = coverage[0].astype(np.int64)
     ranges = _parents_to_ranges(parents, resolved_level - query_level)
     cells = np.concatenate([np.arange(a, b, dtype=np.int64) for a, b in ranges])
@@ -351,10 +335,7 @@ def attach_cell_coords(
     """
     cells = np.asarray(cells, dtype=np.int64)
     if ds.sizes.get("cell") != cells.size:
-        raise ValueError(
-            f"Dataset has {ds.sizes.get('cell')} cells but {cells.size} "
-            "IDs were provided."
-        )
+        raise ValueError(f"Dataset has {ds.sizes.get('cell')} cells but {cells.size} IDs were provided.")
     grid = HealpixGrid(level=level, ellipsoid=_dataset_ellipsoid(ds))
     module, kwargs = _require_healpix_geo_module(grid)
     lon_deg, lat_deg = module.healpix_to_lonlat(cells, level, **kwargs)

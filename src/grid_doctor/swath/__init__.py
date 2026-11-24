@@ -217,9 +217,7 @@ def bin_to_healpix(
     if min_count < 1:
         raise ValueError("min_count must be at least 1.")
 
-    lat, lon, sample_dims = resolve_point_coords(
-        ds, lat_name=lat_name, lon_name=lon_name, source_units=source_units
-    )
+    lat, lon, sample_dims = resolve_point_coords(ds, lat_name=lat_name, lon_name=lon_name, source_units=source_units)
     # Fail-fast: validate every aggregation before any data is loaded.
     methods = resolve_methods(ds, sample_dims, agg)
 
@@ -227,14 +225,10 @@ def bin_to_healpix(
     if not valid_coords.any():
         raise ValueError("No samples with valid (finite) coordinates found.")
 
-    grid = HealpixGrid.from_nest(
-        level, nest=nest, ellipsoid=_ellipsoid_or_config(ellipsoid)
-    )
+    grid = HealpixGrid.from_nest(level, nest=nest, ellipsoid=_ellipsoid_or_config(ellipsoid))
     module, kwargs = _require_healpix_geo_module(grid)
     cell_ids = np.asarray(
-        module.lonlat_to_healpix(
-            lon[valid_coords], lat[valid_coords], depth=level, **kwargs
-        ),
+        module.lonlat_to_healpix(lon[valid_coords], lat[valid_coords], depth=level, **kwargs),
         dtype=np.int64,
     )
 
@@ -276,14 +270,10 @@ def bin_to_healpix(
             result = bin_mode(group_idx, values, n_cells=n_cells)
             result[valid_count < min_count] = np.nan
         else:
-            result = bin_simple(
-                group_idx, values, n_cells=n_cells, func=NPG_FUNC[method]
-            )
+            result = bin_simple(group_idx, values, n_cells=n_cells, func=NPG_FUNC[method])
             result[valid_count < min_count] = np.nan
 
-        attrs = {
-            key: value for key, value in da.attrs.items() if key not in FILL_ATTR_NAMES
-        }
+        attrs = {key: value for key, value in da.attrs.items() if key not in FILL_ATTR_NAMES}
         attrs.update(variable_method_attrs(AGG_TO_METHOD[method]))
         binned[var_name] = xr.DataArray(result, dims=(*batch_dims, "cell"), attrs=attrs)
         if with_counts and method != "count":
@@ -358,11 +348,7 @@ def _dominant_method(ds: xr.Dataset) -> str:
     variables should be coarsened separately or with an explicit
     ``coarsen_mode``.
     """
-    methods = {
-        method
-        for da in ds.data_vars.values()
-        if (method := variable_method(da.attrs)) is not None
-    }
+    methods = {method for da in ds.data_vars.values() if (method := variable_method(da.attrs)) is not None}
     if methods == {"binned-mode"}:
         return "binned-mode"
     return "binned-mean"

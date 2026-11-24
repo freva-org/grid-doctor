@@ -268,9 +268,7 @@ def write_ugrid_mesh_file(
     )
     face_node_var = f"{mesh_name}_face_nodes"
     encoding: dict[str, dict[str, object]] = {
-        str(var): {"_FillValue": None}
-        for var in ds.data_vars
-        if str(var) != face_node_var
+        str(var): {"_FillValue": None} for var in ds.data_vars if str(var) != face_node_var
     }
     encoding[face_node_var] = {
         "dtype": "int32",
@@ -379,10 +377,7 @@ def _default_offline_enabled(
         return True
     if method != "conservative":
         return False
-    return bool(
-        config.nproc > 1
-        and (source_cell_count >= 200_000 or target_cell_count >= 1_000_000)
-    )
+    return bool(config.nproc > 1 and (source_cell_count >= 200_000 or target_cell_count >= 1_000_000))
 
 
 # ===================================================================
@@ -421,19 +416,11 @@ def _compute_weights_in_memory(
     src_field.data[...] = 0.0
     dst_field.data[...] = 0.0
 
-    regrid_method = (
-        esmpy_mod.RegridMethod.NEAREST_STOD
-        if method == "nearest"
-        else esmpy_mod.RegridMethod.CONSERVE
-    )
+    regrid_method = esmpy_mod.RegridMethod.NEAREST_STOD if method == "nearest" else esmpy_mod.RegridMethod.CONSERVE
     kwargs: dict[str, object] = {
         "filename": str(weights_path),
         "regrid_method": regrid_method,
-        "unmapped_action": (
-            esmpy_mod.UnmappedAction.IGNORE
-            if ignore_unmapped
-            else esmpy_mod.UnmappedAction.ERROR
-        ),
+        "unmapped_action": (esmpy_mod.UnmappedAction.IGNORE if ignore_unmapped else esmpy_mod.UnmappedAction.ERROR),
         "ignore_degenerate": True,
         "large_file": large_file,
     }
@@ -546,9 +533,7 @@ def compute_healpix_weights_backend(
         target_cell_count=target_mesh.face_count,
         config=offline_cfg,
     )
-    eff_ignore = (
-        source_desc.ignore_unmapped if ignore_unmapped is None else ignore_unmapped
-    )
+    eff_ignore = source_desc.ignore_unmapped if ignore_unmapped is None else ignore_unmapped
 
     # Provenance: every part of the weights' identity, so a store can be
     # re-verified from the files alone.
@@ -674,13 +659,9 @@ def _run_offline_esmf(
             is missing.
     """
     if shutil.which(config.esmf_regrid_weightgen) is None:
-        raise FileNotFoundError(
-            f"Could not find {config.esmf_regrid_weightgen!r} in PATH."
-        )
+        raise FileNotFoundError(f"Could not find {config.esmf_regrid_weightgen!r} in PATH.")
     if config.nproc > 1 and shutil.which(config.mpirun) is None:
-        raise FileNotFoundError(
-            f"Could not find MPI launcher {config.mpirun!r} in PATH."
-        )
+        raise FileNotFoundError(f"Could not find MPI launcher {config.mpirun!r} in PATH.")
 
     if config.workdir is None:
         workdir = Path(tempfile.mkdtemp(prefix="grid_doctor_esmf_"))

@@ -225,13 +225,9 @@ def init_pyramid_store(
     ```
     """
     if if_exists not in ("error", "resume", "overwrite"):
-        raise ValueError(
-            f"if_exists must be 'error', 'resume' or 'overwrite', got {if_exists!r}"
-        )
+        raise ValueError(f"if_exists must be 'error', 'resume' or 'overwrite', got {if_exists!r}")
     if structure not in ("flat", "multiscales"):
-        raise ValueError(
-            f"structure must be 'flat' or 'multiscales', got {structure!r}"
-        )
+        raise ValueError(f"structure must be 'flat' or 'multiscales', got {structure!r}")
     materialise = list(materialise or [])
     if structure == "multiscales":
         unsupported = [
@@ -262,9 +258,7 @@ def init_pyramid_store(
 
     # Workers rebuild store paths from the manifest; keep them identical.
     path = path.rstrip("/")
-    existing = inspect_target(
-        path, s3_options, [f"level_{level}.zarr" for level in pyramid]
-    )
+    existing = inspect_target(path, s3_options, [f"level_{level}.zarr" for level in pyramid])
     if existing.exists and if_exists == "error":
         raise StoreExistsError(
             f"{path} already holds a pyramid ({existing.describe()}).  Pass "
@@ -278,28 +272,19 @@ def init_pyramid_store(
                 f"({existing.describe()}).  Use if_exists='overwrite'."
             )
         templates = {
-            level: maybe_drop_coordinates(
-                ds, level, write_coords, WRITE_COORDS_MAX_LEVEL
-            )
+            level: maybe_drop_coordinates(ds, level, write_coords, WRITE_COORDS_MAX_LEVEL)
             for level, ds in pyramid.items()
         }
         return resume_init(
             existing.manifest,
             path,
             templates,
-            {
-                level: [str(k) for k in ds.data_vars if str(k) not in materialise]
-                for level, ds in templates.items()
-            },
+            {level: [str(k) for k in ds.data_vars if str(k) not in materialise] for level, ds in templates.items()},
             s3_options,
             zarr_format=zarr_format,
             split=split,
             variables_per_task=variables_per_task,
-            materialised=[
-                m
-                for m in materialise
-                if m in {str(v) for ds in pyramid.values() for v in ds}
-            ],
+            materialised=[m for m in materialise if m in {str(v) for ds in pyramid.values() for v in ds}],
         )
     fs = get_filesystem(path, s3_options)
     begin_init(path, s3_options)
@@ -457,9 +442,7 @@ def save_pyramid(
     deferred: list[DeferredWrite] = []
     encoding = encoding or {}
     for level, dataset in pyramid.items():
-        dataset = maybe_drop_coordinates(
-            dataset, level, write_coords, WRITE_COORDS_MAX_LEVEL
-        )
+        dataset = maybe_drop_coordinates(dataset, level, write_coords, WRITE_COORDS_MAX_LEVEL)
         store_name = f"level_{level}"
         root_path = f"{path}/{store_name}.zarr"
         store = get_store(root_path, fs)
@@ -504,8 +487,7 @@ def _save_multiscale(
     encoding = encoding or {}
 
     dropped_pyramid = {
-        lev: maybe_drop_coordinates(ds, lev, write_coords, WRITE_COORDS_MAX_LEVEL)
-        for lev, ds in pyramid.items()
+        lev: maybe_drop_coordinates(ds, lev, write_coords, WRITE_COORDS_MAX_LEVEL) for lev, ds in pyramid.items()
     }
     if region == "auto":
         template = pyramid_to_multiscales_tree(dropped_pyramid)
@@ -516,9 +498,7 @@ def _save_multiscale(
         for level, dataset in pyramid.items():
             templates[level] = prepare_region_dataset(dataset, region)
 
-        template = pyramid_to_multiscales_tree(
-            templates, common_coords=list(region.keys())
-        )
+        template = pyramid_to_multiscales_tree(templates, common_coords=list(region.keys()))
         write_region = region
 
     encodings = {f"/{level_group(level)}": enc for level, enc in encoding.items()}

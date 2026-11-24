@@ -149,9 +149,7 @@ def _infer_curvilinear_corners(
     # (j-1, i-1), (j-1, i), (j, i-1), (j, i).  In the padded array
     # these correspond to offsets (j, i), (j, i+1), (j+1, i),
     # (j+1, i+1) — i.e. four shifted views of size (ny+1, nx+1).
-    corner_sum = (
-        padded[:-1, :-1] + padded[:-1, 1:] + padded[1:, :-1] + padded[1:, 1:]
-    )  # (ny + 1, nx + 1, 3)
+    corner_sum = padded[:-1, :-1] + padded[:-1, 1:] + padded[1:, :-1] + padded[1:, 1:]  # (ny + 1, nx + 1, 3)
 
     corner_count = (count[:-1, :-1] + count[:-1, 1:] + count[1:, :-1] + count[1:, 1:])[
         ..., np.newaxis
@@ -328,17 +326,14 @@ def _regular_grid_mesh(
 
     if periodic:
         logger.debug(
-            "Longitude axis detected as globally periodic (coverage=%.1f°); "
-            "mesh will wrap at the seam.",
+            "Longitude axis detected as globally periodic (coverage=%.1f°); mesh will wrap at the seam.",
             lon_cov,
         )
         # For a global grid the last longitude bound coincides with the
         # first (modulo 360°).  We drop the duplicate column and let the
         # last column of faces wrap its right-hand nodes back to column 0
         # so the mesh is topologically closed.
-        node_idx_full = np.arange((ny + 1) * (nx + 1), dtype=np.int32).reshape(
-            ny + 1, nx + 1
-        )
+        node_idx_full = np.arange((ny + 1) * (nx + 1), dtype=np.int32).reshape(ny + 1, nx + 1)
         # Rewrite last column to point to column 0 nodes.
         node_idx_full[:, -1] = node_idx_full[:, 0]
         face_nodes: IntArray = np.stack(
@@ -362,9 +357,7 @@ def _regular_grid_mesh(
         node_lon = node_lon_2d.ravel()[keep]
         node_lat = node_lat_2d.ravel()[keep]
     else:
-        node_idx = np.arange((ny + 1) * (nx + 1), dtype=np.int32).reshape(
-            ny + 1, nx + 1
-        )
+        node_idx = np.arange((ny + 1) * (nx + 1), dtype=np.int32).reshape(ny + 1, nx + 1)
         face_nodes = np.stack(
             (
                 node_idx[:-1, :-1],
@@ -510,9 +503,7 @@ def _corner_mesh_from_arrays(
     flat_keys["lon"] = flat_lon
     flat_keys["lat"] = flat_lat
 
-    _, unique_idx, inverse = np.unique(
-        flat_keys, return_index=True, return_inverse=True
-    )
+    _, unique_idx, inverse = np.unique(flat_keys, return_index=True, return_inverse=True)
 
     original_lon = canonical.ravel()[flat_mask]
     original_lat = cell_lat.ravel()[flat_mask]
@@ -636,9 +627,7 @@ def _source_mesh(
                 "'lon_vertices'/'lat_vertices', or CF bounds variables "
                 "referenced by lon:bounds and lat:bounds."
             )
-        lon_v = _canonical_lon(
-            _normalise_angle_units(_to_float64(ds[lon_name].values), source_units)
-        )
+        lon_v = _canonical_lon(_normalise_angle_units(_to_float64(ds[lon_name].values), source_units))
         lat_v = _normalise_angle_units(_to_float64(ds[lat_name].values), source_units)
         mesh = _corner_mesh_from_arrays(lon_v, lat_v)
         return mesh, (_get_unstructured_dim(ds),)

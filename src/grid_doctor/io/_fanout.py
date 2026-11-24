@@ -109,9 +109,7 @@ class _Target:
     def __init__(self, path: str, s3_options: S3Options | None) -> None:
         self.path = path.rstrip("/")
         self.fs: s3fs.S3FileSystem | None = (
-            s3fs.S3FileSystem(**dict(s3_options or {}))
-            if self.path.startswith("s3://")
-            else None
+            s3fs.S3FileSystem(**dict(s3_options or {})) if self.path.startswith("s3://") else None
         )
 
     # -- zarr stores ---------------------------------------------------
@@ -191,11 +189,7 @@ class _Target:
         if self.fs is not None:
             self.fs.invalidate_cache(key)
             prefix = self.fs._strip_protocol(key).rstrip("/") + "/"
-            return {
-                p.removeprefix(prefix)
-                for p in self.fs.find(key)
-                if p.startswith(prefix)
-            }
+            return {p.removeprefix(prefix) for p in self.fs.find(key) if p.startswith(prefix)}
         root = Path(key)
         if not root.is_dir():
             return set()
@@ -207,9 +201,7 @@ class _Target:
         return found
 
 
-def load_manifest(
-    path: str, s3_options: S3Options | None = None
-) -> PyramidManifest:
+def load_manifest(path: str, s3_options: S3Options | None = None) -> PyramidManifest:
     """Read the manifest that the init step stored below *path*.
 
     Parameters
@@ -238,9 +230,7 @@ def load_manifest(
     return PyramidManifest.from_json(text)
 
 
-def is_current(
-    item: PyramidManifest | WriteTask, s3_options: S3Options | None = None
-) -> bool:
+def is_current(item: PyramidManifest | WriteTask, s3_options: S3Options | None = None) -> bool:
     """Whether the store at ``item.path`` still holds ``item``'s manifest.
 
     ``False`` if the store was deleted, never finished its init, or was
@@ -281,19 +271,14 @@ def is_task_done(task: WriteTask, s3_options: S3Options | None = None) -> bool:
     """
     if not is_current(task, s3_options):
         return False
-    text = _Target(task.path, s3_options).read_text(
-        STATE_DIR, DONE_DIR, f"{task.task_id}.json"
-    )
+    text = _Target(task.path, s3_options).read_text(STATE_DIR, DONE_DIR, f"{task.task_id}.json")
     if text is None:
         return False
     try:
         marker = json.loads(text)
     except json.JSONDecodeError:
         return False
-    return bool(
-        marker.get("manifest_id") == task.manifest_id
-        and marker.get("task_id") == task.task_id
-    )
+    return bool(marker.get("manifest_id") == task.manifest_id and marker.get("task_id") == task.task_id)
 
 
 # ======================================================================
@@ -338,9 +323,7 @@ def describe_level(
             )
         )
     coords = tuple(str(n) for n in template.variables if str(n) not in task_vars)
-    return LevelSpec(
-        level=level, store=store_name, coords=coords, data_vars=tuple(specs)
-    )
+    return LevelSpec(level=level, store=store_name, coords=coords, data_vars=tuple(specs))
 
 
 def begin_init(path: str, s3_options: S3Options | None) -> None:
@@ -394,9 +377,7 @@ class ExistingTarget:
     @property
     def exists(self) -> bool:
         """Whether anything of a pyramid is there."""
-        return bool(
-            self.manifest or self.manifest_error or self.stores or self.interrupted
-        )
+        return bool(self.manifest or self.manifest_error or self.stores or self.interrupted)
 
     def describe(self) -> str:
         """Summarise what is there, for error messages."""
@@ -412,9 +393,7 @@ class ExistingTarget:
         return "; ".join(parts)
 
 
-def inspect_target(
-    path: str, s3_options: S3Options | None, store_names: Iterable[str]
-) -> ExistingTarget:
+def inspect_target(path: str, s3_options: S3Options | None, store_names: Iterable[str]) -> ExistingTarget:
     """Look for a manifest, level stores and an unfinished init at *path*."""
     target = _Target(path, s3_options)
     manifest: PyramidManifest | None = None
@@ -464,9 +443,7 @@ def resume_init(
     if existing.zarr_format != zarr_format:
         differences.append(f"zarr_format {existing.zarr_format} != {zarr_format}")
     if existing.materialised != tuple(materialised):
-        differences.append(
-            f"materialise {list(existing.materialised)} != {list(materialised)}"
-        )
+        differences.append(f"materialise {list(existing.materialised)} != {list(materialised)}")
     stored_levels = {spec.level for spec in existing.levels}
     if stored_levels != set(templates):
         differences.append(f"levels {sorted(stored_levels)} != {sorted(templates)}")
@@ -489,14 +466,8 @@ def resume_init(
                 differences.append(f"level {level}: {error!r}")
                 continue
             if spec != existing.level(level):
-                differences.append(
-                    f"level {level}: layout {_layout_difference(existing.level(level), spec)}"
-                )
-            differences.extend(
-                _chunk_differences(
-                    level, template, spec, target.store(name), zarr_format
-                )
-            )
+                differences.append(f"level {level}: layout {_layout_difference(existing.level(level), spec)}")
+            differences.extend(_chunk_differences(level, template, spec, target.store(name), zarr_format))
             differences.extend(
                 f"level {level}: {problem}"
                 for problem in coordinate_differences(
@@ -509,9 +480,7 @@ def resume_init(
             levels.append(spec)
 
     if not differences:
-        effective, planned = plan_tasks(
-            levels, split=split, variables_per_task=variables_per_task
-        )
+        effective, planned = plan_tasks(levels, split=split, variables_per_task=variables_per_task)
         if effective != existing.split:
             differences.append(f"split {dict(existing.split)} != {dict(effective)}")
         old = [(t.variables, t.region, t.levels) for t in existing.tasks]
@@ -597,9 +566,7 @@ def coordinate_differences(
             continue
         stored_dims = _array_dims(stored)
         if stored_dims is not None and set(stored_dims) != set(var.dims):
-            problems.append(
-                f"coordinate {name!r}: dims {var.dims} != stored {stored_dims}"
-            )
+            problems.append(f"coordinate {name!r}: dims {var.dims} != stored {stored_dims}")
             continue
         if stored_dims is not None and tuple(stored_dims) != var.dims:
             var = var.transpose(*stored_dims)
@@ -612,8 +579,7 @@ def coordinate_differences(
             elif have not in (full, stop - start):
                 problems.append(
                     f"coordinate {name!r}: length {have} along {dim!r}, store "
-                    f"has {full}"
-                    + (f", task region {stop - start}" if dim in region else "")
+                    f"has {full}" + (f", task region {stop - start}" if dim in region else "")
                 )
                 break
             stored_index.append(slice(start, stop))
@@ -623,15 +589,10 @@ def coordinate_differences(
             mine = var.isel(selection) if selection else var
             mine = mine.copy(deep=False)
             mine.encoding = dict(encodings.get(name, {}))
-            raw_mine = np.asarray(
-                encode_zarr_variable(mine, name=name, zarr_format=zarr_format).values
-            )
+            raw_mine = np.asarray(encode_zarr_variable(mine, name=name, zarr_format=zarr_format).values)
             raw_stored = np.asarray(stored[tuple(stored_index)])
             if raw_mine.shape != raw_stored.shape:
-                problems.append(
-                    f"coordinate {name!r}: shape {raw_mine.shape} != stored "
-                    f"{raw_stored.shape}"
-                )
+                problems.append(f"coordinate {name!r}: shape {raw_mine.shape} != stored {raw_stored.shape}")
                 continue
             equal = _equal_elements(raw_mine, raw_stored)
             if equal.all():
@@ -639,19 +600,11 @@ def coordinate_differences(
             position = tuple(int(i) for i in np.argwhere(~equal)[0])
             if decoded is None:
                 decoded = xr.open_zarr(store, zarr_format=zarr_format, chunks=None)
-            theirs = (
-                decoded[name]
-                .isel({d: s for d, s in zip(var.dims, stored_index)})
-                .values[position]
-            )
+            theirs = decoded[name].isel({d: s for d, s in zip(var.dims, stored_index)}).values[position]
             ours = mine.values[position]
-            where = ", ".join(
-                f"{d}={s.start + i}"
-                for d, s, i in zip(var.dims, stored_index, position)
-            )
+            where = ", ".join(f"{d}={s.start + i}" for d, s, i in zip(var.dims, stored_index, position))
             problems.append(
-                f"coordinate {name!r} differs at {where or 'its only element'}: "
-                f"pyramid has {ours}, store has {theirs}"
+                f"coordinate {name!r} differs at {where or 'its only element'}: pyramid has {ours}, store has {theirs}"
             )
     if decoded is not None:
         decoded.close()
@@ -713,9 +666,7 @@ def _chunk_differences(
             continue
         stored = tuple(int(n) for n in node.chunks)
         if wanted != stored:
-            result.append(
-                f"level {level}: {array.name!r} chunks {wanted} != stored {stored}"
-            )
+            result.append(f"level {level}: {array.name!r} chunks {wanted} != stored {stored}")
     return result
 
 
@@ -732,9 +683,7 @@ def finish_init(
     """Plan the tasks, assemble the manifest and store it below *path*."""
     from .. import __version__
 
-    effective, planned = plan_tasks(
-        levels, split=split, variables_per_task=variables_per_task
-    )
+    effective, planned = plan_tasks(levels, split=split, variables_per_task=variables_per_task)
     manifest_id = uuid.uuid4().hex
     width = max(6, len(str(len(planned))))
     tasks = tuple(
@@ -841,9 +790,7 @@ def write_pyramid_task(
     try:
         planned = manifest.task(task.task_id)
     except KeyError:
-        raise ManifestError(
-            f"{task.task_id} is not part of manifest {manifest.manifest_id}"
-        ) from None
+        raise ManifestError(f"{task.task_id} is not part of manifest {manifest.manifest_id}") from None
     if planned != task:
         # The manifest validated that its own tasks are chunk-aligned and
         # disjoint; a task that differs (edited or hand-built) has no such
@@ -857,8 +804,7 @@ def write_pyramid_task(
     for level in task.levels:
         if level not in pyramid:
             raise ManifestError(
-                f"{task.task_id} writes level {level}, but the pyramid only has "
-                f"levels {sorted(pyramid)}"
+                f"{task.task_id} writes level {level}, but the pyramid only has levels {sorted(pyramid)}"
             )
         spec = manifest.level(level)
         store = target.store(spec.store)
@@ -867,18 +813,14 @@ def write_pyramid_task(
         for name in task.variables:
             array_spec = spec.array(name)
             if name not in pyramid[level]:
-                raise ManifestError(
-                    f"{task.task_id}: variable {name!r} missing on level {level}"
-                )
+                raise ManifestError(f"{task.task_id}: variable {name!r} missing on level {level}")
             var = _select_region(pyramid[level][name].variable, array_spec, task)
             var = var.copy(deep=False)
             var.encoding = encodings.get(name, {})
             encoded = encode_zarr_variable(var, name=name, zarr_format=task.zarr_format)
             offsets = _region_offsets(array_spec, task)
             source = _aligned(encoded.data, array_spec.chunks, offsets, name)
-            region = tuple(
-                slice(off, off + n) for off, n in zip(offsets, encoded.shape)
-            )
+            region = tuple(slice(off, off + n) for off, n in zip(offsets, encoded.shape))
             writes.append(DeferredWrite(source, get_array(group, name), region))
 
         mismatches = coordinate_differences(
@@ -918,9 +860,7 @@ def write_pyramid_task(
         "levels": list(task.levels),
         "region": {d: [a, b] for d, a, b in task.region},
     }
-    target.write_text(
-        json.dumps(marker, indent=2), STATE_DIR, DONE_DIR, f"{task.task_id}.json"
-    )
+    target.write_text(json.dumps(marker, indent=2), STATE_DIR, DONE_DIR, f"{task.task_id}.json")
     logger.info(
         "%s done (%s, %d level(s)) in %.1fs",
         task.task_id,
@@ -934,10 +874,7 @@ def write_pyramid_task(
 def _select_region(var: xr.Variable, spec: ArraySpec, task: WriteTask) -> xr.Variable:
     """Bring *var* to the task's region, accepting full or pre-subset data."""
     if set(var.dims) != set(spec.dims):
-        raise ManifestError(
-            f"{task.task_id}: {spec.name!r} has dims {var.dims}, the store "
-            f"expects {spec.dims}"
-        )
+        raise ManifestError(f"{task.task_id}: {spec.name!r} has dims {var.dims}, the store expects {spec.dims}")
     if var.dims != spec.dims:
         var = var.transpose(*spec.dims)
     region = {dim: (start, stop) for dim, start, stop in task.region}
@@ -956,8 +893,7 @@ def _select_region(var: xr.Variable, spec: ArraySpec, task: WriteTask) -> xr.Var
                 )
         elif have != full:
             raise ManifestError(
-                f"{task.task_id}: {spec.name!r} has {have} elements along "
-                f"{dim!r}, the store has {full}"
+                f"{task.task_id}: {spec.name!r} has {have} elements along {dim!r}, the store has {full}"
             )
     return var.isel(selection) if selection else var
 
@@ -992,8 +928,7 @@ def _aligned(
             position += size
             if position % unit:
                 logger.warning(
-                    "Rechunking %r to the store's write units %s: its dask "
-                    "chunks %s would split zarr chunks",
+                    "Rechunking %r to the store's write units %s: its dask chunks %s would split zarr chunks",
                     name,
                     units,
                     data.chunksize,
@@ -1062,18 +997,11 @@ class StoreReport:
     def summary(self) -> str:
         """One human-readable paragraph."""
         state = "complete" if self.complete else "INCOMPLETE"
-        lines = [
-            (
-                f"Store {state}: {len(self.done_tasks)}/{self.n_tasks} task(s) "
-                f"done (manifest {self.manifest_id})."
-            )
-        ]
+        lines = [(f"Store {state}: {len(self.done_tasks)}/{self.n_tasks} task(s) done (manifest {self.manifest_id}).")]
         if self.missing_tasks:
             shown = ", ".join(self.missing_tasks[:10])
             more = len(self.missing_tasks) - 10
-            lines.append(
-                f"Missing: {shown}" + (f" and {more} more." if more > 0 else ".")
-            )
+            lines.append(f"Missing: {shown}" + (f" and {more} more." if more > 0 else "."))
         lines.extend(f"Problem: {p}" for p in self.problems)
         if self.stale_markers:
             lines.append(f"Ignored {self.stale_markers} stale marker(s).")
@@ -1143,23 +1071,17 @@ def check_pyramid_store(
     if stored_text is None:
         interrupted = _interrupted_init(target)
         problems.append(
-            f"no manifest stored at {manifest.path}/{STATE_DIR}"
-            + (f": {interrupted}" if interrupted else "")
+            f"no manifest stored at {manifest.path}/{STATE_DIR}" + (f": {interrupted}" if interrupted else "")
         )
     else:
         stored_id = json.loads(stored_text).get("manifest_id")
         if stored_id != manifest.manifest_id:
-            problems.append(
-                f"store was re-initialised: it holds manifest {stored_id}, "
-                f"not {manifest.manifest_id}"
-            )
+            problems.append(f"store was re-initialised: it holds manifest {stored_id}, not {manifest.manifest_id}")
 
     groups: dict[int, zarr.Group] = {}
     for spec in manifest.levels:
         try:
-            group = zarr.open_group(
-                target.store(spec.store), mode="r", zarr_format=manifest.zarr_format
-            )
+            group = zarr.open_group(target.store(spec.store), mode="r", zarr_format=manifest.zarr_format)
         except Exception as error:  # noqa: BLE001 - report, do not raise
             problems.append(f"level {spec.level}: cannot open {spec.store}: {error}")
             continue
@@ -1195,9 +1117,7 @@ def check_pyramid_store(
 
     absent: list[tuple[str, int, int]] = []
     if inspect_chunks:
-        absent = _absent_chunks(
-            manifest, target, groups, [manifest.task(t) for t in done_tasks]
-        )
+        absent = _absent_chunks(manifest, target, groups, [manifest.task(t) for t in done_tasks])
 
     return StoreReport(
         manifest_id=manifest.manifest_id,
@@ -1210,28 +1130,17 @@ def check_pyramid_store(
     )
 
 
-def _check_array(
-    level: int, group: zarr.Group, members: set[str], spec: ArraySpec
-) -> list[str]:
+def _check_array(level: int, group: zarr.Group, members: set[str], spec: ArraySpec) -> list[str]:
     if spec.name not in members:
         return [f"level {level}: array {spec.name!r} missing"]
     array = get_array(group, spec.name)
     problems = []
     if tuple(array.shape) != spec.shape:
-        problems.append(
-            f"level {level}: {spec.name!r} has shape {tuple(array.shape)}, "
-            f"manifest says {spec.shape}"
-        )
+        problems.append(f"level {level}: {spec.name!r} has shape {tuple(array.shape)}, manifest says {spec.shape}")
     if write_unit(array) != spec.chunks:
-        problems.append(
-            f"level {level}: {spec.name!r} has write unit {write_unit(array)}, "
-            f"manifest says {spec.chunks}"
-        )
+        problems.append(f"level {level}: {spec.name!r} has write unit {write_unit(array)}, manifest says {spec.chunks}")
     if str(array.dtype) != spec.dtype:
-        problems.append(
-            f"level {level}: {spec.name!r} has dtype {array.dtype}, "
-            f"manifest says {spec.dtype}"
-        )
+        problems.append(f"level {level}: {spec.name!r} has dtype {array.dtype}, manifest says {spec.dtype}")
     return problems
 
 
@@ -1257,9 +1166,7 @@ def _absent_chunks(
                     listings[key] = target.find(spec.store, name)
                 array = get_array(groups[level], name)
                 ranges = []
-                for dim, size, unit in zip(
-                    array_spec.dims, array_spec.shape, array_spec.chunks
-                ):
+                for dim, size, unit in zip(array_spec.dims, array_spec.shape, array_spec.chunks):
                     start, stop = region.get(dim, (0, size))
                     ranges.append(range(start // unit, math.ceil(stop / unit)))
                 for coords in itertools.product(*ranges):

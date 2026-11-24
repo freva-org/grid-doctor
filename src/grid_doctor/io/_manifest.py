@@ -172,8 +172,7 @@ class ArraySpec:
         if not len(dims) == len(shape) == len(chunks):
             _fail(
                 where,
-                f"dims {dims}, shape {shape} and chunks {chunks} must have "
-                "the same length",
+                f"dims {dims}, shape {shape} and chunks {chunks} must have the same length",
             )
         _set(
             self,
@@ -203,9 +202,7 @@ class ArraySpec:
         }
 
     @classmethod
-    def from_dict(
-        cls, data: Mapping[str, object], *, where: str = "array"
-    ) -> ArraySpec:
+    def from_dict(cls, data: Mapping[str, object], *, where: str = "array") -> ArraySpec:
         """Inverse of [`to_dict`][grid_doctor.io.ArraySpec.to_dict].
 
         *where* names the location in error messages.
@@ -215,9 +212,7 @@ class ArraySpec:
             name=_name(_field(fields, "name", where), where, "name"),
             dims=_str_tuple(_field(fields, "dims", where), where, "dims"),
             shape=_int_tuple(_field(fields, "shape", where), where, "shape", minimum=0),
-            chunks=_int_tuple(
-                _field(fields, "chunks", where), where, "chunks", minimum=1
-            ),
+            chunks=_int_tuple(_field(fields, "chunks", where), where, "chunks", minimum=1),
             dtype=_as_str(_field(fields, "dtype", where), where, "dtype"),
         )
 
@@ -250,9 +245,7 @@ class LevelSpec:
         """Validate and normalise the fields (lists become tuples)."""
         where = f"level {self.level!r}"
         coords = _str_tuple(self.coords, where, "coords", unique=True)
-        data_vars = _instances(
-            _as_tuple(self.data_vars, where, "data_vars"), ArraySpec, where, "data_vars"
-        )
+        data_vars = _instances(_as_tuple(self.data_vars, where, "data_vars"), ArraySpec, where, "data_vars")
         names = [spec.name for spec in data_vars]
         duplicates = sorted({n for n in names if names.count(n) > 1})
         if duplicates:
@@ -285,9 +278,7 @@ class LevelSpec:
         }
 
     @classmethod
-    def from_dict(
-        cls, data: Mapping[str, object], *, where: str = "level"
-    ) -> LevelSpec:
+    def from_dict(cls, data: Mapping[str, object], *, where: str = "level") -> LevelSpec:
         """Inverse of [`to_dict`][grid_doctor.io.LevelSpec.to_dict].
 
         *where* names the location in error messages.
@@ -362,13 +353,9 @@ class WriteTask:
             manifest_id=_as_str(self.manifest_id, where, "manifest_id", safe=True),
             path=_as_str(self.path, where, "path"),
             zarr_format=_zarr_format(self.zarr_format, where),
-            variables=_str_tuple(
-                self.variables, where, "variables", unique=True, nonempty=True
-            ),
+            variables=_str_tuple(self.variables, where, "variables", unique=True, nonempty=True),
             region=_region(self.region, where),
-            levels=_int_tuple(
-                self.levels, where, "levels", minimum=0, unique=True, nonempty=True
-            ),
+            levels=_int_tuple(self.levels, where, "levels", minimum=0, unique=True, nonempty=True),
         )
         for name in self.variables:
             _name(name, where, "variables")
@@ -424,14 +411,10 @@ class WriteTask:
         merged: dict[str, object] = {**(defaults or {}), **_mapping(data, where)}
         return cls(
             task_id=_as_str(_field(merged, "task_id", where), where, "task_id", safe=True),
-            manifest_id=_as_str(
-                _field(merged, "manifest_id", where), where, "manifest_id", safe=True
-            ),
+            manifest_id=_as_str(_field(merged, "manifest_id", where), where, "manifest_id", safe=True),
             path=_as_str(_field(merged, "path", where), where, "path"),
             zarr_format=_zarr_format(_field(merged, "zarr_format", where), where),
-            variables=_str_tuple(
-                _field(merged, "variables", where), where, "variables"
-            ),
+            variables=_str_tuple(_field(merged, "variables", where), where, "variables"),
             region=_region(_field(merged, "region", where), where),
             levels=_int_tuple(_field(merged, "levels", where), where, "levels", minimum=0),
         )
@@ -506,27 +489,19 @@ class PyramidManifest:
         """
         where = "manifest"
         _check_schema_version(self.schema_version)
-        levels = _instances(
-            _as_tuple(self.levels, where, "levels"), LevelSpec, where, "levels"
-        )
-        tasks = _instances(
-            _as_tuple(self.tasks, where, "tasks"), WriteTask, where, "tasks"
-        )
+        levels = _instances(_as_tuple(self.levels, where, "levels"), LevelSpec, where, "levels")
+        tasks = _instances(_as_tuple(self.tasks, where, "tasks"), WriteTask, where, "tasks")
         _set(
             self,
             manifest_id=_as_str(self.manifest_id, where, "manifest_id", safe=True),
             path=_as_str(self.path, where, "path"),
             zarr_format=_zarr_format(self.zarr_format, where),
             created=_as_str(self.created, where, "created"),
-            grid_doctor_version=_as_str(
-                self.grid_doctor_version, where, "grid_doctor_version"
-            ),
+            grid_doctor_version=_as_str(self.grid_doctor_version, where, "grid_doctor_version"),
             split=_split(self.split, where),
             levels=levels,
             tasks=tasks,
-            materialised=_str_tuple(
-                self.materialised, where, "materialised", unique=True
-            ),
+            materialised=_str_tuple(self.materialised, where, "materialised", unique=True),
         )
         _check_consistency(self)
 
@@ -597,19 +572,14 @@ class PyramidManifest:
         where = "manifest"
         fields = _mapping(data, where)
         _check_schema_version(fields.get("schema_version"))
-        defaults = {
-            key: _field(fields, key, where)
-            for key in ("manifest_id", "path", "zarr_format")
-        }
+        defaults = {key: _field(fields, key, where) for key in ("manifest_id", "path", "zarr_format")}
         raw_split = _field(fields, "split", where)
         if not isinstance(raw_split, Mapping):
             _fail(where, f"split must be an object, got {type(raw_split).__name__}")
         raw_levels = _as_tuple(_field(fields, "levels", where), where, "levels")
         raw_tasks = _as_tuple(_field(fields, "tasks", where), where, "tasks")
         return cls(
-            manifest_id=_as_str(
-                defaults["manifest_id"], where, "manifest_id", safe=True
-            ),
+            manifest_id=_as_str(defaults["manifest_id"], where, "manifest_id", safe=True),
             path=_as_str(defaults["path"], where, "path"),
             zarr_format=_zarr_format(defaults["zarr_format"], where),
             created=_as_str(_field(fields, "created", where), where, "created"),
@@ -619,13 +589,9 @@ class PyramidManifest:
                 "grid_doctor_version",
             ),
             split=_split(tuple(raw_split.items()), where),
-            materialised=_str_tuple(
-                fields.get("materialised", ()), where, "materialised"
-            ),
+            materialised=_str_tuple(fields.get("materialised", ()), where, "materialised"),
             levels=tuple(
-                LevelSpec.from_dict(
-                    _mapping(lvl, f"levels[{i}]"), where=f"levels[{i}]"
-                )
+                LevelSpec.from_dict(_mapping(lvl, f"levels[{i}]"), where=f"levels[{i}]")
                 for i, lvl in enumerate(raw_levels)
             ),
             tasks=tuple(
@@ -709,9 +675,7 @@ def plan_tasks(
                 "dimension such as 'time' instead."
             )
         if not isinstance(step, int) or isinstance(step, bool) or step < 1:
-            raise ManifestError(
-                f"split size for {dim!r} must be a positive int, got {step!r}"
-            )
+            raise ManifestError(f"split size for {dim!r} must be a positive int, got {step!r}")
 
     all_specs = [spec for lvl in levels for spec in lvl.data_vars]
     effective: list[tuple[str, int]] = []
@@ -719,9 +683,7 @@ def plan_tasks(
     for dim, requested in split.items():
         having = [spec for spec in all_specs if dim in spec.dims]
         if not having:
-            raise ManifestError(
-                f"split dimension {dim!r} is not a dimension of any data variable"
-            )
+            raise ManifestError(f"split dimension {dim!r} is not a dimension of any data variable")
         lengths = {spec.size(dim) for spec in having}
         if len(lengths) != 1:
             detail = ", ".join(f"{spec.name}={spec.size(dim)}" for spec in having[:6])
@@ -734,8 +696,7 @@ def plan_tasks(
         step = math.ceil(requested / unit) * unit
         if step != requested:
             logger.info(
-                "split[%r]=%d rounded up to %d (multiple of the %d-element "
-                "write unit shared by all arrays)",
+                "split[%r]=%d rounded up to %d (multiple of the %d-element write unit shared by all arrays)",
                 dim,
                 requested,
                 step,
@@ -743,9 +704,7 @@ def plan_tasks(
             )
         step = min(step, max(length, 1))
         effective.append((dim, step))
-        boundaries[dim] = [
-            (start, min(start + step, length)) for start in range(0, length, step)
-        ] or [(0, 0)]
+        boundaries[dim] = [(start, min(start + step, length)) for start in range(0, length, step)] or [(0, 0)]
 
     # Which split dims does every variable carry, and on which levels?
     placements: dict[str, _VariablePlacement] = {}
@@ -773,9 +732,7 @@ def plan_tasks(
         batches = [tuple(names[start:][:size]) for start in starts]
         regions = itertools.product(*(boundaries[d] for d in dims))
         for bounds in regions:
-            region: Region = tuple(
-                (dim, start, stop) for dim, (start, stop) in zip(dims, bounds)
-            )
+            region: Region = tuple((dim, start, stop) for dim, (start, stop) in zip(dims, bounds))
             for batch in batches:
                 planned.append(_PlannedTask(batch, region, group_levels))
     return tuple(effective), planned
@@ -826,8 +783,7 @@ def _as_str(value: object, where: str, name: str, *, safe: bool = False) -> str:
     if safe and not _SAFE_NAME.fullmatch(value):
         _fail(
             where,
-            f"{name} {value!r} may only contain letters, digits, '.', '_' "
-            "and '-', and must not start with '.' or '-'",
+            f"{name} {value!r} may only contain letters, digits, '.', '_' and '-', and must not start with '.' or '-'",
         )
     return str(value)
 
@@ -849,17 +805,14 @@ def _as_int(value: object, where: str, name: str, *, minimum: int = 0) -> int:
     return value
 
 
-def _instances(
-    items: tuple[object, ...], cls: type[_T], where: str, name: str
-) -> tuple[_T, ...]:
+def _instances(items: tuple[object, ...], cls: type[_T], where: str, name: str) -> tuple[_T, ...]:
     """Check that every item is a *cls* instance (e.g. ``LevelSpec``)."""
     result: list[_T] = []
     for item in items:
         if not isinstance(item, cls):
             _fail(
                 where,
-                f"{name} must contain {cls.__name__} objects, got "
-                f"{type(item).__name__}",
+                f"{name} must contain {cls.__name__} objects, got {type(item).__name__}",
             )
         result.append(item)
     return tuple(result)
@@ -913,9 +866,7 @@ def _int_tuple(
     items = _as_tuple(value, where, name)
     if nonempty and not items:
         _fail(where, f"{name} must not be empty")
-    result = tuple(
-        _as_int(item, where, f"{name} entry", minimum=minimum) for item in items
-    )
+    result = tuple(_as_int(item, where, f"{name} entry", minimum=minimum) for item in items)
     if unique:
         _unique(result, where, name)
     return result
@@ -949,10 +900,7 @@ def _region(value: object, where: str) -> Region:
                 _fail(where, f"region[{dim!r}] must be [start, stop], got {bounds!r}")
             entries.append((dim, *pair))
     else:
-        entries = [
-            _as_tuple(entry, where, "region entry")
-            for entry in _as_tuple(value, where, "region")
-        ]
+        entries = [_as_tuple(entry, where, "region entry") for entry in _as_tuple(value, where, "region")]
     region: list[tuple[str, int, int]] = []
     for entry in entries:
         if len(entry) != 3:
@@ -999,8 +947,7 @@ def _check_consistency(manifest: PyramidManifest) -> None:
             if getattr(task, name) != getattr(manifest, name):
                 _fail(
                     where,
-                    f"{name} {getattr(task, name)!r} differs from the manifest's "
-                    f"{getattr(manifest, name)!r}",
+                    f"{name} {getattr(task, name)!r} differs from the manifest's {getattr(manifest, name)!r}",
                 )
         extra = sorted({dim for dim, _, _ in task.region} - split_dims)
         if extra:
@@ -1021,8 +968,7 @@ def _check_consistency(manifest: PyramidManifest) -> None:
             if (level, array.name) not in coverage:
                 _fail(
                     "manifest",
-                    f"data variable {array.name!r} on level {level} is not "
-                    "written by any task",
+                    f"data variable {array.name!r} on level {level} is not written by any task",
                 )
     for (level, name), regions in coverage.items():
         _check_partition(
@@ -1045,14 +991,12 @@ def _check_task_region(where: str, level: int, spec: ArraySpec, region: Region) 
         if start % unit:
             _fail(
                 where,
-                f"region start {start} is not a multiple of the write unit "
-                f"{unit} of {context}",
+                f"region start {start} is not a multiple of the write unit {unit} of {context}",
             )
         if stop % unit and stop != size:
             _fail(
                 where,
-                f"region stop {stop} is neither a multiple of the write unit "
-                f"{unit} nor the end ({size}) of {context}",
+                f"region stop {stop} is neither a multiple of the write unit {unit} nor the end ({size}) of {context}",
             )
 
 
@@ -1089,8 +1033,7 @@ def _check_partition(
     dim_sets = {frozenset(box) for box in boxes}
     if len(dim_sets) > 1:
         raise ManifestError(
-            f"{where} is split along different dimensions by different "
-            f"tasks: {sorted(sorted(d) for d in dim_sets)}"
+            f"{where} is split along different dimensions by different tasks: {sorted(sorted(d) for d in dim_sets)}"
         )
     present = dim_sets.pop()
     dims = [dim for dim in split_order if dim in present]
@@ -1107,21 +1050,15 @@ def _check_partition(
                     "intervals per dimension"
                 )
             if start > position:
-                raise ManifestError(
-                    f"{where}: tasks leave a gap along {dim!r} at index {position}"
-                )
+                raise ManifestError(f"{where}: tasks leave a gap along {dim!r} at index {position}")
             position = stop
         if position != size and not (size == 0 and intervals == [(0, 0)]):
-            raise ManifestError(
-                f"{where}: tasks cover {dim!r} up to {position}, not its length {size}"
-            )
+            raise ManifestError(f"{where}: tasks cover {dim!r} up to {position}, not its length {size}")
         expected *= len(intervals)
     cells = [tuple(box[dim] for dim in dims) for box in boxes]
     distinct = len(set(cells))
     if distinct != len(cells):
-        raise ManifestError(
-            f"{where} is written by more than one task in the same region"
-        )
+        raise ManifestError(f"{where} is written by more than one task in the same region")
     if distinct != expected:
         raise ManifestError(
             f"{where}: {distinct} task region(s) do not form the full grid of "

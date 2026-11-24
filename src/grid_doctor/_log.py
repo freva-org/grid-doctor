@@ -69,9 +69,7 @@ def set_level(level: Union[int, str]) -> None:
     try:
         _current_index = _LEVELS.index(level)
     except ValueError:
-        _current_index = min(
-            range(len(_LEVELS)), key=lambda i: abs(_LEVELS[i] - level)
-        )
+        _current_index = min(range(len(_LEVELS)), key=lambda i: abs(_LEVELS[i] - level))
     _apply_level(_LEVELS[_current_index])
 
 

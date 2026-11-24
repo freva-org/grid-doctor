@@ -34,15 +34,11 @@ def _lonlat_to_xyz(lon_deg: FloatArray, lat_deg: FloatArray) -> FloatArray:
 
 
 @overload
-def _xyz_to_lonlat(
-    xyz: FloatArray, *, batch: Literal[False] = ...
-) -> tuple[float, float]: ...  # noqa: E501
+def _xyz_to_lonlat(xyz: FloatArray, *, batch: Literal[False] = ...) -> tuple[float, float]: ...  # noqa: E501
 
 
 @overload
-def _xyz_to_lonlat(
-    xyz: FloatArray, *, batch: Literal[True]
-) -> tuple[FloatArray, FloatArray]: ...  # noqa: E501
+def _xyz_to_lonlat(xyz: FloatArray, *, batch: Literal[True]) -> tuple[FloatArray, FloatArray]: ...  # noqa: E501
 
 
 def _xyz_to_lonlat(
@@ -190,7 +186,5 @@ def _vectorized_polygon_centres(
         raise ValueError("Cannot infer polygon centres from zero-length vectors.")
 
     lon = np.rad2deg(np.arctan2(y, x)).astype(np.float64, copy=False)
-    lat = np.rad2deg(np.arcsin(np.clip(z / norm, -1.0, 1.0))).astype(
-        np.float64, copy=False
-    )
+    lat = np.rad2deg(np.arcsin(np.clip(z / norm, -1.0, 1.0))).astype(np.float64, copy=False)
     return _canonical_lon(lon), lat

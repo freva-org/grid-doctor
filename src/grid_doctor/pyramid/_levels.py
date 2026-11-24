@@ -123,9 +123,7 @@ def assemble_coarse_level(
     return HealpixMetadata(grid, provenance).apply(result)
 
 
-def resolve_valid_fraction(
-    spec: ValidFraction, ds: xr.Dataset
-) -> dict[str, FractionShape]:
+def resolve_valid_fraction(spec: ValidFraction, ds: xr.Dataset) -> dict[str, FractionShape]:
     """Map variable name to fraction shape for the requested variables."""
     cell_vars = [str(n) for n, v in ds.data_vars.items() if "cell" in v.dims]
     items: Iterable[tuple[str, bool | Literal["static"]]]
@@ -134,9 +132,7 @@ def resolve_valid_fraction(
     if spec is True or spec == "static":
         items = ((name, spec) for name in cell_vars)
     elif isinstance(spec, str):
-        raise ValueError(
-            f"valid_fraction={spec!r}: use True, 'static', or variable names."
-        )
+        raise ValueError(f"valid_fraction={spec!r}: use True, 'static', or variable names.")
     elif isinstance(spec, Mapping):
         items = spec.items()
     else:
@@ -146,8 +142,7 @@ def resolve_valid_fraction(
     for name, shape in items:
         if name not in cell_vars:
             raise ValueError(
-                f"valid_fraction: {name!r} is not a variable with a 'cell' "
-                f"dimension (available: {cell_vars})."
+                f"valid_fraction: {name!r} is not a variable with a 'cell' dimension (available: {cell_vars})."
             )
         if shape is False:
             continue
@@ -155,11 +150,7 @@ def resolve_valid_fraction(
             raise ValueError(f"valid_fraction[{name!r}] must be True or 'static'.")
         resolved[name] = "static" if shape == "static" else "full"
 
-    clashes = sorted(
-        f"{name}_valid_fraction"
-        for name in resolved
-        if f"{name}_valid_fraction" in ds.variables
-    )
+    clashes = sorted(f"{name}_valid_fraction" for name in resolved if f"{name}_valid_fraction" in ds.variables)
     if clashes:
         raise ValueError(f"valid_fraction: {clashes} already exist in the dataset.")
     return resolved
@@ -306,9 +297,7 @@ def coarse_levels(
     """
     cell_chunk = cell_chunk_of(finest)
     templates = {
-        str(name): data.transpose(..., "cell")
-        for name, data in finest.data_vars.items()
-        if "cell" in data.dims
+        str(name): data.transpose(..., "cell") for name, data in finest.data_vars.items() if "cell" in data.dims
     }
     fractions = valid_fraction or {}
     # Mode coarsening carries the coarsened values from level to level,
@@ -343,9 +332,7 @@ def coarse_levels(
                 counts = count_state[name]
             else:
                 current = (
-                    partials[name].coarsen()
-                    if name in partials
-                    else MeanPartials.from_values(state[name])
+                    partials[name].coarsen() if name in partials else MeanPartials.from_values(state[name])
                 ).rechunk(cell_chunk)
                 partials[name] = current
                 values = current.mean(min_valid_fraction)

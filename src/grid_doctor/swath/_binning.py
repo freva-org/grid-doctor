@@ -74,8 +74,7 @@ def _find_coord_name(
             return name
     available = sorted({*map(str, ds.coords), *map(str, ds.data_vars)})
     raise ValueError(
-        f"Could not locate a {kind} coordinate. Pass "
-        f"``{kind[:3]}_name=...`` explicitly. Available names: {available}."
+        f"Could not locate a {kind} coordinate. Pass ``{kind[:3]}_name=...`` explicitly. Available names: {available}."
     )
 
 
@@ -248,11 +247,7 @@ def resolve_methods(
     - a mapping key that matches no binnable variable (a typo like
       ``"radaince"`` was previously ignored silently).
     """
-    binnable = [
-        str(name)
-        for name, da in ds.data_vars.items()
-        if set(sample_dims) <= set(map(str, da.dims))
-    ]
+    binnable = [str(name) for name, da in ds.data_vars.items() if set(sample_dims) <= set(map(str, da.dims))]
     if isinstance(agg, Mapping):
         unknown_keys = sorted(set(map(str, agg)) - set(binnable))
         if unknown_keys:
@@ -273,9 +268,7 @@ def resolve_methods(
 
     bad = {n: m for n, m in resolved.items() if m not in AGG_TO_METHOD}
     if bad:
-        raise ValueError(
-            f"Unknown aggregation(s) {bad}. Supported: {sorted(AGG_TO_METHOD)}."
-        )
+        raise ValueError(f"Unknown aggregation(s) {bad}. Supported: {sorted(AGG_TO_METHOD)}.")
     return resolved
 
 
@@ -311,17 +304,8 @@ def resolve_point_coords(
             f"{tuple(lat_var.dims)} vs {tuple(lon_var.dims)}."
         )
     if lat_var.shape != lon_var.shape:
-        raise ValueError(
-            "Latitude and longitude must share the same shape, got "
-            f"{lat_var.shape} vs {lon_var.shape}."
-        )
+        raise ValueError(f"Latitude and longitude must share the same shape, got {lat_var.shape} vs {lon_var.shape}.")
 
-    lat = _normalise_angle_units(
-        np.asarray(lat_var.values, dtype=np.float64).ravel(), source_units
-    )
-    lon = _canonical_lon(
-        _normalise_angle_units(
-            np.asarray(lon_var.values, dtype=np.float64).ravel(), source_units
-        )
-    )
+    lat = _normalise_angle_units(np.asarray(lat_var.values, dtype=np.float64).ravel(), source_units)
+    lon = _canonical_lon(_normalise_angle_units(np.asarray(lon_var.values, dtype=np.float64).ravel(), source_units))
     return lat, lon, tuple(map(str, lat_var.dims))

@@ -377,10 +377,7 @@ def _apply_cupy_batched(
         RuntimeError: When CuPy is not available.
     """
     if not _HAS_CUPY or _gpu_cache is None:
-        raise RuntimeError(
-            "CuPy is required for the GPU backend. "
-            "Install it with: pip install cupy-cuda12x"
-        )
+        raise RuntimeError("CuPy is required for the GPU backend. Install it with: pip install cupy-cuda12x")
 
     gpu_matrix = _gpu_cache.get(matrix)
     values_gpu = cp.asarray(values_2d, dtype=cp.float64)
@@ -474,8 +471,7 @@ def apply_weights_nd(
 
     if arr.shape[-1] != n_source:
         raise ValueError(
-            f"Trailing source size {arr.shape[-1]} does not match "
-            f"weight matrix source dimension {n_source}."
+            f"Trailing source size {arr.shape[-1]} does not match weight matrix source dimension {n_source}."
         )
 
     # Reshape to (n_batch, n_source) for the engine.
@@ -484,24 +480,18 @@ def apply_weights_nd(
 
     # --- Backend dispatch ---
     use_cupy = backend == "cupy" or (backend == "auto" and _HAS_CUPY)
-    use_numba = not use_cupy and (
-        backend == "numba" or (backend == "auto" and n_batch == 1 and _HAS_NUMBA)
-    )
+    use_numba = not use_cupy and (backend == "numba" or (backend == "auto" and n_batch == 1 and _HAS_NUMBA))
 
     if use_cupy:
         result_2d = _apply_cupy_batched(matrix, flat_2d, missing_policy)
     elif use_numba and n_batch == 1:
-        result_2d = _apply_numba_single(matrix, flat_2d[0], missing_policy, parallel)[
-            np.newaxis, :
-        ]
+        result_2d = _apply_numba_single(matrix, flat_2d[0], missing_policy, parallel)[np.newaxis, :]
     elif use_numba and n_batch > 1:
         # Numba is fastest per-slice; loop is still faster than
         # Python-level vectorize because the kernel itself is compiled.
         result_2d = np.empty((n_batch, n_target), dtype=np.float64)
         for i in range(n_batch):
-            result_2d[i] = _apply_numba_single(
-                matrix, flat_2d[i], missing_policy, parallel
-            )
+            result_2d[i] = _apply_numba_single(matrix, flat_2d[i], missing_policy, parallel)
     else:
         result_2d = _apply_scipy_batched(matrix, flat_2d, missing_policy)
 
