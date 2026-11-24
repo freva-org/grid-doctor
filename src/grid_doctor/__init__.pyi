@@ -8,6 +8,7 @@ from . import select as select
 from . import swath as swath
 from . import types as types
 from . import weights as weights
+from . import xarray_accessor as xarray_accessor
 from ._geometry.coords import get_latlon_resolution as get_latlon_resolution
 from ._geometry.healpix import (
     resolution_to_healpix_level as resolution_to_healpix_level,
@@ -50,6 +51,7 @@ __all__ = [
     "swath",
     "types",
     "weights",
+    "xarray_accessor",
     "apply_weight_file",
     "attach_cell_coords",
     "bin_to_healpix",

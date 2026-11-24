@@ -9,6 +9,8 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING
 
+from . import xarray_accessor  # noqa: F401  registers on import
+
 __version__ = "2604.0.0"
 
 _SUBMODULES: dict[str, str] = {
@@ -22,6 +24,7 @@ _SUBMODULES: dict[str, str] = {
     "swath": ".swath",
     "types": ".types",
     "weights": ".weights",
+    "xarray_accessor": ".xarray_accessor",
 }
 
 
@@ -152,6 +155,7 @@ __all__ = [
     "swath",
     "types",
     "weights",
+    "xarray_accessor",
     "apply_weight_file",
     "attach_cell_coords",
     "bin_to_healpix",
