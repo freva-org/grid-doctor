@@ -452,13 +452,13 @@ class WeightsStore:
         ```
     """
 
-    def __init__(
+    def __init__(  # noqa: D107
         self,
         location: str | Path | FSMap | None = None,
         *,
         cache_dir: str | Path | None = None,
         read_only: bool | None = None,
-    ) -> None:  # noqa: D107
+    ) -> None:
         from fsspec.core import url_to_fs
         from fsspec.mapping import FSMap
 
