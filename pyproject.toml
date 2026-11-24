@@ -71,6 +71,7 @@ tests = [
     "mock",
     "pytest-mock",
     "pytest-cov",
+    "pytest-xdist",
     "healpy",
     "pandas>=2.2",
     "bottleneck",
@@ -150,7 +151,7 @@ python_functions = ["test_*"]
 addopts = "-v --cov=grid_doctor --cov-report=term-missing"
 
 [tool.coverage.run]
-source = ["grid-doctor"]
+source = ["grid_doctor"]
 branch = false
 
 [tool.coverage.report]
@@ -198,15 +199,19 @@ commands =
     ruff format {posargs:src}
 
 [testenv:test]
+# System site packages (conda) provide ESMF/ESMPy. pytest would also
+# auto-load every plugin registered there, even ones whose module the env
+# shadows (e.g. platformdirs.pytest_plugin), so load plugins explicitly.
 setenv =
     VIRTUALENV_SYSTEM_SITE_PACKAGES=true
+    PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 description = "Run the unit tests."
 # Keep system packages available for external libraries, but install declared
 # dependencies locally so they take precedence over inherited packages.
 install_command = python -I -m pip install --ignore-installed {opts} {packages}
 deps = -e .[tests]
 commands =
-    python3 -m pytest -vv --cov=grid_doctor --cov-report=html:coverage_report --junitxml report.xml --cov-report xml tests/
+    python3 -m pytest -vv -p pytest_cov -p xdist.plugin -n auto --cov=grid_doctor --cov-report=html:coverage_report --junitxml report.xml --cov-report xml tests/
     python3 -m coverage report --fail-under=65 --precision=2
 
 [testenv:docs]
