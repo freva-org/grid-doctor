@@ -10,12 +10,8 @@ import numpy as np
 import numpy_groupies as npg
 import xarray as xr
 
-from ..remap_backend import (
-    _LAT_NAMES,
-    _LON_NAMES,
-    _canonical_lon,
-    _normalise_angle_units,
-)
+from .._geometry.coords import _LAT_NAMES, _LON_NAMES
+from .._geometry.normalise import _canonical_lon, _normalise_angle_units
 from ..types import BinAgg, FloatArray, Int64Array, SourceUnits
 
 logger = logging.getLogger(__name__)

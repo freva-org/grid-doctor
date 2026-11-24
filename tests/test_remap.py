@@ -15,57 +15,72 @@ import xarray as xr
 
 from grid_doctor import remap
 from grid_doctor import remap_backend as remap_backend_module
+from grid_doctor._geometry import healpix as healpix_module
+from grid_doctor._geometry import spectral as spectral_module
+from grid_doctor._geometry import sphere as sphere_module
 from grid_doctor import weights as weights_module
 from grid_doctor.metadata import HealpixGrid
-from grid_doctor.remap import (
+from grid_doctor._geometry.healpix import (
     _attach_healpix_coords,
+    _healpix_centres,
+)
+from grid_doctor.remap import (
     _flattened_size,
     _guess_source_dims_from_size,
-    _healpix_centres,
     _parse_source_dims_attr,
     _resolve_source_dims_for_weight_application,
     apply_weight_file,
     regrid_to_healpix,
     regrid_unstructured_to_healpix,
 )
-from grid_doctor.remap_backend import (
+from grid_doctor._geometry.coords import (
     _get_latlon_names,
-    _canonical_lon,
     _get_latlon_arrays,
-    _looks_like_radians,
-    _classify_source_kind,
-    _collapse_repeated_corners,
-    _corner_mesh_from_arrays,
-    _default_offline_enabled,
-    _ensure_ccw,
     _get_unstructured_vertices,
     _get_unstructured_dim,
     _get_spatial_dims,
+)
+from grid_doctor._geometry.healpix import _require_healpix_geo_module
+from grid_doctor._geometry.mesh import (
+    _classify_source_kind,
+    _collapse_repeated_corners,
+    _corner_mesh_from_arrays,
     _infer_bounds_1d,
     _infer_curvilinear_corners,
     _lat_coverage_from_centres,
     _looks_global,
     _lon_coverage_from_centres,
-    _materialise_spectral_source,
     _median_positive_step,
     _mesh_to_polygons,
-    _normalise_angle_units,
     _polygons_to_corner_arrays,
     _regular_grid_mesh,
-    _require_esmpy,
-    _require_healpix_geo_module,
-    _run_offline_esmf,
-    _run_subprocess,
     _source_mesh,
+)
+from grid_doctor._geometry.normalise import (
+    _canonical_lon,
+    _looks_like_radians,
+    _normalise_angle_units,
+    normalise_dataset,
+)
+from grid_doctor._geometry.spectral import (
+    _materialise_spectral_source,
+    _run_subprocess,
+    SpectralTransformError,
+)
+from grid_doctor._geometry.sphere import (
+    _ensure_ccw,
     _spherical_centroid,
     _vectorized_polygon_centres,
     _xyz_to_lonlat,
+)
+from grid_doctor.remap_backend import (
+    _default_offline_enabled,
+    _require_esmpy,
+    _run_offline_esmf,
     OfflineWeightConfig,
-    SpectralTransformError,
     compute_healpix_weights_backend,
     run_esmf_regrid_weightgen,
     write_ugrid_mesh_file,
-    normalise_dataset,
 )
 from grid_doctor.weights import describe_source
 
@@ -310,7 +325,7 @@ class TestBackendPolygonMeshes:
                 np.array([[np.nan]]), np.array([[np.nan]])
             )
         monkeypatch.setattr(
-            remap_backend_module.np, "sqrt", lambda values: np.zeros_like(values)
+            sphere_module.np, "sqrt", lambda values: np.zeros_like(values)
         )
         with pytest.raises(ValueError, match="zero-length"):
             _vectorized_polygon_centres(
@@ -376,7 +391,7 @@ class TestBackendExternalWorkflows:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setattr(
-            remap_backend_module.subprocess,
+            spectral_module.subprocess,
             "run",
             lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="out", stderr="err"),
         )
@@ -421,7 +436,7 @@ class TestBackendExternalWorkflows:
         def write_transformed(cmd: list[str]) -> None:
             xr.Dataset(coords={"lat": ("y", [0.0, 1.0]), "lon": ("x", [0.0, 1.0])}).to_netcdf(cmd[-1])
 
-        monkeypatch.setattr(remap_backend_module, "_run_subprocess", write_transformed)
+        monkeypatch.setattr(spectral_module, "_run_subprocess", write_transformed)
         transformed = _materialise_spectral_source(
             regular_ds,
             transform_command=["transform", "{input}", "{output}"],
@@ -439,7 +454,7 @@ class TestBackendExternalWorkflows:
         assert set(transformed_from_path.coords) == {"lat", "lon"}
 
         monkeypatch.setattr(
-            remap_backend_module,
+            spectral_module,
             "_run_subprocess",
             lambda cmd: (_ for _ in ()).throw(RuntimeError("bad transform")),
         )
@@ -703,7 +718,7 @@ class TestGlobalCoverage:
 class TestHealpixCentres:
     def test_uses_healpix_geo_module(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            remap,
+            healpix_module,
             "_require_healpix_geo_module",
             lambda grid: (_FakeHealpixModule(), {}),
         )
@@ -1376,7 +1391,7 @@ class TestNormaliseDataset:
     )
     def test_normalise_missing_units_guesses_from_pair(self, caplog, lat, lon, expected):
         ds = xr.Dataset(coords={"lat": lat, "lon": lon})
-        with caplog.at_level(logging.WARNING, logger="grid_doctor.remap_backend"):
+        with caplog.at_level(logging.WARNING, logger="grid_doctor._geometry.normalise"):
             norm_ds = normalise_dataset(ds)
         factor = np.degrees(1.0) if expected == "radians" else 1.0
         np.testing.assert_allclose(norm_ds["lat"], np.asarray(lat) * factor, atol=1e-6)
@@ -1405,7 +1420,7 @@ class TestNormaliseDataset:
         ds = xr.Dataset(coords={"lat": [0.0, 0.5], "lon": [0.0, 1.0]})
         for c in ds.coords:
             ds[c].attrs["units"] = "degrees"
-        with caplog.at_level(logging.WARNING, logger="grid_doctor.remap_backend"):
+        with caplog.at_level(logging.WARNING, logger="grid_doctor._geometry.normalise"):
             norm_ds = normalise_dataset(ds, source_units="rad")
         np.testing.assert_allclose(norm_ds["lat"], np.degrees([0.0, 0.5]), atol=1e-6)
         assert not caplog.text

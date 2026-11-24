@@ -40,6 +40,11 @@ from collections.abc import Hashable, Mapping
 import numpy as np
 import xarray as xr
 
+from ._geometry.healpix import (
+    _ellipsoid_or_config,
+    _require_healpix_geo_module,
+)
+from ._geometry.normalise import _canonical_lon
 from .metadata import (
     CELL_DIM,
     LAT_VAR,
@@ -48,11 +53,6 @@ from .metadata import (
     HealpixMetadata,
     Provenance,
     has_healpix_metadata,
-)
-from .remap_backend import (
-    _canonical_lon,
-    _ellipsoid_or_config,
-    _require_healpix_geo_module,
 )
 from .types import Ellipsoid, Int64Array
 

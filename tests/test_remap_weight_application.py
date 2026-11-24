@@ -12,6 +12,8 @@ import pytest
 import xarray as xr
 
 from grid_doctor import config, remap, remap_backend
+from grid_doctor._geometry import healpix as healpix_module
+from grid_doctor._geometry import mesh as mesh_module
 from grid_doctor.metadata import ELLIPSOID_ATTR
 from grid_doctor.remap import (
     apply_weight_file,
@@ -132,12 +134,12 @@ class TestWeightGeneration:
             remap_backend, "_require_esmpy", lambda: _FakeESMPy()
         )
         monkeypatch.setattr(
-            remap_backend,
+            mesh_module,
             "_require_healpix_geo_module",
             lambda grid: (_FakeHealpixModule(), {}),
         )
         monkeypatch.setattr(
-            remap,
+            healpix_module,
             "_require_healpix_geo_module",
             lambda grid: (_FakeHealpixModule(), {}),
         )
@@ -157,7 +159,7 @@ class TestWeightGeneration:
 
     def _fake_healpix(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
-        for module in (remap_backend, remap):
+        for module in (mesh_module, healpix_module):
             monkeypatch.setattr(module, "_require_healpix_geo_module", lambda grid: (_FakeHealpixModule(), {}))
 
     def test_write_is_atomic(
@@ -221,7 +223,7 @@ class TestWeightGeneration:
         from grid_doctor.weights import WeightsDescription, describe_source
 
         monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
-        for module in (remap_backend, remap):
+        for module in (mesh_module, healpix_module):
             monkeypatch.setattr(module, "_require_healpix_geo_module", lambda grid: (_FakeHealpixModule(), {}))
         monkeypatch.setattr("grid_doctor.utils.cache_dir", lambda: tmp_path)
 
@@ -247,7 +249,7 @@ class TestWeightGeneration:
     ) -> None:
         monkeypatch.setattr(remap_backend, "_require_esmpy", lambda: _FakeESMPy())
         monkeypatch.setattr(
-            remap_backend, "_require_healpix_geo_module", lambda grid: (_FakeHealpixModule(), {})
+            mesh_module, "_require_healpix_geo_module", lambda grid: (_FakeHealpixModule(), {})
         )
         path = tmp_path / "weights.nc"
         with config.healpix.set(ellipsoid="WGS84"):
@@ -265,12 +267,12 @@ class TestWeightGeneration:
             remap_backend, "_require_esmpy", lambda: _FakeESMPy()
         )
         monkeypatch.setattr(
-            remap_backend,
+            mesh_module,
             "_require_healpix_geo_module",
             lambda grid: (_FakeHealpixModule(), {}),
         )
         monkeypatch.setattr(
-            remap,
+            healpix_module,
             "_require_healpix_geo_module",
             lambda grid: (_FakeHealpixModule(), {}),
         )
@@ -298,12 +300,12 @@ class TestWeightGeneration:
             remap_backend, "_require_esmpy", lambda: _FakeESMPy()
         )
         monkeypatch.setattr(
-            remap_backend,
+            mesh_module,
             "_require_healpix_geo_module",
             lambda grid: (_FakeHealpixModule(), {}),
         )
         monkeypatch.setattr(
-            remap,
+            healpix_module,
             "_require_healpix_geo_module",
             lambda grid: (_FakeHealpixModule(), {}),
         )

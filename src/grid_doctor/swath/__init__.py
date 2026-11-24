@@ -64,6 +64,12 @@ from collections.abc import Mapping
 import numpy as np
 import xarray as xr
 
+from .._geometry.healpix import (
+    _attach_healpix_coords,
+    _ellipsoid_or_config,
+    _require_healpix_geo_module,
+)
+from .._geometry.normalise import _canonical_lon
 from ..metadata import (
     CELL_DIM,
     LAT_VAR,
@@ -74,12 +80,6 @@ from ..metadata import (
     has_healpix_metadata,
     variable_method,
     variable_method_attrs,
-)
-from ..remap import _attach_healpix_coords
-from ..remap_backend import (
-    _canonical_lon,
-    _ellipsoid_or_config,
-    _require_healpix_geo_module,
 )
 from ..types import BinAgg, Ellipsoid, Int64Array, SourceUnits
 from .utils import (

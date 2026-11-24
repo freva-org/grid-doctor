@@ -10,7 +10,7 @@ import pytest
 import xarray as xr
 
 from grid_doctor.metadata import HealpixGrid
-from grid_doctor.remap_backend import _source_mesh
+from grid_doctor._geometry.mesh import _source_mesh
 from grid_doctor.weights import (
     WEIGHTS_VERSION,
     WeightsDescription,

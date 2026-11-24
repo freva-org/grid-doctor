@@ -243,10 +243,10 @@ def cached_weights(
     weight_file = cached_weights(ds, level=8, store="/work/ab1234/weights")
     ```
     """
+    from ._geometry.healpix import _ellipsoid_or_config
     from .helpers import get_latlon_resolution, resolution_to_healpix_level
     from .metadata import HealpixGrid
     from .remap import compute_healpix_weights
-    from .remap_backend import _ellipsoid_or_config
     from .weights import WeightsDescription
     from .weights import WeightsStore as _WeightsStore
     from .weights import check_coverage, describe_source

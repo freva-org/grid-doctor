@@ -16,6 +16,7 @@ from typing import Literal
 import numpy as np
 import xarray as xr
 
+from .._geometry.healpix import _healpix_centres
 from ..metadata import (
     CELL_DIM,
     LAT_VAR,
@@ -25,7 +26,6 @@ from ..metadata import (
     Provenance,
     has_healpix_metadata,
 )
-from ..remap import _healpix_centres
 from ..types import CoarsenMode, FloatArray, NumberArray, ValidFraction
 from ._blocks import (
     Array,

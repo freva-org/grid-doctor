@@ -32,6 +32,15 @@ import numpy as np
 import numpy.typing as npt
 import xarray as xr
 
+from ._geometry.coords import _get_latlon_names, _get_vertex_names
+from ._geometry.mesh import (
+    PolygonMesh,
+    _classify_source_kind,
+    _looks_global,
+    _source_mesh,
+)
+from ._geometry.normalise import _MICRO_SCALE, normalise_dataset
+from ._geometry.spectral import _materialise_spectral_source
 from .metadata import (
     ELLIPSOIDS,
     GRID_MAPPING_NAME,
@@ -39,17 +48,6 @@ from .metadata import (
     HealpixGrid,
 )
 from .metadata import _keys as keys
-from .remap_backend import (
-    _MICRO_SCALE,
-    PolygonMesh,
-    _classify_source_kind,
-    _get_latlon_names,
-    _get_vertex_names,
-    _looks_global,
-    _materialise_spectral_source,
-    _source_mesh,
-    normalise_dataset,
-)
 from .types import RemapMethod, SourceKind, SourceUnits
 
 if TYPE_CHECKING:
@@ -245,7 +243,7 @@ def _source_hash(ds: xr.Dataset) -> str:
     """Hash the cell centres and vertices of *ds*.
 
     *ds* is expected to be normalised (see
-    [`normalise_dataset`][grid_doctor.remap_backend.normalise_dataset]):
+    [`normalise_dataset`][grid_doctor._geometry.normalise.normalise_dataset]):
     degrees, longitudes in ``[-180, 180)``, rounded to micro-degrees. The
     values are hashed as those integers, so float noise below half a
     micro-degree, dtypes and signed zeros do not change the digest.

@@ -20,6 +20,11 @@ import numpy as np
 import s3fs
 import xarray as xr
 
+from ._geometry.coords import (
+    _get_latlon_arrays,
+    _get_unstructured_dim,
+    _is_unstructured,
+)
 from .io import (
     DeferredWrite,
     deferred_writes,
@@ -55,11 +60,6 @@ from .pyramid import (
 from .remap import (
     regrid_to_healpix,
     regrid_unstructured_to_healpix,
-)
-from .remap_backend import (
-    _get_latlon_arrays,
-    _get_unstructured_dim,
-    _is_unstructured,
 )
 from .types import (
     CoarsenMode,

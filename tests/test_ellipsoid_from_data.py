@@ -22,7 +22,10 @@ import grid_doctor as gd
 from grid_doctor import select
 from grid_doctor.metadata import ELLIPSOID_ATTR, HealpixGrid, HealpixMetadata
 from grid_doctor.pyramid._levels import assemble_coarse_level
-from grid_doctor.remap import _attach_healpix_coords, _healpix_centres
+from grid_doctor._geometry.healpix import (
+    _attach_healpix_coords,
+    _healpix_centres,
+)
 from grid_doctor.types import Ellipsoid
 
 LEVEL = 2
