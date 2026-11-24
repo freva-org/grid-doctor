@@ -31,8 +31,8 @@ from grid_doctor.io import (
 from grid_doctor.io import _fanout as fanout
 from grid_doctor.io._manifest import plan_tasks
 
-from . import test_fanout as base
-from .test_chunked_pyramid import _weight_file
+from ..helpers import _weight_file
+from . import fanout_helpers as base
 
 STATE = "_grid_doctor"
 
@@ -113,8 +113,6 @@ class TestCorruptStateFiles:
     def test_summary_mentions_stale_markers(self) -> None:
         report = StoreReport("m", 2, ("a",), ("b",), (), 3, ())
         assert "Ignored 3 stale marker(s)." in report.summary()
-
-
 # ----------------------------------------------------------------------
 # Damaged stores
 # ----------------------------------------------------------------------
@@ -172,8 +170,6 @@ class TestDamagedStore:
         report = gd.check_pyramid_store(manifest, inspect_chunks=True)
         assert any(p.startswith("level 1: cannot open") for p in report.problems)
         assert report.missing_tasks == ()
-
-
 # ----------------------------------------------------------------------
 # Resume against a different pyramid
 # ----------------------------------------------------------------------
@@ -214,8 +210,6 @@ class TestResumeDifferences:
         pyramid, manifest = _init(tmp_path)
         loaded = {k: v.assign(lsm=v["lsm"].compute()) for k, v in pyramid.items()}
         assert self._resume(tmp_path, loaded) == manifest
-
-
 # ----------------------------------------------------------------------
 # Coordinate comparison
 # ----------------------------------------------------------------------
@@ -260,8 +254,6 @@ class TestCoordinateDifferences:
         )
         (problem,) = self._diff(path, other)
         assert "coordinate 'bounds': dims ('time', 'edge') != stored" in problem
-
-
 # ----------------------------------------------------------------------
 # Worker input
 # ----------------------------------------------------------------------
@@ -292,8 +284,6 @@ class TestWorkerInput:
         cut = {k: v.isel(cell=slice(0, 10)) for k, v in pyramid.items()}
         with pytest.raises(ManifestError, match="10 elements along 'cell', the store"):
             gd.write_pyramid_task(cut, _timed_task(manifest))
-
-
 # ----------------------------------------------------------------------
 # init_pyramid_store arguments
 # ----------------------------------------------------------------------
@@ -317,8 +307,6 @@ class TestInitArguments:
     def test_variables_per_task_must_be_positive(self, tmp_path: Path) -> None:
         with pytest.raises(ManifestError, match="variables_per_task must be a positive"):
             gd.init_pyramid_store(base._pyramid(), str(tmp_path), variables_per_task=0)
-
-
 # ----------------------------------------------------------------------
 # Manifest validation
 # ----------------------------------------------------------------------

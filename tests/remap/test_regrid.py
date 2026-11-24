@@ -1,8 +1,7 @@
-"""Tests for the weight-generation + application workflow."""
+"""Weight generation and ``regrid_to_healpix`` (``grid_doctor.remap._regrid``)."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -15,13 +14,127 @@ from grid_doctor import config, remap
 from grid_doctor._geometry import healpix as healpix_module
 from grid_doctor._geometry import mesh as mesh_module
 from grid_doctor.metadata import ELLIPSOID_ATTR
-from grid_doctor.remap import _apply as apply_module
 from grid_doctor.remap import _esmf as esmf_module
-from grid_doctor.remap import apply_weight_file, compute_healpix_weights
+from grid_doctor.remap import _regrid as regrid_module
+from grid_doctor.remap import (
+    compute_healpix_weights,
+    regrid_to_healpix,
+)
 from grid_doctor.types import Ellipsoid
 
-from .helpers import _FakeHealpixModule
+from ..helpers import _FakeHealpixModule
 
+
+@pytest.mark.parametrize(
+    "missing_policy",
+    ["renormalize", "propagate"],
+)
+def test_regrid_to_healpix_weight_methods_delegate(
+    regular_ds: xr.Dataset,
+    missing_policy: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    weight_file = tmp_path / "weights.nc"
+    calls: dict[str, Any] = {}
+
+    def fake_compute(ds: xr.Dataset, level: int, **kwargs: Any) -> Path:
+        del ds, level
+        calls["compute"] = kwargs
+        weight_file.write_text("ok")
+        return weight_file
+
+    def fake_apply(
+        ds: xr.Dataset,
+        path: str | Path,
+        *,
+        missing_policy: str = "renormalize",
+        **kwargs: Any,
+    ) -> xr.Dataset:
+        calls["apply"] = {"path": Path(path), "missing_policy": missing_policy}
+        return xr.Dataset(
+            {"temperature": (("cell",), np.arange(3, dtype=np.float64))},
+            attrs=ds.attrs.copy(),
+        )
+
+    monkeypatch.setattr(regrid_module, "compute_healpix_weights", fake_compute)
+    monkeypatch.setattr(remap, "compute_healpix_weights", fake_compute)  # cached_weights
+    monkeypatch.setattr(regrid_module, "apply_weight_file", fake_apply)
+
+    result = regrid_to_healpix(
+        regular_ds, level=1, method="nearest", missing_policy=missing_policy
+    )
+    assert result.sizes["cell"] == 3
+    assert calls["apply"]["missing_policy"] == missing_policy
+
+
+def test_regrid_to_healpix_reuses_default_store(
+    regular_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch, _isolated_weights_store: Path
+) -> None:
+    """Without ``weights_path`` weights come from the default store: computed once, then reused."""
+    computed: list[Path] = []
+
+    def fake_compute(ds: xr.Dataset, level: int, **kwargs: Any) -> Path:
+        path = Path(kwargs["weights_path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("weights")
+        computed.append(path)
+        return path
+
+    applied: list[Path] = []
+
+    def fake_apply(ds: xr.Dataset, path: str | Path, **kwargs: Any) -> xr.Dataset:
+        applied.append(Path(path))
+        return xr.Dataset({"temperature": (("cell",), np.zeros(3))})
+
+    monkeypatch.setattr(regrid_module, "compute_healpix_weights", fake_compute)
+    monkeypatch.setattr(remap, "compute_healpix_weights", fake_compute)  # cached_weights
+    monkeypatch.setattr(regrid_module, "apply_weight_file", fake_apply)
+
+    regrid_to_healpix(regular_ds)  # level derived from the grid resolution
+    regrid_to_healpix(regular_ds)
+    assert len(computed) == 1
+    assert applied == computed * 2
+    assert computed[0].is_relative_to(_isolated_weights_store / "weights")  # the default store
+
+
+# ===================================================================
+# Public regridding entry points
+# ===================================================================
+
+
+class TestPublicRegridding:
+    def test_regrid_to_healpix_nearest(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        regular_ds: xr.Dataset,
+        tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "weights.nc"
+        called: dict[str, Any] = {}
+
+        def fake_compute(ds: xr.Dataset, level: int, **kwargs: Any) -> Path:
+            called["computed"] = True
+            path.write_text("placeholder")
+            return path
+
+        def fake_apply(
+            ds: xr.Dataset,
+            weights_path: str | Path,
+            **kwargs: Any,
+        ) -> xr.Dataset:
+            called["applied"] = True
+            return xr.Dataset(
+                {"t": ("cell", np.arange(3, dtype=np.float64))},
+                attrs=ds.attrs.copy(),
+            )
+
+        monkeypatch.setattr(regrid_module, "compute_healpix_weights", fake_compute)
+        monkeypatch.setattr(regrid_module, "apply_weight_file", fake_apply)
+
+        result = regrid_to_healpix(regular_ds, 2, method="nearest", weights_path=path)
+        assert called == {"computed": True, "applied": True}
+        assert result.sizes["cell"] == 3
 # ===================================================================
 # Fake ESMPy objects for in-memory weight generation
 # ===================================================================
@@ -323,57 +436,3 @@ class TestWeightGeneration:
             _FakeRegrid.last_kwargs["unmapped_action"]
             == _FakeESMPy.UnmappedAction.IGNORE
         )
-
-
-# ===================================================================
-# End-to-end weight application with grid argument
-# ===================================================================
-
-
-class TestApplyWeightFileWithGrid:
-    def test_with_grid_argument(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        ds = xr.Dataset(
-            {
-                "temperature": xr.DataArray(
-                    [[1.0, 2.0, 3.0]],
-                    dims=("time", "cell"),
-                    coords={"time": [0], "cell": [0, 1, 2]},
-                )
-            }
-        )
-        grid = xr.Dataset(coords={"cell": [0, 1, 2]})
-
-        weights = xr.Dataset(
-            {
-                "row": (
-                    "nnz",
-                    np.array([1, 2, 2], dtype=np.int32),
-                ),
-                "col": (
-                    "nnz",
-                    np.array([1, 2, 3], dtype=np.int32),
-                ),
-                "S": (
-                    "nnz",
-                    np.array([1.0, 0.25, 0.75], dtype=np.float64),
-                ),
-            },
-        )
-        path = tmp_path / "weights.nc"
-        weights.to_netcdf(path)
-
-        monkeypatch.setattr(
-            apply_module, "_source_centre_arrays",
-            lambda obj, source_units="auto": (
-                np.array([0.0, 1.0, 2.0], dtype=np.float64),
-                np.array([10.0, 20.0, 30.0], dtype=np.float64),
-                ("cell",),
-            ),
-        )
-        result = apply_weight_file(ds, path, grid=grid)
-        out = result["temperature"].isel(time=0).values
-        np.testing.assert_allclose(out, [1.0, 2.75])

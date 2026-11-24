@@ -23,7 +23,7 @@ from grid_doctor.metadata import (
 )
 from grid_doctor.metadata._pyramid import pyramid_root_attrs
 
-SCHEMAS = Path(__file__).parent / "data" / "zarr_conventions"
+SCHEMAS = Path(__file__).parents[1] / "data" / "zarr_conventions"
 FINEST = 3
 
 

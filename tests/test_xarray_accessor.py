@@ -9,7 +9,7 @@ from pathlib import Path
 import xarray as xr
 
 import grid_doctor as gd
-from grid_doctor.xarray_accessor import DataTreeAccessor, DatasetAccessor
+from grid_doctor.xarray_accessor import DatasetAccessor, DataTreeAccessor
 
 
 def test_dataset_accessor_is_registered() -> None:

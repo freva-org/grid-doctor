@@ -1,418 +1,23 @@
-"""Tests for pyramid building, resolution helpers and saving pyramids."""
+"""``save_pyramid`` and ``init_pyramid_store`` (``grid_doctor.io._save``)."""
 
 from __future__ import annotations
 
 import os
-from concurrent.futures import (
-    ThreadPoolExecutor,
-)
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from unittest import mock
 
 import numpy as np
 import pytest
 import xarray as xr
 
-from grid_doctor.pyramid import _build as build_module
-from grid_doctor._geometry.coords import (
-    _get_latlon_arrays,
-    _get_unstructured_dim,
-    _is_unstructured,
-    get_latlon_resolution,
-)
-from grid_doctor._geometry.healpix import resolution_to_healpix_level
 from grid_doctor.io._save import (
     init_pyramid_store,
     save_pyramid,
 )
-from grid_doctor.pyramid._build import (
-    coarsen_healpix,
-    create_healpix_pyramid,
-)
-from grid_doctor.pyramid._kernels import (
-    _coarsen_array,
-    _coarsen_array_mode,
-)
-from grid_doctor.metadata import HealpixMetadata, PyramidMetadata
-from grid_doctor.pyramid import _levels as pyramid_levels
+from grid_doctor.metadata import PyramidMetadata
 
-from .helpers import with_healpix_metadata
-
-
-class TestGridDetection:
-    def test_is_unstructured_from_dimension(self, unstructured_ds: xr.Dataset) -> None:
-        assert _is_unstructured(unstructured_ds) is True
-
-    def test_is_unstructured_from_attribute(self) -> None:
-        ds = xr.Dataset(
-            {"t": (("points",), np.zeros(3), {"CDI_grid_type": "unstructured"})},
-            coords={"lat": ("points", np.zeros(3)), "lon": ("points", np.zeros(3))},
-        )
-        assert _is_unstructured(ds) is True
-
-    def test_get_unstructured_dim_prefers_known_name(
-        self, unstructured_ds: xr.Dataset
-    ) -> None:
-        assert _get_unstructured_dim(unstructured_ds) == "cell"
-
-    def test_get_unstructured_dim_falls_back_to_lat_dim(self) -> None:
-        ds = xr.Dataset(
-            {"t": (("points",), np.zeros(4))},
-            coords={"clat": ("points", np.zeros(4)), "clon": ("points", np.zeros(4))},
-        )
-        assert _get_unstructured_dim(ds) == "points"
-
-    def test_get_latlon_arrays_raises(self) -> None:
-        with pytest.raises(ValueError, match="Could not locate"):
-            _get_latlon_arrays(xr.Dataset({"t": (("x",), np.zeros(3))}))
-
-
-class TestResolutionHelpers:
-    def test_regular_resolution(self, regular_ds: xr.Dataset) -> None:
-        resolution = get_latlon_resolution(regular_ds)
-        assert 0.0 < resolution < 30.0
-
-    def test_curvilinear_resolution(self, curvilinear_ds: xr.Dataset) -> None:
-        resolution = get_latlon_resolution(curvilinear_ds)
-        assert 0.0 < resolution < 30.0
-
-    def test_unstructured_resolution(self, unstructured_ds: xr.Dataset) -> None:
-        resolution = get_latlon_resolution(unstructured_ds)
-        assert resolution > 0.0
-
-    def test_resolution_to_healpix_level(self) -> None:
-        assert resolution_to_healpix_level(1.0) >= 0
-        with pytest.raises(ValueError, match="positive"):
-            resolution_to_healpix_level(0.0)
-
-
-class TestCoarsenArray:
-    """Tests for the low-level ``_coarsen_array`` mean kernel."""
-
-    def test_all_valid(self) -> None:
-        data = np.array([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]])
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
-        np.testing.assert_allclose(result, [[2.5, 6.5]])
-
-    def test_below_threshold_becomes_nan(self) -> None:
-        """1 of 4 valid children (25%) is below the 50% threshold."""
-        data = np.array([[1.0, np.nan, np.nan, np.nan, 5.0, 6.0, 7.0, 8.0]])
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
-        assert np.isnan(result[0, 0]), "1/4 valid should be NaN"
-        np.testing.assert_allclose(result[0, 1], 6.5)
-
-    def test_at_threshold_is_valid(self) -> None:
-        """2 of 4 valid children (50%) meets the 50% threshold."""
-        data = np.array([[1.0, 2.0, np.nan, np.nan]])
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
-        np.testing.assert_allclose(result[0, 0], 1.5)
-
-    def test_all_nan_becomes_nan(self) -> None:
-        data = np.full((1, 4), np.nan)
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
-        assert np.isnan(result[0, 0])
-
-    def test_siberian_lake_killed(self) -> None:
-        """A single valid pixel among 3 NaN siblings must not survive."""
-        data = np.full((1, 4), np.nan)
-        data[0, 2] = 15.0
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
-        assert np.isnan(result[0, 0])
-
-    def test_batch_dims_preserved(self) -> None:
-        data = np.ones((3, 5, 16))
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.5)
-        assert result.shape == (3, 5, 4)
-
-    def test_custom_threshold(self) -> None:
-        """With threshold 0.25, 1 of 4 valid should survive."""
-        data = np.array([[7.0, np.nan, np.nan, np.nan]])
-        result = _coarsen_array(data, factor=4, min_valid_fraction=0.25)
-        np.testing.assert_allclose(result[0, 0], 7.0)
-
-    def test_strict_threshold(self) -> None:
-        """With threshold 1.0, any NaN child kills the parent."""
-        data = np.array([[1.0, 2.0, 3.0, np.nan]])
-        result = _coarsen_array(data, factor=4, min_valid_fraction=1.0)
-        assert np.isnan(result[0, 0])
-
-
-class TestCoarsenArrayMode:
-    """Tests for the low-level ``_coarsen_array_mode`` kernel."""
-
-    def test_clear_majority(self) -> None:
-        data = np.array([[5.0, 5.0, 5.0, 3.0]])
-        result = _coarsen_array_mode(data, factor=4, min_valid_fraction=0.5)
-        assert result[0, 0] == 5.0
-
-    def test_tie_returns_valid_class(self) -> None:
-        """All unique values — any of them is acceptable."""
-        data = np.array([[1.0, 2.0, 3.0, 4.0]])
-        result = _coarsen_array_mode(data, factor=4, min_valid_fraction=0.5)
-        assert result[0, 0] in {1.0, 2.0, 3.0, 4.0}
-
-    def test_nan_excluded_from_vote(self) -> None:
-        data = np.array([[3.0, 3.0, 7.0, np.nan]])
-        result = _coarsen_array_mode(data, factor=4, min_valid_fraction=0.5)
-        assert result[0, 0] == 3.0
-
-    def test_below_threshold_becomes_nan(self) -> None:
-        data = np.array([[5.0, np.nan, np.nan, np.nan]])
-        result = _coarsen_array_mode(data, factor=4, min_valid_fraction=0.5)
-        assert np.isnan(result[0, 0])
-
-    def test_at_threshold_is_valid(self) -> None:
-        data = np.array([[5.0, 5.0, np.nan, np.nan]])
-        result = _coarsen_array_mode(data, factor=4, min_valid_fraction=0.5)
-        assert result[0, 0] == 5.0
-
-    def test_batch_dims_preserved(self) -> None:
-        data = np.ones((2, 3, 8))
-        result = _coarsen_array_mode(data, factor=4, min_valid_fraction=0.5)
-        assert result.shape == (2, 3, 2)
-
-    def test_does_not_average_classes(self) -> None:
-        """Mode must return an actual class label, never an average."""
-        data = np.array([[2.0, 2.0, 8.0, 8.0]])
-        result = _coarsen_array_mode(data, factor=4, min_valid_fraction=0.5)
-        assert result[0, 0] in {2.0, 8.0}, "Result must be an existing class"
-        assert result[0, 0] != 5.0, "Must not be the average"
-
-
-class TestCoarsenHealpix:
-    def test_coarsens_nested_dataset(
-        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            pyramid_levels,
-            "healpix_coords",
-            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
-        )
-        coarse = coarsen_healpix(healpix_ds, target_level=1)
-        assert coarse.sizes["cell"] == 48
-        assert HealpixMetadata.from_dataset(coarse).grid.level == 1
-
-    def test_rejects_ring_order(self, healpix_ds: xr.Dataset) -> None:
-        ds = with_healpix_metadata(healpix_ds, 3, nest=False)
-        with pytest.raises(ValueError, match="only supports nested"):
-            coarsen_healpix(ds, target_level=1)
-
-    def test_preserves_non_cell_variable(
-        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            pyramid_levels,
-            "healpix_coords",
-            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
-        )
-        ds = healpix_ds.assign(scale=xr.DataArray(2.0))
-        coarse = coarsen_healpix(ds, target_level=1)
-        assert float(coarse["scale"]) == 2.0
-
-    def test_auto_mode_conservative_uses_mean(
-        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Auto coarsen_mode with conservative method should use mean."""
-        monkeypatch.setattr(
-            pyramid_levels,
-            "healpix_coords",
-            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
-        )
-        ds = with_healpix_metadata(healpix_ds.copy(), 3, method="conservative")
-        # Pattern repeats every 4 cells; groups of 16 contain 4 copies → mean = 3
-        ds["temperature"].values[:] = np.tile([0.0, 2.0, 4.0, 6.0], 192)
-        coarse = coarsen_healpix(ds, target_level=1, coarsen_mode="auto")
-        np.testing.assert_allclose(coarse["temperature"].values, 3.0)
-
-    def test_auto_mode_nearest_uses_mode(
-        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Auto coarsen_mode with nearest method should use mode."""
-        monkeypatch.setattr(
-            pyramid_levels,
-            "healpix_coords",
-            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
-        )
-        ds = with_healpix_metadata(healpix_ds.copy(), 3, method="nearest")
-        # Groups of 16: twelve 7s and four 3s → mode = 7
-        ds["temperature"].values[:] = np.tile([7.0, 7.0, 7.0, 3.0], 192)
-        coarse = coarsen_healpix(ds, target_level=1, coarsen_mode="auto")
-        np.testing.assert_array_equal(coarse["temperature"].values, 7.0)
-
-    def test_explicit_mean_overrides_nearest(
-        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Explicit coarsen_mode='mean' should average even with nearest method."""
-        monkeypatch.setattr(
-            pyramid_levels,
-            "healpix_coords",
-            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
-        )
-        ds = with_healpix_metadata(healpix_ds.copy(), 3, method="nearest")
-        ds["temperature"].values[:] = np.tile([0.0, 2.0, 4.0, 6.0], 192)
-        coarse = coarsen_healpix(ds, target_level=1, coarsen_mode="mean")
-        np.testing.assert_allclose(coarse["temperature"].values, 3.0)
-
-    def test_explicit_mode_overrides_conservative(
-        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Explicit coarsen_mode='mode' takes the mode even with conservative method."""
-        monkeypatch.setattr(
-            pyramid_levels,
-            "healpix_coords",
-            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
-        )
-        ds = with_healpix_metadata(healpix_ds.copy(), 3, method="conservative")
-        ds["temperature"].values[:] = np.tile([5.0, 5.0, 5.0, 9.0], 192)
-        coarse = coarsen_healpix(ds, target_level=1, coarsen_mode="mode")
-        np.testing.assert_array_equal(coarse["temperature"].values, 5.0)
-
-    def test_min_valid_fraction_kills_sparse_cells(
-        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            pyramid_levels,
-            "healpix_coords",
-            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
-        )
-        ds = healpix_ds.copy()
-        # All NaN except every 4th cell → 4 of 16 valid per group (25% < 50%).
-        ds["temperature"].values[:] = np.nan
-        ds["temperature"].values[:, 0::4] = 42.0
-        coarse = coarsen_healpix(ds, target_level=1, min_valid_fraction=0.5)
-        assert np.all(np.isnan(coarse["temperature"].values)), (
-            "Cells with only 4/16 valid children should be NaN"
-        )
-
-    def test_has_crs_variable(
-        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            pyramid_levels,
-            "healpix_coords",
-            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
-        )
-        coarse = coarsen_healpix(healpix_ds, target_level=1)
-        assert "crs" in coarse.coords
-        assert coarse.coords["crs"].attrs == {
-            "grid_mapping_name": "healpix",
-            "indexing_scheme": "nested",
-            "refinement_level": 1,
-        }
-        assert coarse["cell"].attrs["standard_name"] == "healpix_index"
-
-    def test_data_vars_have_grid_mapping(
-        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            pyramid_levels,
-            "healpix_coords",
-            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
-        )
-        coarse = coarsen_healpix(healpix_ds, target_level=1)
-        for name in coarse.data_vars:
-            if "cell" in coarse[name].dims:
-                assert coarse[name].attrs["grid_mapping"] == "crs"
-
-    def test_coarsened_from_level_attr(
-        self, healpix_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            pyramid_levels,
-            "healpix_coords",
-            lambda grid: (np.array([0.0] * 48), np.array([1.0] * 48)),
-        )
-        coarse = coarsen_healpix(healpix_ds, target_level=1)
-        assert coarse.attrs["grid_doctor_coarsened_from_level"] == 3
-
-
-class TestPyramidBuilders:
-    def test_create_healpix_pyramid_nested(
-        self, regular_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
-            del kwargs
-            npix = 12 * (4**level)
-            return with_healpix_metadata(
-                xr.Dataset(
-                    {"t": (("cell",), np.zeros(npix))},
-                    attrs=ds.attrs,
-                ),
-                level,
-            )
-
-        monkeypatch.setattr(build_module, "regrid_to_healpix", fake_regrid)
-        monkeypatch.setattr(
-            build_module,
-            "coarsen_healpix",
-            lambda ds, level, **kwargs: with_healpix_metadata(
-                xr.Dataset(
-                    {"t": (("cell",), np.zeros(12 * (4**level)))}, attrs=ds.attrs
-                ),
-                level,
-            ),
-        )
-        pyramid = create_healpix_pyramid(regular_ds, max_level=3, min_level=1)
-        assert set(pyramid) == {1, 2, 3}
-
-    def test_create_healpix_pyramid_ring_regrids_every_level(
-        self, regular_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        calls: list[int] = []
-
-        def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
-            calls.append(level)
-            return with_healpix_metadata(
-                xr.Dataset(
-                    {"t": (("cell",), np.zeros(12 * (4**level)))},
-                    attrs=ds.attrs,
-                ),
-                level, nest=False,
-            )
-
-        monkeypatch.setattr(build_module, "regrid_to_healpix", fake_regrid)
-        pyramid = create_healpix_pyramid(
-            regular_ds, max_level=2, min_level=0, nest=False
-        )
-        assert set(pyramid) == {0, 1, 2}
-        assert calls == [2, 1, 0]
-
-    def test_create_healpix_pyramid_forwards_coarsen_params(
-        self, regular_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        coarsen_calls: list[dict[str, Any]] = []
-
-        def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
-            npix = 12 * (4**level)
-            return with_healpix_metadata(
-                xr.Dataset(
-                    {"t": (("cell",), np.zeros(npix))},
-                    attrs=ds.attrs,
-                ),
-                level,
-            )
-
-        def fake_coarse_levels(
-            finest: xr.Dataset, **kwargs: Any
-        ) -> dict[int, xr.Dataset]:
-            coarsen_calls.append(kwargs)
-            return {}
-
-        monkeypatch.setattr(build_module, "regrid_to_healpix", fake_regrid)
-        monkeypatch.setattr(build_module, "coarse_levels", fake_coarse_levels)
-        create_healpix_pyramid(
-            regular_ds,
-            max_level=2,
-            min_level=0,
-            coarsen_mode="mode",
-            min_valid_fraction=0.75,
-        )
-        assert len(coarsen_calls) == 1
-        call = coarsen_calls[0]
-        assert call["max_level"] == 2
-        assert call["min_level"] == 0
-        assert call["coarsen_mode"] == "mode"
-        assert call["min_valid_fraction"] == 0.75
+from ..helpers import with_healpix_metadata
 
 
 class TestSavePyramid:
@@ -863,3 +468,161 @@ class TestSavePyramidMultiscales:
         xr.testing.assert_allclose(
             ds1.compute(), pyramid[11].compute().drop_vars(["cell", "latitude"])
         )
+
+
+LEVEL = 3
+NPIX = 12 * 4**LEVEL
+
+
+def _values_with_nans(shape: tuple[int, ...], seed: int = 54) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    values = rng.normal(size=shape)
+    values[..., : shape[-1] // 3] = np.nan  # a clustered "coastline"
+    values[rng.random(shape) < 0.3] = np.nan
+    return values
+
+
+class TestSavePyramidSingleStore:
+    @staticmethod
+    def _pyramid() -> dict[int, xr.Dataset]:
+        values = _values_with_nans((4, NPIX))
+        ds = xr.Dataset(
+            {"sst": (("time", "cell"), values)},
+            coords={"time": np.arange(4), "cell": np.arange(NPIX)},
+        )
+        return {LEVEL: ds.chunk(time=1, cell=192)}
+
+    def test_encoding_and_nan_fill(self, tmp_path: Path) -> None:
+        pyramid = self._pyramid()
+        save_pyramid(
+            pyramid,
+            str(tmp_path),
+            mode="w",
+            encoding={LEVEL: {"sst": {"dtype": "float32", "_FillValue": -999.0}}},
+        )
+        stored = xr.open_zarr(tmp_path / f"level_{LEVEL}.zarr")
+        raw = xr.open_zarr(tmp_path / f"level_{LEVEL}.zarr", mask_and_scale=False)
+        assert raw["sst"].dtype == np.float32
+        assert (raw["sst"].values == -999.0).any()
+        np.testing.assert_allclose(
+            stored["sst"].values,
+            pyramid[LEVEL]["sst"].values.astype(np.float32),
+            equal_nan=True,
+        )
+
+    def test_region_write(self, tmp_path: Path) -> None:
+        pyramid = self._pyramid()
+        init_pyramid_store(pyramid, str(tmp_path))
+        save_pyramid(
+            pyramid,
+            str(tmp_path),
+            mode="r+",
+            region={"time": slice(1, 3)},
+        )
+        stored = xr.open_zarr(tmp_path / f"level_{LEVEL}.zarr")["sst"].values
+        expected = pyramid[LEVEL]["sst"].values
+        np.testing.assert_allclose(stored[1:3], expected[1:3], equal_nan=True)
+        assert np.isnan(stored[[0, 3]]).all()
+
+    def test_region_write_keeps_stored_packing(self, tmp_path: Path) -> None:
+        """Region updates are packed with the store's scale and offset."""
+        ds = xr.Dataset({"sst": (("time", "cell"), np.full((2, 12), 280.0))})
+        ds = ds.chunk(time=1)
+        packing = {
+            "dtype": "int16",
+            "scale_factor": 0.1,
+            "add_offset": 270.0,
+            "_FillValue": -9999,
+        }
+        save_pyramid({0: ds}, str(tmp_path), mode="w", encoding={0: {"sst": packing}})
+        update = ds.assign(sst=xr.full_like(ds["sst"], 310.0))
+        save_pyramid(
+            {0: update}, str(tmp_path), mode="r+", region={"time": slice(1, 2)}
+        )
+        stored = xr.open_zarr(tmp_path / "level_0.zarr")["sst"].values
+        np.testing.assert_allclose(stored[:, 0], [280.0, 310.0])
+
+    def test_region_write_keeps_stored_time_units(self, tmp_path: Path) -> None:
+        """Datetime variables are written in the units chosen at init."""
+        stamps = np.array(
+            ["2000-01-01", "2000-01-02", "2000-01-03", "2000-01-04"],
+            dtype="datetime64[ns]",
+        )
+        ds = xr.Dataset(
+            {"obs_time": (("time", "cell"), np.repeat(stamps[:, None], 12, axis=1))}
+        ).chunk(time=1)
+        save_pyramid({0: ds}, str(tmp_path), mode="w")
+        save_pyramid({0: ds}, str(tmp_path), mode="r+", region={"time": slice(2, 4)})
+        stored = xr.open_zarr(tmp_path / "level_0.zarr")["obs_time"].values
+        np.testing.assert_array_equal(stored[2:, 0], stamps[2:])
+
+
+def _tiny_pyramid() -> dict[int, xr.Dataset]:
+    """a two-level HEALPix-like pyramid for write tests."""
+
+    def level_ds(npix: int) -> xr.Dataset:
+        return xr.Dataset(
+            {"tas": ("cell", np.arange(npix, dtype="float32"))},
+            coords={"cell": np.arange(npix)},
+        )
+
+    return {0: level_ds(12), 1: level_ds(48)}
+
+
+class TestSavePyramidToS3Local:
+    def test_writes_levels_to_disk(self, tmp_path: Path) -> None:
+        pyramid = _tiny_pyramid()
+        out = tmp_path / "pyramid"
+        save_pyramid(pyramid, str(out), mode="w")
+        for level in pyramid:
+            assert (out / f"level_{level}.zarr").is_dir()
+
+    def test_round_trips_values(self, tmp_path: Path) -> None:
+        pyramid = _tiny_pyramid()
+        out = tmp_path / "pyramid"
+        save_pyramid(pyramid, str(out), mode="w")
+        for level, dataset in pyramid.items():
+            reloaded = xr.open_zarr(out / f"level_{level}.zarr")
+            xr.testing.assert_allclose(reloaded[["tas"]], dataset[["tas"]])
+
+    def test_creates_missing_parent_directories(self, tmp_path: Path) -> None:
+        pyramid = _tiny_pyramid()
+        out = tmp_path / "nested" / "deeper" / "pyramid"
+        save_pyramid(pyramid, str(out), mode="w")
+        assert (out / "level_0.zarr").is_dir()
+
+    def test_s3_options_optional_for_local(self, tmp_path: Path) -> None:
+        # since no s3_options supplied a local write must
+        # not construct an S3 client.
+        out = tmp_path / "pyramid"
+        with mock.patch("s3fs.S3FileSystem") as fs:
+            save_pyramid(_tiny_pyramid(), str(out), mode="w")
+        fs.assert_not_called()
+
+
+class TestSavePyramidToS3Remote:
+    def test_uses_s3_map_store_for_s3_path(self) -> None:
+        class _FakeDataset:
+            store: object = None
+            variables: dict[str, object] = {}
+
+            def to_zarr(self, store: object, **kwargs: object) -> None:
+                self.store = store
+
+        dataset = _FakeDataset()
+        with (
+            mock.patch("s3fs.S3FileSystem") as fs,
+            mock.patch(
+                "s3fs.S3Map", return_value="s3-store"
+            ) as s3_map,
+        ):
+            save_pyramid(
+                {0: dataset},  # type: ignore[dict-item]
+                "s3://bucket/pyr",
+                {"key": "x", "secret": "y"},
+                mode="w",
+            )
+        fs.assert_called_once()
+        s3_map.assert_called_once()
+        assert s3_map.call_args.kwargs["root"] == "s3://bucket/pyr/level_0.zarr"
+        assert dataset.store == "s3-store"

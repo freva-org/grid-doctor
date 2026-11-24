@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 from scipy.sparse import csr_matrix
@@ -11,7 +13,6 @@ from grid_doctor.remap._sparse import (
     apply_weights_nd,
     extract_sparse_weights,
 )
-from grid_doctor.types import ApplyBackend
 
 # ===================================================================
 # Fixtures
@@ -83,8 +84,6 @@ class TestExtractSparseWeights:
         np.testing.assert_allclose(
             matrix.toarray(), np.array([[0.25, 0.75], [0.0, 1.0]])
         )
-
-
 # ===================================================================
 # _apply_scipy_batched
 # ===================================================================
@@ -152,8 +151,6 @@ class TestApplyScipyBatched:
         result = _apply_scipy_batched(simple_matrix, values, "renormalize")
         np.testing.assert_allclose(result[0], [10.0, 3.0])
         np.testing.assert_allclose(result[1], [20.0, 6.0])
-
-
 # ===================================================================
 # apply_weights_nd
 # ===================================================================
@@ -360,3 +357,31 @@ def test_extract_sparse_weights_explicit_shape() -> None:
     matrix, n_target, n_source = extract_sparse_weights(row, col, vals, n_target=4, n_source=3)
     assert (n_target, n_source) == (4, 3)
     assert matrix.shape == (4, 3)
+
+
+@pytest.mark.parametrize("policy", ["renormalize", "propagate"])
+@pytest.mark.parametrize(
+    ("backend", "parallel", "batch"),
+    [("scipy", True, 3), ("numba", True, 1), ("numba", False, 1), ("numba", False, 3)],
+)
+def test_float32_sources_are_not_upcast_copied(
+    policy: str, backend: str, parallel: bool, batch: int
+) -> None:
+    """float32 input skips the full-field float64 copy without changing results."""
+    from scipy.sparse import random as sparse_random
+
+    from grid_doctor.remap._sparse import apply_weights_nd
+
+    matrix = sparse_random(500, 300, density=0.02, format="csr", random_state=3)
+    values = np.random.default_rng(4).normal(size=(batch, 300)).astype(np.float32)
+    values[:, ::11] = np.nan
+    kwargs: dict[str, Any] = {
+        "matrix": matrix,
+        "missing_policy": policy,
+        "backend": backend,
+        "parallel": parallel,
+    }
+    as32 = apply_weights_nd(values, **kwargs)
+    as64 = apply_weights_nd(values.astype(np.float64), **kwargs)
+    assert as32.dtype == np.float64
+    np.testing.assert_array_equal(as32, as64)

@@ -1,5 +1,8 @@
 """Little helpers."""
 
+import json
+from pathlib import Path
+
 import numpy as np
 import xarray as xr
 
@@ -51,3 +54,32 @@ def with_healpix_metadata(
         sparse=sparse,
     )
     return metadata.apply(ds)
+
+
+LEVEL = 3
+NPIX = 12 * 4**LEVEL
+NLAT, NLON = 8, 16
+
+
+def _weight_file(path: Path, n_target: int = NPIX, seed: int = 7) -> Path:
+    """Synthetic conservative-style weights: 3 normalised sources per target."""
+    rng = np.random.default_rng(seed)
+    n_source = NLAT * NLON
+    rows = np.repeat(np.arange(n_target), 3)
+    cols = rng.integers(0, n_source, size=rows.size)
+    weights = rng.random(rows.size)
+    weights /= np.bincount(rows, weights)[rows]
+    xr.Dataset(
+        {
+            "row": ("n_s", rows + 1),
+            "col": ("n_s", cols + 1),
+            "S": ("n_s", weights),
+        },
+        attrs={
+            "grid_doctor_level": LEVEL,
+            "grid_doctor_order": "nested",
+            "grid_doctor_method": "conservative",
+            "grid_doctor_source_dims": json.dumps(["lat", "lon"]),
+        },
+    ).to_netcdf(path)
+    return path

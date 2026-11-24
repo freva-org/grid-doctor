@@ -9,14 +9,14 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from grid_doctor.pyramid import _build as build_module
 from grid_doctor.io._save import save_pyramid
+from grid_doctor.pyramid import _build as build_module
 from grid_doctor.pyramid._build import (
     coarsen_healpix,
     create_healpix_pyramid,
 )
 
-from .helpers import with_healpix_metadata
+from ..helpers import with_healpix_metadata
 
 LEVEL = 3
 NPIX = 12 * 4**LEVEL
