@@ -56,10 +56,13 @@ setting and reads the default files and environment variables again, as at
 import; use it after editing a config file.
 
 Settings are process-wide: a `with gd.config.set(...)` block also affects
-other threads while it is open. Dask workers in other processes read the
-default config files and environment variables themselves, but do not see
-changes made at runtime; put settings they need in a default config file,
-the file named by `GRID_DOCTOR_CONFIG`, or an environment variable.
+other threads while it is open.
+
+!!! note "Multi-process dask"
+    Dask workers in other processes read the default config files and
+    environment variables themselves, but do not see changes made at runtime;
+    put settings they need in a default config file, the file named by
+    `GRID_DOCTOR_CONFIG`, or an environment variable.
 
 ## Config files
 
@@ -90,9 +93,8 @@ scratch_dir = "/scratch/a/ab1234/grid-doctor"
 ```
 
 A key in a later file wins; an empty string (`scratch_dir = ""`) unsets a
-setting given by a file read before. `~` is expanded in paths. An unknown key
-or an invalid value is an error that names the file, so a typo does not go
-unnoticed. `GRID_DOCTOR_CONFIG=""` skips your own file, e.g. in tests, and
+setting given by a file read before. `~` is expanded in paths.
+`GRID_DOCTOR_CONFIG=""` skips your own file, e.g. in tests, and
 [`loaded_files`][grid_doctor.config.loaded_files] lists the files that were
 read.
 

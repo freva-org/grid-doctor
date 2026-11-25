@@ -39,7 +39,7 @@ from pathlib import Path
 from types import ModuleType, TracebackType
 from typing import Any, get_args
 
-from platformdirs import user_config_path
+from platformdirs import user_config_dir
 
 from ..types import Ellipsoid
 
@@ -81,7 +81,12 @@ gets its own subdirectory, removed afterwards.  ``None`` uses the system's
 temporary directory (``$TMPDIR``, usually ``/tmp``).  Environment variable:
 ``GRID_DOCTOR_SCRATCH_DIR``."""
 
-SETTINGS: tuple[str, ...] = ("ellipsoid", "weights_store", "esmf_regrid_weightgen", "scratch_dir")
+SETTINGS: tuple[str, ...] = (
+    "ellipsoid",
+    "weights_store",
+    "esmf_regrid_weightgen",
+    "scratch_dir",
+)
 """Names of all settings."""
 
 loaded_files: tuple[Path, ...] = ()
@@ -109,7 +114,9 @@ def user_config_file() -> Path:
     on macOS, ``%APPDATA%\grid-doctor\config.toml`` on Windows.  The file
     need not exist.
     """
-    return user_config_path("grid-doctor", appauthor=False) / "config.toml"
+    user_default_config = os.path.join(user_config_dir("grid-doctor", appauthor=False), "config.toml")
+    user_env_config = os.environ.get(env_var("config"), "").strip()
+    return Path(user_env_config or user_default_config)
 
 
 def environment_config_file() -> Path:
@@ -157,12 +164,12 @@ def _check(name: str, value: object) -> None:
         raise ValueError(f"{name} must be a string, a path or None, got {value!r}")
 
 
-def _clean(name: str, value: str) -> str | None:
+def _clean(value: object) -> object:
     """Return *value* stripped, ``~`` expanded, ``None`` if empty and optional."""
-    value = value.strip()
-    if name in _OPTIONAL:
-        return os.path.expanduser(value) if value else None
-    return value
+    if not isinstance(value, str | os.PathLike):
+        return value
+    text = os.fspath(value).strip()
+    return os.path.expanduser(os.path.expandvars(text)) if text else None
 
 
 def _read_env(environ: Mapping[str, str]) -> dict[str, Any]:
@@ -180,11 +187,11 @@ def _read_env(environ: Mapping[str, str]) -> dict[str, Any]:
         var = env_var(name)
         if var not in environ:
             continue
-        value = _clean(name, environ[var])
+        value = _clean(environ[var])
         try:
             _check(name, value)
         except ValueError as error:
-            raise ValueError(f"Invalid {var}: {error}") from None
+            ValueError(f"Invalid {var}: {error}")
         values[name] = value
     return values
 
@@ -212,7 +219,7 @@ def _read_file(path: Path) -> dict[str, Any]:
     for name, raw in data.items():
         if not isinstance(raw, str):
             raise ValueError(f"Invalid {name!r} in {path}: expected a string, got {raw!r}")
-        value = _clean(name, raw)
+        value = _clean(raw)
         try:
             _check(name, value)
         except ValueError as error:
@@ -284,6 +291,7 @@ class set:  # noqa: N801  # a function to its users, like dask.config.set
     """
 
     def __init__(self, config_file: str | os.PathLike[str] | None = None, /, **settings: Any) -> None:  # noqa: D107
+        """Init settings."""
         global loaded_files
         values: dict[str, Any] = {}
         files: tuple[Path, ...] = ()
@@ -295,7 +303,7 @@ class set:  # noqa: N801  # a function to its users, like dask.config.set
             files = (path,)
         for name, value in settings.items():
             _check(name, value)
-        values.update(settings)
+            values[name] = _clean(value)
         module = sys.modules[__name__]
         self._previous = {name: getattr(module, name) for name in values}
         self._previous_files = loaded_files
@@ -366,7 +374,7 @@ class _ConfigModule(ModuleType):
     def __setattr__(self, name: str, value: object) -> None:
         if name in SETTINGS:
             _check(name, value)
-        super().__setattr__(name, value)
+        super().__setattr__(name, _clean(value))
 
 
 _DEFAULTS: dict[str, Any] = {name: globals()[name] for name in SETTINGS}

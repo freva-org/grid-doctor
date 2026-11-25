@@ -33,7 +33,12 @@ class TestSettings:
 
     def test_defaults(self) -> None:
         assert config._read_env({}) == {}
-        assert [getattr(config, name) for name in config.SETTINGS] == ["sphere", None, None, None]
+        assert [getattr(config, name) for name in config.SETTINGS] == [
+            "sphere",
+            None,
+            None,
+            None,
+        ]
 
     def test_env_var_names(self) -> None:
         assert [config.env_var(name) for name in config.SETTINGS] == [
@@ -44,15 +49,19 @@ class TestSettings:
         ]
 
     def test_env_values_are_read_and_stripped(self) -> None:
-        env = {"GRID_DOCTOR_ELLIPSOID": " WGS84 ", "GRID_DOCTOR_WEIGHTS_STORE": " /data/w "}
-        assert config._read_env(env) == {"ellipsoid": "WGS84", "weights_store": "/data/w"}
+        env = {
+            "GRID_DOCTOR_ELLIPSOID": " WGS84 ",
+            "GRID_DOCTOR_WEIGHTS_STORE": " /data/w ",
+        }
+        assert config._read_env(env) == {
+            "ellipsoid": "WGS84",
+            "weights_store": "/data/w",
+        }
 
     def test_empty_weights_store_counts_as_unset(self) -> None:
-        assert config._read_env({"GRID_DOCTOR_WEIGHTS_STORE": " "}) == {"weights_store": None}
-
-    def test_invalid_env_var_is_named_in_error(self) -> None:
-        with pytest.raises(ValueError, match="GRID_DOCTOR_ELLIPSOID.*'wgs84'"):
-            config._read_env({"GRID_DOCTOR_ELLIPSOID": "wgs84"})
+        assert config._read_env({"GRID_DOCTOR_WEIGHTS_STORE": " "}) == {
+            "weights_store": None
+        }
 
     def test_assignment_overrides(self) -> None:
         gd.config.ellipsoid = "WGS84"
@@ -64,7 +73,10 @@ class TestSettings:
         assert config.ellipsoid == "sphere"
 
     def test_unknown_setting_is_rejected_by_set(self) -> None:
-        with pytest.raises(AttributeError, match="elipsoid"), gd.config.set(elipsoid="WGS84"):
+        with (
+            pytest.raises(AttributeError, match="elipsoid"),
+            gd.config.set(elipsoid="WGS84"),
+        ):
             pass
 
     def test_set_restores_previous_value(self) -> None:
@@ -79,7 +91,10 @@ class TestSettings:
         assert config.ellipsoid == "sphere"
 
     def test_set_invalid_value_changes_nothing(self) -> None:
-        with pytest.raises(ValueError), gd.config.set(weights_store="/data/w", ellipsoid="GRS80"):
+        with (
+            pytest.raises(ValueError),
+            gd.config.set(weights_store="/data/w", ellipsoid="GRS80"),
+        ):
             pass
         assert (config.ellipsoid, config.weights_store) == ("sphere", None)
 
@@ -90,11 +105,19 @@ class TestSettings:
             ("GRID_DOCTOR_WEIGHTS_STORE", "print(gd.config.weights_store)", "WGS84"),
         ],
     )
-    def test_env_var_is_read_at_import(self, var: str, code: str, expected: str) -> None:
+    def test_env_var_is_read_at_import(
+        self, var: str, code: str, expected: str
+    ) -> None:
         src = str(Path(gd.__file__).parents[1])
         env = {**os.environ, var: "WGS84", "PYTHONPATH": src}
         script = f"import grid_doctor as gd; {code}"
-        result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         assert result.stdout.strip() == expected
 
     def test_new_grids_use_configured_ellipsoid(self) -> None:
@@ -137,7 +160,9 @@ class TestSetGetRefresh:
         assert gd.config.scratch_dir is None
 
     def test_set_from_file_then_items(self, tmp_path: Path) -> None:
-        path = _write(tmp_path / "p.toml", 'ellipsoid = "WGS84"\nweights_store = "/w"\n')
+        path = _write(
+            tmp_path / "p.toml", 'ellipsoid = "WGS84"\nweights_store = "/w"\n'
+        )
         with gd.config.set(path, weights_store="/mine"):
             assert gd.config.get() == {
                 "ellipsoid": "WGS84",
@@ -149,7 +174,9 @@ class TestSetGetRefresh:
         assert gd.config.get("weights_store") is None
         assert path not in gd.config.loaded_files
 
-    def test_file_overrides_environment_variable(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_file_overrides_environment_variable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv("GRID_DOCTOR_ELLIPSOID", "sphere")
         gd.config.refresh()
         gd.config.set(_write(tmp_path / "p.toml", 'ellipsoid = "WGS84"\n'))
@@ -170,7 +197,11 @@ class TestSetGetRefresh:
         ids=["bad-file", "bad-value", "unknown-setting"],
     )
     def test_invalid_set_changes_nothing(
-        self, tmp_path: Path, text: str, settings: dict[str, object], error: type[Exception]
+        self,
+        tmp_path: Path,
+        text: str,
+        settings: dict[str, object],
+        error: type[Exception],
     ) -> None:
         before = gd.config.get(), gd.config.loaded_files
         with pytest.raises(error):
@@ -205,9 +236,13 @@ class TestSetGetRefresh:
         }
         assert gd.config.loaded_files[-1] == user_file
 
-    def test_invalid_refresh_changes_nothing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_invalid_refresh_changes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         gd.config.set(scratch_dir="/keep")
-        monkeypatch.setenv("GRID_DOCTOR_CONFIG", str(_write(tmp_path / "c.toml", "scratch_dir = 1\n")))
+        monkeypatch.setenv(
+            "GRID_DOCTOR_CONFIG", str(_write(tmp_path / "c.toml", "scratch_dir = 1\n"))
+        )
         with pytest.raises(ValueError):
             gd.config.refresh()
         assert gd.config.scratch_dir == "/keep"
@@ -222,7 +257,9 @@ class TestConfigFiles:
         monkeypatch.setattr(sys, "prefix", str(tmp_path / "env"))
         return tmp_path / "env"
 
-    def test_locations(self, prefix: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_locations(
+        self, prefix: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         env_file = prefix / "etc" / "grid-doctor" / "config.toml"
         assert config.environment_config_file() == env_file
         # The user file comes from platformdirs, which follows XDG_CONFIG_HOME on Linux.
@@ -230,9 +267,14 @@ class TestConfigFiles:
         user_file = config.user_config_file()
         if sys.platform.startswith("linux"):
             assert user_file == tmp_path / "xdg" / "grid-doctor" / "config.toml"
-        assert user_file.name == "config.toml" and user_file.parent.name == "grid-doctor"
+        assert (
+            user_file.name == "config.toml" and user_file.parent.name == "grid-doctor"
+        )
         assert config.config_files({}) == (env_file, user_file)
-        assert config.config_files({"GRID_DOCTOR_CONFIG": " /etc/gd.toml "}) == (env_file, Path("/etc/gd.toml"))
+        assert config.config_files({"GRID_DOCTOR_CONFIG": " /etc/gd.toml "}) == (
+            env_file,
+            Path("/etc/gd.toml"),
+        )
         assert config.config_files({"GRID_DOCTOR_CONFIG": ""}) == (env_file,)
 
     def test_precedence(self, prefix: Path, tmp_path: Path) -> None:
@@ -241,8 +283,12 @@ class TestConfigFiles:
             'ellipsoid = "WGS84"\nweights_store = "/shared/weights"\nscratch_dir = "/scratch"\n'
             'esmf_regrid_weightgen = "/opt/esmf/bin/ESMF_RegridWeightGen"\n',
         )
-        user_file = _write(tmp_path / "user.toml", 'weights_store = "/mine"\nscratch_dir = ""\n')
-        values, read = config._load({"GRID_DOCTOR_CONFIG": str(user_file), "GRID_DOCTOR_ELLIPSOID": "sphere"})
+        user_file = _write(
+            tmp_path / "user.toml", 'weights_store = "/mine"\nscratch_dir = ""\n'
+        )
+        values, read = config._load(
+            {"GRID_DOCTOR_CONFIG": str(user_file), "GRID_DOCTOR_ELLIPSOID": "sphere"}
+        )
         assert read == (env_file, user_file)
         assert values == {
             "ellipsoid": "sphere",  # environment variable over the environment's file
@@ -251,7 +297,9 @@ class TestConfigFiles:
             "esmf_regrid_weightgen": "/opt/esmf/bin/ESMF_RegridWeightGen",
         }
 
-    def test_missing_files_are_skipped(self, prefix: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_missing_files_are_skipped(
+        self, prefix: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "none"))
         assert config._load({}) == ({}, ())
 
@@ -262,22 +310,42 @@ class TestConfigFiles:
     @pytest.mark.parametrize(
         ("text", "match"),
         [
-            ('weight_store = "/w"\n', r"Unknown setting\(s\) 'weight_store' in .*bad.toml"),
-            ('ellipsoid = "GRS80"\n', r"Invalid 'ellipsoid' in .*bad.toml: ellipsoid must be one of"),
-            ("scratch_dir = 1\n", r"Invalid 'scratch_dir' in .*bad.toml: expected a string"),
+            (
+                'weight_store = "/w"\n',
+                r"Unknown setting\(s\) 'weight_store' in .*bad.toml",
+            ),
+            (
+                'ellipsoid = "GRS80"\n',
+                r"Invalid 'ellipsoid' in .*bad.toml: ellipsoid must be one of",
+            ),
+            (
+                "scratch_dir = 1\n",
+                r"Invalid 'scratch_dir' in .*bad.toml: expected a string",
+            ),
             ("[weights]\nstore = '/w'\n", r"Unknown setting\(s\) 'weights'"),
             ("ellipsoid = sphere\n", r"Invalid config file .*bad.toml"),
         ],
         ids=["unknown-key", "bad-choice", "not-a-string", "table", "not-toml"],
     )
-    def test_invalid_file_is_named_in_error(self, tmp_path: Path, text: str, match: str) -> None:
+    def test_invalid_file_is_named_in_error(
+        self, tmp_path: Path, text: str, match: str
+    ) -> None:
         with pytest.raises(ValueError, match=match):
             config._read_file(_write(tmp_path / "bad.toml", text))
 
-    def test_home_is_expanded_in_paths(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_home_is_expanded_in_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv("HOME", str(tmp_path))
-        values = config._read_file(_write(tmp_path / "c.toml", 'ellipsoid = "sphere"\nscratch_dir = "~/scratch"\n'))
-        assert values == {"ellipsoid": "sphere", "scratch_dir": str(tmp_path / "scratch")}
+        values = config._read_file(
+            _write(
+                tmp_path / "c.toml", 'ellipsoid = "sphere"\nscratch_dir = "~/scratch"\n'
+            )
+        )
+        assert values == {
+            "ellipsoid": "sphere",
+            "scratch_dir": str(tmp_path / "scratch"),
+        }
 
     def test_file_is_read_at_import(self, tmp_path: Path) -> None:
         user_file = _write(tmp_path / "c.toml", 'ellipsoid = "WGS84"\n')
@@ -285,7 +353,13 @@ class TestConfigFiles:
         env = {**os.environ, "GRID_DOCTOR_CONFIG": str(user_file), "PYTHONPATH": src}
         env.pop("GRID_DOCTOR_ELLIPSOID", None)
         script = "import grid_doctor as gd; print(gd.config.ellipsoid, gd.config.loaded_files[-1])"
-        result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         assert result.stdout.split() == ["WGS84", str(user_file)]
 
 
@@ -302,7 +376,9 @@ class TestTemplate:
 
     def test_uncommented_examples_are_valid(self, tmp_path: Path) -> None:
         lines = [
-            line.removeprefix("# ") if line.startswith(tuple(f"# {name} = " for name in config.SETTINGS)) else line
+            line.removeprefix("# ")
+            if line.startswith(tuple(f"# {name} = " for name in config.SETTINGS))
+            else line
             for line in template.render().splitlines()
         ]
         values = config._read_file(_write(tmp_path / "c.toml", "\n".join(lines)))
@@ -314,13 +390,17 @@ class TestTemplate:
 
     def test_output_directory_is_created(self, tmp_path: Path) -> None:
         assert template.main(["-o", str(tmp_path / "a" / "grid-doctor")]) == 0
-        assert (tmp_path / "a" / "grid-doctor" / "config.toml").read_text() == template.render()
+        assert (
+            tmp_path / "a" / "grid-doctor" / "config.toml"
+        ).read_text() == template.render()
 
     def test_output_file(self, tmp_path: Path) -> None:
         assert template.main(["-o", str(tmp_path / "site.toml")]) == 0
         assert (tmp_path / "site.toml").is_file()
 
-    def test_existing_file_needs_force(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_existing_file_needs_force(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         target = _write(tmp_path / "config.toml", 'ellipsoid = "WGS84"\n')
         assert template.main(["-o", str(tmp_path)]) == 1
         assert "--force" in capsys.readouterr().err
@@ -333,14 +413,23 @@ class TestTemplate:
             template.main(["--stdout", "-o", "x"])
         assert error.value.code == 2
 
-    def test_default_is_user_config_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_default_is_user_config_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         target = tmp_path / "user" / "config.toml"
         monkeypatch.setattr(template, "user_config_file", lambda: target)
         assert template.main([]) == 0
         assert target.read_text() == template.render()
 
     def test_set_writes_a_new_file(self, tmp_path: Path) -> None:
-        argv = ["-o", str(tmp_path), "--set", "weights_store=/work/w", "--set", "ellipsoid=WGS84"]
+        argv = [
+            "-o",
+            str(tmp_path),
+            "--set",
+            "weights_store=/work/w",
+            "--set",
+            "ellipsoid=WGS84",
+        ]
         assert template.main(argv) == 0
         values = config._read_file(tmp_path / "config.toml")
         assert values == {"weights_store": "/work/w", "ellipsoid": "WGS84"}
@@ -350,23 +439,38 @@ class TestTemplate:
             tmp_path / "config.toml",
             '# my notes\nellipsoid = "WGS84"\n# scratch_dir = "/path"\n',
         )
-        argv = ["-o", str(target), "--set", "scratch_dir=/scratch/x", "--set", "weights_store=/w"]
+        argv = [
+            "-o",
+            str(target),
+            "--set",
+            "scratch_dir=/scratch/x",
+            "--set",
+            "weights_store=/w",
+        ]
         assert template.main(argv) == 0
         assert target.read_text() == (
-            '# my notes\nellipsoid = "WGS84"\nscratch_dir = "/scratch/x"\nweights_store = "/w"\n'
+            '# my notes\nellipsoid = "WGS84"\n# scratch_dir = "/path"\nscratch_dir = "/scratch/x"\nweights_store = "/w"\n'
         )
 
-    def test_set_reports_a_broken_file(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_set_reports_a_broken_file(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         target = _write(tmp_path / "config.toml", "weight_store = '/typo'\n")
         assert template.main(["-o", str(target), "--set", "scratch_dir=/s"]) == 1
         assert "weight_store" in capsys.readouterr().err
 
     def test_set_quotes_values(self, tmp_path: Path) -> None:
-        assert template.main(["-o", str(tmp_path), "--set", 'scratch_dir=/a "b"\\c']) == 0
-        assert config._read_file(tmp_path / "config.toml") == {"scratch_dir": '/a "b"\\c'}
+        assert (
+            template.main(["-o", str(tmp_path), "--set", 'scratch_dir=/a "b"\\c']) == 0
+        )
+        assert config._read_file(tmp_path / "config.toml") == {
+            "scratch_dir": '/a "b"\\c'
+        }
 
     @pytest.mark.parametrize(
-        "item", ["weight_store=/w", "ellipsoid=GRS80", "scratch_dir"], ids=["unknown", "invalid", "no-equals"]
+        "item",
+        ["weight_store=/w", "ellipsoid=GRS80", "scratch_dir"],
+        ids=["unknown", "invalid", "no-equals"],
     )
     def test_invalid_set_writes_nothing(self, tmp_path: Path, item: str) -> None:
         with pytest.raises(SystemExit) as error:
@@ -378,8 +482,18 @@ class TestTemplate:
         src = str(Path(gd.__file__).parents[1])
         env = {**os.environ, "GRID_DOCTOR_CONFIG": "", "PYTHONPATH": src}
         result = subprocess.run(
-            [sys.executable, "-W", "error", "-m", "grid_doctor.config.template", "--stdout"],
-            env=env, capture_output=True, text=True, check=True,
+            [
+                sys.executable,
+                "-W",
+                "error",
+                "-m",
+                "grid_doctor.config.template",
+                "--stdout",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         assert result.stdout.startswith("# grid-doctor configuration")
 
@@ -391,7 +505,10 @@ class TestEsmfSettings:
     def test_executable(self) -> None:
         assert esmf_module.resolve_esmf_regrid_weightgen(None) == "ESMF_RegridWeightGen"
         with gd.config.set(esmf_regrid_weightgen="/opt/esmf/ESMF_RegridWeightGen"):
-            assert esmf_module.resolve_esmf_regrid_weightgen(None) == "/opt/esmf/ESMF_RegridWeightGen"
+            assert (
+                esmf_module.resolve_esmf_regrid_weightgen(None)
+                == "/opt/esmf/ESMF_RegridWeightGen"
+            )
             assert esmf_module.resolve_esmf_regrid_weightgen("mine") == "mine"
 
     def test_compute_weights_uses_configured_executable(
@@ -401,7 +518,9 @@ class TestEsmfSettings:
         monkeypatch.setattr(
             regrid_module,
             "compute_healpix_weights_backend",
-            lambda *args, offline, **kwargs: passed.append(offline.esmf_regrid_weightgen) or Path("w.nc"),
+            lambda *args, offline, **kwargs: (
+                passed.append(offline.esmf_regrid_weightgen) or Path("w.nc")
+            ),
         )
         with gd.config.set(esmf_regrid_weightgen="/opt/esmf/ESMF_RegridWeightGen"):
             gd.compute_healpix_weights(regular_ds, 1)
@@ -415,9 +534,15 @@ class TestEsmfSettings:
         written: list[Path] = []
         monkeypatch.setattr(esmf_module.shutil, "which", lambda executable: "/bin/tool")
         monkeypatch.setattr(
-            esmf_module, "write_ugrid_mesh_file", lambda mesh, path, **kwargs: written.append(Path(path)) or Path(path)
+            esmf_module,
+            "write_ugrid_mesh_file",
+            lambda mesh, path, **kwargs: written.append(Path(path)) or Path(path),
         )
-        monkeypatch.setattr(esmf_module, "run_esmf_regrid_weightgen", lambda **kwargs: kwargs["weights_path"])
+        monkeypatch.setattr(
+            esmf_module,
+            "run_esmf_regrid_weightgen",
+            lambda **kwargs: kwargs["weights_path"],
+        )
         scratch = tmp_path / "scratch" / "not-yet"
         with gd.config.set(scratch_dir=str(scratch)):
             esmf_module._run_offline_esmf(
@@ -432,12 +557,17 @@ class TestEsmfSettings:
             )
         assert written[0].parent.parent == scratch
         assert written[0].parent.name.startswith("grid_doctor_esmf_")
-        assert scratch.is_dir() and not written[0].parent.exists()  # the run's directory is removed
+        assert (
+            scratch.is_dir() and not written[0].parent.exists()
+        )  # the run's directory is removed
 
 
 _POINTS = xr.Dataset(
     {"t": ("obs", np.arange(4.0))},
-    coords={"lat": ("obs", [10.0, 40.0, -30.0, 60.0]), "lon": ("obs", [0.0, 90.0, 180.0, 270.0])},
+    coords={
+        "lat": ("obs", [10.0, 40.0, -30.0, 60.0]),
+        "lon": ("obs", [0.0, 90.0, 180.0, 270.0]),
+    },
 )
 
 
@@ -458,14 +588,20 @@ class TestEllipsoidArgument:
         """Record the ``ellipsoid`` that binning's cell lookup and coordinate step receive."""
         passed: dict[str, Ellipsoid] = {}
 
-        def fake_lonlat_to_healpix(lon: np.ndarray, lat: np.ndarray, **kwargs: object) -> np.ndarray:
+        def fake_lonlat_to_healpix(
+            lon: np.ndarray, lat: np.ndarray, **kwargs: object
+        ) -> np.ndarray:
             return np.zeros(lon.size, dtype=np.int64)  # every point in cell 0
 
-        def fake_geo_module(grid: HealpixGrid) -> tuple[SimpleNamespace, dict[str, str]]:
+        def fake_geo_module(
+            grid: HealpixGrid,
+        ) -> tuple[SimpleNamespace, dict[str, str]]:
             passed["cells"] = grid.ellipsoid
             return SimpleNamespace(lonlat_to_healpix=fake_lonlat_to_healpix), {}
 
-        def fake_coords(ds: xr.Dataset, cell_ids: np.ndarray, grid: HealpixGrid, **kwargs: object) -> xr.Dataset:
+        def fake_coords(
+            ds: xr.Dataset, cell_ids: np.ndarray, grid: HealpixGrid, **kwargs: object
+        ) -> xr.Dataset:
             passed["coords"] = grid.ellipsoid
             return ds
 
@@ -475,7 +611,9 @@ class TestEllipsoidArgument:
         return passed
 
     @pytest.fixture
-    def regrid_passed(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Ellipsoid | None]:
+    def regrid_passed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> dict[str, Ellipsoid | None]:
         """Record the ``ellipsoid`` that regridding's weight generation and application receive.
 
         Application gets ``None`` unless an ellipsoid was given: it then
@@ -487,42 +625,58 @@ class TestEllipsoidArgument:
             passed["weights"] = ellipsoid
             return tmp_path / "weights.nc"
 
-        def fake_apply(ds: xr.Dataset, *args: object, ellipsoid: Ellipsoid | None, **kwargs: object) -> xr.Dataset:
+        def fake_apply(
+            ds: xr.Dataset, *args: object, ellipsoid: Ellipsoid | None, **kwargs: object
+        ) -> xr.Dataset:
             passed["apply"] = ellipsoid
             return ds
 
-        monkeypatch.setattr(regrid_module, "compute_healpix_weights_backend", fake_weights)
+        monkeypatch.setattr(
+            regrid_module, "compute_healpix_weights_backend", fake_weights
+        )
         monkeypatch.setattr(regrid_module, "apply_weight_file", fake_apply)
         return passed
 
-    def test_binning_default_is_sphere(self, binning_passed: dict[str, Ellipsoid], dense: bool) -> None:
+    def test_binning_default_is_sphere(
+        self, binning_passed: dict[str, Ellipsoid], dense: bool
+    ) -> None:
         # Pin the built-in default, whatever the environment says.
         with gd.config.set(ellipsoid="sphere"):
             gd.bin_to_healpix(_POINTS, 1, dense=dense)
         assert binning_passed == {"cells": "sphere", "coords": "sphere"}
 
-    def test_binning_none_uses_config(self, binning_passed: dict[str, Ellipsoid], dense: bool) -> None:
+    def test_binning_none_uses_config(
+        self, binning_passed: dict[str, Ellipsoid], dense: bool
+    ) -> None:
         with gd.config.set(ellipsoid="WGS84"):
             gd.bin_to_healpix(_POINTS, 1, dense=dense)
         assert binning_passed == {"cells": "WGS84", "coords": "WGS84"}
 
-    def test_binning_argument_overrides_config(self, binning_passed: dict[str, Ellipsoid], dense: bool) -> None:
+    def test_binning_argument_overrides_config(
+        self, binning_passed: dict[str, Ellipsoid], dense: bool
+    ) -> None:
         with gd.config.set(ellipsoid="WGS84"):
             gd.bin_to_healpix(_POINTS, 1, dense=dense, ellipsoid="sphere")
         assert binning_passed == {"cells": "sphere", "coords": "sphere"}
 
-    def test_regrid_default_is_sphere(self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset) -> None:
+    def test_regrid_default_is_sphere(
+        self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset
+    ) -> None:
         # Pin the built-in default, whatever the environment says.
         with gd.config.set(ellipsoid="sphere"):
             gd.regrid_to_healpix(regular_ds, 1)
         assert regrid_passed == {"weights": "sphere", "apply": None}
 
-    def test_regrid_none_uses_config(self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset) -> None:
+    def test_regrid_none_uses_config(
+        self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset
+    ) -> None:
         with gd.config.set(ellipsoid="WGS84"):
             gd.regrid_to_healpix(regular_ds, 1)
         assert regrid_passed == {"weights": "WGS84", "apply": None}
 
-    def test_regrid_argument_overrides_config(self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset) -> None:
+    def test_regrid_argument_overrides_config(
+        self, regrid_passed: dict[str, Ellipsoid | None], regular_ds: xr.Dataset
+    ) -> None:
         with gd.config.set(ellipsoid="WGS84"):
             gd.regrid_to_healpix(regular_ds, 1, ellipsoid="sphere")
         assert regrid_passed == {"weights": "sphere", "apply": "sphere"}

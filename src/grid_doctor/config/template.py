@@ -20,12 +20,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import SETTINGS, _check, _clean, _read_file, config_files, env_var, user_config_file
+import tomlkit
+
+from . import (
+    SETTINGS,
+    _check,
+    _clean,
+    _read_file,
+    config_files,
+    env_var,
+    user_config_file,
+)
 
 FILE_NAME = "config.toml"
 """Name of the file written into a directory given to ``-o``."""
@@ -92,21 +101,11 @@ def _line(name: str, value: str) -> str:
 
 
 def update(text: str, values: dict[str, str]) -> str:
-    """Return config file *text* with the settings in *values* set.
-
-    The first line setting each one, active or commented out, is replaced;
-    settings without such a line are appended.  Everything else is kept.
-    """
-    lines = text.splitlines()
+    """Return config file *text* with the settings in *values* set."""
+    doc = tomlkit.parse(text)
     for name, value in values.items():
-        pattern = re.compile(rf"^\s*#?\s*{re.escape(name)}\s*=")
-        for index, line in enumerate(lines):
-            if pattern.match(line):
-                lines[index] = _line(name, value)
-                break
-        else:
-            lines.append(_line(name, value))
-    return "\n".join(lines) + "\n"
+        doc[name] = value  # an existing key is changed in place, new keys added
+    return tomlkit.dumps(doc)
 
 
 def target_path(output: Path | None) -> Path:
@@ -138,7 +137,7 @@ def _parse_set(items: Sequence[str]) -> dict[str, str]:
             raise ValueError(f"--set takes KEY=VALUE, got {item!r}")
         if name not in SETTINGS:
             raise ValueError(f"Unknown setting {name!r}; settings are {SETTINGS}")
-        _check(name, _clean(name, value))
+        _check(name, _clean(value))
         values[name] = value.strip()
     return values
 
@@ -189,7 +188,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     path = target_path(args.output)
     if path.exists() and not args.force:
         if not values:
-            print(f"{path} exists; use --set KEY=VALUE to change it, or --force to replace it.", file=sys.stderr)
+            print(
+                f"{path} exists; use --set KEY=VALUE to change it, or --force to replace it.",
+                file=sys.stderr,
+            )
             return 1
         text = update(path.read_text(encoding="utf-8"), values)
         action = "Updated"

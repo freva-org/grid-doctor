@@ -51,6 +51,7 @@ dependencies = [
     "numpy_groupies",
     "h5netcdf",
     "platformdirs>=3",
+    "tomlkit",
 ]
 
 
