@@ -1,7 +1,7 @@
 # Grid Doctor HEALs your Grids
 <p align="center">
   <img src="docs/assets/logo-512.png" alt="Logo" width="200"><br>
-  <a href="https://freva-org.github.io/grid-doctor/">
+  <a href="https://grid-doctor.org/">
   <img
     src="https://img.shields.io/badge/grid--doctor-Documentation-green?logo=readthedocs&logoColor=white"
     alt="Documentation"
@@ -11,7 +11,7 @@
 
 This repository contains the code for regridding data onto HEALPix grids.
 Example scripts can be found in the `scripts/` directory.
-For full documentation, see https://freva-org.github.io/grid-doctor/.
+For full documentation, see https://grid-doctor.org/.
 
 ## Installation
 
@@ -36,8 +36,8 @@ mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
 
 ## Developing the documentation
 
-The documentation is built from the `docs/` directory and configured in
-`mkdocs.yml`.
+The documentation is built with [Zensical](https://zensical.org) from the
+`docs/` directory and configured in `mkdocs.yml`.
 
 ```console
 tox -e docs        # spell check and strict build into site/
@@ -59,6 +59,25 @@ pages `docs/technical-decisions.md` and `docs/high-level-access.md`. Edit
 the files in `docs/shared/`, and keep them self-contained: no mkdocstrings
 cross-references, and absolute `https://grid-doctor.org/...` links for
 pages that only exist in this site.
+
+### Publishing
+
+The documentation at <https://grid-doctor.org> is versioned with
+[Zensical's fork of mike](https://github.com/squidfunk/mike) and served by GitHub Pages from
+the `gh-pages` branch (`.github/workflows/docs.yaml`):
+
+* every push to `main` updates the version `dev`,
+* a release tag `vX.Y.Z` deploys the version `X.Y` with the alias
+  `latest`; the site root redirects there.  Until the first release,
+  `dev` carries the alias `latest`.
+
+To preview the versioned site locally, deploy into your local `gh-pages`
+branch without pushing and serve it:
+
+```console
+tox -e docs-deploy -- deploy dev
+tox -e docs-deploy -- serve
+```
 
 
 ## Quick Start

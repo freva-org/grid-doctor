@@ -38,7 +38,7 @@ jobs:
             docs:
               - "docs/**"
               - "src/**"
-              - "mkdocs.*.yml"
+              - "mkdocs.yml"
               - "pyproject.toml"
               - ".github/workflows/ci.yaml"
 

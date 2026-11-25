@@ -716,7 +716,7 @@ interactively.
 ## References
 
 [^1]: Remapping is realised with a uniform remapping software
-    [grid-doctor](https://freva-org.github.io/grid-doctor)
+    [grid-doctor](https://grid-doctor.org)
 [^gorski]: Górski, K. M., et al. (2005). *HEALPix: A Framework for
     High-Resolution Discretization and Fast Analysis of Data
     Distributed on the Sphere*. The Astrophysical Journal, 622(2),

@@ -1,6 +1,6 @@
 site_name: Grid Doctor
 site_description: Convert lat/lon xarray datasets to HEALPix pyramids.
-site_url: https://freva-org.github.io/grid-doctor/
+site_url: https://grid-doctor.org/
 repo_url: https://github.com/freva-org/grid-doctor
 repo_name: freva-org/grid-doctor
 site_dir: site
@@ -32,11 +32,13 @@ nav:
       - Parallel writes (reflow, array jobs): recipes/parallel-writes.md
       - Working with the data: high-level-access.md
 
-
 exclude_docs: |
   shared/**
+  overrides/
+
 theme:
   name: material
+  custom_dir: docs/overrides
   logo: assets/logo-512.png
   favicon: assets/favicon.ico
   icon:
@@ -120,6 +122,14 @@ markdown_extensions:
   - pymdownx.blocks.caption
   - toc:
       permalink: true
+
+extra:
+  version:
+    # Versions are deployed with mike, see .github/workflows/docs.yaml.
+    provider: mike
+    alias: true
+    # Pages of other versions show the outdated banner (overrides/main.html).
+    default: [latest, dev]
 
 extra_css:
   - assets/styles.css

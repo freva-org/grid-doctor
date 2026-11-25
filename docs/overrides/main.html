@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{#- Banner on the pages of versions that are neither `latest` nor `dev`. -#}
+{% block outdated %}
+  You are reading the documentation of an older release.
+  <a href="{{ '../' ~ base_url }}">
+    <strong>Go to the latest version.</strong>
+  </a>
+{% endblock %}
