@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import os
+
+# Keep the tester's own config file out of the tests; set before grid_doctor
+# is imported, because the config is read at import.
+os.environ["GRID_DOCTOR_CONFIG"] = ""
+
 from pathlib import Path
 from typing import Literal
 

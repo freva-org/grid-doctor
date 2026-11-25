@@ -50,6 +50,7 @@ dependencies = [
     "numba",
     "numpy_groupies",
     "h5netcdf",
+    "platformdirs>=3",
 ]
 
 

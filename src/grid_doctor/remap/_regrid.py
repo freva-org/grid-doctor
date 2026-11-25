@@ -39,6 +39,7 @@ from ._apply import apply_weight_file
 from ._esmf import (
     OfflineWeightConfig,
     compute_healpix_weights_backend,
+    resolve_esmf_regrid_weightgen,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ def compute_healpix_weights(
     large_file: bool = True,
     prefer_offline: bool | None = None,
     nproc: int = 1,
-    esmf_regrid_weightgen: str = "ESMF_RegridWeightGen",
+    esmf_regrid_weightgen: str | None = None,
     keep_intermediates: bool = False,
     workdir: str | Path | None = None,
     spectral_transform_command: list[str] | tuple[str, ...] | None = None,
@@ -102,11 +103,16 @@ def compute_healpix_weights(
     nproc:
         Number of MPI ranks for the offline path.
     esmf_regrid_weightgen:
-        Name or path of the offline ESMF executable.
+        Name or path of the offline ESMF executable.  Defaults to
+        ``grid_doctor.config.esmf_regrid_weightgen``, or
+        ``ESMF_RegridWeightGen`` from ``PATH``.
     keep_intermediates:
         Keep intermediate mesh files.
     workdir:
-        Working directory for offline intermediate files.
+        Working directory for offline intermediate files, kept after the
+        run.  Defaults to a temporary directory, removed after the run, in
+        ``grid_doctor.config.scratch_dir`` or the system's temporary
+        directory.
     spectral_transform_command:
         External command for ``source_kind="spectral"``.
     ellipsoid:
@@ -131,7 +137,7 @@ def compute_healpix_weights(
     offline = OfflineWeightConfig(
         enabled=bool(prefer_offline) if prefer_offline is not None else False,
         nproc=nproc,
-        esmf_regrid_weightgen=esmf_regrid_weightgen,
+        esmf_regrid_weightgen=resolve_esmf_regrid_weightgen(esmf_regrid_weightgen),
         keep_intermediates=keep_intermediates,
         workdir=Path(workdir) if workdir is not None else None,
     )
@@ -174,7 +180,7 @@ def regrid_to_healpix(
     large_file: bool = True,
     prefer_offline: bool | None = None,
     nproc: int = 1,
-    esmf_regrid_weightgen: str = "ESMF_RegridWeightGen",
+    esmf_regrid_weightgen: str | None = None,
     keep_intermediates: bool = False,
     workdir: str | Path | None = None,
     spectral_transform_command: list[str] | tuple[str, ...] | None = None,
@@ -228,11 +234,16 @@ def regrid_to_healpix(
     nproc:
         Number of MPI ranks for the offline path.
     esmf_regrid_weightgen:
-        Name or path of the offline ESMF executable.
+        Name or path of the offline ESMF executable.  Defaults to
+        ``grid_doctor.config.esmf_regrid_weightgen``, or
+        ``ESMF_RegridWeightGen`` from ``PATH``.
     keep_intermediates:
         Keep intermediate mesh files.
     workdir:
-        Working directory for offline intermediate files.
+        Working directory for offline intermediate files, kept after the
+        run.  Defaults to a temporary directory, removed after the run, in
+        ``grid_doctor.config.scratch_dir`` or the system's temporary
+        directory.
     spectral_transform_command:
         External command for ``source_kind="spectral"``.
     cell_chunks:

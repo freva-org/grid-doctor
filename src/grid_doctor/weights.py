@@ -32,6 +32,7 @@ from typing import (
 import numpy as np
 import numpy.typing as npt
 import xarray as xr
+from platformdirs import user_cache_path
 
 from . import config
 from ._geometry.coords import (
@@ -410,13 +411,14 @@ _SUPPORTED_PROTOCOLS: Final = _LOCAL_PROTOCOLS | {"memory"}
 def local_weights_dir() -> Path:
     """Local directory holding weight files in the [`WeightsRef`][grid_doctor.weights.WeightsRef] layout.
 
-    ``$XDG_CACHE_HOME/grid-doctor/weights``, where ``XDG_CACHE_HOME``
-    defaults to ``~/.cache``. Generated weights land here by default and
+    ``grid-doctor/weights`` in the user cache directory of platformdirs:
+    ``~/.cache/grid-doctor/weights`` on Linux (following
+    ``XDG_CACHE_HOME``), ``~/Library/Caches/grid-doctor/weights`` on macOS.
+    Generated weights land here by default and
     remote [`WeightsStore`][grid_doctor.weights.WeightsStore]s download
     into it, so one set of weights has one local path.
     """
-    cache_home = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
-    return Path(cache_home) / "grid-doctor" / "weights"
+    return user_cache_path("grid-doctor", appauthor=False) / "weights"
 
 
 class WeightsStore:
@@ -433,10 +435,10 @@ class WeightsStore:
             ``memory://`` URL, or an fsspec mapper of either. Defaults to
             [`grid_doctor.config.weights_store`][grid_doctor.config.weights_store]
             (environment variable ``GRID_DOCTOR_WEIGHTS_STORE``), else
-            ``$XDG_CACHE_HOME/grid-doctor/weights``.
+            [`local_weights_dir()`][grid_doctor.weights.local_weights_dir].
         cache_dir: Local directory for copies of in-memory weights and for
             weights computed while the store is read-only. Defaults to
-            ``$XDG_CACHE_HOME/grid-doctor/weights``.
+            [`local_weights_dir()`][grid_doctor.weights.local_weights_dir].
         read_only: Forbid [`publish`][grid_doctor.weights.WeightsStore.publish].
             When omitted, local stores are read-only if their directory is
             not writable.
