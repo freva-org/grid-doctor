@@ -1,0 +1,3088 @@
+
+
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Convert lat&#x2f;lon xarray datasets to HEALPix pyramids.">
+      
+      
+      
+        <link rel="canonical" href="https://grid-doctor.org/dev/recipes/parallel-writes/">
+      
+      
+      
+      
+        <link rel="prev" href="../averaging/">
+      
+      
+        <link rel="next" href="../../high-level-access/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="zensical-0.1.3">
+    
+    
+      
+        <title>Parallel writes - Grid Doctor</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e2cf241e.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.b60ce83d.min.css">
+      
+      
+      
+  
+  
+    
+      
+      
+    
+  
+  
+  <style>:root{--md-admonition-icon--example:url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M12%203C7.58%203%204%204.79%204%207s3.58%204%208%204%208-1.79%208-4-3.58-4-8-4M4%209v3c0%202.21%203.58%204%208%204s8-1.79%208-4V9c0%202.21-3.58%204-8%204s-8-1.79-8-4m0%205v3c0%202.21%203.58%204%208%204s8-1.79%208-4v-3c0%202.21-3.58%204-8%204s-8-1.79-8-4%22/%3E%3C/svg%3E');}</style>
+
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/styles.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  <meta property="og:type" content="website" />
+<meta property="og:title" content="Parallel writes - Grid Doctor" />
+<meta property="og:description" content="Convert lat/lon xarray datasets to HEALPix pyramids." />
+<meta property="og:image" content="https://grid-doctor.org/dev/assets/images/social/recipes/parallel-writes.png" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:url" content="https://grid-doctor.org/dev/recipes/parallel-writes/" />
+<meta property="twitter:card" content="summary_large_image" />
+<meta property="twitter:title" content="Parallel writes - Grid Doctor" />
+<meta property="twitter:description" content="Convert lat/lon xarray datasets to HEALPix pyramids." />
+<meta property="twitter:image" content="https://grid-doctor.org/dev/assets/images/social/recipes/parallel-writes.png" />
+</head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  You are reading the documentation of an older release.
+  <a href="../../..">
+    <strong>Go to the latest version.</strong>
+  </a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL("../..",location),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Grid Doctor" class="md-header__button md-logo" aria-label="Grid Doctor" data-md-component="logo">
+      
+  <img src="../../assets/logo-mark.svg" alt="Grid Doctor">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+      <span class="md-visually-hidden">Navigation</span>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Grid Doctor
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Parallel writes
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715M16 12a4 4 0 0 0-4-4M19 5l-1.256 1.256M20 12h2"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+          <span class="md-visually-hidden">Search</span>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/freva-org/grid-doctor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    freva-org/grid-doctor
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../getting-started/" class="md-tabs__link">
+        
+  
+  Getting started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+      
+    
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  Recipes
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+      
+    
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../api/" class="md-tabs__link">
+          
+  
+  API reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../technical-decisions/" class="md-tabs__link">
+        
+  
+  Technical decisions
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Grid Doctor" class="md-nav__button md-logo" aria-label="Grid Doctor" data-md-component="logo">
+      
+  <img src="../../assets/logo-mark.svg" alt="Grid Doctor">
+
+    </a>
+    Grid Doctor
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/freva-org/grid-doctor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    freva-org/grid-doctor
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting started
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Recipes
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Recipes
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../structured/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Structured grids (ERA5, CMIP)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../icon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Unstructured grids (ICON)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../regional/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Regional grids (CORDEX)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../point-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Point data
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Coarsening and averaging masked fields
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Parallel writes
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Parallel writes
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Quick start
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The manifest
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The manifest">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-contains" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What it contains
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What it contains">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#manifest-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Manifest fields
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#level-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Level fields
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Task fields
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-it-is-stored" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Where it is stored
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#serialisation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Serialisation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Validation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-tasks-are-planned" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        How tasks are planned
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How tasks are planned">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#split-the-task-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>split</code>: the task size
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#which-variables-go-into-a-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Which variables go into a task
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-init-does-not-compute" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What the init does not compute
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-the-target-already-exists" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When the target already exists
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Writing a task
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Writing a task">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#full-or-pre-subset-pyramid" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Full or pre-subset pyramid
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-is-validated-before-anything-is-written" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What is validated before anything is written
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chunk-alignment-inside-a-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Chunk alignment inside a task
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retries-and-idempotency" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Retries and idempotency
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#return-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Return value
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#s3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        S3
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checking-completeness" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Checking completeness
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Checking completeness">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-markers-and-not-chunks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why markers and not chunks?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retrying-only-what-is-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Retrying only what is missing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-it-with-reflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Running it with reflow
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Running it with reflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Caching
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Local testing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#re-running-and-recovering" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Re-running and recovering
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Troubleshooting
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Limitations
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../high-level-access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Working with the data
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  API reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/remap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Remapping
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/weights/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Weights store
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/pyramid/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Pyramids
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/swath/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Point binning
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/io/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Writing stores
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/parallel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Parallel writes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/select/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Region selection
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Metadata
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Types
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Command line
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../technical-decisions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Technical decisions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Quick start
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The manifest
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The manifest">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-contains" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What it contains
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What it contains">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#manifest-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Manifest fields
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#level-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Level fields
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Task fields
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-it-is-stored" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Where it is stored
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#serialisation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Serialisation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Validation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-tasks-are-planned" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        How tasks are planned
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How tasks are planned">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#split-the-task-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>split</code>: the task size
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#which-variables-go-into-a-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Which variables go into a task
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-init-does-not-compute" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What the init does not compute
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-the-target-already-exists" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When the target already exists
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Writing a task
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Writing a task">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#full-or-pre-subset-pyramid" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Full or pre-subset pyramid
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-is-validated-before-anything-is-written" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What is validated before anything is written
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chunk-alignment-inside-a-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Chunk alignment inside a task
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retries-and-idempotency" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Retries and idempotency
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#return-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Return value
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#s3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        S3
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checking-completeness" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Checking completeness
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Checking completeness">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-markers-and-not-chunks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why markers and not chunks?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retrying-only-what-is-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Retrying only what is missing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-it-with-reflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Running it with reflow
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Running it with reflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Caching
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Local testing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#re-running-and-recovering" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Re-running and recovering
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Troubleshooting
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Limitations
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+    
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  
+  <span class="md-ellipsis">
+    Recipes
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+  
+
+
+<h1 id="parallel-writes-with-a-manifest">Parallel writes with a manifest<a class="headerlink" href="#parallel-writes-with-a-manifest" title="Permanent link">&para;</a></h1>
+<p><a class="autorefs autorefs-internal" title="            save_pyramid(pyramid, path, s3_options=None, *, mode=&#x27;a&#x27;, region=&#x27;auto&#x27;, zarr_format=2, encoding=None, write_coords=&#x27;auto&#x27;, structure=&#x27;flat&#x27;)" href="../../api/io/#grid_doctor.save_pyramid"><code>save_pyramid</code></a> writes a whole pyramid in one
+dask computation on one machine.  That stops working when the source is
+too large for the memory or the wall-clock limit of a single job, for
+example decades of hourly data at HEALPix level 10 or above.  The
+answer is to split the work into many small, independent jobs: one job
+creates empty stores and decides how the work is cut, an array job fills
+the stores in parallel, and a last job checks that nothing is missing.</p>
+<p>grid-doctor supports exactly this pattern through a <strong>manifest</strong>:</p>
+<pre class="mermaid"><code>flowchart LR
+    A["init_pyramid_store()&lt;br/&gt;empty stores + manifest"] --&gt;|"manifest.tasks"| B1["write_pyramid_task(task 0)"]
+    A --&gt; B2["write_pyramid_task(task 1)"]
+    A --&gt; B3["write_pyramid_task(task …)"]
+    A --&gt; B4["write_pyramid_task(task N)"]
+    B1 --&gt; C["check_pyramid_store()&lt;br/&gt;complete?"]
+    B2 --&gt; C
+    B3 --&gt; C
+    B4 --&gt; C</code></pre>
+<ol>
+<li><strong>Init</strong> (<a class="autorefs autorefs-internal" title="            init_pyramid_store(pyramid, path, s3_options=None, *, zarr_format=2, encoding=None, write_coords=&#x27;auto&#x27;, materialise=None, structure=&#x27;flat&#x27;, split=None, variables_per_task=None, if_exists=&#x27;error&#x27;)" href="../../api/parallel/#grid_doctor.init_pyramid_store"><code>init_pyramid_store</code></a>)
+   writes every level store with its metadata, encodings and
+   coordinates, but no data.  It returns a
+   <a class="autorefs autorefs-internal" title="              PyramidManifest(manifest_id, path, zarr_format, created, grid_doctor_version, split, levels, tasks, materialised=(), schema_version=MANIFEST_SCHEMA_VERSION)
+
+  
+      dataclass
+  " href="../../api/parallel/#grid_doctor.PyramidManifest"><code>PyramidManifest</code></a>: the layout of the
+   stores plus a list of <a class="autorefs autorefs-internal" title="              WriteTask(task_id, manifest_id, path, zarr_format, variables, region, levels)
+
+  
+      dataclass
+  " href="../../api/parallel/#grid_doctor.WriteTask"><code>WriteTask</code></a> work
+   units.  Each task names the variables and the index region one
+   worker has to write.</li>
+<li><strong>Write</strong> (<a class="autorefs autorefs-internal" title="            write_pyramid_task(pyramid, task, s3_options=None)" href="../../api/parallel/#grid_doctor.write_pyramid_task"><code>write_pyramid_task</code></a>) is
+   called once per task, by any number of workers, in any order, on any
+   number of nodes.  No locking is needed: tasks never share a zarr
+   chunk.</li>
+<li><strong>Check</strong> (<a class="autorefs autorefs-internal" title="            check_pyramid_store(manifest, s3_options=None, *, inspect_chunks=False)" href="../../api/parallel/#grid_doctor.check_pyramid_store"><code>check_pyramid_store</code></a>)
+   reports which tasks have finished and whether the stores still look
+   like the manifest says.  Missing tasks can be retried individually.</li>
+</ol>
+<p>The manifest and the tasks are plain, frozen dataclasses that serialise
+to JSON.  They can be returned from one
+<a href="https://reflow-hpc.org">reflow</a> job and fed into the next one without
+any glue code, which is what the <a href="#running-it-with-reflow">reflow section</a>
+below shows.</p>
+<h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
+<p>Everything in one process, to show the moving parts.  On an HPC system
+each loop iteration would be one array-job element.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">xarray</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">xr</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">grid_doctor</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gd</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">source</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">open_mfdataset</span><span class="p">(</span><span class="s2">"era5/tas_*.nc"</span><span class="p">,</span> <span class="n">chunks</span><span class="o">=</span><span class="p">{</span><span class="s2">"time"</span><span class="p">:</span> <span class="mi">24</span><span class="p">})</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">pyramid</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">create_healpix_pyramid</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">max_level</span><span class="o">=</span><span class="mi">9</span><span class="p">)</span>  <span class="c1"># lazy</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># 1. Empty stores + plan: tasks of 72 time steps each.</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">manifest</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">init_pyramid_store</span><span class="p">(</span><span class="n">pyramid</span><span class="p">,</span> <span class="s2">"/scratch/project/era5"</span><span class="p">,</span> <span class="n">split</span><span class="o">=</span><span class="p">{</span><span class="s2">"time"</span><span class="p">:</span> <span class="mi">72</span><span class="p">})</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="nb">print</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">manifest</span><span class="o">.</span><span class="n">tasks</span><span class="p">),</span> <span class="s2">"tasks"</span><span class="p">)</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1"># 2. One call per task (this is what the array job does).</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">manifest</span><span class="o">.</span><span class="n">tasks</span><span class="p">:</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">gd</span><span class="o">.</span><span class="n">write_pyramid_task</span><span class="p">(</span><span class="n">pyramid</span><span class="p">,</span> <span class="n">task</span><span class="p">)</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="c1"># 3. Did everything arrive?</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="n">report</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">check_pyramid_store</span><span class="p">(</span><span class="n">manifest</span><span class="p">)</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="o">.</span><span class="n">summary</span><span class="p">())</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="n">report</span><span class="o">.</span><span class="n">raise_if_incomplete</span><span class="p">()</span>
+</code></pre></div>
+<p>The result is identical, attribute for attribute and value for value,
+to what <code>save_pyramid(pyramid, path, mode="w")</code> would have written.</p>
+<h2 id="the-manifest">The manifest<a class="headerlink" href="#the-manifest" title="Permanent link">&para;</a></h2>
+<h3 id="what-it-contains">What it contains<a class="headerlink" href="#what-it-contains" title="Permanent link">&para;</a></h3>
+<p>This is (an excerpt of) the manifest for one month of hourly data with
+two time-dependent variables and a static land fraction, at levels 9 to
+7, split into tasks of 72 time steps:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"schema_version"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">"manifest_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"d28efd88124c404ebbbacb99d5f44b6b"</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/scratch/project/era5_202001"</span><span class="p">,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">"zarr_format"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">"created"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-27T09:50:54+00:00"</span><span class="p">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">"grid_doctor_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2604.0.0"</span><span class="p">,</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span><span class="nt">"split"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="mi">72</span><span class="p">},</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">  </span><span class="nt">"materialised"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">  </span><span class="nt">"levels"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">      </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="mi">9</span><span class="p">,</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">      </span><span class="nt">"store"</span><span class="p">:</span><span class="w"> </span><span class="s2">"level_9.zarr"</span><span class="p">,</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">      </span><span class="nt">"coords"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"time"</span><span class="p">],</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">      </span><span class="nt">"data_vars"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">        </span><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tas"</span><span class="p">,</span><span class="w">   </span><span class="nt">"dims"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="s2">"cell"</span><span class="p">],</span><span class="w"> </span><span class="nt">"shape"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">744</span><span class="p">,</span><span class="w"> </span><span class="mi">3145728</span><span class="p">],</span><span class="w"> </span><span class="nt">"chunks"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">24</span><span class="p">,</span><span class="w"> </span><span class="mi">65536</span><span class="p">],</span><span class="w"> </span><span class="nt">"dtype"</span><span class="p">:</span><span class="w"> </span><span class="s2">"float32"</span><span class="p">},</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">        </span><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pr"</span><span class="p">,</span><span class="w">    </span><span class="nt">"dims"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="s2">"cell"</span><span class="p">],</span><span class="w"> </span><span class="nt">"shape"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">744</span><span class="p">,</span><span class="w"> </span><span class="mi">3145728</span><span class="p">],</span><span class="w"> </span><span class="nt">"chunks"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">24</span><span class="p">,</span><span class="w"> </span><span class="mi">65536</span><span class="p">],</span><span class="w"> </span><span class="nt">"dtype"</span><span class="p">:</span><span class="w"> </span><span class="s2">"float32"</span><span class="p">},</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">        </span><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sftlf"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dims"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"cell"</span><span class="p">],</span><span class="w">         </span><span class="nt">"shape"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">3145728</span><span class="p">],</span><span class="w">      </span><span class="nt">"chunks"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">65536</span><span class="p">],</span><span class="w">     </span><span class="nt">"dtype"</span><span class="p">:</span><span class="w"> </span><span class="s2">"float32"</span><span class="p">}</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">      </span><span class="p">]</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="w">  </span><span class="nt">"tasks"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="w">    </span><span class="p">{</span><span class="nt">"task_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"task-000000"</span><span class="p">,</span><span class="w"> </span><span class="nt">"variables"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"tas"</span><span class="p">,</span><span class="w"> </span><span class="s2">"pr"</span><span class="p">],</span><span class="w"> </span><span class="nt">"region"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">72</span><span class="p">]},</span><span class="w">   </span><span class="nt">"levels"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">9</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="mi">7</span><span class="p">]},</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="w">    </span><span class="p">{</span><span class="nt">"task_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"task-000001"</span><span class="p">,</span><span class="w"> </span><span class="nt">"variables"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"tas"</span><span class="p">,</span><span class="w"> </span><span class="s2">"pr"</span><span class="p">],</span><span class="w"> </span><span class="nt">"region"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">72</span><span class="p">,</span><span class="w"> </span><span class="mi">144</span><span class="p">]},</span><span class="w"> </span><span class="nt">"levels"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">9</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="mi">7</span><span class="p">]},</span>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="w">    </span><span class="p">{</span><span class="nt">"task_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"task-000011"</span><span class="p">,</span><span class="w"> </span><span class="nt">"variables"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"sftlf"</span><span class="p">],</span><span class="w">     </span><span class="nt">"region"</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span><span class="w">                  </span><span class="nt">"levels"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">9</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="mi">7</span><span class="p">]}</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="p">}</span>
+</code></pre></div>
+<h4 id="manifest-fields">Manifest fields<a class="headerlink" href="#manifest-fields" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>schema_version</code></td>
+<td>Layout version of this JSON.  A grid-doctor that does not know the version refuses to read it instead of guessing.</td>
+</tr>
+<tr>
+<td><code>manifest_id</code></td>
+<td>Random id created by every init.  Every task and every completion marker carries it, which is how stale work is recognised after a re-init.</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td>Pyramid root as passed to <code>init_pyramid_store</code>.</td>
+</tr>
+<tr>
+<td><code>zarr_format</code></td>
+<td>Zarr format (2 or 3) of all level stores.</td>
+</tr>
+<tr>
+<td><code>created</code></td>
+<td>UTC timestamp of the init.</td>
+</tr>
+<tr>
+<td><code>grid_doctor_version</code></td>
+<td>Version that wrote the manifest.</td>
+</tr>
+<tr>
+<td><code>split</code></td>
+<td><strong>Effective</strong> task size per split dimension, after rounding (see <a href="#how-tasks-are-planned">planning</a>).  Empty when nothing was split.</td>
+</tr>
+<tr>
+<td><code>materialised</code></td>
+<td>Data variables the init wrote completely itself (<code>materialise=</code>).</td>
+</tr>
+<tr>
+<td><code>levels</code></td>
+<td>One entry per level, finest first.</td>
+</tr>
+<tr>
+<td><code>tasks</code></td>
+<td>All work units.  Together they cover every data variable on every level exactly once.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="level-fields">Level fields<a class="headerlink" href="#level-fields" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>level</code></td>
+<td>HEALPix refinement level.</td>
+</tr>
+<tr>
+<td><code>store</code></td>
+<td>Store name relative to <code>path</code>.</td>
+</tr>
+<tr>
+<td><code>coords</code></td>
+<td>Arrays the init wrote completely (coordinates, <code>crs</code>, materialised variables).  Workers never touch them.</td>
+</tr>
+<tr>
+<td><code>data_vars</code></td>
+<td>Arrays that tasks write, with <code>dims</code>, full <code>shape</code>, on-disk <code>dtype</code> and <code>chunks</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><code>chunks</code> is the <strong>write unit</strong>: the shard shape for sharded zarr v3
+arrays, the chunk shape otherwise.  It is read back from the store after
+the init, so it reflects what the stores really contain, not what was
+requested.</p>
+<h4 id="task-fields">Task fields<a class="headerlink" href="#task-fields" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>task_id</code></td>
+<td>Unique within the manifest; also the name of the completion marker.</td>
+</tr>
+<tr>
+<td><code>variables</code></td>
+<td>Data variables this task writes.</td>
+</tr>
+<tr>
+<td><code>region</code></td>
+<td>Half-open index range per split dimension, <code>{"time": [0, 72]}</code> means <code>time</code> indices 0 to 71.  Dimensions that are not listed are written in full.  An empty region means "the whole array" (variables without any split dimension).</td>
+</tr>
+<tr>
+<td><code>levels</code></td>
+<td>Levels the task writes, finest first.  A task always covers all levels of its variables, because coarse levels are derived from the finest one.</td>
+</tr>
+</tbody>
+</table>
+<p>Inside the manifest file the tasks omit the fields they share with the
+manifest.  A task on its own (<code>task.to_json()</code>) also carries
+<code>manifest_id</code>, <code>path</code> and <code>zarr_format</code>, so that it is self-contained:
+a worker needs nothing but the task, the data and, for S3, credentials.</p>
+<h3 id="where-it-is-stored">Where it is stored<a class="headerlink" href="#where-it-is-stored" title="Permanent link">&para;</a></h3>
+<p>The init writes the manifest next to the level stores, and every
+finished task leaves a small marker there:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>&lt;path&gt;/
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── level_9.zarr/
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>├── level_8.zarr/
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>├── level_7.zarr/
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>└── _grid_doctor/
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    ├── init.json             # only while an init runs (or after it was killed)
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    ├── manifest.json         # written last by the init
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    └── done/
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>        ├── task-000000.json  # one marker per finished task
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>        └── ...
+</code></pre></div>
+<p>A marker records the task id, the manifest id, the host, the finish
+time and the elapsed seconds, which is handy when you want to know where
+and how long a task ran.</p>
+<p>The manifest is written <strong>after</strong> all level stores exist, so its
+presence means the init finished.  A re-init deletes the old manifest
+and all markers <strong>before</strong> touching the stores, so workers of an
+earlier run fail immediately instead of writing into the new stores.</p>
+<p><code>init.json</code> is written when an init starts and removed right after the
+manifest.  It records the start time, host, process id and, inside a
+Slurm job, <code>SLURM_JOB_ID</code>.  If it is still there without a manifest, the
+init was killed (time limit, <code>scancel</code>, node failure) or is still
+running, and the error messages of <code>load_manifest</code>, <code>check_pyramid_store</code>
+and <code>init_pyramid_store</code> say so, for example:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ManifestError: no manifest at /scratch/project/era5: an init started
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>2026-10-27T11:02:13+00:00 on host l40123 (Slurm job 4711) has not
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>finished; it is still running or was killed
+</code></pre></div>
+<h3 id="serialisation">Serialisation<a class="headerlink" href="#serialisation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">text</span> <span class="o">=</span> <span class="n">manifest</span><span class="o">.</span><span class="n">to_json</span><span class="p">()</span>                     <span class="c1"># str, pretty-printed</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">manifest</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">PyramidManifest</span><span class="o">.</span><span class="n">from_json</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">task_json</span> <span class="o">=</span> <span class="n">manifest</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span><span class="o">.</span><span class="n">to_json</span><span class="p">()</span>       <span class="c1"># self-contained task</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">task</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">WriteTask</span><span class="o">.</span><span class="n">from_json</span><span class="p">(</span><span class="n">task_json</span><span class="p">)</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">manifest</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">load_manifest</span><span class="p">(</span><span class="s2">"/scratch/project/era5"</span><span class="p">)</span>  <span class="c1"># read the stored copy</span>
+</code></pre></div>
+<p>All classes are frozen dataclasses built only from <code>str</code>, <code>int</code> and
+<code>tuple</code>.  That has two consequences:</p>
+<ul>
+<li>reflow's manifest codec serialises them natively.  A job can return a
+  <code>PyramidManifest</code>, a <code>WriteTask</code> or <code>list[WriteTask]</code> and the next job
+  receives the same object back, type and all.</li>
+<li>They are hashable and compare by value, so <code>task in done_tasks</code> and
+  using tasks as dictionary keys just work.</li>
+</ul>
+<p><code>task.slices</code> (or <code>task.isel()</code>) turns the region into a mapping that
+<code>Dataset.isel</code> understands: <code>{"time": slice(0, 72)}</code>.</p>
+<h3 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h3>
+<p>There is no separate JSON Schema file.  Instead every object validates
+itself when it is created, in <code>__post_init__</code>.  That matters because
+manifests and tasks arrive by three routes: parsed from JSON
+(<code>from_json</code>, <code>load_manifest</code>), rebuilt by reflow's codec (which calls
+the constructor directly and never goes through <code>from_json</code>), or built
+by hand.  A JSON Schema would only cover the first one.</p>
+<p>Each class checks its own fields:</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Checks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ArraySpec</code></td>
+<td><code>name</code> is a valid array name; <code>dims</code> unique strings; <code>shape</code> integers ≥ 0; <code>chunks</code> integers ≥ 1; <code>dims</code>, <code>shape</code> and <code>chunks</code> of equal length.</td>
+</tr>
+<tr>
+<td><code>LevelSpec</code></td>
+<td><code>level</code> ≥ 0; <code>store</code> is a plain name (no <code>/</code>, no leading <code>.</code>); unique data variables; no name both coordinate and data variable.</td>
+</tr>
+<tr>
+<td><code>WriteTask</code></td>
+<td><code>task_id</code> and <code>manifest_id</code> are plain names (they become file names); <code>zarr_format</code> is 2 or 3; <code>variables</code> non-empty and unique; <code>region</code> entries well formed with <code>0 ≤ start ≤ stop</code>; <code>levels</code> non-empty and unique.</td>
+</tr>
+<tr>
+<td><code>PyramidManifest</code></td>
+<td><code>schema_version</code> is supported; <code>split</code> sizes ≥ 1 and not along <code>cell</code>; plus the consistency checks below.</td>
+</tr>
+</tbody>
+</table>
+<p>The manifest additionally checks that its tasks fit its layout, which
+is the property parallel writes depend on:</p>
+<ul>
+<li>every task's <code>manifest_id</code>, <code>path</code> and <code>zarr_format</code> match the
+  manifest's, and task ids are unique;</li>
+<li>every task level and variable exists, and region dimensions are
+  split dimensions the variable actually has;</li>
+<li>every region lies inside the array and starts and ends on write-unit
+  boundaries (or at the array end);</li>
+<li>for each data variable on each level, the task regions <strong>tile the
+  array exactly as a grid</strong>: per split dimension the intervals cover
+  the dimension end to end without overlap, every combination of
+  intervals occurs exactly once, and every data variable is written by
+  at least one task.  The order of the entries inside a region does not
+  matter.  Irregular tilings that are not grids are rejected even if
+  they do not overlap, since the planner never produces them.</li>
+</ul>
+<p>The tiling check is linear in the number of tasks; a manifest for ten
+years of hourly data in daily tasks (3650 tasks, 4 variables, 10 levels)
+parses and validates in well under a second.</p>
+<p>Strings must be strings and integers must be integers: <code>"72"</code> is not
+accepted for 72, <code>true</code> is not accepted as 1, and <code>"time"</code> is not
+accepted where a list of dimensions is expected.  Lists are converted to
+tuples, so a hand-built <code>WriteTask(..., variables=["tas"])</code> compares
+equal to one built with <code>("tas",)</code>.</p>
+<p>Violations raise <code>ManifestError</code> with the location of the problem, for
+example:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>ManifestError: tasks[3]: missing field 'levels'
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>ManifestError: task 'task-000004': region start 3 is not a multiple of the write unit 24 of 'tas' on level 9 along 'time'
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>ManifestError: manifest: 'pr' on level 7: task intervals along 'time' overlap at index 48; ...
+</code></pre></div>
+<p><code>schema_version</code> remains the compatibility contract.  It is checked
+first, so a manifest from an incompatible grid-doctor fails with
+"re-initialise the store" rather than with a missing field.</p>
+<h2 id="how-tasks-are-planned">How tasks are planned<a class="headerlink" href="#how-tasks-are-planned" title="Permanent link">&para;</a></h2>
+<p>Parallel writes are only safe if no two writers ever touch the same zarr
+chunk.  Zarr writes a chunk by reading it, modifying the part that
+changed and writing it back; two writers doing that at the same time
+lose one of the updates, silently.  The planner therefore cuts regions
+only at chunk boundaries.</p>
+<h3 id="split-the-task-size"><code>split</code>: the task size<a class="headerlink" href="#split-the-task-size" title="Permanent link">&para;</a></h3>
+<p><code>split={"time": 72}</code> asks for tasks of 72 time steps.  The size is
+rounded <strong>up</strong> to a multiple of the least common multiple of the write
+units of all arrays along that dimension, on all levels:</p>
+<table>
+<thead>
+<tr>
+<th>Arrays along <code>time</code></th>
+<th>Requested</th>
+<th>Effective</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>all chunked by 24</td>
+<td>72</td>
+<td>72</td>
+<td>already a multiple of 24</td>
+</tr>
+<tr>
+<td>all chunked by 24</td>
+<td>50</td>
+<td>72</td>
+<td>next multiple of 24</td>
+</tr>
+<tr>
+<td><code>tas</code> by 2, <code>pr</code> by 3</td>
+<td>4</td>
+<td>6</td>
+<td>lcm(2, 3) = 6</td>
+</tr>
+<tr>
+<td>sharded, shard 48, chunk 24</td>
+<td>24</td>
+<td>48</td>
+<td>shards are the write unit</td>
+</tr>
+</tbody>
+</table>
+<p>Rounding is logged at <code>INFO</code> level, and the effective sizes end up in
+<code>manifest.split</code>.  The last region along a dimension may be shorter
+(744 = 10 × 72 + 24, so the eleventh time task covers 24 steps).</p>
+<p>Several split dimensions give the cartesian product of their regions:
+<code>split={"time": 72, "plev": 4}</code> on 744 time steps and 12 pressure levels
+gives 11 × 3 = 33 regions.</p>
+<div class="admonition warning">
+<p class="admonition-title">Splitting along <code>cell</code> is not supported</p>
+<p>Every pyramid level is derived from the finest one by aggregating
+four children per parent.  A <code>cell</code> region of the finest level
+becomes a 4ᵏ times smaller region on a level k steps coarser, which
+is generally no longer chunk-aligned.  <code>init_pyramid_store</code> rejects
+<code>split={"cell": ...}</code> with a <code>ManifestError</code>.  Split along time,
+ensemble member, vertical level or any other non-spatial dimension.</p>
+</div>
+<h3 id="which-variables-go-into-a-task">Which variables go into a task<a class="headerlink" href="#which-variables-go-into-a-task" title="Permanent link">&para;</a></h3>
+<p>Variables are grouped by the split dimensions they have (and the levels
+they appear on):</p>
+<ul>
+<li>All variables with the same split dimensions share a task, so a
+  worker reads and regrids the source region once for all of them.
+  <code>variables_per_task=1</code> gives one task per variable instead, which
+  lowers the memory per worker at the price of reading the source
+  several times.</li>
+<li>Variables without any split dimension (a static land-sea mask, a 0-d
+  scale factor) get their own task with an empty region.  They are
+  written exactly once.  Small static fields can instead be written by
+  the init itself with <code>materialise=["sftlf"]</code>; they then appear in the
+  level's <code>coords</code> and in no task.</li>
+<li><code>split=None</code> (the default) plans a single task per variable group that
+  covers the whole store.  This is the degenerate case and mostly useful
+  for testing.</li>
+</ul>
+<h3 id="what-the-init-does-not-compute">What the init does not compute<a class="headerlink" href="#what-the-init-does-not-compute" title="Permanent link">&para;</a></h3>
+<p>Only coordinates and <code>materialise</code> variables are computed at init
+time.  For lazy data variables the init
+writes metadata only, so it takes seconds even for stores with hundreds
+of thousands of chunks.  The pyramid passed to the init therefore only
+needs the correct shapes, dtypes, chunks, encodings and attributes; you
+can build it lazily from the full source without fear.</p>
+<h2 id="when-the-target-already-exists">When the target already exists<a class="headerlink" href="#when-the-target-already-exists" title="Permanent link">&para;</a></h2>
+<p>A second init on the same path is the one thing that can destroy work:
+it re-creates every level store.  <code>init_pyramid_store</code> therefore checks
+the target first and lets you choose with <code>if_exists</code>:</p>
+<table>
+<thead>
+<tr>
+<th><code>if_exists</code></th>
+<th>Target is empty</th>
+<th>Target has a pyramid with a manifest</th>
+<th>Target has stores but no manifest (killed init, <code>save_pyramid</code> output)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"error"</code> (default)</td>
+<td>initialise</td>
+<td><code>StoreExistsError</code></td>
+<td><code>StoreExistsError</code></td>
+</tr>
+<tr>
+<td><code>"resume"</code></td>
+<td>initialise</td>
+<td>return the stored manifest if the plan matches, else <code>StoreExistsError</code></td>
+<td><code>StoreExistsError</code></td>
+</tr>
+<tr>
+<td><code>"overwrite"</code></td>
+<td>initialise</td>
+<td>re-initialise, new <code>manifest_id</code></td>
+<td>re-initialise</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Resume</strong> plans the tasks again from the pyramid you pass and the
+chunking of the stores that already exist, and compares the result with
+the stored manifest: path, zarr format, levels, array names, dims,
+shapes, chunks and dtypes, <code>materialise</code>, the effective <code>split</code> and every
+task's variables, region and levels.  It also compares the <strong>coordinate
+values</strong> the init wrote (time, vertical levels, members, ...), so a
+pyramid of another time range with the same length is refused rather
+than resumed under the old labels.  If everything matches it returns
+the stored manifest <strong>unchanged, with its <code>manifest_id</code></strong>, and writes
+nothing.  Tasks that already finished keep their markers.  If anything
+differs, it raises and lists the differences:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>StoreExistsError: cannot resume /scratch/project/era5: the stored
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>manifest d28efd88… was planned differently (split {'time': 72} !=
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>{'time': 48}). Use if_exists='overwrite' to discard it and start over.
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>StoreExistsError: cannot resume /scratch/project/era5: the stored
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>manifest d28efd88… was planned differently (level 9: coordinate 'time'
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>differs at time=0: pyramid has 2021-01-01T00:00:00, store has
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>2020-01-01T00:00:00). Use if_exists='overwrite' ...
+</code></pre></div>
+<p>What resume cannot see is a change in the <em>data</em> under unchanged labels
+(the same time steps re-processed with a fixed input file, say).  In
+that case overwrite.</p>
+<p>That makes re-submitting a conversion after a time-out safe and cheap:
+same parameters resume where the last run stopped, different parameters
+fail loudly instead of wiping the store.  Two accidental submissions with
+the same parameters running at the same time are harmless as well, since
+they write identical data into identical, chunk-aligned regions.</p>
+<p>A moved or copied store cannot be resumed (its manifest records the old
+path, which is where workers would write).  Use <code>"overwrite"</code> there.</p>
+<p><strong>Overwrite</strong> discards the store and starts a new manifest.  Use it
+only when nothing else is writing into the path.</p>
+<div class="admonition danger">
+<p class="admonition-title">One conversion per path at a time</p>
+<p>grid-doctor does not lock a store.  It assumes that <strong>only one
+conversion writes into a path at any time</strong>, and it cannot enforce
+that on a shared file system or object store.</p>
+<p>What grid-doctor does guard against:</p>
+<ul>
+<li>a second init on an existing path is refused unless you pass
+  <code>if_exists</code> (<code>"error"</code> is the default),</li>
+<li><code>"resume"</code> only continues a store that was planned the same way
+  and has the same coordinate values,</li>
+<li>workers refuse tasks of an older manifest, edited tasks, and
+  pyramids whose coordinates differ from the stored ones.</li>
+</ul>
+<p>What it <strong>cannot</strong> prevent: an <code>"overwrite"</code> while workers of the
+previous run are still writing.  A worker that already passed its
+checks keeps writing, into the new stores.  It notices afterwards
+and fails with <code>StaleTaskError</code> ("re-initialised while task-… was
+writing"), but by then its data may sit in regions the new run has
+already marked as done, and <code>check_pyramid_store</code> of the new run can
+still report the store as complete.</p>
+<p>So, before overwriting:</p>
+<ol>
+<li>make sure the previous run into that path has finished or is
+   cancelled (<code>status</code> / <code>cancel</code> in reflow, or the scheduler);</li>
+<li>if you ever see the "re-initialised while … was writing" error,
+   overwrite once more, with nothing else running.</li>
+</ol>
+<p>When several people or runs convert at the same time, give each
+conversion its own path, or let the workflow tool allow only one
+active run per target.</p>
+</div>
+<p>The <code>_grid_doctor/</code> directory is not part of any zarr store and does not
+disturb readers.  Once a store is complete and published you may delete
+it; you only lose the ability to run <code>check_pyramid_store</code> against it.</p>
+<h2 id="writing-a-task">Writing a task<a class="headerlink" href="#writing-a-task" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">gd</span><span class="o">.</span><span class="n">write_pyramid_task</span><span class="p">(</span><span class="n">pyramid</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span> <span class="n">s3_options</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="full-or-pre-subset-pyramid">Full or pre-subset pyramid<a class="headerlink" href="#full-or-pre-subset-pyramid" title="Permanent link">&para;</a></h3>
+<p>The pyramid a worker passes can have either shape along the split
+dimensions:</p>
+<ul>
+<li><strong>Full extent</strong>: the same lazy pyramid as at init time.  The task
+  region is selected inside <code>write_pyramid_task</code>.  Simple, but every
+  worker builds the full dask graph.</li>
+<li><strong>Only the task region</strong> (recommended): subset the <em>source</em> first and
+  build the pyramid from that.  Each worker opens, reads and regrids only
+  its slice.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">source</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">open_mfdataset</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="n">chunks</span><span class="o">=</span><span class="p">{</span><span class="s2">"time"</span><span class="p">:</span> <span class="mi">24</span><span class="p">})</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">pyramid</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">create_healpix_pyramid</span><span class="p">(</span><span class="n">source</span><span class="o">.</span><span class="n">isel</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">isel</span><span class="p">()),</span> <span class="n">max_level</span><span class="o">=</span><span class="mi">9</span><span class="p">)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">gd</span><span class="o">.</span><span class="n">write_pyramid_task</span><span class="p">(</span><span class="n">pyramid</span><span class="p">,</span> <span class="n">task</span><span class="p">)</span>
+</code></pre></div>
+<p>For every split dimension, the length must be either the full length
+recorded in the manifest or exactly the region length; anything else is
+a <code>ManifestError</code>.  The pyramid may contain extra variables or levels;
+they are ignored.</p>
+<h3 id="what-is-validated-before-anything-is-written">What is validated before anything is written<a class="headerlink" href="#what-is-validated-before-anything-is-written" title="Permanent link">&para;</a></h3>
+<ol>
+<li>The stored manifest has the task's <code>manifest_id</code>.  If the store was
+   re-initialised since the task was planned, a <code>StaleTaskError</code> is
+   raised and nothing is written.</li>
+<li>The task is identical to the task with the same id in the stored
+   manifest.  The manifest guarantees that <em>its</em> tasks are chunk-aligned
+   and disjoint; an edited or hand-built task has no such guarantee and
+   is refused with a <code>ManifestError</code>.</li>
+<li>Every level and variable of the task exists in the pyramid.</li>
+<li>Dimension names match the store (dimension order may differ; the
+   data is transposed).</li>
+<li>Non-split dimensions have exactly the stored length.</li>
+<li>The coordinate values in the task region match the ones the init
+   stored.  Workers never write coordinates, so a pyramid built from
+   another time range of the same length would otherwise put its data
+   under the stored labels.  Values are encoded the way they are stored
+   (units, dtype, packing) and compared exactly; arrays along <code>cell</code>
+   (<code>cell</code>, <code>latitude</code>, <code>longitude</code>) are skipped, since they follow from
+   the HEALPix index.</li>
+</ol>
+<p>After the data is stored and before the completion marker is written,
+the worker reads the manifest id once more.  If the store was
+re-initialised in the meantime, it raises <code>StaleTaskError</code> and writes no
+marker (see <a href="#when-the-target-already-exists">overwrite</a>).</p>
+<h3 id="chunk-alignment-inside-a-task">Chunk alignment inside a task<a class="headerlink" href="#chunk-alignment-inside-a-task" title="Permanent link">&para;</a></h3>
+<p><code>da.store</code> writes every dask block independently.  If a worker's dask
+chunks do not line up with the store's chunks (for example the init
+pyramid was chunked <code>time=24</code> and the worker opened the source with
+<code>time=10</code>), two blocks would share a zarr chunk and race.  The worker
+detects this, logs a warning starting with <code>Rechunking ...</code> and rechunks
+to the store's write units.  Correctness is preserved, but rechunking
+costs memory and time, so open the source with the same chunks in both
+steps if you see the warning.</p>
+<h3 id="retries-and-idempotency">Retries and idempotency<a class="headerlink" href="#retries-and-idempotency" title="Permanent link">&para;</a></h3>
+<p>A task writes the same values into the same region every time it runs.
+Running a task twice, or running a task whose first attempt crashed
+halfway, is harmless.  The completion marker is written only after all
+data of the task has been stored, so a crashed task never looks done.</p>
+<p>A job killed by Slurm in the middle of a write (time limit, <code>scancel</code>)
+can leave a truncated chunk file on a POSIX file system; S3 uploads are
+atomic, so there it cannot.  Because regions are chunk-aligned, the
+retry rewrites every chunk of its region completely, without reading the
+old content, which replaces the broken file (or deletes it, if the new
+chunk is all fill value).  The marker itself is written atomically
+(temporary file plus rename, or a single upload), so it is either
+complete or absent.</p>
+<h3 id="return-value">Return value<a class="headerlink" href="#return-value" title="Permanent link">&para;</a></h3>
+<p><code>write_pyramid_task</code> returns the task itself.  That sounds odd but is
+deliberate: in reflow, the output of the array job is then a
+<code>WriteTask</code>, which <a class="autorefs autorefs-internal" title="            is_task_done(task, s3_options=None)" href="../../api/parallel/#grid_doctor.is_task_done"><code>is_task_done</code></a> can verify
+on a cache hit (see below).</p>
+<h3 id="s3">S3<a class="headerlink" href="#s3" title="Permanent link">&para;</a></h3>
+<p>Pass the credentials to every call with <code>s3_options</code>, exactly as for
+<code>save_pyramid</code>.  Credentials are never written to the manifest, the
+tasks or the markers:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">s3_options</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">get_s3_options</span><span class="p">(</span><span class="s2">"https://s3.example.org"</span><span class="p">,</span> <span class="s2">"~/.s3-credentials.json"</span><span class="p">)</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">manifest</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">init_pyramid_store</span><span class="p">(</span><span class="n">pyramid</span><span class="p">,</span> <span class="s2">"s3://bucket/era5"</span><span class="p">,</span> <span class="n">s3_options</span><span class="p">,</span> <span class="n">split</span><span class="o">=</span><span class="p">{</span><span class="s2">"time"</span><span class="p">:</span> <span class="mi">72</span><span class="p">})</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">gd</span><span class="o">.</span><span class="n">write_pyramid_task</span><span class="p">(</span><span class="n">pyramid</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span> <span class="n">s3_options</span><span class="p">)</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">gd</span><span class="o">.</span><span class="n">check_pyramid_store</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">s3_options</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="checking-completeness">Checking completeness<a class="headerlink" href="#checking-completeness" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">report</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">check_pyramid_store</span><span class="p">(</span><span class="n">manifest</span><span class="p">)</span>          <span class="c1"># or the path: "/scratch/project/era5"</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">report</span><span class="o">.</span><span class="n">complete</span>           <span class="c1"># True / False, also bool(report)</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">report</span><span class="o">.</span><span class="n">done_tasks</span>         <span class="c1"># ("task-000000", ...)</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">report</span><span class="o">.</span><span class="n">missing_tasks</span>      <span class="c1"># tasks without a valid marker</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">report</span><span class="o">.</span><span class="n">problems</span>           <span class="c1"># structural problems, see below</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="o">.</span><span class="n">summary</span><span class="p">())</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="n">report</span><span class="o">.</span><span class="n">raise_if_incomplete</span><span class="p">()</span>   <span class="c1"># IncompleteStoreError with the summary</span>
+</code></pre></div>
+<p>The check reads level metadata and lists the marker directory.  It
+never reads data, so it is fast even for very large stores.  A store is
+complete when all of the following hold:</p>
+<ol>
+<li><strong>Same manifest.</strong> The stored <code>manifest.json</code> has the id being
+   checked.  If not, the store was re-initialised and this manifest's
+   markers mean nothing.</li>
+<li><strong>Same layout.</strong> Every level store opens, and every array and
+   coordinate listed in the manifest exists with the recorded shape,
+   write unit and dtype.  Violations end up in <code>report.problems</code>.</li>
+<li><strong>All tasks done.</strong> Every task has a marker with the right
+   <code>manifest_id</code>.  Markers of other manifests and unreadable markers are
+   counted in <code>report.stale_markers</code> and otherwise ignored.</li>
+</ol>
+<h3 id="why-markers-and-not-chunks">Why markers and not chunks?<a class="headerlink" href="#why-markers-and-not-chunks" title="Permanent link">&para;</a></h3>
+<p>The obvious alternative, "every chunk of the region exists", does not
+work: zarr does not store chunks that contain only the fill value.  For
+regional data (CORDEX on a global HEALPix grid), ocean-only variables
+over land, or any masked field, most chunks are legitimately absent, and
+there is no way to distinguish "never written" from "written, but all
+NaN".  A marker written after the data is unambiguous.</p>
+<p>If you still want to look at chunks, <code>inspect_chunks=True</code> lists the
+stored chunk keys and reports, per finished task, how many chunks of its
+region are absent in <code>report.absent_chunks</code> as
+<code>(task_id, absent, expected)</code>.  This is <strong>informational</strong> and never makes
+a store incomplete.  A task of a global, gap-free field with absent
+chunks is suspicious; a task over the Sahara of an SST field with all
+chunks absent is not.  The option lists every object of the inspected
+arrays, which can take a while on large S3 stores.</p>
+<h3 id="retrying-only-what-is-missing">Retrying only what is missing<a class="headerlink" href="#retrying-only-what-is-missing" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">report</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">check_pyramid_store</span><span class="p">(</span><span class="n">manifest</span><span class="p">)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">manifest</span><span class="o">.</span><span class="n">select_tasks</span><span class="p">(</span><span class="n">report</span><span class="o">.</span><span class="n">missing_tasks</span><span class="p">):</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">gd</span><span class="o">.</span><span class="n">write_pyramid_task</span><span class="p">(</span><span class="n">pyramid</span><span class="p">,</span> <span class="n">task</span><span class="p">)</span>
+</code></pre></div>
+<p><code>select_tasks</code> returns the tasks in manifest order and raises <code>KeyError</code>
+for unknown ids.</p>
+<h2 id="running-it-with-reflow">Running it with reflow<a class="headerlink" href="#running-it-with-reflow" title="Permanent link">&para;</a></h2>
+<p>The three steps map onto three reflow jobs.  The init returns
+<code>list(manifest.tasks)</code>, which reflow fans out into one array element per
+task; the <code>write</code> array job hands its tasks to a final <code>check</code> job,
+which fails the workflow if anything is missing.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="sd">"""convert_era5.py: ERA5 to HEALPix with one array element per task."""</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Annotated</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="kn">import</span><span class="w"> </span><span class="nn">xarray</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">xr</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="kn">from</span><span class="w"> </span><span class="nn">reflow</span><span class="w"> </span><span class="kn">import</span> <span class="n">Param</span><span class="p">,</span> <span class="n">Result</span><span class="p">,</span> <span class="n">Workflow</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="kn">import</span><span class="w"> </span><span class="nn">grid_doctor</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gd</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="n">wf</span> <span class="o">=</span> <span class="n">Workflow</span><span class="p">(</span><span class="s2">"era5-healpix"</span><span class="p">)</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="k">def</span><span class="w"> </span><span class="nf">build_pyramid</span><span class="p">(</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>    <span class="n">source</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">max_level</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">region</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">slice</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">]:</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="w">    </span><span class="sd">"""Same pyramid in every job; workers pass their task region."""</span>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>    <span class="n">ds</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">open_mfdataset</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">chunks</span><span class="o">=</span><span class="p">{</span><span class="s2">"time"</span><span class="p">:</span> <span class="mi">24</span><span class="p">},</span> <span class="n">parallel</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a>    <span class="k">if</span> <span class="n">region</span><span class="p">:</span>
+<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a>        <span class="n">ds</span> <span class="o">=</span> <span class="n">ds</span><span class="o">.</span><span class="n">isel</span><span class="p">(</span><span class="n">region</span><span class="p">)</span>
+<a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a>    <span class="k">return</span> <span class="n">gd</span><span class="o">.</span><span class="n">create_healpix_pyramid</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">max_level</span><span class="o">=</span><span class="n">max_level</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="s2">"conservative"</span><span class="p">)</span>
+<a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a>
+<a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a>
+<a id="__codelineno-12-23" name="__codelineno-12-23" href="#__codelineno-12-23"></a><span class="c1"># Not cached: see "Caching" below.</span>
+<a id="__codelineno-12-24" name="__codelineno-12-24" href="#__codelineno-12-24"></a><span class="nd">@wf</span><span class="o">.</span><span class="n">job</span><span class="p">(</span><span class="n">cache</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">cpus</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">mem</span><span class="o">=</span><span class="s2">"16G"</span><span class="p">,</span> <span class="n">time</span><span class="o">=</span><span class="s2">"00:30:00"</span><span class="p">)</span>
+<a id="__codelineno-12-25" name="__codelineno-12-25" href="#__codelineno-12-25"></a><span class="k">def</span><span class="w"> </span><span class="nf">init</span><span class="p">(</span>
+<a id="__codelineno-12-26" name="__codelineno-12-26" href="#__codelineno-12-26"></a>    <span class="n">source</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Param</span><span class="p">(</span><span class="n">help</span><span class="o">=</span><span class="s2">"Glob of input files"</span><span class="p">)],</span>
+<a id="__codelineno-12-27" name="__codelineno-12-27" href="#__codelineno-12-27"></a>    <span class="n">target</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Param</span><span class="p">(</span><span class="n">help</span><span class="o">=</span><span class="s2">"Pyramid root, local path or s3://"</span><span class="p">)],</span>
+<a id="__codelineno-12-28" name="__codelineno-12-28" href="#__codelineno-12-28"></a>    <span class="n">max_level</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">Param</span><span class="p">(</span><span class="n">help</span><span class="o">=</span><span class="s2">"Finest HEALPix level"</span><span class="p">)]</span> <span class="o">=</span> <span class="mi">9</span><span class="p">,</span>
+<a id="__codelineno-12-29" name="__codelineno-12-29" href="#__codelineno-12-29"></a>    <span class="n">time_per_task</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">Param</span><span class="p">(</span><span class="n">help</span><span class="o">=</span><span class="s2">"Time steps per array element"</span><span class="p">)]</span> <span class="o">=</span> <span class="mi">72</span><span class="p">,</span>
+<a id="__codelineno-12-30" name="__codelineno-12-30" href="#__codelineno-12-30"></a>    <span class="n">overwrite</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">Param</span><span class="p">(</span><span class="n">help</span><span class="o">=</span><span class="s2">"Discard an existing store"</span><span class="p">)]</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-12-31" name="__codelineno-12-31" href="#__codelineno-12-31"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">gd</span><span class="o">.</span><span class="n">WriteTask</span><span class="p">]:</span>
+<a id="__codelineno-12-32" name="__codelineno-12-32" href="#__codelineno-12-32"></a>    <span class="n">manifest</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">init_pyramid_store</span><span class="p">(</span>
+<a id="__codelineno-12-33" name="__codelineno-12-33" href="#__codelineno-12-33"></a>        <span class="n">build_pyramid</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">max_level</span><span class="p">),</span>
+<a id="__codelineno-12-34" name="__codelineno-12-34" href="#__codelineno-12-34"></a>        <span class="n">target</span><span class="p">,</span>
+<a id="__codelineno-12-35" name="__codelineno-12-35" href="#__codelineno-12-35"></a>        <span class="n">split</span><span class="o">=</span><span class="p">{</span><span class="s2">"time"</span><span class="p">:</span> <span class="n">time_per_task</span><span class="p">},</span>
+<a id="__codelineno-12-36" name="__codelineno-12-36" href="#__codelineno-12-36"></a>        <span class="c1"># A re-submit continues an existing store; changed parameters fail.</span>
+<a id="__codelineno-12-37" name="__codelineno-12-37" href="#__codelineno-12-37"></a>        <span class="n">if_exists</span><span class="o">=</span><span class="s2">"overwrite"</span> <span class="k">if</span> <span class="n">overwrite</span> <span class="k">else</span> <span class="s2">"resume"</span><span class="p">,</span>
+<a id="__codelineno-12-38" name="__codelineno-12-38" href="#__codelineno-12-38"></a>    <span class="p">)</span>
+<a id="__codelineno-12-39" name="__codelineno-12-39" href="#__codelineno-12-39"></a>    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">manifest</span><span class="o">.</span><span class="n">tasks</span><span class="p">)</span>
+<a id="__codelineno-12-40" name="__codelineno-12-40" href="#__codelineno-12-40"></a>
+<a id="__codelineno-12-41" name="__codelineno-12-41" href="#__codelineno-12-41"></a>
+<a id="__codelineno-12-42" name="__codelineno-12-42" href="#__codelineno-12-42"></a><span class="nd">@wf</span><span class="o">.</span><span class="n">job</span><span class="p">(</span>
+<a id="__codelineno-12-43" name="__codelineno-12-43" href="#__codelineno-12-43"></a>    <span class="n">array</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-12-44" name="__codelineno-12-44" href="#__codelineno-12-44"></a>    <span class="n">array_parallelism</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span>
+<a id="__codelineno-12-45" name="__codelineno-12-45" href="#__codelineno-12-45"></a>    <span class="n">cpus</span><span class="o">=</span><span class="mi">16</span><span class="p">,</span>
+<a id="__codelineno-12-46" name="__codelineno-12-46" href="#__codelineno-12-46"></a>    <span class="n">mem</span><span class="o">=</span><span class="s2">"64G"</span><span class="p">,</span>
+<a id="__codelineno-12-47" name="__codelineno-12-47" href="#__codelineno-12-47"></a>    <span class="n">time</span><span class="o">=</span><span class="s2">"02:00:00"</span><span class="p">,</span>
+<a id="__codelineno-12-48" name="__codelineno-12-48" href="#__codelineno-12-48"></a>    <span class="n">verify</span><span class="o">=</span><span class="n">gd</span><span class="o">.</span><span class="n">is_task_done</span><span class="p">,</span>
+<a id="__codelineno-12-49" name="__codelineno-12-49" href="#__codelineno-12-49"></a><span class="p">)</span>
+<a id="__codelineno-12-50" name="__codelineno-12-50" href="#__codelineno-12-50"></a><span class="k">def</span><span class="w"> </span><span class="nf">write</span><span class="p">(</span>
+<a id="__codelineno-12-51" name="__codelineno-12-51" href="#__codelineno-12-51"></a>    <span class="n">task</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span><span class="n">gd</span><span class="o">.</span><span class="n">WriteTask</span><span class="p">,</span> <span class="n">Result</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="s2">"init"</span><span class="p">)],</span>
+<a id="__codelineno-12-52" name="__codelineno-12-52" href="#__codelineno-12-52"></a>    <span class="n">source</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Param</span><span class="p">(</span><span class="n">help</span><span class="o">=</span><span class="s2">"Glob of input files"</span><span class="p">)],</span>
+<a id="__codelineno-12-53" name="__codelineno-12-53" href="#__codelineno-12-53"></a>    <span class="n">max_level</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">Param</span><span class="p">(</span><span class="n">help</span><span class="o">=</span><span class="s2">"Finest HEALPix level"</span><span class="p">)]</span> <span class="o">=</span> <span class="mi">9</span><span class="p">,</span>
+<a id="__codelineno-12-54" name="__codelineno-12-54" href="#__codelineno-12-54"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">gd</span><span class="o">.</span><span class="n">WriteTask</span><span class="p">:</span>
+<a id="__codelineno-12-55" name="__codelineno-12-55" href="#__codelineno-12-55"></a>    <span class="n">pyramid</span> <span class="o">=</span> <span class="n">build_pyramid</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">max_level</span><span class="p">,</span> <span class="n">task</span><span class="o">.</span><span class="n">isel</span><span class="p">())</span>
+<a id="__codelineno-12-56" name="__codelineno-12-56" href="#__codelineno-12-56"></a>    <span class="k">return</span> <span class="n">gd</span><span class="o">.</span><span class="n">write_pyramid_task</span><span class="p">(</span><span class="n">pyramid</span><span class="p">,</span> <span class="n">task</span><span class="p">)</span>
+<a id="__codelineno-12-57" name="__codelineno-12-57" href="#__codelineno-12-57"></a>
+<a id="__codelineno-12-58" name="__codelineno-12-58" href="#__codelineno-12-58"></a>
+<a id="__codelineno-12-59" name="__codelineno-12-59" href="#__codelineno-12-59"></a><span class="nd">@wf</span><span class="o">.</span><span class="n">job</span><span class="p">(</span><span class="n">cpus</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">mem</span><span class="o">=</span><span class="s2">"4G"</span><span class="p">,</span> <span class="n">time</span><span class="o">=</span><span class="s2">"00:10:00"</span><span class="p">)</span>
+<a id="__codelineno-12-60" name="__codelineno-12-60" href="#__codelineno-12-60"></a><span class="k">def</span><span class="w"> </span><span class="nf">check</span><span class="p">(</span>
+<a id="__codelineno-12-61" name="__codelineno-12-61" href="#__codelineno-12-61"></a>    <span class="n">done</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="n">gd</span><span class="o">.</span><span class="n">WriteTask</span><span class="p">],</span> <span class="n">Result</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="s2">"write"</span><span class="p">)],</span>
+<a id="__codelineno-12-62" name="__codelineno-12-62" href="#__codelineno-12-62"></a>    <span class="n">target</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Param</span><span class="p">(</span><span class="n">help</span><span class="o">=</span><span class="s2">"Pyramid root, local path or s3://"</span><span class="p">)],</span>
+<a id="__codelineno-12-63" name="__codelineno-12-63" href="#__codelineno-12-63"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">gd</span><span class="o">.</span><span class="n">StoreReport</span><span class="p">:</span>
+<a id="__codelineno-12-64" name="__codelineno-12-64" href="#__codelineno-12-64"></a>    <span class="n">report</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">check_pyramid_store</span><span class="p">(</span><span class="n">target</span><span class="p">)</span>
+<a id="__codelineno-12-65" name="__codelineno-12-65" href="#__codelineno-12-65"></a>    <span class="n">report</span><span class="o">.</span><span class="n">raise_if_incomplete</span><span class="p">()</span>
+<a id="__codelineno-12-66" name="__codelineno-12-66" href="#__codelineno-12-66"></a>    <span class="k">return</span> <span class="n">report</span>
+<a id="__codelineno-12-67" name="__codelineno-12-67" href="#__codelineno-12-67"></a>
+<a id="__codelineno-12-68" name="__codelineno-12-68" href="#__codelineno-12-68"></a>
+<a id="__codelineno-12-69" name="__codelineno-12-69" href="#__codelineno-12-69"></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+<a id="__codelineno-12-70" name="__codelineno-12-70" href="#__codelineno-12-70"></a>    <span class="n">wf</span><span class="o">.</span><span class="n">cli</span><span class="p">()</span>
+</code></pre></div>
+<p>Submit and follow it like any reflow workflow:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="gp">$ </span>python<span class="w"> </span>convert_era5.py<span class="w"> </span>submit<span class="w"> </span>--run-dir<span class="w"> </span>/scratch/project/runs<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">      </span>--source<span class="w"> </span><span class="s1">'era5/t2m/*.nc'</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">      </span>--target<span class="w"> </span>/scratch/project/era5_t2m<span class="w"> </span>--max-level<span class="w"> </span><span class="m">10</span><span class="w"> </span>--time-per-task<span class="w"> </span><span class="m">168</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="gp">$ </span>python<span class="w"> </span>convert_era5.py<span class="w"> </span>status<span class="w"> </span>&lt;run-id&gt;
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="gp">$ </span>python<span class="w"> </span>convert_era5.py<span class="w"> </span>retry<span class="w"> </span>&lt;run-id&gt;<span class="w"> </span>--task<span class="w"> </span>write<span class="w">   </span><span class="c1"># only the failed elements</span>
+</code></pre></div>
+<p>Notes on the design:</p>
+<ul>
+<li><strong>Each <code>WriteTask</code> is self-contained.</strong>  The array job does not need
+  the manifest; reflow passes each element its own task.  If a later job
+  needs the full manifest, call <code>gd.load_manifest(target)</code> there, or
+  return the manifest from a separate job and pass it with
+  <code>Result(step=..., broadcast=True)</code>.</li>
+<li><strong>Choose <code>time_per_task</code> by memory and wall-clock, not by node count.</strong>
+  Each element regrids <code>time_per_task</code> steps of the source at
+  <code>max_level</code>.  Measure one element interactively first, then size the
+  others.  Many short elements also make retries cheaper.</li>
+<li><strong><code>array_parallelism</code></strong> caps how many elements run at once.  Use it to
+  protect the file system or an S3 endpoint from too many concurrent
+  writers.</li>
+<li><strong>S3:</strong> read credentials inside each job (for example with
+  <a class="autorefs autorefs-internal" title="            get_s3_options(endpoint_url, secrets_file, **kwargs)" href="../../api/io/#grid_doctor.get_s3_options"><code>get_s3_options</code></a>) and pass them to all
+  three calls.  Do not pass secrets as reflow <code>Param</code>s; those end up in
+  the run database.</li>
+</ul>
+<h3 id="caching">Caching<a class="headerlink" href="#caching" title="Permanent link">&para;</a></h3>
+<p>reflow skips a job whose identity (name, version, inputs, upstream
+outputs) it has seen before.  Two things to know:</p>
+<ul>
+<li><strong>The init job is declared with <code>cache=False</code>.</strong>  In reflow 2604.4 the
+  <code>Param</code> values of a job are not part of its cache identity.  A cached
+  init would therefore return the tasks of the <em>previous</em> target even if
+  you change <code>--target</code>, and the array job would write into the old
+  store.  With <code>cache=False</code>, every <code>submit</code> runs the init again; with
+  <code>if_exists="resume"</code> that is cheap and returns the stored manifest, so
+  the tasks (and their manifest id) are the same as last time.</li>
+<li><strong>A re-submit only redoes what is missing.</strong>  Because the tasks are
+  identical, reflow finds the write elements that succeeded last time in
+  its cache and skips them; only failed or timed-out elements run again.
+  <code>retry &lt;run-id&gt; --task write</code> does the same within one run.  To start
+  over deliberately, submit with <code>--overwrite</code>, but only after the
+  previous run into the same target has finished or been cancelled (see
+  <a href="#when-the-target-already-exists">one conversion per path</a>).</li>
+<li><strong><code>verify=gd.is_task_done</code> on the array job.</strong>  A write element is
+  cached by its task, and every task carries the manifest id, so a
+  re-initialised store never reuses old results.  On a cache hit with
+  verification enabled, <code>is_task_done</code> additionally confirms that the
+  marker is still in the store (it was not deleted, the store was not
+  re-initialised by someone else).  For a manifest-returning job,
+  <a class="autorefs autorefs-internal" title="            is_current(item, s3_options=None)" href="../../api/parallel/#grid_doctor.is_current"><code>is_current</code></a> does the same for the manifest.</li>
+</ul>
+<h3 id="local-testing">Local testing<a class="headerlink" href="#local-testing" title="Permanent link">&para;</a></h3>
+<p><code>wf.run_local(run_dir=..., source=..., target=...)</code> runs the whole
+workflow in one process, which is the quickest way to try a conversion on
+a small time range.  With <code>max_workers &gt; 1</code>, reflow runs array elements
+in a process pool.  On Linux the default <em>fork</em> start method can
+deadlock once dask, numba or zarr threads exist in the parent; switch to
+spawn before running locally:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">multiprocessing</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">multiprocessing</span><span class="o">.</span><span class="n">set_start_method</span><span class="p">(</span><span class="s2">"spawn"</span><span class="p">,</span> <span class="n">force</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="n">run</span> <span class="o">=</span> <span class="n">wf</span><span class="o">.</span><span class="n">run_local</span><span class="p">(</span><span class="n">run_dir</span><span class="o">=</span><span class="s2">"/tmp/run"</span><span class="p">,</span> <span class="n">max_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">source</span><span class="o">=...</span><span class="p">,</span> <span class="n">target</span><span class="o">=...</span><span class="p">)</span>
+</code></pre></div>
+<p>On a cluster every array element is its own process, so this does not
+apply there.</p>
+<h2 id="re-running-and-recovering">Re-running and recovering<a class="headerlink" href="#re-running-and-recovering" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A few array elements failed (time limit, node failure)</td>
+<td><code>check_pyramid_store</code> lists them in <code>missing_tasks</code>.  In reflow: <code>retry &lt;run-id&gt; --task write</code>, or <code>submit</code> again with the same parameters.  By hand: <code>manifest.select_tasks(report.missing_tasks)</code>.  Partially written regions are rewritten completely by the retry.</td>
+</tr>
+<tr>
+<td>The whole run was cancelled or the dispatcher died</td>
+<td><code>submit</code> again with the same parameters.  The init resumes the stored manifest and only missing tasks run.</td>
+</tr>
+<tr>
+<td>The init job hit its time limit</td>
+<td>There is no manifest, only <code>init.json</code> and partial stores; nothing else ran.  Give the init more time and <code>submit --overwrite</code>.</td>
+</tr>
+<tr>
+<td>A task ran twice</td>
+<td>Nothing.  Writes are idempotent.</td>
+</tr>
+<tr>
+<td>You want a different <code>split</code> or <code>variables_per_task</code></td>
+<td>Run the init with <code>if_exists="overwrite"</code> (<code>--overwrite</code>).  All written data is discarded and a new manifest is created.  <code>"resume"</code> refuses and lists what changed.</td>
+</tr>
+<tr>
+<td>The source data changed</td>
+<td>Overwrite.  Resume notices changed layouts (shapes, chunks, variables) and changed coordinate labels (another time range), not changed values under the same labels.</td>
+</tr>
+<tr>
+<td>Workers from an old run are still in the queue after a re-init</td>
+<td>Those that have not started fail with <code>StaleTaskError</code> without writing anything.  Cancel them, and next time cancel the old run <em>before</em> overwriting: workers that were already writing may have written into the new stores (see <a href="#when-the-target-already-exists">one conversion per path</a>).</td>
+</tr>
+<tr>
+<td>The store was deleted</td>
+<td><code>check_pyramid_store</code> reports problems; <code>is_current</code> returns <code>False</code>.  Run the init again.</td>
+</tr>
+<tr>
+<td>You want to publish the finished store</td>
+<td>Optionally delete <code>&lt;path&gt;/_grid_doctor/</code>.  Readers never look at it.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Error or symptom</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ManifestError: no manifest at .../_grid_doctor/manifest.json</code></td>
+<td>The init has not finished, failed, or the path differs.</td>
+<td>Check the init job and the <code>path</code>.</td>
+</tr>
+<tr>
+<td><code>StaleTaskError: task-… belongs to manifest …</code></td>
+<td>The store was re-initialised after the task was planned.</td>
+<td>Use tasks from the new manifest.</td>
+</tr>
+<tr>
+<td><code>StaleTaskError: … re-initialised while task-… was writing</code></td>
+<td>An overwrite happened while this worker was writing.</td>
+<td>Overwrite again and let only one run write into the path.</td>
+</tr>
+<tr>
+<td><code>StoreExistsError: … already holds a pyramid</code></td>
+<td><code>if_exists="error"</code> (the default) and the target is not empty.</td>
+<td><code>"resume"</code> to continue, <code>"overwrite"</code> to start over.</td>
+</tr>
+<tr>
+<td><code>StoreExistsError: cannot resume …: … planned differently (…)</code></td>
+<td>The parameters or the source layout changed since the init.</td>
+<td>Restore the parameters, or overwrite.</td>
+</tr>
+<tr>
+<td><code>StoreExistsError: cannot resume …: there is no readable manifest (… has not finished …)</code></td>
+<td>The previous init was killed, or the path holds a store not written by <code>init_pyramid_store</code>.</td>
+<td>Overwrite.</td>
+</tr>
+<tr>
+<td><code>ManifestError: tasks[3]: missing field '…'</code> or <code>… must be …</code></td>
+<td>The manifest file (or a task passed through JSON) is truncated or was edited.</td>
+<td>Re-initialise, or fix the named field.</td>
+</tr>
+<tr>
+<td><code>ManifestError: … intervals along 'time' overlap</code> / <code>… gap along 'time'</code> or <code>… not a multiple of the write unit</code></td>
+<td>A manifest whose tasks no longer tile the arrays, typically after hand-editing.</td>
+<td>Re-initialise; never edit regions by hand.</td>
+</tr>
+<tr>
+<td><code>ManifestError: task-…: the pyramid does not match the coordinates stored by the init …</code></td>
+<td>The worker built its pyramid from other data than the init (another time range, other levels), or subset it differently from <code>task.isel()</code>.</td>
+<td>Build workers from the same source as the init, subset with <code>task.isel()</code>.</td>
+</tr>
+<tr>
+<td><code>ManifestError: task-… differs from the task stored in the manifest</code></td>
+<td>The worker received a task that is not the one the manifest planned.</td>
+<td>Pass the tasks from <code>manifest.tasks</code> unchanged.</td>
+</tr>
+<tr>
+<td><code>ManifestError: cannot split along 'cell'</code></td>
+<td><code>split</code> contains a spatial dimension.</td>
+<td>Split along a non-spatial dimension.</td>
+</tr>
+<tr>
+<td><code>ManifestError: dimension 'time' has different lengths across variables/levels</code></td>
+<td>Levels or variables disagree on the split dimension.</td>
+<td>All levels of a pyramid must share it; check the source.</td>
+</tr>
+<tr>
+<td><code>ManifestError: … expected the full length N or the task region length M</code></td>
+<td>The worker built its pyramid from a different subset than the task region.</td>
+<td>Subset with <code>source.isel(task.isel())</code>, nothing else.</td>
+</tr>
+<tr>
+<td><code>ManifestError: … has dims … the store expects …</code></td>
+<td>Variable built differently in the worker than at init.</td>
+<td>Use the same <code>build_pyramid</code> in both steps.</td>
+</tr>
+<tr>
+<td>Warning <code>Rechunking 'tas' to the store's write units</code></td>
+<td>Worker chunks differ from init chunks.</td>
+<td>Open the source with the same chunks in both steps.</td>
+</tr>
+<tr>
+<td><code>split[...]=N rounded up to M</code> in the log</td>
+<td><code>N</code> is not a multiple of the chunk size.</td>
+<td>Expected; pick a multiple to avoid surprises.</td>
+</tr>
+<tr>
+<td>Store complete but values all NaN in a region</td>
+<td>The source has no data there, or the pyramid was built from the wrong source.</td>
+<td>Compare <code>report.absent_chunks</code> with your expectations.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Fan-out writes need one store per level (<code>structure="flat"</code>, the
+  default).  <code>init_pyramid_store(..., structure="multiscales")</code> writes
+  the template of a single datatree store and returns <code>None</code>; tasks,
+  <code>split</code> and <code>if_exists="resume"</code> are not supported for it yet.</li>
+<li>Splitting is supported along non-spatial dimensions only.</li>
+<li>All levels of the pyramid must share the length of every split
+  dimension.</li>
+<li>A variable that has no split dimension is written by a single task.
+  For very large static fields at high levels that task is
+  correspondingly large; <code>materialise</code> or a separate run are the
+  options.</li>
+<li>grid-doctor does not lock stores: only one conversion may write into
+  a path at a time (see
+  <a href="#when-the-target-already-exists">one conversion per path</a>).</li>
+<li>The manifest describes data variables only.  Coordinates are written
+  completely by the init; resume and workers compare their values (not
+  those along <code>cell</code>), but changed data under unchanged labels is not
+  detected.</li>
+</ul>
+<p>See the <a href="../../api/parallel/">Parallel writes API reference</a> for all
+parameters.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../averaging/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Coarsening and averaging masked fields">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L77.3 256l137.3-137.4c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Coarsening and averaging masked fields
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../../high-level-access/" class="md-footer__link md-footer__link--next" aria-label="Next: Working with the data">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Working with the data
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M247.1 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L179.2 256 41.9 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.code.copy","navigation.tabs","navigation.tabs.sticky","navigation.sections","navigation.footer","navigation.path","search.highlight","search.suggest"],"redirect":null,"search":"../../assets/javascripts/workers/search.719e0d91.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["latest","dev"],"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.9e76c64c.min.js"></script>
+      
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

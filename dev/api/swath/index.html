@@ -1,0 +1,2406 @@
+
+
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Convert lat&#x2f;lon xarray datasets to HEALPix pyramids.">
+      
+      
+      
+        <link rel="canonical" href="https://grid-doctor.org/dev/api/swath/">
+      
+      
+      
+      
+        <link rel="prev" href="../pyramid/">
+      
+      
+        <link rel="next" href="../io/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="zensical-0.1.3">
+    
+    
+      
+        <title>Point binning - Grid Doctor</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e2cf241e.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.b60ce83d.min.css">
+      
+      
+      
+  
+  
+    
+      
+      
+    
+  
+  
+  <style>:root{--md-admonition-icon--example:url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M12%203C7.58%203%204%204.79%204%207s3.58%204%208%204%208-1.79%208-4-3.58-4-8-4M4%209v3c0%202.21%203.58%204%208%204s8-1.79%208-4V9c0%202.21-3.58%204-8%204s-8-1.79-8-4m0%205v3c0%202.21%203.58%204%208%204s8-1.79%208-4v-3c0%202.21-3.58%204-8%204s-8-1.79-8-4%22/%3E%3C/svg%3E');}</style>
+
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/styles.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  <meta property="og:type" content="website" />
+<meta property="og:title" content="Point binning - Grid Doctor" />
+<meta property="og:description" content="Convert lat/lon xarray datasets to HEALPix pyramids." />
+<meta property="og:image" content="https://grid-doctor.org/dev/assets/images/social/api/swath.png" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:url" content="https://grid-doctor.org/dev/api/swath/" />
+<meta property="twitter:card" content="summary_large_image" />
+<meta property="twitter:title" content="Point binning - Grid Doctor" />
+<meta property="twitter:description" content="Convert lat/lon xarray datasets to HEALPix pyramids." />
+<meta property="twitter:image" content="https://grid-doctor.org/dev/assets/images/social/api/swath.png" />
+</head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  You are reading the documentation of an older release.
+  <a href="../../..">
+    <strong>Go to the latest version.</strong>
+  </a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL("../..",location),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Grid Doctor" class="md-header__button md-logo" aria-label="Grid Doctor" data-md-component="logo">
+      
+  <img src="../../assets/logo-mark.svg" alt="Grid Doctor">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+      <span class="md-visually-hidden">Navigation</span>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Grid Doctor
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Point binning
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715M16 12a4 4 0 0 0-4-4M19 5l-1.256 1.256M20 12h2"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+          <span class="md-visually-hidden">Search</span>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/freva-org/grid-doctor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    freva-org/grid-doctor
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../getting-started/" class="md-tabs__link">
+        
+  
+  Getting started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+      
+    
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../recipes/" class="md-tabs__link">
+          
+  
+  Recipes
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+      
+    
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  API reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../technical-decisions/" class="md-tabs__link">
+        
+  
+  Technical decisions
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Grid Doctor" class="md-nav__button md-logo" aria-label="Grid Doctor" data-md-component="logo">
+      
+  <img src="../../assets/logo-mark.svg" alt="Grid Doctor">
+
+    </a>
+    Grid Doctor
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/freva-org/grid-doctor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    freva-org/grid-doctor
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting started
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Recipes
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Recipes
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/structured/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Structured grids (ERA5, CMIP)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/icon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Unstructured grids (ICON)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/regional/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Regional grids (CORDEX)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/point-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Point data
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Coarsening and averaging masked fields
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/parallel-writes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Parallel writes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../high-level-access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Working with the data
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  API reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../remap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Remapping
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weights/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Weights store
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pyramid/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Pyramids
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Point binning
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Point binning
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#binning" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Binning
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grid_doctor.bin_to_healpix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;bin_to_healpix
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sparse-intermediates" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Sparse intermediates
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grid_doctor.sparse_to_dense" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;sparse_to_dense
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../io/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Writing stores
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parallel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Parallel writes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../select/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Region selection
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Metadata
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Types
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Command line
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../technical-decisions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Technical decisions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#binning" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Binning
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grid_doctor.bin_to_healpix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;bin_to_healpix
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sparse-intermediates" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Sparse intermediates
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grid_doctor.sparse_to_dense" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;sparse_to_dense
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+    
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  
+  <span class="md-ellipsis">
+    API reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+  
+
+
+<h1 id="point-binning">Point binning<a class="headerlink" href="#point-binning" title="Permanent link">&para;</a></h1>
+<p>Map <em>point-sampled</em> data (satellite Level-2 swaths, station records,
+trajectories) onto HEALPix (<code>grid_doctor.swath</code>).  Point data cannot use
+the ESMF weight path: every granule has its own geometry, so weights
+could never be reused, and nearest-neighbour remapping would spread a
+narrow swath over the entire globe.  Binning assigns each sample to the
+HEALPix cell that contains it and reduces the samples per cell instead.</p>
+<p>See the <a href="../../recipes/point-data/">point data recipe</a> for an end-to-end
+workflow and the
+<a href="../../technical-decisions/#point-binning-swath-and-station-data">technical decisions</a>
+for the design rationale.</p>
+<h2 id="binning">Binning<a class="headerlink" href="#binning" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="grid_doctor.bin_to_healpix" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">bin_to_healpix</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">level</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">agg</span><span class="o">=</span><span class="s1">'mean'</span><span class="p">,</span> <span class="n">nest</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">lat_name</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">lon_name</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">source_units</span><span class="o">=</span><span class="s1">'auto'</span><span class="p">,</span> <span class="n">fill_values</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">with_counts</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">dense</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">ellipsoid</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#grid_doctor.bin_to_healpix" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+        <p>Bin point-sampled data into HEALPix cells.</p>
+<p>Every sample is assigned to the HEALPix cell containing its
+coordinates (on <em>ellipsoid</em>, consistent with all other grid-doctor
+output) and all samples per cell are reduced with the
+requested aggregation.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>ds</code>
+            </td>
+            <td>
+                  <code><span title="xarray.Dataset">Dataset</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Dataset with per-sample latitude/longitude variables (swath
+geolocation, station coordinates, …).  Variables that span the
+sample dimensions are binned; variables that share none of the
+sample dimensions are passed through unchanged; variables that
+overlap them only partially are skipped with a warning.
+Non-sample dimensions (<code>time</code>, <code>channel</code>, …) are preserved
+as batch dimensions.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>level</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Target HEALPix level.  Choose it so the cell spacing
+(<code>58.6° / 2**level</code>) is coarser than the sample spacing:
+only then is the per-cell mean a faithful stand-in for
+conservative remapping.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>agg</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="            BinAgg = Literal[&#x27;mean&#x27;, &#x27;mode&#x27;, &#x27;min&#x27;, &#x27;max&#x27;, &#x27;count&#x27;]
+
+  
+      module-attribute
+   (grid_doctor.types.BinAgg)" href="../types/#grid_doctor.types.BinAgg">BinAgg</a> | <span title="collections.abc.Mapping">Mapping</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="            BinAgg = Literal[&#x27;mean&#x27;, &#x27;mode&#x27;, &#x27;min&#x27;, &#x27;max&#x27;, &#x27;count&#x27;]
+
+  
+      module-attribute
+   (grid_doctor.types.BinAgg)" href="../types/#grid_doctor.types.BinAgg">BinAgg</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Aggregation per variable: a single method applied to all
+variables or a mapping <code>{variable: method}</code>.  Supported
+methods: <code>"mean"</code> (continuous fields; binning analogue of
+conservative remapping), <code>"mode"</code> (categorical fields;
+analogue of nearest-neighbour), <code>"min"</code>, <code>"max"</code>, and
+<code>"count"</code>.  A per-sample <em>sum</em> is deliberately not offered:
+it scales with sample density (orbit overlap, across-track
+pixel count) rather than any physical integral.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;mean&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>nest</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Use nested HEALPix ordering when <em>True</em>.  Nested ordering is
+required for pyramid coarsening.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>lat_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Explicit coordinate variable names.  When omitted, the standard
+grid-doctor name lists are searched (<code>latitude</code>, <code>lat</code>, …).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>lon_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Explicit coordinate variable names.  When omitted, the standard
+grid-doctor name lists are searched (<code>latitude</code>, <code>lat</code>, …).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>source_units</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="            SourceUnits = Literal[&#x27;auto&#x27;, &#x27;deg&#x27;, &#x27;rad&#x27;]
+
+  
+      module-attribute
+   (grid_doctor.types.SourceUnits)" href="../types/#grid_doctor.types.SourceUnits">SourceUnits</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Angular unit convention of the coordinates.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;auto&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fill_values</code>
+            </td>
+            <td>
+                  <code><span title="collections.abc.Mapping">Mapping</span>[<span title="str">str</span>, <span title="float">float</span>] | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Explicit per-variable fill values, e.g. <code>{"cloud_type": 255}</code>.
+When omitted, declared <code>_FillValue</code> / <code>missing_value</code>
+attributes are honoured; floating-point non-finite values are
+always treated as invalid.  <code>0</code> is accepted as a fill value.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>min_count</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Minimum number of valid samples required for a cell to be
+valid.  Cells with fewer samples are set to NaN (does not apply
+to <code>"count"</code>).</p>
+              </div>
+            </td>
+            <td>
+                  <code>1</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>with_counts</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Add an <code>&lt;name&gt;_count</code> companion variable per binned variable
+holding the number of valid samples per cell.  Recommended for
+published datasets: it makes coverage auditable and enables
+unbiased merging of overlapping granules downstream.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>dense</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <em>True</em> (default), return the full <code>12 * 4**level</code> cell
+array with standard grid-doctor coordinates, CRS variable, and
+attributes, directly consumable by
+<a class="autorefs autorefs-internal" title="            coarsen_healpix(ds, target_level, coarsen_mode=&#x27;auto&#x27;, min_valid_fraction=0.5, valid_fraction=False)" href="../pyramid/#grid_doctor.coarsen_healpix"><code>coarsen_healpix</code></a> and
+<a class="autorefs autorefs-internal" title="            save_pyramid(pyramid, path, s3_options=None, *, mode=&#x27;a&#x27;, region=&#x27;auto&#x27;, zarr_format=2, encoding=None, write_coords=&#x27;auto&#x27;, structure=&#x27;flat&#x27;)" href="../io/#grid_doctor.save_pyramid"><code>save_pyramid</code></a>.  When
+<em>False</em>, return a compact dataset containing only the touched
+cells (the <code>cell</code> coordinate holds the actual HEALPix
+indices), useful as a per-granule intermediate at high levels;
+convert with
+<a class="autorefs autorefs-internal" title="            sparse_to_dense(ds)" href="./#grid_doctor.sparse_to_dense"><code>sparse_to_dense</code></a> before
+coarsening or publishing.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>ellipsoid</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="            Ellipsoid = Literal[&#x27;sphere&#x27;, &#x27;WGS84&#x27;]
+
+  
+      module-attribute
+   (grid_doctor.types.Ellipsoid)" href="../types/#grid_doctor.types.Ellipsoid">Ellipsoid</a> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Ellipsoid of the HEALPix geometry, <code>"sphere"</code> or
+<code>"WGS84"</code>.  Defaults to <code>grid_doctor.config.ellipsoid</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code>Dataset</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Binned dataset on the HEALPix grid.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>On unknown aggregation methods, invalid levels, or when no
+valid sample coordinates exist.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="highlight"><pre><span></span><code><a id="grid_doctor.bin_to_healpix--__codelineno-0-1" name="grid_doctor.bin_to_healpix--__codelineno-0-1" href="#grid_doctor.bin_to_healpix--__codelineno-0-1"></a><span class="n">hpx</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">bin_to_healpix</span><span class="p">(</span>
+<a id="grid_doctor.bin_to_healpix--__codelineno-0-2" name="grid_doctor.bin_to_healpix--__codelineno-0-2" href="#grid_doctor.bin_to_healpix--__codelineno-0-2"></a>    <span class="n">swath</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--__codelineno-0-3" name="grid_doctor.bin_to_healpix--__codelineno-0-3" href="#grid_doctor.bin_to_healpix--__codelineno-0-3"></a>    <span class="n">level</span><span class="o">=</span><span class="mi">11</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--__codelineno-0-4" name="grid_doctor.bin_to_healpix--__codelineno-0-4" href="#grid_doctor.bin_to_healpix--__codelineno-0-4"></a>    <span class="n">agg</span><span class="o">=</span><span class="p">{</span><span class="s2">"radiance"</span><span class="p">:</span> <span class="s2">"mean"</span><span class="p">,</span> <span class="s2">"cloud_type"</span><span class="p">:</span> <span class="s2">"mode"</span><span class="p">},</span>
+<a id="grid_doctor.bin_to_healpix--__codelineno-0-5" name="grid_doctor.bin_to_healpix--__codelineno-0-5" href="#grid_doctor.bin_to_healpix--__codelineno-0-5"></a>    <span class="n">fill_values</span><span class="o">=</span><span class="p">{</span><span class="s2">"cloud_type"</span><span class="p">:</span> <span class="mi">255</span><span class="p">},</span>
+<a id="grid_doctor.bin_to_healpix--__codelineno-0-6" name="grid_doctor.bin_to_healpix--__codelineno-0-6" href="#grid_doctor.bin_to_healpix--__codelineno-0-6"></a>    <span class="n">with_counts</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--__codelineno-0-7" name="grid_doctor.bin_to_healpix--__codelineno-0-7" href="#grid_doctor.bin_to_healpix--__codelineno-0-7"></a><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--__codelineno-0-8" name="grid_doctor.bin_to_healpix--__codelineno-0-8" href="#grid_doctor.bin_to_healpix--__codelineno-0-8"></a><span class="n">pyramid</span> <span class="o">=</span> <span class="p">{</span><span class="mi">11</span><span class="p">:</span> <span class="n">hpx</span><span class="p">}</span>
+<a id="grid_doctor.bin_to_healpix--__codelineno-0-9" name="grid_doctor.bin_to_healpix--__codelineno-0-9" href="#grid_doctor.bin_to_healpix--__codelineno-0-9"></a><span class="k">for</span> <span class="n">lvl</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">):</span>
+<a id="grid_doctor.bin_to_healpix--__codelineno-0-10" name="grid_doctor.bin_to_healpix--__codelineno-0-10" href="#grid_doctor.bin_to_healpix--__codelineno-0-10"></a>    <span class="n">pyramid</span><span class="p">[</span><span class="n">lvl</span><span class="p">]</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">coarsen_healpix</span><span class="p">(</span><span class="n">hpx</span><span class="p">,</span> <span class="n">lvl</span><span class="p">)</span>
+</code></pre></div>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>grid_doctor/swath/__init__.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-107">107</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-108">108</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-109">109</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-110">110</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-111">111</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-112">112</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-113">113</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-114">114</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-115">115</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-116">116</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-117">117</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-118">118</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-119">119</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-120">120</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-121">121</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-122">122</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-123">123</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-124">124</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-125">125</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-126">126</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-127">127</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-128">128</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-129">129</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-130">130</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-131">131</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-132">132</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-133">133</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-134">134</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-135">135</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-136">136</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-137">137</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-138">138</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-139">139</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-140">140</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-141">141</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-142">142</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-143">143</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-144">144</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-145">145</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-146">146</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-147">147</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-148">148</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-149">149</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-150">150</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-151">151</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-152">152</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-153">153</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-154">154</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-155">155</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-156">156</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-157">157</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-158">158</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-159">159</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-160">160</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-161">161</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-162">162</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-163">163</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-164">164</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-165">165</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-166">166</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-167">167</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-168">168</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-169">169</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-170">170</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-171">171</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-172">172</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-173">173</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-174">174</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-175">175</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-176">176</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-177">177</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-178">178</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-179">179</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-180">180</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-181">181</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-182">182</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-183">183</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-184">184</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-185">185</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-186">186</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-187">187</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-188">188</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-189">189</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-190">190</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-191">191</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-192">192</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-193">193</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-194">194</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-195">195</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-196">196</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-197">197</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-198">198</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-199">199</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-200">200</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-201">201</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-202">202</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-203">203</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-204">204</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-205">205</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-206">206</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-207">207</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-208">208</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-209">209</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-210">210</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-211">211</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-212">212</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-213">213</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-214">214</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-215">215</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-216">216</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-217">217</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-218">218</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-219">219</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-220">220</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-221">221</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-222">222</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-223">223</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-224">224</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-225">225</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-226">226</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-227">227</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-228">228</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-229">229</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-230">230</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-231">231</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-232">232</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-233">233</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-234">234</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-235">235</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-236">236</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-237">237</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-238">238</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-239">239</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-240">240</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-241">241</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-242">242</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-243">243</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-244">244</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-245">245</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-246">246</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-247">247</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-248">248</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-249">249</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-250">250</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-251">251</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-252">252</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-253">253</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-254">254</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-255">255</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-256">256</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-257">257</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-258">258</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-259">259</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-260">260</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-261">261</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-262">262</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-263">263</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-264">264</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-265">265</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-266">266</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-267">267</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-268">268</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-269">269</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-270">270</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-271">271</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-272">272</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-273">273</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-274">274</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-275">275</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-276">276</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-277">277</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-278">278</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-279">279</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-280">280</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-281">281</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-282">282</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-283">283</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-284">284</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-285">285</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-286">286</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-287">287</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-288">288</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-289">289</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-290">290</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-291">291</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-292">292</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-293">293</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-294">294</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-295">295</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-296">296</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-297">297</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-298">298</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-299">299</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-300">300</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-301">301</a></span>
+<span class="normal"><a href="#grid_doctor.bin_to_healpix--source--__codelineno-0-302">302</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="grid_doctor.bin_to_healpix--source--__codelineno-0-107" name="grid_doctor.bin_to_healpix--source--__codelineno-0-107"></a><span class="k">def</span><span class="w"> </span><span class="nf">bin_to_healpix</span><span class="p">(</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-108" name="grid_doctor.bin_to_healpix--source--__codelineno-0-108"></a>    <span class="n">ds</span><span class="p">:</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-109" name="grid_doctor.bin_to_healpix--source--__codelineno-0-109"></a>    <span class="n">level</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-110" name="grid_doctor.bin_to_healpix--source--__codelineno-0-110"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-111" name="grid_doctor.bin_to_healpix--source--__codelineno-0-111"></a>    <span class="n">agg</span><span class="p">:</span> <span class="n">BinAgg</span> <span class="o">|</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">BinAgg</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"mean"</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-112" name="grid_doctor.bin_to_healpix--source--__codelineno-0-112"></a>    <span class="n">nest</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-113" name="grid_doctor.bin_to_healpix--source--__codelineno-0-113"></a>    <span class="n">lat_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-114" name="grid_doctor.bin_to_healpix--source--__codelineno-0-114"></a>    <span class="n">lon_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-115" name="grid_doctor.bin_to_healpix--source--__codelineno-0-115"></a>    <span class="n">source_units</span><span class="p">:</span> <span class="n">SourceUnits</span> <span class="o">=</span> <span class="s2">"auto"</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-116" name="grid_doctor.bin_to_healpix--source--__codelineno-0-116"></a>    <span class="n">fill_values</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-117" name="grid_doctor.bin_to_healpix--source--__codelineno-0-117"></a>    <span class="n">min_count</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-118" name="grid_doctor.bin_to_healpix--source--__codelineno-0-118"></a>    <span class="n">with_counts</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-119" name="grid_doctor.bin_to_healpix--source--__codelineno-0-119"></a>    <span class="n">dense</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-120" name="grid_doctor.bin_to_healpix--source--__codelineno-0-120"></a>    <span class="n">ellipsoid</span><span class="p">:</span> <span class="n">Ellipsoid</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-121" name="grid_doctor.bin_to_healpix--source--__codelineno-0-121"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-122" name="grid_doctor.bin_to_healpix--source--__codelineno-0-122"></a><span class="w">    </span><span class="sd">"""Bin point-sampled data into HEALPix cells.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-123" name="grid_doctor.bin_to_healpix--source--__codelineno-0-123"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-124" name="grid_doctor.bin_to_healpix--source--__codelineno-0-124"></a><span class="sd">    Every sample is assigned to the HEALPix cell containing its</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-125" name="grid_doctor.bin_to_healpix--source--__codelineno-0-125"></a><span class="sd">    coordinates (on *ellipsoid*, consistent with all other grid-doctor</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-126" name="grid_doctor.bin_to_healpix--source--__codelineno-0-126"></a><span class="sd">    output) and all samples per cell are reduced with the</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-127" name="grid_doctor.bin_to_healpix--source--__codelineno-0-127"></a><span class="sd">    requested aggregation.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-128" name="grid_doctor.bin_to_healpix--source--__codelineno-0-128"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-129" name="grid_doctor.bin_to_healpix--source--__codelineno-0-129"></a><span class="sd">    Parameters</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-130" name="grid_doctor.bin_to_healpix--source--__codelineno-0-130"></a><span class="sd">    ----------</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-131" name="grid_doctor.bin_to_healpix--source--__codelineno-0-131"></a><span class="sd">    ds:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-132" name="grid_doctor.bin_to_healpix--source--__codelineno-0-132"></a><span class="sd">        Dataset with per-sample latitude/longitude variables (swath</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-133" name="grid_doctor.bin_to_healpix--source--__codelineno-0-133"></a><span class="sd">        geolocation, station coordinates, …).  Variables that span the</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-134" name="grid_doctor.bin_to_healpix--source--__codelineno-0-134"></a><span class="sd">        sample dimensions are binned; variables that share none of the</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-135" name="grid_doctor.bin_to_healpix--source--__codelineno-0-135"></a><span class="sd">        sample dimensions are passed through unchanged; variables that</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-136" name="grid_doctor.bin_to_healpix--source--__codelineno-0-136"></a><span class="sd">        overlap them only partially are skipped with a warning.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-137" name="grid_doctor.bin_to_healpix--source--__codelineno-0-137"></a><span class="sd">        Non-sample dimensions (``time``, ``channel``, …) are preserved</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-138" name="grid_doctor.bin_to_healpix--source--__codelineno-0-138"></a><span class="sd">        as batch dimensions.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-139" name="grid_doctor.bin_to_healpix--source--__codelineno-0-139"></a><span class="sd">    level:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-140" name="grid_doctor.bin_to_healpix--source--__codelineno-0-140"></a><span class="sd">        Target HEALPix level.  Choose it so the cell spacing</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-141" name="grid_doctor.bin_to_healpix--source--__codelineno-0-141"></a><span class="sd">        (``58.6° / 2**level``) is coarser than the sample spacing:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-142" name="grid_doctor.bin_to_healpix--source--__codelineno-0-142"></a><span class="sd">        only then is the per-cell mean a faithful stand-in for</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-143" name="grid_doctor.bin_to_healpix--source--__codelineno-0-143"></a><span class="sd">        conservative remapping.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-144" name="grid_doctor.bin_to_healpix--source--__codelineno-0-144"></a><span class="sd">    agg:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-145" name="grid_doctor.bin_to_healpix--source--__codelineno-0-145"></a><span class="sd">        Aggregation per variable: a single method applied to all</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-146" name="grid_doctor.bin_to_healpix--source--__codelineno-0-146"></a><span class="sd">        variables or a mapping ``{variable: method}``.  Supported</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-147" name="grid_doctor.bin_to_healpix--source--__codelineno-0-147"></a><span class="sd">        methods: ``"mean"`` (continuous fields; binning analogue of</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-148" name="grid_doctor.bin_to_healpix--source--__codelineno-0-148"></a><span class="sd">        conservative remapping), ``"mode"`` (categorical fields;</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-149" name="grid_doctor.bin_to_healpix--source--__codelineno-0-149"></a><span class="sd">        analogue of nearest-neighbour), ``"min"``, ``"max"``, and</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-150" name="grid_doctor.bin_to_healpix--source--__codelineno-0-150"></a><span class="sd">        ``"count"``.  A per-sample *sum* is deliberately not offered:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-151" name="grid_doctor.bin_to_healpix--source--__codelineno-0-151"></a><span class="sd">        it scales with sample density (orbit overlap, across-track</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-152" name="grid_doctor.bin_to_healpix--source--__codelineno-0-152"></a><span class="sd">        pixel count) rather than any physical integral.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-153" name="grid_doctor.bin_to_healpix--source--__codelineno-0-153"></a><span class="sd">    nest:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-154" name="grid_doctor.bin_to_healpix--source--__codelineno-0-154"></a><span class="sd">        Use nested HEALPix ordering when *True*.  Nested ordering is</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-155" name="grid_doctor.bin_to_healpix--source--__codelineno-0-155"></a><span class="sd">        required for pyramid coarsening.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-156" name="grid_doctor.bin_to_healpix--source--__codelineno-0-156"></a><span class="sd">    lat_name, lon_name:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-157" name="grid_doctor.bin_to_healpix--source--__codelineno-0-157"></a><span class="sd">        Explicit coordinate variable names.  When omitted, the standard</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-158" name="grid_doctor.bin_to_healpix--source--__codelineno-0-158"></a><span class="sd">        grid-doctor name lists are searched (``latitude``, ``lat``, …).</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-159" name="grid_doctor.bin_to_healpix--source--__codelineno-0-159"></a><span class="sd">    source_units:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-160" name="grid_doctor.bin_to_healpix--source--__codelineno-0-160"></a><span class="sd">        Angular unit convention of the coordinates.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-161" name="grid_doctor.bin_to_healpix--source--__codelineno-0-161"></a><span class="sd">    fill_values:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-162" name="grid_doctor.bin_to_healpix--source--__codelineno-0-162"></a><span class="sd">        Explicit per-variable fill values, e.g. ``{"cloud_type": 255}``.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-163" name="grid_doctor.bin_to_healpix--source--__codelineno-0-163"></a><span class="sd">        When omitted, declared ``_FillValue`` / ``missing_value``</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-164" name="grid_doctor.bin_to_healpix--source--__codelineno-0-164"></a><span class="sd">        attributes are honoured; floating-point non-finite values are</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-165" name="grid_doctor.bin_to_healpix--source--__codelineno-0-165"></a><span class="sd">        always treated as invalid.  ``0`` is accepted as a fill value.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-166" name="grid_doctor.bin_to_healpix--source--__codelineno-0-166"></a><span class="sd">    min_count:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-167" name="grid_doctor.bin_to_healpix--source--__codelineno-0-167"></a><span class="sd">        Minimum number of valid samples required for a cell to be</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-168" name="grid_doctor.bin_to_healpix--source--__codelineno-0-168"></a><span class="sd">        valid.  Cells with fewer samples are set to NaN (does not apply</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-169" name="grid_doctor.bin_to_healpix--source--__codelineno-0-169"></a><span class="sd">        to ``"count"``).</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-170" name="grid_doctor.bin_to_healpix--source--__codelineno-0-170"></a><span class="sd">    with_counts:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-171" name="grid_doctor.bin_to_healpix--source--__codelineno-0-171"></a><span class="sd">        Add an ``&lt;name&gt;_count`` companion variable per binned variable</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-172" name="grid_doctor.bin_to_healpix--source--__codelineno-0-172"></a><span class="sd">        holding the number of valid samples per cell.  Recommended for</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-173" name="grid_doctor.bin_to_healpix--source--__codelineno-0-173"></a><span class="sd">        published datasets: it makes coverage auditable and enables</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-174" name="grid_doctor.bin_to_healpix--source--__codelineno-0-174"></a><span class="sd">        unbiased merging of overlapping granules downstream.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-175" name="grid_doctor.bin_to_healpix--source--__codelineno-0-175"></a><span class="sd">    dense:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-176" name="grid_doctor.bin_to_healpix--source--__codelineno-0-176"></a><span class="sd">        When *True* (default), return the full ``12 * 4**level`` cell</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-177" name="grid_doctor.bin_to_healpix--source--__codelineno-0-177"></a><span class="sd">        array with standard grid-doctor coordinates, CRS variable, and</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-178" name="grid_doctor.bin_to_healpix--source--__codelineno-0-178"></a><span class="sd">        attributes, directly consumable by</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-179" name="grid_doctor.bin_to_healpix--source--__codelineno-0-179"></a><span class="sd">        [`coarsen_healpix`][grid_doctor.coarsen_healpix] and</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-180" name="grid_doctor.bin_to_healpix--source--__codelineno-0-180"></a><span class="sd">        [`save_pyramid`][grid_doctor.save_pyramid].  When</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-181" name="grid_doctor.bin_to_healpix--source--__codelineno-0-181"></a><span class="sd">        *False*, return a compact dataset containing only the touched</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-182" name="grid_doctor.bin_to_healpix--source--__codelineno-0-182"></a><span class="sd">        cells (the ``cell`` coordinate holds the actual HEALPix</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-183" name="grid_doctor.bin_to_healpix--source--__codelineno-0-183"></a><span class="sd">        indices), useful as a per-granule intermediate at high levels;</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-184" name="grid_doctor.bin_to_healpix--source--__codelineno-0-184"></a><span class="sd">        convert with</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-185" name="grid_doctor.bin_to_healpix--source--__codelineno-0-185"></a><span class="sd">        [`sparse_to_dense`][grid_doctor.swath.sparse_to_dense] before</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-186" name="grid_doctor.bin_to_healpix--source--__codelineno-0-186"></a><span class="sd">        coarsening or publishing.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-187" name="grid_doctor.bin_to_healpix--source--__codelineno-0-187"></a><span class="sd">    ellipsoid:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-188" name="grid_doctor.bin_to_healpix--source--__codelineno-0-188"></a><span class="sd">        Ellipsoid of the HEALPix geometry, ``"sphere"`` or</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-189" name="grid_doctor.bin_to_healpix--source--__codelineno-0-189"></a><span class="sd">        ``"WGS84"``.  Defaults to ``grid_doctor.config.ellipsoid``.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-190" name="grid_doctor.bin_to_healpix--source--__codelineno-0-190"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-191" name="grid_doctor.bin_to_healpix--source--__codelineno-0-191"></a><span class="sd">    Returns</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-192" name="grid_doctor.bin_to_healpix--source--__codelineno-0-192"></a><span class="sd">    -------</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-193" name="grid_doctor.bin_to_healpix--source--__codelineno-0-193"></a><span class="sd">    xarray.Dataset</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-194" name="grid_doctor.bin_to_healpix--source--__codelineno-0-194"></a><span class="sd">        Binned dataset on the HEALPix grid.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-195" name="grid_doctor.bin_to_healpix--source--__codelineno-0-195"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-196" name="grid_doctor.bin_to_healpix--source--__codelineno-0-196"></a><span class="sd">    Raises</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-197" name="grid_doctor.bin_to_healpix--source--__codelineno-0-197"></a><span class="sd">    ------</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-198" name="grid_doctor.bin_to_healpix--source--__codelineno-0-198"></a><span class="sd">    ValueError</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-199" name="grid_doctor.bin_to_healpix--source--__codelineno-0-199"></a><span class="sd">        On unknown aggregation methods, invalid levels, or when no</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-200" name="grid_doctor.bin_to_healpix--source--__codelineno-0-200"></a><span class="sd">        valid sample coordinates exist.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-201" name="grid_doctor.bin_to_healpix--source--__codelineno-0-201"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-202" name="grid_doctor.bin_to_healpix--source--__codelineno-0-202"></a><span class="sd">    Examples</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-203" name="grid_doctor.bin_to_healpix--source--__codelineno-0-203"></a><span class="sd">    --------</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-204" name="grid_doctor.bin_to_healpix--source--__codelineno-0-204"></a><span class="sd">    ```python</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-205" name="grid_doctor.bin_to_healpix--source--__codelineno-0-205"></a><span class="sd">    hpx = gd.bin_to_healpix(</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-206" name="grid_doctor.bin_to_healpix--source--__codelineno-0-206"></a><span class="sd">        swath,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-207" name="grid_doctor.bin_to_healpix--source--__codelineno-0-207"></a><span class="sd">        level=11,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-208" name="grid_doctor.bin_to_healpix--source--__codelineno-0-208"></a><span class="sd">        agg={"radiance": "mean", "cloud_type": "mode"},</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-209" name="grid_doctor.bin_to_healpix--source--__codelineno-0-209"></a><span class="sd">        fill_values={"cloud_type": 255},</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-210" name="grid_doctor.bin_to_healpix--source--__codelineno-0-210"></a><span class="sd">        with_counts=True,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-211" name="grid_doctor.bin_to_healpix--source--__codelineno-0-211"></a><span class="sd">    )</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-212" name="grid_doctor.bin_to_healpix--source--__codelineno-0-212"></a><span class="sd">    pyramid = {11: hpx}</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-213" name="grid_doctor.bin_to_healpix--source--__codelineno-0-213"></a><span class="sd">    for lvl in range(10, -1, -1):</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-214" name="grid_doctor.bin_to_healpix--source--__codelineno-0-214"></a><span class="sd">        pyramid[lvl] = gd.coarsen_healpix(hpx, lvl)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-215" name="grid_doctor.bin_to_healpix--source--__codelineno-0-215"></a><span class="sd">    ```</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-216" name="grid_doctor.bin_to_healpix--source--__codelineno-0-216"></a><span class="sd">    """</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-217" name="grid_doctor.bin_to_healpix--source--__codelineno-0-217"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">level</span> <span class="o">&lt;=</span> <span class="n">MAX_NESTED_LEVEL</span><span class="p">:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-218" name="grid_doctor.bin_to_healpix--source--__codelineno-0-218"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"level must be within [0, </span><span class="si">{</span><span class="n">MAX_NESTED_LEVEL</span><span class="si">}</span><span class="s2">]."</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-219" name="grid_doctor.bin_to_healpix--source--__codelineno-0-219"></a>    <span class="k">if</span> <span class="n">min_count</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-220" name="grid_doctor.bin_to_healpix--source--__codelineno-0-220"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"min_count must be at least 1."</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-221" name="grid_doctor.bin_to_healpix--source--__codelineno-0-221"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-222" name="grid_doctor.bin_to_healpix--source--__codelineno-0-222"></a>    <span class="n">lat</span><span class="p">,</span> <span class="n">lon</span><span class="p">,</span> <span class="n">sample_dims</span> <span class="o">=</span> <span class="n">resolve_point_coords</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">lat_name</span><span class="o">=</span><span class="n">lat_name</span><span class="p">,</span> <span class="n">lon_name</span><span class="o">=</span><span class="n">lon_name</span><span class="p">,</span> <span class="n">source_units</span><span class="o">=</span><span class="n">source_units</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-223" name="grid_doctor.bin_to_healpix--source--__codelineno-0-223"></a>    <span class="c1"># Fail-fast: validate every aggregation before any data is loaded.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-224" name="grid_doctor.bin_to_healpix--source--__codelineno-0-224"></a>    <span class="n">methods</span> <span class="o">=</span> <span class="n">resolve_methods</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">sample_dims</span><span class="p">,</span> <span class="n">agg</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-225" name="grid_doctor.bin_to_healpix--source--__codelineno-0-225"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-226" name="grid_doctor.bin_to_healpix--source--__codelineno-0-226"></a>    <span class="n">valid_coords</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">lat</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">lon</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-227" name="grid_doctor.bin_to_healpix--source--__codelineno-0-227"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">valid_coords</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-228" name="grid_doctor.bin_to_healpix--source--__codelineno-0-228"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"No samples with valid (finite) coordinates found."</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-229" name="grid_doctor.bin_to_healpix--source--__codelineno-0-229"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-230" name="grid_doctor.bin_to_healpix--source--__codelineno-0-230"></a>    <span class="n">grid</span> <span class="o">=</span> <span class="n">HealpixGrid</span><span class="o">.</span><span class="n">from_nest</span><span class="p">(</span><span class="n">level</span><span class="p">,</span> <span class="n">nest</span><span class="o">=</span><span class="n">nest</span><span class="p">,</span> <span class="n">ellipsoid</span><span class="o">=</span><span class="n">_ellipsoid_or_config</span><span class="p">(</span><span class="n">ellipsoid</span><span class="p">))</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-231" name="grid_doctor.bin_to_healpix--source--__codelineno-0-231"></a>    <span class="n">module</span><span class="p">,</span> <span class="n">kwargs</span> <span class="o">=</span> <span class="n">_require_healpix_geo_module</span><span class="p">(</span><span class="n">grid</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-232" name="grid_doctor.bin_to_healpix--source--__codelineno-0-232"></a>    <span class="n">cell_ids</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-233" name="grid_doctor.bin_to_healpix--source--__codelineno-0-233"></a>        <span class="n">module</span><span class="o">.</span><span class="n">lonlat_to_healpix</span><span class="p">(</span><span class="n">lon</span><span class="p">[</span><span class="n">valid_coords</span><span class="p">],</span> <span class="n">lat</span><span class="p">[</span><span class="n">valid_coords</span><span class="p">],</span> <span class="n">depth</span><span class="o">=</span><span class="n">level</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">),</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-234" name="grid_doctor.bin_to_healpix--source--__codelineno-0-234"></a>        <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-235" name="grid_doctor.bin_to_healpix--source--__codelineno-0-235"></a>    <span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-236" name="grid_doctor.bin_to_healpix--source--__codelineno-0-236"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-237" name="grid_doctor.bin_to_healpix--source--__codelineno-0-237"></a>    <span class="c1"># Compact indexing: bin into the touched cells only, scatter later.</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-238" name="grid_doctor.bin_to_healpix--source--__codelineno-0-238"></a>    <span class="n">unique_cells</span><span class="p">,</span> <span class="n">group_idx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">cell_ids</span><span class="p">,</span> <span class="n">return_inverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-239" name="grid_doctor.bin_to_healpix--source--__codelineno-0-239"></a>    <span class="n">group_idx</span> <span class="o">=</span> <span class="n">group_idx</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-240" name="grid_doctor.bin_to_healpix--source--__codelineno-0-240"></a>    <span class="n">n_cells</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">unique_cells</span><span class="o">.</span><span class="n">size</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-241" name="grid_doctor.bin_to_healpix--source--__codelineno-0-241"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-242" name="grid_doctor.bin_to_healpix--source--__codelineno-0-242"></a>    <span class="n">binned</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">xr</span><span class="o">.</span><span class="n">DataArray</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-243" name="grid_doctor.bin_to_healpix--source--__codelineno-0-243"></a>    <span class="n">counts</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">xr</span><span class="o">.</span><span class="n">DataArray</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-244" name="grid_doctor.bin_to_healpix--source--__codelineno-0-244"></a>    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">da</span> <span class="ow">in</span> <span class="n">ds</span><span class="o">.</span><span class="n">data_vars</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-245" name="grid_doctor.bin_to_healpix--source--__codelineno-0-245"></a>        <span class="n">var_name</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-246" name="grid_doctor.bin_to_healpix--source--__codelineno-0-246"></a>        <span class="n">overlap</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">sample_dims</span><span class="p">)</span> <span class="o">&amp;</span> <span class="nb">set</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">da</span><span class="o">.</span><span class="n">dims</span><span class="p">))</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-247" name="grid_doctor.bin_to_healpix--source--__codelineno-0-247"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">overlap</span><span class="p">:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-248" name="grid_doctor.bin_to_healpix--source--__codelineno-0-248"></a>            <span class="n">binned</span><span class="p">[</span><span class="n">var_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">da</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-249" name="grid_doctor.bin_to_healpix--source--__codelineno-0-249"></a>            <span class="k">continue</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-250" name="grid_doctor.bin_to_healpix--source--__codelineno-0-250"></a>        <span class="k">if</span> <span class="n">overlap</span> <span class="o">!=</span> <span class="nb">set</span><span class="p">(</span><span class="n">sample_dims</span><span class="p">):</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-251" name="grid_doctor.bin_to_healpix--source--__codelineno-0-251"></a>            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-252" name="grid_doctor.bin_to_healpix--source--__codelineno-0-252"></a>                <span class="s2">"Skipping </span><span class="si">%r</span><span class="s2">: covers only part of the sample dimensions </span><span class="si">%s</span><span class="s2">."</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-253" name="grid_doctor.bin_to_healpix--source--__codelineno-0-253"></a>                <span class="n">var_name</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-254" name="grid_doctor.bin_to_healpix--source--__codelineno-0-254"></a>                <span class="n">sample_dims</span><span class="p">,</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-255" name="grid_doctor.bin_to_healpix--source--__codelineno-0-255"></a>            <span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-256" name="grid_doctor.bin_to_healpix--source--__codelineno-0-256"></a>            <span class="k">continue</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-257" name="grid_doctor.bin_to_healpix--source--__codelineno-0-257"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-258" name="grid_doctor.bin_to_healpix--source--__codelineno-0-258"></a>        <span class="n">method</span> <span class="o">=</span> <span class="n">methods</span><span class="p">[</span><span class="n">var_name</span><span class="p">]</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-259" name="grid_doctor.bin_to_healpix--source--__codelineno-0-259"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-260" name="grid_doctor.bin_to_healpix--source--__codelineno-0-260"></a>        <span class="n">batch_dims</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">d</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">da</span><span class="o">.</span><span class="n">dims</span><span class="p">)</span> <span class="k">if</span> <span class="n">d</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">sample_dims</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-261" name="grid_doctor.bin_to_healpix--source--__codelineno-0-261"></a>        <span class="n">arranged</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="o">*</span><span class="n">batch_dims</span><span class="p">,</span> <span class="o">*</span><span class="n">sample_dims</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-262" name="grid_doctor.bin_to_healpix--source--__codelineno-0-262"></a>        <span class="n">fill</span> <span class="o">=</span> <span class="p">(</span><span class="n">fill_values</span> <span class="ow">or</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">var_name</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-263" name="grid_doctor.bin_to_healpix--source--__codelineno-0-263"></a>        <span class="n">values</span> <span class="o">=</span> <span class="n">masked_float64</span><span class="p">(</span><span class="n">arranged</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="n">fill</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-264" name="grid_doctor.bin_to_healpix--source--__codelineno-0-264"></a>        <span class="n">values</span> <span class="o">=</span> <span class="n">values</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">arranged</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span> <span class="nb">len</span><span class="p">(</span><span class="n">batch_dims</span><span class="p">)],</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-265" name="grid_doctor.bin_to_healpix--source--__codelineno-0-265"></a>        <span class="n">values</span> <span class="o">=</span> <span class="n">values</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">valid_coords</span><span class="p">]</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-266" name="grid_doctor.bin_to_healpix--source--__codelineno-0-266"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-267" name="grid_doctor.bin_to_healpix--source--__codelineno-0-267"></a>        <span class="n">valid_count</span> <span class="o">=</span> <span class="n">bin_count</span><span class="p">(</span><span class="n">group_idx</span><span class="p">,</span> <span class="n">values</span><span class="p">,</span> <span class="n">n_cells</span><span class="o">=</span><span class="n">n_cells</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-268" name="grid_doctor.bin_to_healpix--source--__codelineno-0-268"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-269" name="grid_doctor.bin_to_healpix--source--__codelineno-0-269"></a>        <span class="k">if</span> <span class="n">method</span> <span class="o">==</span> <span class="s2">"count"</span><span class="p">:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-270" name="grid_doctor.bin_to_healpix--source--__codelineno-0-270"></a>            <span class="n">result</span> <span class="o">=</span> <span class="n">valid_count</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-271" name="grid_doctor.bin_to_healpix--source--__codelineno-0-271"></a>        <span class="k">elif</span> <span class="n">method</span> <span class="o">==</span> <span class="s2">"mode"</span><span class="p">:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-272" name="grid_doctor.bin_to_healpix--source--__codelineno-0-272"></a>            <span class="n">result</span> <span class="o">=</span> <span class="n">bin_mode</span><span class="p">(</span><span class="n">group_idx</span><span class="p">,</span> <span class="n">values</span><span class="p">,</span> <span class="n">n_cells</span><span class="o">=</span><span class="n">n_cells</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-273" name="grid_doctor.bin_to_healpix--source--__codelineno-0-273"></a>            <span class="n">result</span><span class="p">[</span><span class="n">valid_count</span> <span class="o">&lt;</span> <span class="n">min_count</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-274" name="grid_doctor.bin_to_healpix--source--__codelineno-0-274"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-275" name="grid_doctor.bin_to_healpix--source--__codelineno-0-275"></a>            <span class="n">result</span> <span class="o">=</span> <span class="n">bin_simple</span><span class="p">(</span><span class="n">group_idx</span><span class="p">,</span> <span class="n">values</span><span class="p">,</span> <span class="n">n_cells</span><span class="o">=</span><span class="n">n_cells</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="n">NPG_FUNC</span><span class="p">[</span><span class="n">method</span><span class="p">])</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-276" name="grid_doctor.bin_to_healpix--source--__codelineno-0-276"></a>            <span class="n">result</span><span class="p">[</span><span class="n">valid_count</span> <span class="o">&lt;</span> <span class="n">min_count</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-277" name="grid_doctor.bin_to_healpix--source--__codelineno-0-277"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-278" name="grid_doctor.bin_to_healpix--source--__codelineno-0-278"></a>        <span class="n">attrs</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">value</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">da</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">FILL_ATTR_NAMES</span><span class="p">}</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-279" name="grid_doctor.bin_to_healpix--source--__codelineno-0-279"></a>        <span class="n">attrs</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">variable_method_attrs</span><span class="p">(</span><span class="n">AGG_TO_METHOD</span><span class="p">[</span><span class="n">method</span><span class="p">]))</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-280" name="grid_doctor.bin_to_healpix--source--__codelineno-0-280"></a>        <span class="n">binned</span><span class="p">[</span><span class="n">var_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">DataArray</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">dims</span><span class="o">=</span><span class="p">(</span><span class="o">*</span><span class="n">batch_dims</span><span class="p">,</span> <span class="s2">"cell"</span><span class="p">),</span> <span class="n">attrs</span><span class="o">=</span><span class="n">attrs</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-281" name="grid_doctor.bin_to_healpix--source--__codelineno-0-281"></a>        <span class="k">if</span> <span class="n">with_counts</span> <span class="ow">and</span> <span class="n">method</span> <span class="o">!=</span> <span class="s2">"count"</span><span class="p">:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-282" name="grid_doctor.bin_to_healpix--source--__codelineno-0-282"></a>            <span class="n">counts</span><span class="p">[</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">var_name</span><span class="si">}</span><span class="s2">_count"</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">DataArray</span><span class="p">(</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-283" name="grid_doctor.bin_to_healpix--source--__codelineno-0-283"></a>                <span class="n">valid_count</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">),</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-284" name="grid_doctor.bin_to_healpix--source--__codelineno-0-284"></a>                <span class="n">dims</span><span class="o">=</span><span class="p">(</span><span class="o">*</span><span class="n">batch_dims</span><span class="p">,</span> <span class="s2">"cell"</span><span class="p">),</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-285" name="grid_doctor.bin_to_healpix--source--__codelineno-0-285"></a>                <span class="n">attrs</span><span class="o">=</span><span class="p">{</span><span class="s2">"long_name"</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"number of valid samples binned into </span><span class="si">{</span><span class="n">var_name</span><span class="si">}</span><span class="s2">"</span><span class="p">},</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-286" name="grid_doctor.bin_to_healpix--source--__codelineno-0-286"></a>            <span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-287" name="grid_doctor.bin_to_healpix--source--__codelineno-0-287"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-288" name="grid_doctor.bin_to_healpix--source--__codelineno-0-288"></a>    <span class="n">binned</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">counts</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-289" name="grid_doctor.bin_to_healpix--source--__codelineno-0-289"></a>    <span class="n">result_ds</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">(</span><span class="n">binned</span><span class="p">,</span> <span class="n">attrs</span><span class="o">=</span><span class="n">ds</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">copy</span><span class="p">())</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-290" name="grid_doctor.bin_to_healpix--source--__codelineno-0-290"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-291" name="grid_doctor.bin_to_healpix--source--__codelineno-0-291"></a>    <span class="c1"># Preserve batch coordinates (time, channel, ...).</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-292" name="grid_doctor.bin_to_healpix--source--__codelineno-0-292"></a>    <span class="n">keep_coords</span> <span class="o">=</span> <span class="p">{</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-293" name="grid_doctor.bin_to_healpix--source--__codelineno-0-293"></a>        <span class="nb">str</span><span class="p">(</span><span class="n">coord</span><span class="p">):</span> <span class="n">ds</span><span class="o">.</span><span class="n">coords</span><span class="p">[</span><span class="n">coord</span><span class="p">]</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-294" name="grid_doctor.bin_to_healpix--source--__codelineno-0-294"></a>        <span class="k">for</span> <span class="n">coord</span> <span class="ow">in</span> <span class="n">ds</span><span class="o">.</span><span class="n">coords</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-295" name="grid_doctor.bin_to_healpix--source--__codelineno-0-295"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="nb">set</span><span class="p">(</span><span class="n">sample_dims</span><span class="p">)</span> <span class="o">&amp;</span> <span class="nb">set</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">ds</span><span class="o">.</span><span class="n">coords</span><span class="p">[</span><span class="n">coord</span><span class="p">]</span><span class="o">.</span><span class="n">dims</span><span class="p">))</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-296" name="grid_doctor.bin_to_healpix--source--__codelineno-0-296"></a>    <span class="p">}</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-297" name="grid_doctor.bin_to_healpix--source--__codelineno-0-297"></a>    <span class="n">result_ds</span> <span class="o">=</span> <span class="n">result_ds</span><span class="o">.</span><span class="n">assign_coords</span><span class="p">(</span><span class="n">keep_coords</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-298" name="grid_doctor.bin_to_healpix--source--__codelineno-0-298"></a>    <span class="n">method</span> <span class="o">=</span> <span class="n">_dominant_method</span><span class="p">(</span><span class="n">result_ds</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-299" name="grid_doctor.bin_to_healpix--source--__codelineno-0-299"></a>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-300" name="grid_doctor.bin_to_healpix--source--__codelineno-0-300"></a>    <span class="k">if</span> <span class="n">dense</span><span class="p">:</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-301" name="grid_doctor.bin_to_healpix--source--__codelineno-0-301"></a>        <span class="k">return</span> <span class="n">_scatter_to_dense</span><span class="p">(</span><span class="n">result_ds</span><span class="p">,</span> <span class="n">unique_cells</span><span class="p">,</span> <span class="n">grid</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="n">method</span><span class="p">)</span>
+<a id="grid_doctor.bin_to_healpix--source--__codelineno-0-302" name="grid_doctor.bin_to_healpix--source--__codelineno-0-302"></a>    <span class="k">return</span> <span class="n">_attach_sparse_coords</span><span class="p">(</span><span class="n">result_ds</span><span class="p">,</span> <span class="n">unique_cells</span><span class="p">,</span> <span class="n">grid</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="n">method</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div><h2 id="sparse-intermediates">Sparse intermediates<a class="headerlink" href="#sparse-intermediates" title="Permanent link">&para;</a></h2>
+<p>At high HEALPix levels a single granule touches only a tiny fraction of
+the global grid.  <code>bin_to_healpix(..., dense=False)</code> returns a compact
+per-granule dataset that can be accumulated cheaply and expanded once
+before publishing.</p>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="grid_doctor.sparse_to_dense" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">sparse_to_dense</span><span class="p">(</span><span class="n">ds</span><span class="p">)</span></code>
+
+<a href="#grid_doctor.sparse_to_dense" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+        <p>Scatter a compact (sparse) binned dataset onto the full grid.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>ds</code>
+            </td>
+            <td>
+                  <code><span title="xarray.Dataset">Dataset</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Output of <code>bin_to_healpix(..., dense=False)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code>Dataset</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Dense dataset with the standard grid-doctor HEALPix coordinates
+and metadata, ready for
+<a class="autorefs autorefs-internal" title="            coarsen_healpix(ds, target_level, coarsen_mode=&#x27;auto&#x27;, min_valid_fraction=0.5, valid_fraction=False)" href="../pyramid/#grid_doctor.coarsen_healpix"><code>coarsen_healpix</code></a>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <em>ds</em> does not look like a sparse binned dataset.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>grid_doctor/swath/__init__.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-305">305</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-306">306</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-307">307</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-308">308</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-309">309</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-310">310</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-311">311</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-312">312</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-313">313</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-314">314</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-315">315</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-316">316</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-317">317</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-318">318</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-319">319</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-320">320</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-321">321</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-322">322</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-323">323</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-324">324</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-325">325</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-326">326</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-327">327</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-328">328</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-329">329</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-330">330</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-331">331</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-332">332</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-333">333</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-334">334</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-335">335</a></span>
+<span class="normal"><a href="#grid_doctor.sparse_to_dense--source--__codelineno-0-336">336</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="grid_doctor.sparse_to_dense--source--__codelineno-0-305" name="grid_doctor.sparse_to_dense--source--__codelineno-0-305"></a><span class="k">def</span><span class="w"> </span><span class="nf">sparse_to_dense</span><span class="p">(</span><span class="n">ds</span><span class="p">:</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">:</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-306" name="grid_doctor.sparse_to_dense--source--__codelineno-0-306"></a><span class="w">    </span><span class="sd">"""Scatter a compact (sparse) binned dataset onto the full grid.</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-307" name="grid_doctor.sparse_to_dense--source--__codelineno-0-307"></a>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-308" name="grid_doctor.sparse_to_dense--source--__codelineno-0-308"></a><span class="sd">    Parameters</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-309" name="grid_doctor.sparse_to_dense--source--__codelineno-0-309"></a><span class="sd">    ----------</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-310" name="grid_doctor.sparse_to_dense--source--__codelineno-0-310"></a><span class="sd">    ds:</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-311" name="grid_doctor.sparse_to_dense--source--__codelineno-0-311"></a><span class="sd">        Output of ``bin_to_healpix(..., dense=False)``.</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-312" name="grid_doctor.sparse_to_dense--source--__codelineno-0-312"></a>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-313" name="grid_doctor.sparse_to_dense--source--__codelineno-0-313"></a><span class="sd">    Returns</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-314" name="grid_doctor.sparse_to_dense--source--__codelineno-0-314"></a><span class="sd">    -------</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-315" name="grid_doctor.sparse_to_dense--source--__codelineno-0-315"></a><span class="sd">    xarray.Dataset</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-316" name="grid_doctor.sparse_to_dense--source--__codelineno-0-316"></a><span class="sd">        Dense dataset with the standard grid-doctor HEALPix coordinates</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-317" name="grid_doctor.sparse_to_dense--source--__codelineno-0-317"></a><span class="sd">        and metadata, ready for</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-318" name="grid_doctor.sparse_to_dense--source--__codelineno-0-318"></a><span class="sd">        [`coarsen_healpix`][grid_doctor.coarsen_healpix].</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-319" name="grid_doctor.sparse_to_dense--source--__codelineno-0-319"></a>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-320" name="grid_doctor.sparse_to_dense--source--__codelineno-0-320"></a><span class="sd">    Raises</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-321" name="grid_doctor.sparse_to_dense--source--__codelineno-0-321"></a><span class="sd">    ------</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-322" name="grid_doctor.sparse_to_dense--source--__codelineno-0-322"></a><span class="sd">    ValueError</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-323" name="grid_doctor.sparse_to_dense--source--__codelineno-0-323"></a><span class="sd">        When *ds* does not look like a sparse binned dataset.</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-324" name="grid_doctor.sparse_to_dense--source--__codelineno-0-324"></a><span class="sd">    """</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-325" name="grid_doctor.sparse_to_dense--source--__codelineno-0-325"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">has_healpix_metadata</span><span class="p">(</span><span class="n">ds</span><span class="p">):</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-326" name="grid_doctor.sparse_to_dense--source--__codelineno-0-326"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"Dataset doesn't contain healpix metadata."</span><span class="p">)</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-327" name="grid_doctor.sparse_to_dense--source--__codelineno-0-327"></a>    <span class="n">metadata</span> <span class="o">=</span> <span class="n">HealpixMetadata</span><span class="o">.</span><span class="n">from_dataset</span><span class="p">(</span><span class="n">ds</span><span class="p">)</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-328" name="grid_doctor.sparse_to_dense--source--__codelineno-0-328"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">metadata</span><span class="o">.</span><span class="n">sparse</span><span class="p">:</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-329" name="grid_doctor.sparse_to_dense--source--__codelineno-0-329"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"Dataset is not a sparse binned dataset."</span><span class="p">)</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-330" name="grid_doctor.sparse_to_dense--source--__codelineno-0-330"></a>    <span class="n">cell_ids</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">ds</span><span class="p">[</span><span class="n">CELL_DIM</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-331" name="grid_doctor.sparse_to_dense--source--__codelineno-0-331"></a>    <span class="k">return</span> <span class="n">_scatter_to_dense</span><span class="p">(</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-332" name="grid_doctor.sparse_to_dense--source--__codelineno-0-332"></a>        <span class="n">ds</span><span class="o">.</span><span class="n">drop_vars</span><span class="p">([</span><span class="n">CELL_DIM</span><span class="p">,</span> <span class="n">LAT_VAR</span><span class="p">,</span> <span class="n">LON_VAR</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s2">"ignore"</span><span class="p">),</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-333" name="grid_doctor.sparse_to_dense--source--__codelineno-0-333"></a>        <span class="n">cell_ids</span><span class="p">,</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-334" name="grid_doctor.sparse_to_dense--source--__codelineno-0-334"></a>        <span class="n">metadata</span><span class="o">.</span><span class="n">grid</span><span class="p">,</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-335" name="grid_doctor.sparse_to_dense--source--__codelineno-0-335"></a>        <span class="n">method</span><span class="o">=</span><span class="n">metadata</span><span class="o">.</span><span class="n">provenance</span><span class="o">.</span><span class="n">method</span> <span class="ow">or</span> <span class="s2">"binned-mean"</span><span class="p">,</span>
+<a id="grid_doctor.sparse_to_dense--source--__codelineno-0-336" name="grid_doctor.sparse_to_dense--source--__codelineno-0-336"></a>    <span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../pyramid/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Pyramids">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L77.3 256l137.3-137.4c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Pyramids
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../io/" class="md-footer__link md-footer__link--next" aria-label="Next: Writing stores">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Writing stores
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M247.1 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L179.2 256 41.9 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.code.copy","navigation.tabs","navigation.tabs.sticky","navigation.sections","navigation.footer","navigation.path","search.highlight","search.suggest"],"redirect":null,"search":"../../assets/javascripts/workers/search.719e0d91.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["latest","dev"],"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.9e76c64c.min.js"></script>
+      
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

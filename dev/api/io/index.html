@@ -1,0 +1,2451 @@
+
+
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Convert lat&#x2f;lon xarray datasets to HEALPix pyramids.">
+      
+      
+      
+        <link rel="canonical" href="https://grid-doctor.org/dev/api/io/">
+      
+      
+      
+      
+        <link rel="prev" href="../swath/">
+      
+      
+        <link rel="next" href="../parallel/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="zensical-0.1.3">
+    
+    
+      
+        <title>Writing stores - Grid Doctor</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e2cf241e.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.b60ce83d.min.css">
+      
+      
+      
+  
+  
+    
+      
+      
+    
+  
+  
+  <style>:root{--md-admonition-icon--example:url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M12%203C7.58%203%204%204.79%204%207s3.58%204%208%204%208-1.79%208-4-3.58-4-8-4M4%209v3c0%202.21%203.58%204%208%204s8-1.79%208-4V9c0%202.21-3.58%204-8%204s-8-1.79-8-4m0%205v3c0%202.21%203.58%204%208%204s8-1.79%208-4v-3c0%202.21-3.58%204-8%204s-8-1.79-8-4%22/%3E%3C/svg%3E');}</style>
+
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/styles.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  <meta property="og:type" content="website" />
+<meta property="og:title" content="Writing stores - Grid Doctor" />
+<meta property="og:description" content="Convert lat/lon xarray datasets to HEALPix pyramids." />
+<meta property="og:image" content="https://grid-doctor.org/dev/assets/images/social/api/io.png" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:url" content="https://grid-doctor.org/dev/api/io/" />
+<meta property="twitter:card" content="summary_large_image" />
+<meta property="twitter:title" content="Writing stores - Grid Doctor" />
+<meta property="twitter:description" content="Convert lat/lon xarray datasets to HEALPix pyramids." />
+<meta property="twitter:image" content="https://grid-doctor.org/dev/assets/images/social/api/io.png" />
+</head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  You are reading the documentation of an older release.
+  <a href="../../..">
+    <strong>Go to the latest version.</strong>
+  </a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL("../..",location),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Grid Doctor" class="md-header__button md-logo" aria-label="Grid Doctor" data-md-component="logo">
+      
+  <img src="../../assets/logo-mark.svg" alt="Grid Doctor">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+      <span class="md-visually-hidden">Navigation</span>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Grid Doctor
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Writing stores
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715M16 12a4 4 0 0 0-4-4M19 5l-1.256 1.256M20 12h2"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+          <span class="md-visually-hidden">Search</span>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/freva-org/grid-doctor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    freva-org/grid-doctor
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../getting-started/" class="md-tabs__link">
+        
+  
+  Getting started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+      
+    
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../recipes/" class="md-tabs__link">
+          
+  
+  Recipes
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+      
+    
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  API reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../technical-decisions/" class="md-tabs__link">
+        
+  
+  Technical decisions
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Grid Doctor" class="md-nav__button md-logo" aria-label="Grid Doctor" data-md-component="logo">
+      
+  <img src="../../assets/logo-mark.svg" alt="Grid Doctor">
+
+    </a>
+    Grid Doctor
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/freva-org/grid-doctor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    freva-org/grid-doctor
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting started
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Recipes
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Recipes
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/structured/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Structured grids (ERA5, CMIP)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/icon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Unstructured grids (ICON)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/regional/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Regional grids (CORDEX)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/point-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Point data
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Coarsening and averaging masked fields
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/parallel-writes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Parallel writes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../high-level-access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Working with the data
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  API reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../remap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Remapping
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weights/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Weights store
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pyramid/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Pyramids
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../swath/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Point binning
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Writing stores
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Writing stores
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-pyramid" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Writing a pyramid
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grid_doctor.save_pyramid" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;save_pyramid
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#s3-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        S3 options
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grid_doctor.get_s3_options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;get_s3_options
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chunking" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Chunking
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grid_doctor.chunk_for_target_store_size" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;chunk_for_target_store_size
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parallel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Parallel writes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../select/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Region selection
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Metadata
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Types
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Command line
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../technical-decisions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Technical decisions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-pyramid" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Writing a pyramid
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grid_doctor.save_pyramid" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;save_pyramid
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#s3-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        S3 options
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grid_doctor.get_s3_options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;get_s3_options
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chunking" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Chunking
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grid_doctor.chunk_for_target_store_size" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;chunk_for_target_store_size
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+    
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  
+  <span class="md-ellipsis">
+    API reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+  
+
+
+<h1 id="writing-stores">Writing stores<a class="headerlink" href="#writing-stores" title="Permanent link">&para;</a></h1>
+<p>Write HEALPix pyramids to Zarr stores on local disk or S3, and choose
+storage options and chunk sizes for them (<code>grid_doctor.io</code>).</p>
+<h2 id="writing-a-pyramid">Writing a pyramid<a class="headerlink" href="#writing-a-pyramid" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="grid_doctor.save_pyramid" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">save_pyramid</span><span class="p">(</span><span class="n">pyramid</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">s3_options</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">'a'</span><span class="p">,</span> <span class="n">region</span><span class="o">=</span><span class="s1">'auto'</span><span class="p">,</span> <span class="n">zarr_format</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">write_coords</span><span class="o">=</span><span class="s1">'auto'</span><span class="p">,</span> <span class="n">structure</span><span class="o">=</span><span class="s1">'flat'</span><span class="p">)</span></code>
+
+<a href="#grid_doctor.save_pyramid" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+        <p>Write a HEALPix pyramid to Zarr stores on S3 or local disk.</p>
+<p>Each level is stored below <code>"&lt;path&gt;/level_&lt;level&gt;.zarr"</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>pyramid</code>
+            </td>
+            <td>
+                  <code><span title="dict">dict</span>[<span title="int">int</span>, <span title="xarray.Dataset">Dataset</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Mapping of HEALPix level to dataset.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>path</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Target prefix.  An <code>"s3://bucket/pyramid"</code> URL writes to S3; any
+other value is treated as a local directory path.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>s3_options</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="            S3Options = Mapping[str, object]
+
+  
+      module-attribute
+   (grid_doctor.types.S3Options)" href="../types/#grid_doctor.types.S3Options">S3Options</a> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Options forwarded to :class:<code>s3fs.S3FileSystem</code>.  Only used for S3
+targets; ignored (and optional) for local paths.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>mode</code>
+            </td>
+            <td>
+                  <code><span title="typing.Literal">Literal</span>[&#39;a&#39;, &#39;w&#39;, &#39;r+&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Zarr write mode.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;a&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>region</code>
+            </td>
+            <td>
+                  <code><span title="typing.Literal">Literal</span>[&#39;auto&#39;] | <a class="autorefs autorefs-internal" title="            Region = &#x27;dict[str, slice[int | None, int | None, int | None]]&#x27;
+
+  
+      module-attribute
+   (grid_doctor.types.Region)" href="../types/#grid_doctor.types.Region">Region</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Region writes for partial updates.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;auto&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>zarr_format</code>
+            </td>
+            <td>
+                  <code><span title="typing.Literal">Literal</span>[2, 3]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Zarr format version.</p>
+              </div>
+            </td>
+            <td>
+                  <code>2</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>encoding</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="            PyramidEncoding = Mapping[int, LevelEncoding]
+
+  
+      module-attribute
+   (grid_doctor.types.PyramidEncoding)" href="../types/#grid_doctor.types.PyramidEncoding">PyramidEncoding</a> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Per-level encoding dictionaries.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>write_coords</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span> | <span title="typing.Literal">Literal</span>[&#39;auto&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether to materialise the <code>cell</code>/<code>latitude</code>/<code>longitude</code>
+coordinate arrays in the store.  HEALPix coordinates are a pure
+function of the cell index, and above roughly level 10 the
+arrays dwarf regional payloads (hundreds of GB at level 16, and
+they are never fill values, so chunk elision cannot help).
+<code>"auto"</code> (default) writes coordinates for levels up to
+:data:<code>WRITE_COORDS_MAX_LEVEL</code> and omits them above; <code>True</code> /
+<code>False</code> force either behaviour for all levels.  Coordinate-
+less stores keep the <code>crs</code> grid mapping, are marked as having
+implicit coordinates (see
+<a class="autorefs autorefs-internal" title="              HealpixMetadata(grid, provenance=Provenance(), sparse=False, implicit_coords=False)
+
+  
+      dataclass
+  " href="../metadata/#grid_doctor.metadata.HealpixMetadata"><code>HealpixMetadata</code></a>), and are
+meant to be accessed through the region selectors
+(<a class="autorefs autorefs-internal" title="            select_bbox(ds, *, lon, lat, level=None, query_delta=_DEFAULT_QUERY_DELTA, load=True)" href="../select/#grid_doctor.select_bbox"><code>select_bbox</code></a>,
+<a class="autorefs autorefs-internal" title="            select_cells(ds, cells, *, level=None, load=True)" href="../select/#grid_doctor.select_cells"><code>select_cells</code></a>), which reconstruct
+coordinates for exactly the cells they return.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;auto&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>structure</code>
+            </td>
+            <td>
+                  <code><span title="typing.Literal">Literal</span>[&#39;flat&#39;, &#39;multiscales&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>separate stores ('flat'), or combine them into a datatree
+('multiscales').</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;flat&#39;</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>grid_doctor/io/_save.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-372">372</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-373">373</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-374">374</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-375">375</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-376">376</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-377">377</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-378">378</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-379">379</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-380">380</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-381">381</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-382">382</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-383">383</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-384">384</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-385">385</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-386">386</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-387">387</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-388">388</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-389">389</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-390">390</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-391">391</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-392">392</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-393">393</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-394">394</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-395">395</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-396">396</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-397">397</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-398">398</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-399">399</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-400">400</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-401">401</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-402">402</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-403">403</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-404">404</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-405">405</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-406">406</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-407">407</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-408">408</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-409">409</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-410">410</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-411">411</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-412">412</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-413">413</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-414">414</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-415">415</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-416">416</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-417">417</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-418">418</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-419">419</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-420">420</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-421">421</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-422">422</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-423">423</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-424">424</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-425">425</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-426">426</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-427">427</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-428">428</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-429">429</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-430">430</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-431">431</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-432">432</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-433">433</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-434">434</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-435">435</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-436">436</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-437">437</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-438">438</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-439">439</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-440">440</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-441">441</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-442">442</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-443">443</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-444">444</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-445">445</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-446">446</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-447">447</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-448">448</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-449">449</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-450">450</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-451">451</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-452">452</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-453">453</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-454">454</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-455">455</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-456">456</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-457">457</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-458">458</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-459">459</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-460">460</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-461">461</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-462">462</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-463">463</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-464">464</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-465">465</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-466">466</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-467">467</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-468">468</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-469">469</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-470">470</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-471">471</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-472">472</a></span>
+<span class="normal"><a href="#grid_doctor.save_pyramid--source--__codelineno-0-473">473</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="grid_doctor.save_pyramid--source--__codelineno-0-372" name="grid_doctor.save_pyramid--source--__codelineno-0-372"></a><span class="k">def</span><span class="w"> </span><span class="nf">save_pyramid</span><span class="p">(</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-373" name="grid_doctor.save_pyramid--source--__codelineno-0-373"></a>    <span class="n">pyramid</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">],</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-374" name="grid_doctor.save_pyramid--source--__codelineno-0-374"></a>    <span class="n">path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-375" name="grid_doctor.save_pyramid--source--__codelineno-0-375"></a>    <span class="n">s3_options</span><span class="p">:</span> <span class="n">S3Options</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-376" name="grid_doctor.save_pyramid--source--__codelineno-0-376"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-377" name="grid_doctor.save_pyramid--source--__codelineno-0-377"></a>    <span class="n">mode</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"a"</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">,</span> <span class="s2">"r+"</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"a"</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-378" name="grid_doctor.save_pyramid--source--__codelineno-0-378"></a>    <span class="n">region</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"auto"</span><span class="p">]</span> <span class="o">|</span> <span class="n">Region</span> <span class="o">=</span> <span class="s2">"auto"</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-379" name="grid_doctor.save_pyramid--source--__codelineno-0-379"></a>    <span class="n">zarr_format</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-380" name="grid_doctor.save_pyramid--source--__codelineno-0-380"></a>    <span class="n">encoding</span><span class="p">:</span> <span class="n">PyramidEncoding</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-381" name="grid_doctor.save_pyramid--source--__codelineno-0-381"></a>    <span class="n">write_coords</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"auto"</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"auto"</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-382" name="grid_doctor.save_pyramid--source--__codelineno-0-382"></a>    <span class="n">structure</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"flat"</span><span class="p">,</span> <span class="s2">"multiscales"</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"flat"</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-383" name="grid_doctor.save_pyramid--source--__codelineno-0-383"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-384" name="grid_doctor.save_pyramid--source--__codelineno-0-384"></a><span class="w">    </span><span class="sd">"""Write a HEALPix pyramid to Zarr stores on S3 or local disk.</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-385" name="grid_doctor.save_pyramid--source--__codelineno-0-385"></a>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-386" name="grid_doctor.save_pyramid--source--__codelineno-0-386"></a><span class="sd">    Each level is stored below ``"&lt;path&gt;/level_&lt;level&gt;.zarr"``.</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-387" name="grid_doctor.save_pyramid--source--__codelineno-0-387"></a>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-388" name="grid_doctor.save_pyramid--source--__codelineno-0-388"></a><span class="sd">    Parameters</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-389" name="grid_doctor.save_pyramid--source--__codelineno-0-389"></a><span class="sd">    ----------</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-390" name="grid_doctor.save_pyramid--source--__codelineno-0-390"></a><span class="sd">    pyramid:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-391" name="grid_doctor.save_pyramid--source--__codelineno-0-391"></a><span class="sd">        Mapping of HEALPix level to dataset.</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-392" name="grid_doctor.save_pyramid--source--__codelineno-0-392"></a><span class="sd">    path:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-393" name="grid_doctor.save_pyramid--source--__codelineno-0-393"></a><span class="sd">        Target prefix.  An ``"s3://bucket/pyramid"`` URL writes to S3; any</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-394" name="grid_doctor.save_pyramid--source--__codelineno-0-394"></a><span class="sd">        other value is treated as a local directory path.</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-395" name="grid_doctor.save_pyramid--source--__codelineno-0-395"></a><span class="sd">    s3_options:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-396" name="grid_doctor.save_pyramid--source--__codelineno-0-396"></a><span class="sd">        Options forwarded to :class:`s3fs.S3FileSystem`.  Only used for S3</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-397" name="grid_doctor.save_pyramid--source--__codelineno-0-397"></a><span class="sd">        targets; ignored (and optional) for local paths.</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-398" name="grid_doctor.save_pyramid--source--__codelineno-0-398"></a><span class="sd">    mode:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-399" name="grid_doctor.save_pyramid--source--__codelineno-0-399"></a><span class="sd">        Zarr write mode.</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-400" name="grid_doctor.save_pyramid--source--__codelineno-0-400"></a><span class="sd">    region:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-401" name="grid_doctor.save_pyramid--source--__codelineno-0-401"></a><span class="sd">        Region writes for partial updates.</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-402" name="grid_doctor.save_pyramid--source--__codelineno-0-402"></a><span class="sd">    zarr_format:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-403" name="grid_doctor.save_pyramid--source--__codelineno-0-403"></a><span class="sd">        Zarr format version.</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-404" name="grid_doctor.save_pyramid--source--__codelineno-0-404"></a><span class="sd">    encoding:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-405" name="grid_doctor.save_pyramid--source--__codelineno-0-405"></a><span class="sd">        Per-level encoding dictionaries.</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-406" name="grid_doctor.save_pyramid--source--__codelineno-0-406"></a><span class="sd">    write_coords:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-407" name="grid_doctor.save_pyramid--source--__codelineno-0-407"></a><span class="sd">        Whether to materialise the ``cell``/``latitude``/``longitude``</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-408" name="grid_doctor.save_pyramid--source--__codelineno-0-408"></a><span class="sd">        coordinate arrays in the store.  HEALPix coordinates are a pure</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-409" name="grid_doctor.save_pyramid--source--__codelineno-0-409"></a><span class="sd">        function of the cell index, and above roughly level 10 the</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-410" name="grid_doctor.save_pyramid--source--__codelineno-0-410"></a><span class="sd">        arrays dwarf regional payloads (hundreds of GB at level 16, and</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-411" name="grid_doctor.save_pyramid--source--__codelineno-0-411"></a><span class="sd">        they are never fill values, so chunk elision cannot help).</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-412" name="grid_doctor.save_pyramid--source--__codelineno-0-412"></a><span class="sd">        ``"auto"`` (default) writes coordinates for levels up to</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-413" name="grid_doctor.save_pyramid--source--__codelineno-0-413"></a><span class="sd">        :data:`WRITE_COORDS_MAX_LEVEL` and omits them above; ``True`` /</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-414" name="grid_doctor.save_pyramid--source--__codelineno-0-414"></a><span class="sd">        ``False`` force either behaviour for all levels.  Coordinate-</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-415" name="grid_doctor.save_pyramid--source--__codelineno-0-415"></a><span class="sd">        less stores keep the ``crs`` grid mapping, are marked as having</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-416" name="grid_doctor.save_pyramid--source--__codelineno-0-416"></a><span class="sd">        implicit coordinates (see</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-417" name="grid_doctor.save_pyramid--source--__codelineno-0-417"></a><span class="sd">        [`HealpixMetadata`][grid_doctor.metadata.HealpixMetadata]), and are</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-418" name="grid_doctor.save_pyramid--source--__codelineno-0-418"></a><span class="sd">        meant to be accessed through the region selectors</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-419" name="grid_doctor.save_pyramid--source--__codelineno-0-419"></a><span class="sd">        ([`select_bbox`][grid_doctor.select_bbox],</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-420" name="grid_doctor.save_pyramid--source--__codelineno-0-420"></a><span class="sd">        [`select_cells`][grid_doctor.select_cells]), which reconstruct</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-421" name="grid_doctor.save_pyramid--source--__codelineno-0-421"></a><span class="sd">        coordinates for exactly the cells they return.</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-422" name="grid_doctor.save_pyramid--source--__codelineno-0-422"></a><span class="sd">    structure: Specify whether to write the datasets in the pyramid to</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-423" name="grid_doctor.save_pyramid--source--__codelineno-0-423"></a><span class="sd">        separate stores ('flat'), or combine them into a datatree</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-424" name="grid_doctor.save_pyramid--source--__codelineno-0-424"></a><span class="sd">        ('multiscales').</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-425" name="grid_doctor.save_pyramid--source--__codelineno-0-425"></a><span class="sd">    """</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-426" name="grid_doctor.save_pyramid--source--__codelineno-0-426"></a>    <span class="n">fs</span> <span class="o">=</span> <span class="n">get_filesystem</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">s3_options</span><span class="p">)</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-427" name="grid_doctor.save_pyramid--source--__codelineno-0-427"></a>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-428" name="grid_doctor.save_pyramid--source--__codelineno-0-428"></a>    <span class="k">if</span> <span class="n">structure</span> <span class="o">==</span> <span class="s2">"multiscales"</span><span class="p">:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-429" name="grid_doctor.save_pyramid--source--__codelineno-0-429"></a>        <span class="n">_save_multiscale</span><span class="p">(</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-430" name="grid_doctor.save_pyramid--source--__codelineno-0-430"></a>            <span class="n">pyramid</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-431" name="grid_doctor.save_pyramid--source--__codelineno-0-431"></a>            <span class="n">path</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-432" name="grid_doctor.save_pyramid--source--__codelineno-0-432"></a>            <span class="n">fs</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-433" name="grid_doctor.save_pyramid--source--__codelineno-0-433"></a>            <span class="n">mode</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-434" name="grid_doctor.save_pyramid--source--__codelineno-0-434"></a>            <span class="n">region</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-435" name="grid_doctor.save_pyramid--source--__codelineno-0-435"></a>            <span class="n">zarr_format</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-436" name="grid_doctor.save_pyramid--source--__codelineno-0-436"></a>            <span class="n">encoding</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-437" name="grid_doctor.save_pyramid--source--__codelineno-0-437"></a>            <span class="n">write_coords</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-438" name="grid_doctor.save_pyramid--source--__codelineno-0-438"></a>        <span class="p">)</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-439" name="grid_doctor.save_pyramid--source--__codelineno-0-439"></a>        <span class="k">return</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-440" name="grid_doctor.save_pyramid--source--__codelineno-0-440"></a>    <span class="c1"># Stores are initialised per level; the data of all levels is written</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-441" name="grid_doctor.save_pyramid--source--__codelineno-0-441"></a>    <span class="c1"># in one pass (see grid_doctor.io._zarr for why).</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-442" name="grid_doctor.save_pyramid--source--__codelineno-0-442"></a>    <span class="n">deferred</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">DeferredWrite</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-443" name="grid_doctor.save_pyramid--source--__codelineno-0-443"></a>    <span class="n">encoding</span> <span class="o">=</span> <span class="n">encoding</span> <span class="ow">or</span> <span class="p">{}</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-444" name="grid_doctor.save_pyramid--source--__codelineno-0-444"></a>    <span class="k">for</span> <span class="n">level</span><span class="p">,</span> <span class="n">dataset</span> <span class="ow">in</span> <span class="n">pyramid</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-445" name="grid_doctor.save_pyramid--source--__codelineno-0-445"></a>        <span class="n">dataset</span> <span class="o">=</span> <span class="n">maybe_drop_coordinates</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">level</span><span class="p">,</span> <span class="n">write_coords</span><span class="p">,</span> <span class="n">WRITE_COORDS_MAX_LEVEL</span><span class="p">)</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-446" name="grid_doctor.save_pyramid--source--__codelineno-0-446"></a>        <span class="n">store_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"level_</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">"</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-447" name="grid_doctor.save_pyramid--source--__codelineno-0-447"></a>        <span class="n">root_path</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">store_name</span><span class="si">}</span><span class="s2">.zarr"</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-448" name="grid_doctor.save_pyramid--source--__codelineno-0-448"></a>        <span class="n">store</span> <span class="o">=</span> <span class="n">get_store</span><span class="p">(</span><span class="n">root_path</span><span class="p">,</span> <span class="n">fs</span><span class="p">)</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-449" name="grid_doctor.save_pyramid--source--__codelineno-0-449"></a>        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Writing HEALPix to </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">store</span><span class="p">)</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-450" name="grid_doctor.save_pyramid--source--__codelineno-0-450"></a>        <span class="n">zarr_options</span> <span class="o">=</span> <span class="n">get_zarr_options</span><span class="p">(</span><span class="n">mode</span><span class="p">,</span> <span class="n">zarr_format</span><span class="p">,</span> <span class="n">encoding</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">level</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-451" name="grid_doctor.save_pyramid--source--__codelineno-0-451"></a>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-452" name="grid_doctor.save_pyramid--source--__codelineno-0-452"></a>        <span class="k">if</span> <span class="n">region</span> <span class="o">==</span> <span class="s2">"auto"</span><span class="p">:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-453" name="grid_doctor.save_pyramid--source--__codelineno-0-453"></a>            <span class="n">dataset</span><span class="o">.</span><span class="n">to_zarr</span><span class="p">(</span><span class="n">store</span><span class="p">,</span> <span class="o">**</span><span class="n">zarr_options</span><span class="p">)</span>  <span class="c1"># type: ignore[call-overload]</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-454" name="grid_doctor.save_pyramid--source--__codelineno-0-454"></a>            <span class="n">written</span><span class="p">,</span> <span class="n">write_region</span> <span class="o">=</span> <span class="n">dataset</span><span class="p">,</span> <span class="kc">None</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-455" name="grid_doctor.save_pyramid--source--__codelineno-0-455"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-456" name="grid_doctor.save_pyramid--source--__codelineno-0-456"></a>            <span class="c1"># Fill in the region of data.</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-457" name="grid_doctor.save_pyramid--source--__codelineno-0-457"></a>            <span class="n">written</span> <span class="o">=</span> <span class="n">prepare_region_dataset</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">region</span><span class="p">)</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-458" name="grid_doctor.save_pyramid--source--__codelineno-0-458"></a>            <span class="n">written</span><span class="o">.</span><span class="n">to_zarr</span><span class="p">(</span>  <span class="c1"># type: ignore[call-overload]</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-459" name="grid_doctor.save_pyramid--source--__codelineno-0-459"></a>                <span class="n">store</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-460" name="grid_doctor.save_pyramid--source--__codelineno-0-460"></a>                <span class="n">region</span><span class="o">=</span><span class="n">region</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-461" name="grid_doctor.save_pyramid--source--__codelineno-0-461"></a>                <span class="o">**</span><span class="n">zarr_options</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-462" name="grid_doctor.save_pyramid--source--__codelineno-0-462"></a>            <span class="p">)</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-463" name="grid_doctor.save_pyramid--source--__codelineno-0-463"></a>            <span class="n">write_region</span> <span class="o">=</span> <span class="n">region</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-464" name="grid_doctor.save_pyramid--source--__codelineno-0-464"></a>        <span class="n">deferred</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-465" name="grid_doctor.save_pyramid--source--__codelineno-0-465"></a>            <span class="n">deferred_writes</span><span class="p">(</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-466" name="grid_doctor.save_pyramid--source--__codelineno-0-466"></a>                <span class="n">written</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-467" name="grid_doctor.save_pyramid--source--__codelineno-0-467"></a>                <span class="n">store</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-468" name="grid_doctor.save_pyramid--source--__codelineno-0-468"></a>                <span class="n">encoding</span><span class="o">=</span><span class="n">zarr_options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"encoding"</span><span class="p">),</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-469" name="grid_doctor.save_pyramid--source--__codelineno-0-469"></a>                <span class="n">region</span><span class="o">=</span><span class="n">write_region</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-470" name="grid_doctor.save_pyramid--source--__codelineno-0-470"></a>                <span class="n">zarr_format</span><span class="o">=</span><span class="n">zarr_format</span><span class="p">,</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-471" name="grid_doctor.save_pyramid--source--__codelineno-0-471"></a>            <span class="p">)</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-472" name="grid_doctor.save_pyramid--source--__codelineno-0-472"></a>        <span class="p">)</span>
+<a id="grid_doctor.save_pyramid--source--__codelineno-0-473" name="grid_doctor.save_pyramid--source--__codelineno-0-473"></a>    <span class="n">store_all</span><span class="p">(</span><span class="n">deferred</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div><p>To split the write across many jobs (one array-job element per time
+range, say), see <a href="../parallel/">Parallel writes</a>.</p>
+<h2 id="s3-options">S3 options<a class="headerlink" href="#s3-options" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="grid_doctor.get_s3_options" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">get_s3_options</span><span class="p">(</span><span class="n">endpoint_url</span><span class="p">,</span> <span class="n">secrets_file</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></code>
+
+<a href="#grid_doctor.get_s3_options" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+        <p>Build an S3 options dictionary from an endpoint and credentials file.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>endpoint_url</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>S3-compatible endpoint URL.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>secrets_file</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | <span title="pathlib.Path">Path</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>JSON file containing <code>accessKey</code> and <code>secretKey</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>**kwargs</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Additional options merged into the returned dictionary.</p>
+              </div>
+            </td>
+            <td>
+                  <code>{}</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Options for <code>s3fs.S3FileSystem</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>grid_doctor/io/_options.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-93"> 93</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-94"> 94</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-95"> 95</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-96"> 96</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-97"> 97</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-98"> 98</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-99"> 99</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-100">100</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-101">101</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-102">102</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-103">103</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-104">104</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-105">105</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-106">106</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-107">107</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-108">108</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-109">109</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-110">110</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-111">111</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-112">112</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-113">113</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-114">114</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-115">115</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-116">116</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-117">117</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-118">118</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-119">119</a></span>
+<span class="normal"><a href="#grid_doctor.get_s3_options--source--__codelineno-0-120">120</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="grid_doctor.get_s3_options--source--__codelineno-0-93" name="grid_doctor.get_s3_options--source--__codelineno-0-93"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_s3_options</span><span class="p">(</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-94" name="grid_doctor.get_s3_options--source--__codelineno-0-94"></a>    <span class="n">endpoint_url</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-95" name="grid_doctor.get_s3_options--source--__codelineno-0-95"></a>    <span class="n">secrets_file</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span><span class="p">,</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-96" name="grid_doctor.get_s3_options--source--__codelineno-0-96"></a>    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-97" name="grid_doctor.get_s3_options--source--__codelineno-0-97"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-98" name="grid_doctor.get_s3_options--source--__codelineno-0-98"></a><span class="w">    </span><span class="sd">"""Build an S3 options dictionary from an endpoint and credentials file.</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-99" name="grid_doctor.get_s3_options--source--__codelineno-0-99"></a>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-100" name="grid_doctor.get_s3_options--source--__codelineno-0-100"></a><span class="sd">    Parameters</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-101" name="grid_doctor.get_s3_options--source--__codelineno-0-101"></a><span class="sd">    ----------</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-102" name="grid_doctor.get_s3_options--source--__codelineno-0-102"></a><span class="sd">    endpoint_url:</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-103" name="grid_doctor.get_s3_options--source--__codelineno-0-103"></a><span class="sd">        S3-compatible endpoint URL.</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-104" name="grid_doctor.get_s3_options--source--__codelineno-0-104"></a><span class="sd">    secrets_file:</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-105" name="grid_doctor.get_s3_options--source--__codelineno-0-105"></a><span class="sd">        JSON file containing `accessKey` and `secretKey`.</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-106" name="grid_doctor.get_s3_options--source--__codelineno-0-106"></a><span class="sd">    **kwargs:</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-107" name="grid_doctor.get_s3_options--source--__codelineno-0-107"></a><span class="sd">        Additional options merged into the returned dictionary.</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-108" name="grid_doctor.get_s3_options--source--__codelineno-0-108"></a>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-109" name="grid_doctor.get_s3_options--source--__codelineno-0-109"></a><span class="sd">    Returns</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-110" name="grid_doctor.get_s3_options--source--__codelineno-0-110"></a><span class="sd">    -------</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-111" name="grid_doctor.get_s3_options--source--__codelineno-0-111"></a><span class="sd">    dict[str, str]</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-112" name="grid_doctor.get_s3_options--source--__codelineno-0-112"></a><span class="sd">        Options for `s3fs.S3FileSystem`.</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-113" name="grid_doctor.get_s3_options--source--__codelineno-0-113"></a><span class="sd">    """</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-114" name="grid_doctor.get_s3_options--source--__codelineno-0-114"></a>    <span class="n">secrets</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">secrets_file</span><span class="p">)</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-115" name="grid_doctor.get_s3_options--source--__codelineno-0-115"></a>    <span class="k">return</span> <span class="p">{</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-116" name="grid_doctor.get_s3_options--source--__codelineno-0-116"></a>        <span class="s2">"endpoint_url"</span><span class="p">:</span> <span class="n">endpoint_url</span><span class="p">,</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-117" name="grid_doctor.get_s3_options--source--__codelineno-0-117"></a>        <span class="s2">"secret"</span><span class="p">:</span> <span class="n">secrets</span><span class="p">[</span><span class="s2">"secretKey"</span><span class="p">],</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-118" name="grid_doctor.get_s3_options--source--__codelineno-0-118"></a>        <span class="s2">"key"</span><span class="p">:</span> <span class="n">secrets</span><span class="p">[</span><span class="s2">"accessKey"</span><span class="p">],</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-119" name="grid_doctor.get_s3_options--source--__codelineno-0-119"></a>        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+<a id="grid_doctor.get_s3_options--source--__codelineno-0-120" name="grid_doctor.get_s3_options--source--__codelineno-0-120"></a>    <span class="p">}</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div><h2 id="chunking">Chunking<a class="headerlink" href="#chunking" title="Permanent link">&para;</a></h2>
+<p>Chunk sizes balance the number of objects in a store against the amount
+of data read for a small selection.</p>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="grid_doctor.chunk_for_target_store_size" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">chunk_for_target_store_size</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">level</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">'float32'</span><span class="p">,</span> <span class="n">target_stored_mib</span><span class="o">=</span><span class="mf">16.0</span><span class="p">,</span> <span class="n">compression_ratio</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">access</span><span class="o">=</span><span class="s1">'map'</span><span class="p">,</span> <span class="n">ntime</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_time_chunk</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_cell_chunk</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#grid_doctor.chunk_for_target_store_size" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+        <p>Compute (time, cell) chunks for a HEALPix dataset.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>level</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>HEALPix order / level.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>dtype</code>
+            </td>
+            <td>
+                  <code><span title="numpy.typing.DTypeLike">DTypeLike</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Variable dtype.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;float32&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>target_stored_mib</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Desired approximate compressed chunk size on disk.</p>
+              </div>
+            </td>
+            <td>
+                  <code>16.0</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>compression_ratio</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Estimated ratio:
+    uncompressed_bytes / compressed_bytes</p>
+              </div>
+            </td>
+            <td>
+                  <code>2.0</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>access</code>
+            </td>
+            <td>
+                  <code><span title="typing.Literal">Literal</span>[&#39;time_series&#39;, &#39;map&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>"map" or "time_series".</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;map&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>ntime</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Total time size. Needed for time_series mode unless max_time_chunk is given.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>max_time_chunk</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional cap for time chunk.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>max_cell_chunk</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional cap for cell chunk.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="int">int</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Chunk sizes, e.g. {"time": 5, "cell": 786432}.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>grid_doctor/io/_options.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-20">20</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-21">21</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-22">22</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-23">23</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-24">24</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-25">25</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-26">26</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-27">27</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-28">28</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-29">29</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-30">30</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-31">31</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-32">32</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-33">33</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-34">34</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-35">35</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-36">36</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-37">37</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-38">38</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-39">39</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-40">40</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-41">41</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-42">42</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-43">43</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-44">44</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-45">45</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-46">46</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-47">47</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-48">48</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-49">49</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-50">50</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-51">51</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-52">52</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-53">53</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-54">54</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-55">55</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-56">56</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-57">57</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-58">58</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-59">59</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-60">60</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-61">61</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-62">62</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-63">63</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-64">64</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-65">65</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-66">66</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-67">67</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-68">68</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-69">69</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-70">70</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-71">71</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-72">72</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-73">73</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-74">74</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-75">75</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-76">76</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-77">77</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-78">78</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-79">79</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-80">80</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-81">81</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-82">82</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-83">83</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-84">84</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-85">85</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-86">86</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-87">87</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-88">88</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-89">89</a></span>
+<span class="normal"><a href="#grid_doctor.chunk_for_target_store_size--source--__codelineno-0-90">90</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-20" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-20"></a><span class="k">def</span><span class="w"> </span><span class="nf">chunk_for_target_store_size</span><span class="p">(</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-21" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-21"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-22" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-22"></a>    <span class="n">level</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-23" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-23"></a>    <span class="n">dtype</span><span class="p">:</span> <span class="n">npt</span><span class="o">.</span><span class="n">DTypeLike</span> <span class="o">=</span> <span class="s2">"float32"</span><span class="p">,</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-24" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-24"></a>    <span class="n">target_stored_mib</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">16.0</span><span class="p">,</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-25" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-25"></a>    <span class="n">compression_ratio</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">2.0</span><span class="p">,</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-26" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-26"></a>    <span class="n">access</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"time_series"</span><span class="p">,</span> <span class="s2">"map"</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"map"</span><span class="p">,</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-27" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-27"></a>    <span class="n">ntime</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-28" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-28"></a>    <span class="n">max_time_chunk</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-29" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-29"></a>    <span class="n">max_cell_chunk</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-30" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-30"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-31" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-31"></a><span class="w">    </span><span class="sd">"""</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-32" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-32"></a><span class="sd">    Compute (time, cell) chunks for a HEALPix dataset.</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-33" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-33"></a>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-34" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-34"></a><span class="sd">    Parameters</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-35" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-35"></a><span class="sd">    ----------</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-36" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-36"></a><span class="sd">    level</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-37" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-37"></a><span class="sd">        HEALPix order / level.</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-38" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-38"></a><span class="sd">    dtype</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-39" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-39"></a><span class="sd">        Variable dtype.</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-40" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-40"></a><span class="sd">    target_stored_mib</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-41" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-41"></a><span class="sd">        Desired approximate compressed chunk size on disk.</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-42" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-42"></a><span class="sd">    compression_ratio</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-43" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-43"></a><span class="sd">        Estimated ratio:</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-44" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-44"></a><span class="sd">            uncompressed_bytes / compressed_bytes</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-45" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-45"></a><span class="sd">    access</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-46" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-46"></a><span class="sd">        "map" or "time_series".</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-47" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-47"></a><span class="sd">    ntime</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-48" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-48"></a><span class="sd">        Total time size. Needed for time_series mode unless max_time_chunk is given.</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-49" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-49"></a><span class="sd">    max_time_chunk</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-50" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-50"></a><span class="sd">        Optional cap for time chunk.</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-51" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-51"></a><span class="sd">    max_cell_chunk</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-52" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-52"></a><span class="sd">        Optional cap for cell chunk.</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-53" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-53"></a>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-54" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-54"></a><span class="sd">    Returns</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-55" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-55"></a><span class="sd">    -------</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-56" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-56"></a><span class="sd">    dict[str, int]</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-57" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-57"></a><span class="sd">        Chunk sizes, e.g. {"time": 5, "cell": 786432}.</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-58" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-58"></a><span class="sd">    """</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-59" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-59"></a>    <span class="n">nside</span> <span class="o">=</span> <span class="mi">2</span><span class="o">**</span><span class="n">level</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-60" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-60"></a>    <span class="n">ncell</span> <span class="o">=</span> <span class="mi">12</span> <span class="o">*</span> <span class="n">nside</span> <span class="o">*</span> <span class="n">nside</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-61" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-61"></a>    <span class="n">itemsize</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span><span class="o">.</span><span class="n">itemsize</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-62" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-62"></a>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-63" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-63"></a>    <span class="n">target_stored_bytes</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">target_stored_mib</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">)</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-64" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-64"></a>    <span class="n">target_uncompressed_bytes</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">target_stored_bytes</span> <span class="o">*</span> <span class="n">compression_ratio</span><span class="p">)</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-65" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-65"></a>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-66" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-66"></a>    <span class="k">if</span> <span class="n">access</span> <span class="o">==</span> <span class="s2">"map"</span><span class="p">:</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-67" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-67"></a>        <span class="n">cell_chunk</span> <span class="o">=</span> <span class="n">ncell</span> <span class="k">if</span> <span class="n">max_cell_chunk</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="nb">min</span><span class="p">(</span><span class="n">ncell</span><span class="p">,</span> <span class="n">max_cell_chunk</span><span class="p">)</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-68" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-68"></a>        <span class="n">time_chunk</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">target_uncompressed_bytes</span> <span class="o">//</span> <span class="p">(</span><span class="n">itemsize</span> <span class="o">*</span> <span class="n">cell_chunk</span><span class="p">))</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-69" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-69"></a>        <span class="k">return</span> <span class="p">{</span><span class="s2">"time"</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">time_chunk</span><span class="p">),</span> <span class="s2">"cell"</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">cell_chunk</span><span class="p">)}</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-70" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-70"></a>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-71" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-71"></a>    <span class="k">if</span> <span class="n">access</span> <span class="o">==</span> <span class="s2">"time_series"</span><span class="p">:</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-72" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-72"></a>        <span class="k">if</span> <span class="n">max_time_chunk</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-73" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-73"></a>            <span class="n">time_chunk</span> <span class="o">=</span> <span class="n">max_time_chunk</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-74" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-74"></a>        <span class="k">elif</span> <span class="n">ntime</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-75" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-75"></a>            <span class="n">time_chunk</span> <span class="o">=</span> <span class="n">ntime</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-76" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-76"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-77" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-77"></a>            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"For access='time_series', provide either ntime or max_time_chunk."</span><span class="p">)</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-78" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-78"></a>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-79" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-79"></a>        <span class="k">if</span> <span class="n">ntime</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-80" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-80"></a>            <span class="n">time_chunk</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">time_chunk</span><span class="p">,</span> <span class="n">ntime</span><span class="p">)</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-81" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-81"></a>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-82" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-82"></a>        <span class="n">cell_chunk</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">target_uncompressed_bytes</span> <span class="o">//</span> <span class="p">(</span><span class="n">itemsize</span> <span class="o">*</span> <span class="n">time_chunk</span><span class="p">))</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-83" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-83"></a>        <span class="n">cell_chunk</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">cell_chunk</span><span class="p">,</span> <span class="n">ncell</span><span class="p">)</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-84" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-84"></a>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-85" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-85"></a>        <span class="k">if</span> <span class="n">max_cell_chunk</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-86" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-86"></a>            <span class="n">cell_chunk</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">cell_chunk</span><span class="p">,</span> <span class="n">max_cell_chunk</span><span class="p">)</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-87" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-87"></a>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-88" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-88"></a>        <span class="k">return</span> <span class="p">{</span><span class="s2">"time"</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">time_chunk</span><span class="p">),</span> <span class="s2">"cell"</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">cell_chunk</span><span class="p">)}</span>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-89" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-89"></a>
+<a id="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-90" name="grid_doctor.chunk_for_target_store_size--source--__codelineno-0-90"></a>    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Unsupported access mode: </span><span class="si">{</span><span class="n">access</span><span class="si">!r}</span><span class="s2">"</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../swath/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Point binning">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L77.3 256l137.3-137.4c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Point binning
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../parallel/" class="md-footer__link md-footer__link--next" aria-label="Next: Parallel writes">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Parallel writes
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M247.1 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L179.2 256 41.9 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.code.copy","navigation.tabs","navigation.tabs.sticky","navigation.sections","navigation.footer","navigation.path","search.highlight","search.suggest"],"redirect":null,"search":"../../assets/javascripts/workers/search.719e0d91.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["latest","dev"],"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.9e76c64c.min.js"></script>
+      
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

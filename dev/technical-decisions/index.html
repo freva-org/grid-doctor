@@ -1,0 +1,2912 @@
+
+
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Convert lat&#x2f;lon xarray datasets to HEALPix pyramids.">
+      
+      
+      
+        <link rel="canonical" href="https://grid-doctor.org/dev/technical-decisions/">
+      
+      
+      
+      
+        <link rel="prev" href="../api/cli/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.ico">
+      <meta name="generator" content="zensical-0.1.3">
+    
+    
+      
+        <title>Technical decisions - Grid Doctor</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.e2cf241e.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.b60ce83d.min.css">
+      
+      
+      
+  
+  
+    
+      
+      
+    
+  
+  
+  <style>:root{--md-admonition-icon--example:url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M12%203C7.58%203%204%204.79%204%207s3.58%204%208%204%208-1.79%208-4-3.58-4-8-4M4%209v3c0%202.21%203.58%204%208%204s8-1.79%208-4V9c0%202.21-3.58%204-8%204s-8-1.79-8-4m0%205v3c0%202.21%203.58%204%208%204s8-1.79%208-4v-3c0%202.21-3.58%204-8%204s-8-1.79-8-4%22/%3E%3C/svg%3E');}</style>
+
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/styles.css">
+    
+    <script>__md_scope=new URL("..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  <meta property="og:type" content="website" />
+<meta property="og:title" content="Technical decisions - Grid Doctor" />
+<meta property="og:description" content="Convert lat/lon xarray datasets to HEALPix pyramids." />
+<meta property="og:image" content="https://grid-doctor.org/dev/assets/images/social/technical-decisions.png" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:url" content="https://grid-doctor.org/dev/technical-decisions/" />
+<meta property="twitter:card" content="summary_large_image" />
+<meta property="twitter:title" content="Technical decisions - Grid Doctor" />
+<meta property="twitter:description" content="Convert lat/lon xarray datasets to HEALPix pyramids." />
+<meta property="twitter:image" content="https://grid-doctor.org/dev/assets/images/social/technical-decisions.png" />
+</head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  You are reading the documentation of an older release.
+  <a href="../..">
+    <strong>Go to the latest version.</strong>
+  </a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL("..",location),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="./.." title="Grid Doctor" class="md-header__button md-logo" aria-label="Grid Doctor" data-md-component="logo">
+      
+  <img src="../assets/logo-mark.svg" alt="Grid Doctor">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+      <span class="md-visually-hidden">Navigation</span>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Grid Doctor
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Technical decisions
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715M16 12a4 4 0 0 0-4-4M19 5l-1.256 1.256M20 12h2"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+          <span class="md-visually-hidden">Search</span>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/freva-org/grid-doctor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    freva-org/grid-doctor
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="./.." class="md-tabs__link">
+        
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  Getting started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+      
+    
+    
+    
+      <li class="md-tabs__item">
+        <a href="../recipes/" class="md-tabs__link">
+          
+  
+  Recipes
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+      
+    
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/" class="md-tabs__link">
+          
+  
+  API reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="././" class="md-tabs__link">
+        
+  
+  Technical decisions
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="./.." title="Grid Doctor" class="md-nav__button md-logo" aria-label="Grid Doctor" data-md-component="logo">
+      
+  <img src="../assets/logo-mark.svg" alt="Grid Doctor">
+
+    </a>
+    Grid Doctor
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/freva-org/grid-doctor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    freva-org/grid-doctor
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting started
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Recipes
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Recipes
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/structured/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Structured grids (ERA5, CMIP)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/icon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Unstructured grids (ICON)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/regional/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Regional grids (CORDEX)
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/point-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Point data
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/averaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Coarsening and averaging masked fields
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/parallel-writes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Parallel writes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../high-level-access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Working with the data
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  API reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/remap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Remapping
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/weights/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Weights store
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/pyramid/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Pyramids
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/swath/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Point binning
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/io/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Writing stores
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/parallel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Parallel writes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/select/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Region selection
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Metadata
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Types
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Command line
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Technical decisions
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Technical decisions
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-healpix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why HEALPix?
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#area-weighted-statistics-are-trivial" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Area-weighted statistics are trivial
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#no-singularities-at-the-poles" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        No singularities at the poles
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nested-ordering" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Nested ordering
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sphere-or-ellipsoid" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Sphere or ellipsoid
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sphere or ellipsoid">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#different-definitions-are-different-grids" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Different definitions are different grids
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#target-level-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Target level selection
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remapping-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Remapping methods
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Remapping methods">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#conservative-remapping-continuous-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Conservative remapping (continuous fields)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nearest-neighbour-remapping-categorical-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Nearest-neighbour remapping (categorical fields)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#weight-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Weight generation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#weight-application" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Weight application
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#missing-value-handling-during-remapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Missing-value handling during remapping
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Missing-value handling during remapping">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#renormalize-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Renormalize (default)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#propagate" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Propagate
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#point-binning-swath-and-station-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Point binning (swath and station data)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Point binning (swath and station data)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sphere-or-ellipsoid-for-satellite-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Sphere or ellipsoid for satellite data
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minimum-sample-count-and-coverage-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Minimum sample count and coverage tracking
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyramids-from-binned-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Pyramids from binned data
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyramid-construction-and-coarsening" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Pyramid construction and coarsening
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pyramid construction and coarsening">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-coarsen-rather-than-remap-at-each-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why coarsen rather than remap at each level?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mean-coarsening-continuous-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Mean coarsening (continuous fields)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mode-coarsening-categorical-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Mode coarsening (categorical fields)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minimum-valid-fraction-default-50" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Minimum valid fraction (default: 50%)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#averaging-over-coarse-levels-valid-fractions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Averaging over coarse levels: valid fractions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output-metadata-and-crs-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Output metadata and CRS convention
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Output metadata and CRS convention">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cf-grid-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        CF grid mapping
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#grid-doctor-attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        grid-doctor attributes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyramids-in-one-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Pyramids in one store
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#storage-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Storage format
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#high-level-regional-datasets-implicit-coordinates" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        High-level regional datasets: implicit coordinates
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-application-backends" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Performance: application backends
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Performance: application backends">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#chunked-application-and-single-pass-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Chunked application and single-pass writes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        References
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-healpix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why HEALPix?
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#area-weighted-statistics-are-trivial" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Area-weighted statistics are trivial
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#no-singularities-at-the-poles" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        No singularities at the poles
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nested-ordering" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Nested ordering
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sphere-or-ellipsoid" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Sphere or ellipsoid
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sphere or ellipsoid">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#different-definitions-are-different-grids" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Different definitions are different grids
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#target-level-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Target level selection
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remapping-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Remapping methods
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Remapping methods">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#conservative-remapping-continuous-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Conservative remapping (continuous fields)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nearest-neighbour-remapping-categorical-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Nearest-neighbour remapping (categorical fields)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#weight-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Weight generation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#weight-application" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Weight application
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#missing-value-handling-during-remapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Missing-value handling during remapping
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Missing-value handling during remapping">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#renormalize-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Renormalize (default)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#propagate" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Propagate
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#point-binning-swath-and-station-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Point binning (swath and station data)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Point binning (swath and station data)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sphere-or-ellipsoid-for-satellite-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Sphere or ellipsoid for satellite data
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minimum-sample-count-and-coverage-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Minimum sample count and coverage tracking
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyramids-from-binned-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Pyramids from binned data
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyramid-construction-and-coarsening" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Pyramid construction and coarsening
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pyramid construction and coarsening">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-coarsen-rather-than-remap-at-each-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why coarsen rather than remap at each level?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mean-coarsening-continuous-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Mean coarsening (continuous fields)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mode-coarsening-categorical-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Mode coarsening (categorical fields)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minimum-valid-fraction-default-50" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Minimum valid fraction (default: 50%)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#averaging-over-coarse-levels-valid-fractions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Averaging over coarse levels: valid fractions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output-metadata-and-crs-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Output metadata and CRS convention
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Output metadata and CRS convention">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cf-grid-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        CF grid mapping
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#grid-doctor-attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        grid-doctor attributes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pyramids-in-one-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Pyramids in one store
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#storage-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Storage format
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#high-level-regional-datasets-implicit-coordinates" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        High-level regional datasets: implicit coordinates
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-application-backends" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Performance: application backends
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Performance: application backends">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#chunked-application-and-single-pass-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Chunked application and single-pass writes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        References
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+  
+
+
+  <h1>Technical decisions</h1>
+
+<!-- The page lives in docs/shared/ because the Waterpark docs vendor it
+     from there (scripts/sync_shared.py in the Waterpark repository).
+     Edit docs/shared/technical-decisions.md, not this file. -->
+<p>This document records the design rationale behind the significant
+technical choices in grid-doctor<sup id="fnref:1"><a class="footnote-ref" href="#fn:1">1</a></sup>, the software that produces the
+HEALPix datasets: how data is remapped or binned to HEALPix, how
+pyramids are coarsened and what metadata the stores carry.  It is
+intended as a reference for contributors, reviewers, and users of the
+HEALPix pyramids.</p>
+<hr />
+<h2 id="why-healpix">Why HEALPix?<a class="headerlink" href="#why-healpix" title="Permanent link">&para;</a></h2>
+<p>HEALPix (Hierarchical Equal Area isoLatitude Pixelisation) tiles the
+sphere into pixels of exactly equal area at every resolution level.
+Originally developed for mapping the cosmic microwave background, it
+turns out to be exactly what analysis-ready climate data needs.</p>
+<h2 id="area-weighted-statistics-are-trivial">Area-weighted statistics are trivial<a class="headerlink" href="#area-weighted-statistics-are-trivial" title="Permanent link">&para;</a></h2>
+<p>Every pixel covers the same solid angle, so a global mean is just the
+arithmetic mean of all pixels. No latitude-dependent cosine weighting
+is needed, and an entire class of subtle statistics bugs, forgotten
+or misapplied area weights, simply cannot occur.</p>
+<div class="admonition note">
+<p class="admonition-title">Fields with missing values</p>
+<p>This holds for complete fields.  For fields with NaNs (ocean-only
+variables, sea ice, observation gaps), a coarse cell can be partly
+valid, and its value is the mean over that valid part only.  Averages
+over coarse levels then need the valid fraction of each cell as a
+weight;</p>
+</div>
+<figure>
+<p><img alt="Equal area comparison" src="../assets/healpix-equal-area.png#only-dark" />
+<img alt="Equal area comparison" src="../assets/healpix-equal-area-light.png#only-light" /></p>
+<figcaption>
+<p>Cells coloured by their relative area. On a lat-lon grid (left), cell
+areas shrink with latitude; on a comparable 0.25° grid the largest
+cell is more than 400 times bigger than the smallest. On HEALPix
+(right), every cell is identical by construction.</p>
+</figcaption>
+</figure>
+<h2 id="no-singularities-at-the-poles">No singularities at the poles<a class="headerlink" href="#no-singularities-at-the-poles" title="Permanent link">&para;</a></h2>
+<p>Regular lat-lon grids have converging meridians and vanishing cell
+areas at the poles, which force special-case handling in numerics,
+storage, and visualisation. HEALPix cells run right through the pole
+without anything special happening there.</p>
+<figure>
+<p><img alt="Pole view" src="../assets/healpix-pole.png#only-dark" />
+<img alt="Pole view" src="../assets/healpix-pole-light.png#only-light" /></p>
+<figcaption>
+<p>Both grids viewed from directly above the North Pole (cross marks the
+pole). The lat-lon cells collapse into slivers at the centre; the
+HEALPix tessellation is unremarkable there, which is the point.</p>
+</figcaption>
+</figure>
+<h2 id="nested-ordering">Nested ordering<a class="headerlink" href="#nested-ordering" title="Permanent link">&para;</a></h2>
+<p>HEALPix defines two pixel numbering schemes: <strong>ring</strong> ordering (pixels
+numbered along iso-latitude rings) and <strong>nested</strong> ordering (pixels
+numbered by a hierarchical quad-tree).  The remapping procedure<sup id="fnref2:1"><a class="footnote-ref" href="#fn:1">1</a></sup> defaults to nested ordering because it makes coarsening free.</p>
+<p>In nested ordering, a parent pixel at level <span class="arithmatex">\(L\)</span> with index <span class="arithmatex">\(i\)</span> has
+children <span class="arithmatex">\(4i\)</span>, <span class="arithmatex">\(4i+1\)</span>, <span class="arithmatex">\(4i+2\)</span>, <span class="arithmatex">\(4i+3\)</span> at level <span class="arithmatex">\(L+1\)</span>.  Coarsening
+the full grid therefore reduces to reshaping the data array from
+<span class="arithmatex">\((n_\text{cells},)\)</span> to <span class="arithmatex">\((n_\text{cells} / 4,\; 4)\)</span> and reducing along
+the last axis, requiring no index lookup, no scatter, and no sorting.</p>
+<figure>
+<p><img alt="Nesting" src="../assets/healpix-nesting.png#only-dark" />
+<img alt="Nesting" src="../assets/healpix-nesting-light.png#only-light" /></p>
+<figcaption>
+<p>A real level 2 cell (parent 11, amber) with its four level 3 children
+(44 to 47, teal) and sixteen level 4 grandchildren (thin outlines).
+The indices are the actual nested indices: children of parent <em>p</em> are
+<em>4p</em> to <em>4p+3</em>.</p>
+</figcaption>
+</figure>
+<p>HEALPix also supports ring ordering, but it does not have contiguous
+parent-child layout. Our remapping software<sup id="fnref3:1"><a class="footnote-ref" href="#fn:1">1</a></sup> supports it, but in
+that mode  every pyramid level is independently remapped from the
+source grid, which is substantially more expensive.</p>
+<h2 id="sphere-or-ellipsoid">Sphere or ellipsoid<a class="headerlink" href="#sphere-or-ellipsoid" title="Permanent link">&para;</a></h2>
+<p>HEALPix can be defined on a perfect sphere, the original
+construction<sup id="fnref:gorski"><a class="footnote-ref" href="#fn:gorski">2</a></sup>, or on the WGS84 ellipsoid<sup id="fnref:wgs84"><a class="footnote-ref" href="#fn:wgs84">7</a></sup>, where the cell
+boundaries are laid out in authalic latitude so that cells stay
+equal-area on the ellipsoid<sup id="fnref:gibb"><a class="footnote-ref" href="#fn:gibb">5</a></sup><sup id="fnref:hpgeo"><a class="footnote-ref" href="#fn:hpgeo">8</a></sup>.  grid-doctor uses the sphere
+by default; set <code>grid_doctor.config.ellipsoid = "WGS84"</code> (or pass
+<code>ellipsoid="WGS84"</code>) to remap and bin onto the ellipsoid instead.  The
+output records the definition it uses.</p>
+<p>Both definitions give the same results with
+<a href="https://earthsystemmodeling.org/regrid/">ESMF</a>, even though ESMF
+computes all overlap areas on the sphere<sup id="fnref:esmf"><a class="footnote-ref" href="#fn:esmf">6</a></sup>.  healpix-geo returns the
+cell vertices of either definition in geodetic coordinates, the same
+coordinates the source data uses, so source and target mesh always
+share one coordinate space; the ellipsoidal definition only moves where
+the cell boundaries lie.  The remaining distortion of the sphere
+approximation affects the numerator and denominator of every
+conservative weight<sup id="fnref:jones"><a class="footnote-ref" href="#fn:jones">3</a></sup> almost equally and cancels to a relative
+error of about <span class="arithmatex">\(10^{-5}\)</span> at level 10, smaller at finer levels.</p>
+<p>What does not work is converting a remapped product from one definition
+to the other.  Re-binning already averaged cells onto displaced cells
+adds a second interpolation step and roughly doubles the error.
+Products for either definition should always be remapped from the
+native data.</p>
+<figure>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Route</th>
+<th style="text-align: left;">Product</th>
+<th style="text-align: right;">RMS error</th>
+<th style="text-align: right;">× local contrast</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">A</td>
+<td style="text-align: left;">native → spherical HEALPix</td>
+<td style="text-align: right;">0.0840 K</td>
+<td style="text-align: right;">0.94</td>
+</tr>
+<tr>
+<td style="text-align: left;">B</td>
+<td style="text-align: left;">native → ellipsoidal (WGS84) HEALPix</td>
+<td style="text-align: right;">0.0841 K</td>
+<td style="text-align: right;">0.94</td>
+</tr>
+<tr>
+<td style="text-align: left;">C</td>
+<td style="text-align: left;">A converted to ellipsoidal</td>
+<td style="text-align: right;">0.1639 K</td>
+<td style="text-align: right;">1.84</td>
+</tr>
+</tbody>
+</table>
+<figcaption>
+<p>One day of MODIS-Aqua night-time SST (4 km) remapped to HEALPix
+level 10 (about 6.4 km) with ESMF conservative weights, about 2.66
+million ocean cells.  Each route is scored against a reference that bins
+the native pixels directly into cells of the same definition.  The local
+contrast (median spread within groups of four neighbouring cells,
+0.089 K) is the relevant scale because remapping errors live at the cell
+scale.  A and B agree within 1 % between 60° S and 45° N and within 5 %
+poleward of that.</p>
+</figcaption>
+</figure>
+<h3 id="different-definitions-are-different-grids">Different definitions are different grids<a class="headerlink" href="#different-definitions-are-different-grids" title="Permanent link">&para;</a></h3>
+<p>Two datasets on HEALPix at the same level are not on the same grid
+unless they use the same definition.  The same cell index denotes a
+different patch of the Earth under the two definitions, displaced by
+the difference between geodetic and authalic latitude<sup id="fnref:snyder"><a class="footnote-ref" href="#fn:snyder">4</a></sup>:</p>
+<div class="arithmatex">\[
+\varphi - \xi \approx \tfrac{e^2}{3} \sin 2\varphi
+\quad (\text{max } 7.7' \approx 14\ \mathrm{km\ at}\ 45°),
+\]</div>
+<p>with WGS84 eccentricity <span class="arithmatex">\(e^2 \approx 0.006694\)</span>.  That is about 2 cell
+widths at level 10, 9 at level 12 and 18 at level 13; at level 10,
+99.8 % of all cells have a different index under the two definitions.</p>
+<p>Data on different definitions must therefore not be compared, overlaid
+or differenced cell by cell, and cells must not be located with the
+other definition (for example <code>lonlat_to_healpix</code> with a different
+ellipsoid than the data was produced with).  Otherwise the field appears
+shifted by up to 14 km: fronts, coastlines and swath edges land in the
+wrong cells.  To compare such datasets, remap both from their native
+data onto the same definition.</p>
+<h2 id="target-level-selection">Target level selection<a class="headerlink" href="#target-level-selection" title="Permanent link">&para;</a></h2>
+<p>The target HEALPix level for each source dataset is chosen as the
+highest level whose characteristic pixel spacing is coarser than or
+comparable to the source resolution.  The heuristic is:</p>
+<div class="arithmatex">\[
+\ell = \left\lfloor \log_2 \frac{58.6°}{\Delta} \right\rfloor
+\]</div>
+<p>where <span class="arithmatex">\(\Delta\)</span> is the estimated source grid spacing in degrees.  The
+constant 58.6° is the approximate pixel spacing at level 0,
+derived from <span class="arithmatex">\(360° \;/\; \sqrt{12 \times 4^0}\)</span>.</p>
+<p>This ensures that the HEALPix grid does not oversample the source.
+Lower pyramid levels are derived by coarsening, not by remapping, so
+no additional information is fabricated.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Level</th>
+<th style="text-align: right;">nside</th>
+<th style="text-align: right;">Pixels</th>
+<th style="text-align: center;">Approx. spacing</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">12</td>
+<td style="text-align: center;">58.6°</td>
+</tr>
+<tr>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">768</td>
+<td style="text-align: center;">7.3°</td>
+</tr>
+<tr>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">32</td>
+<td style="text-align: right;">12 288</td>
+<td style="text-align: center;">1.8°</td>
+</tr>
+<tr>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">128</td>
+<td style="text-align: right;">196 608</td>
+<td style="text-align: center;">27.5′</td>
+</tr>
+<tr>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">3 145 728</td>
+<td style="text-align: center;">6.9′</td>
+</tr>
+<tr>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">1024</td>
+<td style="text-align: right;">12 582 912</td>
+<td style="text-align: center;">3.4′</td>
+</tr>
+</tbody>
+</table>
+<h2 id="remapping-methods">Remapping methods<a class="headerlink" href="#remapping-methods" title="Permanent link">&para;</a></h2>
+<p>Remapping is performed by ESMF, which computes the geometric overlap
+between source and target cells and produces a sparse weight matrix
+that is applied to the data.  The remapping software supports two remapping
+methods, chosen by variable type.</p>
+<h3 id="conservative-remapping-continuous-fields">Conservative remapping (continuous fields)<a class="headerlink" href="#conservative-remapping-continuous-fields" title="Permanent link">&para;</a></h3>
+<p>Used for temperature, precipitation, radiation, wind, and all other
+fields that represent continuous physical quantities.</p>
+<p>Conservative remapping computes area-weighted averages: each weight is
+proportional to the fractional overlap area between a source cell and a
+target cell.  The key property is <strong>integral preservation</strong>, the
+area-integral of the field over any target cell equals the sum of the
+area-integrals of the contributing source cells.</p>
+<p>This is the only method that correctly handles sub-pixel variability.
+If a HEALPix cell straddles a strong SST gradient, the conservative
+average reflects the true area-weighted mean rather than the value at a
+single sampled point.</p>
+<h3 id="nearest-neighbour-remapping-categorical-fields">Nearest-neighbour remapping (categorical fields)<a class="headerlink" href="#nearest-neighbour-remapping-categorical-fields" title="Permanent link">&para;</a></h3>
+<p>Used for land-sea masks, land cover classes, soil type, and all other
+fields where values are discrete labels.</p>
+<p>Nearest-neighbour assigns each target cell the value of the closest
+source cell centre.  This guarantees that the output contains only
+values that actually exist in the source, no interpolated intermediate
+classes like "land-use 3.7" can appear.</p>
+<p>Linear or bilinear interpolation is explicitly <strong>not</strong> supported.  While
+it can produce smoother-looking fields, it fabricates values that were
+not present in the original data.</p>
+<h2 id="weight-generation">Weight generation<a class="headerlink" href="#weight-generation" title="Permanent link">&para;</a></h2>
+<p>Remapping weights are precomputed and stored as reusable NetCDF files.
+Weight generation is the most expensive step in the pipeline, but it
+only needs to happen once per combination of source grid and target
+HEALPix level.  Subsequent runs reuse the cached weight file.</p>
+<p>For moderate grids, weights are generated in memory using ESMF's Python
+bindings (ESMPy).  For very large grids where this would exceed
+available RAM, grid-doctor<sup id="fnref4:1"><a class="footnote-ref" href="#fn:1">1</a></sup> writes both meshes to temporary files and
+invokes the standalone <code>ESMF_RegridWeightGen</code> command under MPI, with a
+configurable number of ranks.</p>
+<p>Grid-doctor<sup id="fnref5:1"><a class="footnote-ref" href="#fn:1">1</a></sup> automatically classifies the source grid and constructs the
+appropriate mesh representation:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Source type</th>
+<th style="text-align: left;">Examples</th>
+<th style="text-align: left;">Detection</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Regular</td>
+<td style="text-align: left;">ERA5, CMIP on lat-lon grids</td>
+<td style="text-align: left;">1-D <code>lat</code> and <code>lon</code> coordinates</td>
+</tr>
+<tr>
+<td style="text-align: left;">Curvilinear</td>
+<td style="text-align: left;">NEMO, WRF</td>
+<td style="text-align: left;">2-D <code>lat(y, x)</code> and <code>lon(y, x)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Unstructured</td>
+<td style="text-align: left;">ICON, MPAS</td>
+<td style="text-align: left;">Dimension named <code>cell</code> / <code>ncells</code>, or <code>CDI_grid_type</code> attribute</td>
+</tr>
+</tbody>
+</table>
+<p>Every weight file is annotated with provenance metadata
+(<code>grid_doctor_method</code>, <code>grid_doctor_level</code>, <code>grid_doctor_order</code>, source
+grid details) so that downstream tools can verify how the weights were
+produced.</p>
+<h2 id="weight-application">Weight application<a class="headerlink" href="#weight-application" title="Permanent link">&para;</a></h2>
+<p>Applying the weight matrix to data is a sparse matrix multiplication.
+The full batch of time steps is reshaped into a single dense matrix and
+multiplied in one operation, which is typically 10–50× faster than
+applying the weights one time step at a time.  GPU acceleration (via
+CuPy) and JIT compilation (via Numba) are used automatically when those
+packages are installed.  See
+<a href="#performance-application-backends">Performance: application backends</a>
+for details.</p>
+<h2 id="missing-value-handling-during-remapping">Missing-value handling during remapping<a class="headerlink" href="#missing-value-handling-during-remapping" title="Permanent link">&para;</a></h2>
+<p>Source datasets commonly contain NaN values, for instance land pixels in
+an ocean dataset, gaps in satellite swaths, or masked regions.  The
+<code>missing_policy</code> parameter controls how these are treated during weight
+application.</p>
+<h3 id="renormalize-default">Renormalize (default)<a class="headerlink" href="#renormalize-default" title="Permanent link">&para;</a></h3>
+<p>Source cells that are NaN are excluded from the weighted sum.  The
+weights of the remaining valid source cells are rescaled so they sum
+to 1.  A target cell receives a valid value as long as at least one
+contributing source cell is valid.</p>
+<p>This is the appropriate choice for virtually all climate fields.  A
+HEALPix cell on a coastline that partly overlaps land (NaN) and partly
+ocean still receives a valid SST from the ocean fraction.</p>
+<h3 id="propagate">Propagate<a class="headerlink" href="#propagate" title="Permanent link">&para;</a></h3>
+<p>If any contributing source cell is NaN, the target cell is set to NaN.
+No partial averages are computed.</p>
+<p>This mode exists for strict budget-closure applications.  If you are
+integrating total precipitation over a HEALPix cell and one source cell
+is missing, the renormalized average looks valid but represents a biased
+estimate over a subset of the area.  For budget-closure studies it is
+preferable to have a NaN than a plausible-looking number derived from
+incomplete coverage.</p>
+<p>Note that this mode is very aggressive: a single NaN source cell at the
+edge of a target cell's footprint is enough to discard it.  Along
+coastlines, swath edges, and orbit gaps, large portions of the output
+will be NaN.</p>
+<h2 id="point-binning-swath-and-station-data">Point binning (swath and station data)<a class="headerlink" href="#point-binning-swath-and-station-data" title="Permanent link">&para;</a></h2>
+<p>Gridded datasets are remapped with ESMF as described above.  <em>Point-sampled</em>
+data (satellite Level-2 swaths, station records, trajectories) cannot use
+that path for two structural reasons: every granule has unique geometry, so
+the precomputed weight matrix can never be reused, and ESMF's
+nearest source-to-destination method assigns a value to <strong>every</strong>
+destination cell, which would smear a narrow swath over the entire globe.</p>
+<p>Point data is therefore <strong>binned</strong>: each sample is assigned to the HEALPix
+cell containing its coordinates and all samples per cell are reduced.  The
+available reductions mirror the two remapping methods:</p>
+<ul>
+<li><strong>Mean binning (continuous fields).</strong>  In the oversampled limit, with
+  sample spacing much finer than the target cell spacing, the per-cell sample
+  mean converges to the area-weighted mean, making it a first-order
+  approximation of conservative remapping.  This validity condition is
+  enforced by choosing the target level from the sample spacing with the
+  same heuristic used for gridded data; a swath is never binned into cells
+  finer than its own pixel spacing.</li>
+<li><strong>Mode binning (categorical fields).</strong>  The most frequent class per cell,
+  the binning analogue of nearest-neighbour remapping.  Ties are broken
+  deterministically towards the lowest class value.  As with
+  nearest-neighbour remapping, no interpolated intermediate classes can
+  appear.</li>
+<li><code>min</code> / <code>max</code> / <code>count</code> are available for extrema and coverage
+  diagnostics.</li>
+</ul>
+<p>A per-sample <strong>sum is deliberately not offered</strong>: it scales with sample
+density (orbit overlap, across-track pixel count) rather than any physical
+integral, and therefore violates the integral-preservation rationale that
+motivates conservative remapping.  Root-mean-square reductions are likewise
+excluded because they do not commute with mean coarsening in the pyramid;
+if an RMS quantity is required, bin the <em>squared</em> field with the mean and
+apply the square root at read time.</p>
+<h3 id="sphere-or-ellipsoid-for-satellite-data">Sphere or ellipsoid for satellite data<a class="headerlink" href="#sphere-or-ellipsoid-for-satellite-data" title="Permanent link">&para;</a></h3>
+<p>Satellite geolocation is geodetic (WGS84).  Binning assigns each
+geodetic position to the cell that contains it, on the same definition
+as remapping: the sphere by default, the ellipsoid when configured.
+Binning on the sphere is as accurate as binning on the ellipsoid (see
+<a href="#sphere-or-ellipsoid">Sphere or ellipsoid</a>).  Data binned on one
+definition is not comparable cell by cell with data on the other: the
+cells are displaced by up to ~0.13° (~14 km) at 45° latitude, several to
+dozens of pixels at typical swath target levels.</p>
+<h3 id="minimum-sample-count-and-coverage-tracking">Minimum sample count and coverage tracking<a class="headerlink" href="#minimum-sample-count-and-coverage-tracking" title="Permanent link">&para;</a></h3>
+<p>A cell is set to NaN when it receives fewer than <code>min_count</code> valid
+samples (default: 1).  Optionally, a companion <code>&lt;variable&gt;_count</code>
+variable records the number of valid samples per cell.  Publishing the
+count is recommended: it makes coverage auditable, enables unbiased
+count-weighted merging of overlapping granules, and is the point-data
+analogue of a valid-area fraction for coarsened grids.</p>
+<h3 id="pyramids-from-binned-data">Pyramids from binned data<a class="headerlink" href="#pyramids-from-binned-data" title="Permanent link">&para;</a></h3>
+<p>Binned datasets carry the full standard metadata (<code>crs</code> grid mapping
+and <code>grid_doctor_*</code> attributes) and dense cell layout, so
+pyramid construction reuses the ordinary coarsening machinery unchanged,
+including the 50% minimum-valid-fraction rule.  The recorded method
+(<code>grid_doctor_method = "binned-mean"</code> or <code>"binned-mode"</code>) drives the
+automatic mean-vs-mode coarsening selection, just as <code>"conservative"</code>
+and <code>"nearest"</code> do for remapped data.</p>
+<h2 id="pyramid-construction-and-coarsening">Pyramid construction and coarsening<a class="headerlink" href="#pyramid-construction-and-coarsening" title="Permanent link">&para;</a></h2>
+<p>The multi-resolution pyramid is built by first remapping the source
+dataset to the finest HEALPix level, then deriving all coarser levels
+by iterated coarsening, one level at a time, always a factor of 4.
+Every level builds on the previous one, so the whole pyramid is a single
+lazy computation (see
+<a href="#chunked-application-and-single-pass-writes">Chunked application and single-pass writes</a>).</p>
+<h3 id="why-coarsen-rather-than-remap-at-each-level">Why coarsen rather than remap at each level?<a class="headerlink" href="#why-coarsen-rather-than-remap-at-each-level" title="Permanent link">&para;</a></h3>
+<p>Remapping from the original source grid at every level would be correct
+but wasteful: each level would require a separate weight file, and
+weight generation cost scales with the product of source and target
+cell counts.  Coarsening is essentially free, a reshape plus a
+vectorised reduction, and produces identical results for nested
+HEALPix grids because the nested pixel hierarchy exactly matches the
+coarsening hierarchy.</p>
+<h3 id="mean-coarsening-continuous-fields">Mean coarsening (continuous fields)<a class="headerlink" href="#mean-coarsening-continuous-fields" title="Permanent link">&para;</a></h3>
+<p>For continuous fields (those remapped with conservative weights), each
+coarse cell's value is the mean over <strong>all valid finest-level cells</strong>
+beneath it.  This is not the same as the mean of its 4 children once
+children are only partly valid: a child built from a single valid
+finest-level cell would otherwise count as much as a child built from
+four.  Repeated over several levels, that mean of means drifts away from
+the finest level.</p>
+<p>The pyramid therefore carries two running totals per cell instead of a
+mean: the sum of the valid finest-level values and their count.  Both
+coarsen exactly by summing groups of 4, and the mean is only formed when
+a level is written:</p>
+<div class="arithmatex">\[
+\bar{x}_\text{parent} = \frac{\sum_{c} s_c}{\sum_{c} n_c},
+\qquad s_c = \sum_{\text{valid } i \in c} x_i, \quad n_c = \#\{\text{valid } i \in c\}
+\]</div>
+<p>Every level is therefore identical to coarsening directly from the
+finest level, while each step stays a local reduction of 4 neighbouring
+cells. <code>create_healpix_pyramid</code> keeps these sums and counts internally while
+building its chain.</p>
+<div class="admonition note">
+<p class="admonition-title">Be careful with manually chained mean coarsening</p>
+<p>Chaining averages works for complete fields. With missing data,
+intermediate cells can represent different numbers of finest-level
+cells, but the next average weights them equally. Coarsen directly
+from <code>finest</code>, or use <code>create_healpix_pyramid</code>, instead.</p>
+</div>
+<h3 id="mode-coarsening-categorical-fields">Mode coarsening (categorical fields)<a class="headerlink" href="#mode-coarsening-categorical-fields" title="Permanent link">&para;</a></h3>
+<p>For categorical fields (those remapped with nearest-neighbour weights),
+averaging class labels is meaningless.  Instead, each parent cell
+receives the <strong>mode</strong> (most frequent value) of its valid children.
+Ties are broken by the first occurrence.</p>
+<p>The coarsening mode is inferred automatically from the remapping method
+stored in the dataset attributes: <code>grid_doctor_method = "nearest"</code>
+triggers mode coarsening, <code>"conservative"</code> triggers mean coarsening.
+An explicit <code>coarsen_mode</code> parameter is available to override this.</p>
+<p>Unlike the mean, a mode of modes is not the mode of all finest-level
+cells, and mode coarsening is applied level by level, with the minimum
+valid fraction checked against the 4 children at each step.</p>
+<h3 id="minimum-valid-fraction-default-50">Minimum valid fraction (default: 50%)<a class="headerlink" href="#minimum-valid-fraction-default-50" title="Permanent link">&para;</a></h3>
+<p>For mean coarsening, a cell is set to NaN when fewer than half of the
+<strong>finest-level</strong> cells beneath it are valid.  The threshold is applied to
+this cumulative fraction, not to the 4 children of each step.</p>
+<p><strong>Representativeness.</strong>  A cell's value should represent the majority
+of its area.  Because the threshold uses the finest-level count, the
+value is guaranteed to cover at least half of the cell's area at every
+level.  A per-step rule could not guarantee this: 2 valid children out
+of 4, each built from 2 valid children out of 4, cover only a quarter of
+the area two levels up.  Below the threshold, a few pixels' values would
+"speak for" an area that has no data, which is indistinguishable from
+interpolation into unknown territory.</p>
+<p>Cells masked by the threshold keep their running sums and counts, so
+their valid data still contributes to coarser levels where it is part of
+a majority.</p>
+<p><strong>Cascade prevention.</strong>  Each coarsening step is a factor-of-4
+reduction.  If only 1 of 4 valid children were sufficient, a single
+valid pixel at the finest level could survive every coarsening step:
+1/4 at level <span class="arithmatex">\(N-1\)</span>, that surviving parent is again 1/4 at level <span class="arithmatex">\(N-2\)</span>,
+and so on.  After <span class="arithmatex">\(k\)</span> steps it represents a fraction of <span class="arithmatex">\(4^{-k}\)</span> of the
+area it claims to cover.  This is the "Siberian lake problem" observed
+with MODIS SST: a single lake pixel at level 10 bled through 7
+coarsening steps to level 3, covering a 16 384× larger area.  With a
+50% threshold, the cascade is impossible, the pixel is discarded at
+the very first step because 1/4 &lt; 1/2.  A feature can only survive
+coarsening if it covers at least half the area at every scale, which is
+exactly when it is a real, resolvable feature at that resolution.</p>
+<p>The threshold is configurable with <code>min_valid_fraction</code>.  Set it to <code>0</code>
+to keep every cell that contains any valid data, for instance when the
+coarse levels are only used for weighted aggregates.</p>
+<h3 id="averaging-over-coarse-levels-valid-fractions">Averaging over coarse levels: valid fractions<a class="headerlink" href="#averaging-over-coarse-levels-valid-fractions" title="Permanent link">&para;</a></h3>
+<p>Because every coarse value is a mean over its valid area, a plain mean
+over coarse cells weights a coastal cell that is 10% ocean as much as an
+open-ocean cell.  The level-to-level consistency of the pyramid only
+holds for means weighted by the number of valid finest-level cells:
+with two coarse cells, one fully valid at 10 °C (4 valid cells) and one
+with a single valid cell at 20 °C, the finest-level mean is
+(4 × 10 + 20) / 5 = 12 °C, while the plain mean of the two coarse values
+is 15 °C.  Both coarse values are correct; the plain average is not.</p>
+<p>The weights cannot be folded into the stored values without losing their
+meaning (a coastal cell would no longer hold the SST of its ocean
+part).  Instead, the pyramid can store them alongside:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">pyramid</span> <span class="o">=</span> <span class="n">gd</span><span class="o">.</span><span class="n">create_healpix_pyramid</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">valid_fraction</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p>adds <code>&lt;name&gt;_valid_fraction</code> (float32, fraction of valid finest-level
+cells, linked through the CF <code>ancillary_variables</code> attribute) to every
+level, including the finest one.  Global or regional means then agree
+across all levels:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">ds</span> <span class="o">=</span> <span class="n">pyramid</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">ds</span><span class="o">.</span><span class="n">sst</span><span class="o">.</span><span class="n">weighted</span><span class="p">(</span><span class="n">ds</span><span class="o">.</span><span class="n">sst_valid_fraction</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="s2">"cell"</span><span class="p">)</span>
+</code></pre></div>
+<p>The option is opt-in because the fraction has the shape of its variable:</p>
+<ul>
+<li><code>True</code> stores a fraction for every cell variable, with its full shape.
+  This is correct for masks that change over time or height (sea ice,
+  clouds, orography on pressure levels).</li>
+<li><code>"static"</code> stores a single <code>cell</code>-only fraction taken from the first
+  time step / level.  It is tiny, but only correct when the mask never
+  changes, as for a land-sea mask.</li>
+<li>A list of names, or a mapping such as <code>{"sst": "static", "ice": True}</code>,
+  restricts the fractions to selected variables.</li>
+</ul>
+<p>Fractions are mostly exactly 0 or 1 and compress well; in a test with 8
+time steps the full-shape fractions added about 7% to the store, the
+static ones under 1%.  This mirrors the <code>ocean_fraction</code> variables of
+the nextGEMS HEALPix output.</p>
+<h2 id="output-metadata-and-crs-convention">Output metadata and CRS convention<a class="headerlink" href="#output-metadata-and-crs-convention" title="Permanent link">&para;</a></h2>
+<p>Every output dataset carries the same metadata, written and read in one
+place: the <code>grid_doctor.metadata</code> package.  Code that produces
+data builds a <code>HealpixMetadata</code> and calls its <code>apply</code> method; code that
+reads data calls <code>HealpixMetadata.from_dataset</code>.  Attribute names are
+spelled out nowhere else, so changing the stored layout never touches
+the code that writes or reads values.</p>
+<h3 id="cf-grid-mapping">CF grid mapping<a class="headerlink" href="#cf-grid-mapping" title="Permanent link">&para;</a></h3>
+<p>The grid is described with the <code>healpix</code> grid mapping introduced in
+CF-1.13:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>crs: float64                      # scalar grid mapping variable
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    grid_mapping_name: healpix
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    indexing_scheme: nested       # or ring
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    refinement_level: 10          # always written, level 0 included
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>cell: int64 (cell)                # HEALPix index coordinate
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    standard_name: healpix_index
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    units: 1
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>latitude, longitude: float64 (cell)
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    standard_name: latitude / longitude
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    units: degrees_north / degrees_east
+</code></pre></div>
+<p>Every variable along <code>cell</code> carries <code>grid_mapping = "crs"</code>, and the
+global <code>Conventions</code> attribute names <code>CF-1.13</code> (any other convention in
+the source's <code>Conventions</code>, such as <code>CMIP-6.2</code>, is kept).
+<code>nside = 2**refinement_level</code> is not stored; it follows from the level.
+CF also defines <code>nuniq</code> and <code>`zuniq</code> as possible <code>indexing_scheme</code>; grid-doctor does not write
+them, so they are rejected rather than half supported.</p>
+<p>CF identifies the index coordinate by its <code>standard_name</code>, not by its
+name, so the dimension stays <code>cell</code>, the name used across the HEALPix
+tooling of the km-scale hackathons.  The standard name <code>healpix_index</code>
+was accepted in standard name table v94
+(<a href="https://github.com/cf-convention/vocabularies/issues/290">cf-convention/vocabularies#290</a>).
+A generic name for all discrete global grid systems was proposed in
+that discussion and moved to
+<a href="https://github.com/orgs/cf-convention/discussions/447">cf-convention discussion #447</a>,
+which is still open; should it be adopted, only one constant changes.</p>
+<p><a href="https://xdggs.readthedocs.io/">xdggs</a> reads this layout with
+<code>xdggs.decode(ds, convention="cf")</code>.  The geometry is spherical, which is
+also what xdggs and healpix-geo assume when no <code>earth_radius</code> is given.</p>
+<h3 id="grid-doctor-attributes">grid-doctor attributes<a class="headerlink" href="#grid-doctor-attributes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Attribute</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>grid_doctor_metadata_version</code></td>
+<td style="text-align: left;">Version of this metadata layout (currently 1)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>grid_doctor_version</code></td>
+<td style="text-align: left;">Package version that produced the data</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>grid_doctor_method</code></td>
+<td style="text-align: left;"><code>conservative</code>, <code>nearest</code>, <code>binned-mean</code>, ... (also per variable for binned data)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>grid_doctor_coarsened_from_level</code></td>
+<td style="text-align: left;">Level the values were coarsened from: the finest level for pyramids, the input level for <code>coarsen_healpix</code> (coarsened levels only)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>grid_doctor_coarsen_mode</code></td>
+<td style="text-align: left;"><code>mean</code> or <code>mode</code> (coarsened levels only)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>grid_doctor_min_valid_fraction</code></td>
+<td style="text-align: left;">Threshold below which cells were set to NaN: cumulative over finest-level cells for <code>mean</code>, per coarsening step for <code>mode</code> (coarsened levels only)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>grid_doctor_sparse</code></td>
+<td style="text-align: left;"><code>1</code> when <code>cell</code> holds a subset of cell indices (region selections, sparse binning)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>grid_doctor_implicit_coords</code></td>
+<td style="text-align: left;"><code>1</code> when <code>cell</code>/<code>latitude</code>/<code>longitude</code> were omitted (see below)</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>crs</code> convention is also what the
+<a href="https://gridlook.pages.dev/">gridlook</a> viewer uses
+(<code>grid_mapping_name == "healpix"</code>) to detect and render HEALPix
+datasets.</p>
+<h3 id="pyramids-in-one-store">Pyramids in one store<a class="headerlink" href="#pyramids-in-one-store" title="Permanent link">&para;</a></h3>
+<p><code>save_pyramid(..., structure="multiscales")</code> writes a pyramid as one
+datatree, one group per level (<code>level_&lt;n&gt;</code>).  Every level group carries
+the CF metadata above, so tools that only read a single group work
+unchanged.  The root group carries the pyramid-wide attributes (source
+attributes, <code>Conventions</code>, grid-doctor version and method) and
+describes the levels with two Zarr conventions:</p>
+<ul>
+<li><a href="https://github.com/zarr-conventions/multiscales"><code>multiscales</code></a> v0.1
+  lists the levels in <code>layout</code>, finest first.  A coarsened level names
+  the level it was coarsened from in <code>derived_from</code>, with
+  <code>transform.scale = [2**Δlevel]</code> (the factor by which cell edges grow)
+  and the <code>resampling_method</code> (<code>average</code> or <code>mode</code>).</li>
+<li><a href="https://github.com/zarr-conventions/dggs"><code>dggs</code></a> v1 describes each
+  level's grid inside its layout entry: the source level carries the
+  full object (<code>name</code>, <code>refinement_level</code>, <code>indexing_scheme</code>,
+  <code>spatial_dimension</code>, <code>coordinate</code>), derived levels only what changes,
+  usually just <code>refinement_level</code>.  Stores with implicit coordinates
+  omit <code>coordinate</code>, which the convention defines as covering the full
+  sphere.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">"multiscales"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">"layout"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="p">{</span><span class="nt">"asset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"level_10"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dggs"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"healpix"</span><span class="p">,</span><span class="w"> </span><span class="nt">"refinement_level"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="nt">"indexing_scheme"</span><span class="p">:</span><span class="w"> </span><span class="s2">"nested"</span><span class="p">,</span><span class="w"> </span><span class="nt">"spatial_dimension"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cell"</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">      </span><span class="nt">"coordinate"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cell"</span><span class="p">,</span><span class="w"> </span><span class="nt">"compression"</span><span class="p">:</span><span class="w"> </span><span class="s2">"none"</span><span class="p">}},</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="p">{</span><span class="nt">"asset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"level_9"</span><span class="p">,</span><span class="w"> </span><span class="nt">"derived_from"</span><span class="p">:</span><span class="w"> </span><span class="s2">"level_10"</span><span class="p">,</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">      </span><span class="nt">"transform"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"scale"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mf">2.0</span><span class="p">]},</span><span class="w"> </span><span class="nt">"dggs"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"refinement_level"</span><span class="p">:</span><span class="w"> </span><span class="mi">9</span><span class="p">}}</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="nt">"resampling_method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"average"</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="p">}</span>
+</code></pre></div>
+<p>Both conventions are young: <code>multiscales</code> is a pilot with breaking
+changes expected before v1, and embedding <code>dggs</code> objects in layout
+entries follows a proposal that is not merged yet
+(<a href="https://github.com/zarr-conventions/dggs/pull/25">zarr-conventions/dggs#25</a>).
+The encoding therefore lives in one module
+(<code>grid_doctor/metadata/_multiscales.py</code>, with the pinned versions), and
+the tests validate it against the published schemas.  Flat pyramids
+(one store per level) have no root group and carry only the per-level
+CF metadata.</p>
+<h2 id="storage-format">Storage format<a class="headerlink" href="#storage-format" title="Permanent link">&para;</a></h2>
+<p>Pyramids are written as Zarr stores with consolidated metadata, by
+default one store per level (<code>level_0.zarr</code>, <code>level_1.zarr</code>, …), or all
+levels in one store with <code>structure="multiscales"</code> (see
+<a href="#pyramids-in-one-store">Pyramids in one store</a>).  The default format is
+Zarr v2, and <code>zarr_format=3</code> writes v3.  Zarr v2 is the default
+because ecosystem support for v3 is still maturing: client libraries
+such as <code>zarr-python</code>, <code>zarr-js</code> (used by gridlook and similar web
+viewers), <code>xarray</code>, and <code>zarrita</code> have stable, well-tested v2
+implementations, while v3 support varies in completeness.  The
+transition to v3 is planned once the client ecosystem has converged.</p>
+<p>Zarr's chunked, cloud-native layout enables byte-range reads from S3
+without downloading entire files, which is essential for interactive
+visualisation where only a single chunk of a single variable at a single
+level needs to be fetched.</p>
+<h2 id="high-level-regional-datasets-implicit-coordinates">High-level regional datasets: implicit coordinates<a class="headerlink" href="#high-level-regional-datasets-implicit-coordinates" title="Permanent link">&para;</a></h2>
+<p>Small-area datasets at very high levels (16 and beyond) keep the dense
+global convention (cell position equals cell index) but stop
+materialising what the index already implies.  Above level
+10 (<code>WRITE_COORDS_MAX_LEVEL</code>), stores are written <strong>without</strong>
+<code>cell</code>/<code>latitude</code>/<code>longitude</code> coordinate arrays: at level 16 those two
+float64 arrays would cost ~800 GB while the regional payload is
+megabytes, and unlike the data variables they are never fill values, so
+empty-chunk elision cannot help.  Such stores carry
+<code>grid_doctor_implicit_coords = 1</code>, retain the <code>crs</code> grid mapping, and
+remain byte-identical in layout to an ordinary dense store.  Without
+the <code>cell</code> coordinate they lack the variable CF identifies by
+<code>standard_name = "healpix_index"</code>, so generic CF tools cannot recognise
+them as HEALPix; grid-doctor's selectors can.  Sparse datasets (region
+selections) always keep <code>cell</code>, since it records which cells they hold.</p>
+<p>Access is region-driven through range selection.  Nested ordering
+guarantees that every coarse-level parent corresponds to one contiguous
+fine-level index range, so a bounding-box query decomposes into a
+handful of contiguous reads that align one-to-one with power-of-four
+chunks.  Coordinates are reconstructed on the fly for exactly the cells
+returned.  Combined with <code>fill_value = NaN</code> and empty-chunk elision on
+the data variables, storage and access cost are proportional to the
+domain, not the globe, while cross-dataset and cross-level alignment
+stay a bit-shift (<code>parent = id &gt;&gt; 2k</code>) exactly as for every other
+nested HEALPix dataset.</p>
+<p>Levels at or below the threshold within the same pyramid are written
+with materialised coordinates as usual, so coarse overview levels stay
+directly consumable by CF-aware viewers.</p>
+<hr />
+<h2 id="performance-application-backends">Performance: application backends<a class="headerlink" href="#performance-application-backends" title="Permanent link">&para;</a></h2>
+<p>The sparse weight-matrix multiplication supports three backends,
+selected automatically based on what is installed.</p>
+<p><strong>Batched SciPy</strong> (always available) reshapes all time steps into a
+single dense matrix and performs one sparse matmul, delegating to BLAS
+for the dense side.  This is typically 10–50× faster than per-slice
+application.</p>
+<p><strong>Numba</strong> (optional) JIT-compiles a fused kernel that computes the
+weighted sum, NaN mask, and renormalization in a single pass over the
+sparse matrix structure.  This halves memory traffic for single-slice
+workloads.</p>
+<p><strong>CuPy</strong> (optional) transfers the weight matrix to the GPU once and
+applies it via cuSPARSE.  This is worthwhile for large target grids
+(HEALPix level 10+) with many time steps, where the transfer cost is
+amortised over the batch.</p>
+<p>The backend can be overridden explicitly via <code>backend="scipy"</code>,
+<code>"numba"</code>, or <code>"cupy"</code> in any remapping call.</p>
+<h3 id="chunked-application-and-single-pass-writes">Chunked application and single-pass writes<a class="headerlink" href="#chunked-application-and-single-pass-writes" title="Permanent link">&para;</a></h3>
+<p>For dask-backed input, the regridded field is chunked along <code>cell</code>
+(<code>cell_chunks</code>, by default 4^10 cells).  Rows of the weight matrix are
+independent, so each output chunk is computed from its own block of
+matrix rows; the blocks share the matrix memory instead of copying it.
+No task holds the whole HEALPix field, and the coarser levels keep the
+same chunking because every coarsening step only combines groups of 4
+neighbouring cells.</p>
+<p>Inside dask tasks the Numba kernels run single-threaded: dask already
+runs many tasks in parallel, and a multi-threaded kernel per task would
+start one thread team per task and exhaust the process thread limit on
+many-core nodes.  Without dask, the multi-threaded kernels are used.</p>
+<p><code>save_pyramid</code> writes all levels in a single computation, so the
+regridding of each finest-level chunk runs exactly once and is shared by
+all coarser levels.  Computing levels separately (for example
+<code>pyramid[5].compute()</code> followed by <code>pyramid[4].compute()</code>) regrids the
+source again each time; <code>persist()</code> the finest level when exploring
+interactively.</p>
+<hr />
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
+<div class="footnote">
+<hr />
+<ol>
+<li id="fn:1">
+<p>Remapping is realised with a uniform remapping software
+<a href="https://grid-doctor.org">grid-doctor</a>&#160;<a class="footnote-backref" href="#fnref:1" title="Jump back to footnote 1 in the text">&#8617;</a><a class="footnote-backref" href="#fnref2:1" title="Jump back to footnote 1 in the text">&#8617;</a><a class="footnote-backref" href="#fnref3:1" title="Jump back to footnote 1 in the text">&#8617;</a><a class="footnote-backref" href="#fnref4:1" title="Jump back to footnote 1 in the text">&#8617;</a><a class="footnote-backref" href="#fnref5:1" title="Jump back to footnote 1 in the text">&#8617;</a></p>
+</li>
+<li id="fn:gorski">
+<p>Górski, K. M., et al. (2005). <em>HEALPix: A Framework for
+High-Resolution Discretization and Fast Analysis of Data
+Distributed on the Sphere</em>. The Astrophysical Journal, 622(2),
+759–771. <a href="https://doi.org/10.1086/427976">https://doi.org/10.1086/427976</a>&#160;<a class="footnote-backref" href="#fnref:gorski" title="Jump back to footnote 2 in the text">&#8617;</a></p>
+</li>
+<li id="fn:jones">
+<p>Jones, P. W. (1999). <em>First- and Second-Order Conservative
+Remapping Schemes for Grids in Spherical Coordinates</em>. Monthly
+Weather Review, 127(9), 2204–2210.
+<a href="https://doi.org/10.1175/1520-0493(1999)127%3C2204:FASOCR%3E2.0.CO;2">https://doi.org/10.1175/1520-0493(1999)127%3C2204:FASOCR%3E2.0.CO;2</a>&#160;<a class="footnote-backref" href="#fnref:jones" title="Jump back to footnote 3 in the text">&#8617;</a></p>
+</li>
+<li id="fn:snyder">
+<p>Snyder, J. P. (1987). <em>Map Projections: A Working Manual</em>.
+U.S. Geological Survey Professional Paper 1395. Auxiliary
+latitudes (authalic, geocentric) and radii of curvature: Ch. 3.
+<a href="https://doi.org/10.3133/pp1395">https://doi.org/10.3133/pp1395</a>&#160;<a class="footnote-backref" href="#fnref:snyder" title="Jump back to footnote 4 in the text">&#8617;</a></p>
+</li>
+<li id="fn:gibb">
+<p>Gibb, R. G. (2016). <em>The rHEALPix Discrete Global Grid
+System</em>. IOP Conference Series: Earth and Environmental Science,
+34, 012012. <a href="https://doi.org/10.1088/1755-1315/34/1/012012">https://doi.org/10.1088/1755-1315/34/1/012012</a>&#160;<a class="footnote-backref" href="#fnref:gibb" title="Jump back to footnote 5 in the text">&#8617;</a></p>
+</li>
+<li id="fn:esmf">
+<p>ESMF Reference Manual, <em>Regridding</em>: conservative methods
+operate on the surface of the sphere with great-circle cell edges.
+<a href="https://earthsystemmodeling.org/docs/release/latest/ESMF_refdoc/">https://earthsystemmodeling.org/docs/release/latest/ESMF_refdoc/</a>&#160;<a class="footnote-backref" href="#fnref:esmf" title="Jump back to footnote 6 in the text">&#8617;</a></p>
+</li>
+<li id="fn:wgs84">
+<p>NGA (2014). <em>Department of Defense World Geodetic System
+1984</em> (NGA.STND.0036_1.0.0_WGS84). Defining parameters:
+<span class="arithmatex">\(a = 6378137\)</span> m, <span class="arithmatex">\(1/f = 298.257223563\)</span>.&#160;<a class="footnote-backref" href="#fnref:wgs84" title="Jump back to footnote 7 in the text">&#8617;</a></p>
+</li>
+<li id="fn:hpgeo">
+<p>healpix-geo, HEALPix for the geosciences, with WGS84
+ellipsoid support via auxiliary latitudes.
+<a href="https://github.com/GRID4EARTH/healpix-geo">https://github.com/GRID4EARTH/healpix-geo</a>, reference-system
+background: <a href="https://healpix-geo.readthedocs.io/en/stable/reference-system.html">https://healpix-geo.readthedocs.io/en/stable/reference-system.html</a>&#160;<a class="footnote-backref" href="#fnref:hpgeo" title="Jump back to footnote 8 in the text">&#8617;</a></p>
+</li>
+</ol>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../api/cli/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Command line">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L77.3 256l137.3-137.4c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Command line
+              </div>
+            </div>
+          </a>
+        
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.code.copy","navigation.tabs","navigation.tabs.sticky","navigation.sections","navigation.footer","navigation.path","search.highlight","search.suggest"],"redirect":null,"search":"../assets/javascripts/workers/search.719e0d91.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["latest","dev"],"provider":"mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.9e76c64c.min.js"></script>
+      
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
