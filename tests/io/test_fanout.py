@@ -81,7 +81,7 @@ class TestFanOut:
         """Workers can regrid only their slice of the source."""
         source = _source()
         manifest = gd.init_pyramid_store(
-            _pyramid(source), str(tmp_path), split={"time": 4}
+            _pyramid(source.copy()), str(tmp_path), split={"time": 4}
         )
         for task in manifest.tasks:
             sub_source = source.isel(task.isel())

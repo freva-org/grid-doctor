@@ -21,6 +21,7 @@ from grid_doctor.pyramid._kernels import (
     coarsen_mean,
     min_valid_count,
 )
+from grid_doctor.xarray_accessor import DatasetAccessor
 
 from ..helpers import with_healpix_metadata
 
@@ -70,7 +71,7 @@ class TestPyramidConsistency:
     ) -> None:
         finest = self._dataset_with_nans()
         monkeypatch.setattr(
-            "grid_doctor.pyramid._build.regrid_to_healpix", lambda ds, level, **kw: finest
+            "grid_doctor.xarray_accessor.DatasetAccessor.regrid_to_healpix", lambda self, level, **kw: finest
         )
         pyramid = create_healpix_pyramid(
             finest, max_level=4, min_level=0, min_valid_fraction=0.0

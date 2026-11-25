@@ -20,6 +20,7 @@ from grid_doctor.pyramid._build import (
 )
 from grid_doctor.pyramid._kernels import coarsen_mean
 from grid_doctor.remap import _apply as apply_module
+from grid_doctor.xarray_accessor import DatasetAccessor
 
 from ..helpers import _weight_file, with_healpix_metadata
 
@@ -175,18 +176,18 @@ class TestPyramidBuilders:
     def test_create_healpix_pyramid_nested(
         self, regular_ds: xr.Dataset, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
+        def fake_regrid(self, level: int, **kwargs: Any) -> xr.Dataset:
             del kwargs
             npix = 12 * (4**level)
             return with_healpix_metadata(
                 xr.Dataset(
                     {"t": (("cell",), np.zeros(npix))},
-                    attrs=ds.attrs,
+                    attrs=self._ds.attrs,
                 ),
                 level,
             )
 
-        monkeypatch.setattr(build_module, "regrid_to_healpix", fake_regrid)
+        monkeypatch.setattr(DatasetAccessor, "regrid_to_healpix", fake_regrid)
         monkeypatch.setattr(
             build_module,
             "coarsen_healpix",
@@ -205,17 +206,17 @@ class TestPyramidBuilders:
     ) -> None:
         calls: list[int] = []
 
-        def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
+        def fake_regrid(self, level: int, **kwargs: Any) -> xr.Dataset:
             calls.append(level)
             return with_healpix_metadata(
                 xr.Dataset(
                     {"t": (("cell",), np.zeros(12 * (4**level)))},
-                    attrs=ds.attrs,
+                    attrs=self._ds.attrs,
                 ),
                 level, nest=False,
             )
 
-        monkeypatch.setattr(build_module, "regrid_to_healpix", fake_regrid)
+        monkeypatch.setattr(DatasetAccessor, "regrid_to_healpix", fake_regrid)
         pyramid = create_healpix_pyramid(
             regular_ds, max_level=2, min_level=0, nest=False
         )
@@ -227,12 +228,12 @@ class TestPyramidBuilders:
     ) -> None:
         coarsen_calls: list[dict[str, Any]] = []
 
-        def fake_regrid(ds: xr.Dataset, level: int, **kwargs: Any) -> xr.Dataset:
+        def fake_regrid(self, level: int, **kwargs: Any) -> xr.Dataset:
             npix = 12 * (4**level)
             return with_healpix_metadata(
                 xr.Dataset(
                     {"t": (("cell",), np.zeros(npix))},
-                    attrs=ds.attrs,
+                    attrs=self._ds.attrs,
                 ),
                 level,
             )
@@ -243,7 +244,7 @@ class TestPyramidBuilders:
             coarsen_calls.append(kwargs)
             return {}
 
-        monkeypatch.setattr(build_module, "regrid_to_healpix", fake_regrid)
+        monkeypatch.setattr(DatasetAccessor, "regrid_to_healpix", fake_regrid)
         monkeypatch.setattr(build_module, "coarse_levels", fake_coarse_levels)
         create_healpix_pyramid(
             regular_ds,
@@ -316,9 +317,9 @@ class TestSinglePassPyramid:
 
         monkeypatch.setattr(apply_module, "apply_weights_nd", counting)
         monkeypatch.setattr(
-            "grid_doctor.pyramid._build.regrid_to_healpix",
-            lambda ds, level, **kw: remap.apply_weight_file(
-                ds, weights, cell_chunks=256
+            "grid_doctor.xarray_accessor.DatasetAccessor.regrid_to_healpix",
+            lambda self, level, **kw: remap.apply_weight_file(
+                self._ds, weights, cell_chunks=256
             ),
         )
         pyramid = create_healpix_pyramid(_source(True), max_level=LEVEL, min_level=0)
