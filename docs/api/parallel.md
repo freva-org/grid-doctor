@@ -1,4 +1,4 @@
-# Parallel Writes
+# Parallel writes
 
 Functions and data classes for writing a pyramid with many independent
 workers, for example as an HPC array job.  The workflow is
@@ -18,19 +18,10 @@ design, the manifest format and a complete reflow workflow.
 ## Workflow steps
 
 ::: grid_doctor.init_pyramid_store
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.write_pyramid_task
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.check_pyramid_store
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ## Manifest and tasks
 
@@ -38,31 +29,16 @@ These classes are frozen dataclasses that round-trip through JSON and
 through reflow's manifest codec.
 
 ::: grid_doctor.PyramidManifest
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.WriteTask
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.io.LevelSpec
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.io.ArraySpec
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ## Completeness report
 
 ::: grid_doctor.StoreReport
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ## Store state helpers
 
@@ -71,19 +47,10 @@ These read the manifest and the completion markers below
 as cache checks, e.g. reflow's ``verify=`` hook.
 
 ::: grid_doctor.load_manifest
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.is_current
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.is_task_done
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ## JSON layout
 
@@ -91,48 +58,21 @@ The `to_dict()` methods return these typed dictionaries, so the layout
 of `manifest.json` and of a serialised task is spelled out in the types.
 
 ::: grid_doctor.io.ManifestDict
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.io.LevelSpecDict
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.io.ArraySpecDict
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.io.TaskEntryDict
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.io.WriteTaskDict
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ## Exceptions
 
 ::: grid_doctor.io.ManifestError
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.io.StaleTaskError
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.io.StoreExistsError
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.io.IncompleteStoreError
-    options:
-      show_root_heading: true
-      show_root_full_path: false

@@ -42,7 +42,7 @@ where the home directory has a small quota.
 
 ::: grid_doctor.config
     options:
-      show_root_heading: true
+      show_root_full_path: true
       members_order: source
       members: [ellipsoid, weights_store, set, env_var, SETTINGS]
       filters: ["!^_"]

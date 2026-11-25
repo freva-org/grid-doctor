@@ -1,4 +1,4 @@
-# Metadata API
+# Metadata
 
 Every attribute, coordinate name and grid mapping that grid-doctor
 stores is defined in `grid_doctor.metadata`.  Code that produces data
@@ -19,31 +19,31 @@ HealpixMetadata.from_dataset(ds).grid.level  # 8
 
 ::: grid_doctor.metadata
     options:
-      show_root_heading: true
       show_root_full_path: true
       members: false
 
 ::: grid_doctor.metadata.HealpixMetadata
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.metadata.HealpixGrid
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.metadata.Provenance
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.metadata.PyramidMetadata
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.metadata.PyramidLevel
-    options:
-      show_root_heading: true
-      show_root_full_path: false
+
+## Helpers
+
+::: grid_doctor.metadata.has_healpix_metadata
+
+::: grid_doctor.metadata.variable_method
+
+::: grid_doctor.metadata.variable_method_attrs
+
+::: grid_doctor.metadata.grid_mapping_attrs
+
+::: grid_doctor.metadata.merge_conventions
+
+::: grid_doctor.metadata.level_group
+
+::: grid_doctor.metadata.IndexingScheme

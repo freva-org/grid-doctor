@@ -1,45 +1,24 @@
-# Regridding
+# Remapping
 
-This section covers the core remapping functionality of `grid_doctor`.
-The functions below are the main entry points for generating reusable
-weight files and transforming data onto HEALPix grids.
+Remap gridded data to HEALPix with ESMF weights (`grid_doctor.remap`).
+[`regrid_to_healpix`][grid_doctor.regrid_to_healpix] does everything in
+one call: it takes the weights from the [weights store](weights.md), or
+computes them, and applies them.  The other two functions split these
+steps.
 
-## Weight file generation
-
-These functions prepare reusable remapping weights so that later
-transformations can be applied efficiently without recomputing the full
-mapping each time.
-
-::: grid_doctor.weights.cached_weights
-    options:
-      show_root_heading: true
-
-::: grid_doctor.compute_healpix_weights
-    options:
-      show_root_heading: true
-      show_root_full_path: false
-
-## Applying remapping
-
-The following functions use either direct remapping logic or precomputed
-weights to move data onto the target HEALPix representation.
+## Remapping
 
 ::: grid_doctor.regrid_to_healpix
-    options:
-      show_root_heading: true
-      show_root_full_path: false
+
+## Weight files
+
+[`cached_weights`][grid_doctor.cached_weights] returns the weights for a
+grid from the [weights store](weights.md).
+[`compute_healpix_weights`][grid_doctor.compute_healpix_weights] writes
+them to a file of your choice.
+
+::: grid_doctor.compute_healpix_weights
+
+## Applying weights
 
 ::: grid_doctor.apply_weight_file
-    options:
-      show_root_heading: true
-      show_root_full_path: false
-
-## Pyramid post-processing
-
-After remapping, these helpers can be used to derive coarser
-representations for building multiresolution HEALPix pyramids.
-
-::: grid_doctor.coarsen_healpix
-    options:
-      show_root_heading: true
-      show_root_full_path: false

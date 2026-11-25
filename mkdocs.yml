@@ -10,18 +10,19 @@ nav:
   - Overview: index.md
   - Technical decisions: technical-decisions.md
   - Getting started: getting-started.md
-  - API Reference:
+  - API reference:
+      - Overview: api/index.md
+      - Remapping: api/remap.md
+      - Weights store: api/weights.md
       - Pyramids: api/pyramid.md
-      - Regridding: api/remap.md
-      - Weights Store: api/weights.md
-      - Point Binning: api/swath.md
-      - Parallel Writes: api/parallel.md
-      - Writing Stores: api/io.md
-      - Configuration: api/config.md
-      - CLI: api/cli.md
-      - Data selection: api/select.md
+      - Point binning: api/swath.md
+      - Writing stores: api/io.md
+      - Parallel writes: api/parallel.md
+      - Region selection: api/select.md
       - Metadata: api/metadata.md
+      - Configuration: api/config.md
       - Types: api/types.md
+      - Command line: api/cli.md
   - Recipes:
       - Overview: recipes/index.md
       - Structured grids (ERA5, CMIP): recipes/structured.md
@@ -85,6 +86,7 @@ plugins:
             docstring_style: numpy
             show_source: true
             show_root_heading: true
+            show_root_full_path: false
             show_symbol_type_heading: true
             show_symbol_type_toc: true
             members_order: source

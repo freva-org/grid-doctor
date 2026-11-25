@@ -58,4 +58,4 @@ and takes them from the [weights store](api/weights.md) afterwards.
   data.
 - [Technical decisions](technical-decisions.md): why HEALPix, and how
   remapping, binning, coarsening and the stored metadata work.
-- [API reference](api/remap.md): every public function and class.
+- [API reference](api/index.md): every public function and class.
