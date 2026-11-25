@@ -1,4 +1,4 @@
-# Command-line Interface
+# Command line
 
 The command-line interface exposes the main `grid_doctor` workflows for
 use in scripts and batch processing environments.
@@ -7,8 +7,7 @@ use in scripts and batch processing environments.
 
 ::: grid_doctor.cli
     options:
-      show_root_heading: true
-      show_root_full_path: false
+      show_root_full_path: true
       members:
         - get_parser
         - setup_logging_from_args
@@ -19,6 +18,3 @@ use in scripts and batch processing environments.
 `setup_logging_from_args`; outside the CLI, call `setup_logging` directly.
 
 ::: grid_doctor.setup_logging
-    options:
-      show_root_heading: true
-      show_root_full_path: false

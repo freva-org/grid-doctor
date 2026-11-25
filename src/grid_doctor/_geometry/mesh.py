@@ -148,7 +148,7 @@ def _infer_curvilinear_corners(
     # adjacent cell centres (when they exist) sit at grid indices
     # (j-1, i-1), (j-1, i), (j, i-1), (j, i).  In the padded array
     # these correspond to offsets (j, i), (j, i+1), (j+1, i),
-    # (j+1, i+1) — i.e. four shifted views of size (ny+1, nx+1).
+    # (j+1, i+1), i.e. four shifted views of size (ny+1, nx+1).
     corner_sum = padded[:-1, :-1] + padded[:-1, 1:] + padded[1:, :-1] + padded[1:, 1:]  # (ny + 1, nx + 1, 3)
 
     corner_count = (count[:-1, :-1] + count[:-1, 1:] + count[1:, :-1] + count[1:, 1:])[
@@ -291,7 +291,7 @@ def _classify_source_kind(
 
 
 # ===================================================================
-# Mesh construction — one builder per grid type
+# Mesh construction: one builder per grid type
 # ===================================================================
 
 

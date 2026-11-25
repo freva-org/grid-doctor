@@ -145,7 +145,7 @@ def init_pyramid_store(
         Whether to materialise the ``cell``/``latitude``/``longitude``
         coordinate arrays in the store.  HEALPix coordinates are a pure
         function of the cell index, and above roughly level 10 the
-        arrays dwarf regional payloads (hundreds of GB at level 16 —
+        arrays dwarf regional payloads (hundreds of GB at level 16, and
         they are never fill values, so chunk elision cannot help).
         ``"auto"`` (default) writes coordinates for levels up to
         :data:`WRITE_COORDS_MAX_LEVEL` and omits them above; ``True`` /
@@ -407,7 +407,7 @@ def save_pyramid(
         Whether to materialise the ``cell``/``latitude``/``longitude``
         coordinate arrays in the store.  HEALPix coordinates are a pure
         function of the cell index, and above roughly level 10 the
-        arrays dwarf regional payloads (hundreds of GB at level 16 —
+        arrays dwarf regional payloads (hundreds of GB at level 16, and
         they are never fill values, so chunk elision cannot help).
         ``"auto"`` (default) writes coordinates for levels up to
         :data:`WRITE_COORDS_MAX_LEVEL` and omits them above; ``True`` /

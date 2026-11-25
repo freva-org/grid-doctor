@@ -8,18 +8,18 @@ name lookups) so that it can be tested and benchmarked in isolation.
 Three application strategies are available, selected automatically based
 on what is installed and the problem size:
 
-1. **Batched SciPy** (always available) — reshapes all field slices into
+1. **Batched SciPy** (always available) reshapes all field slices into
    a ``(n_source, n_batch)`` matrix and performs a single sparse matmul.
    This is typically 10–50× faster than per-slice application because
    SciPy delegates to BLAS for the dense right-hand side.
 
-2. **Numba fused kernel** (optional, ``numba`` must be installed) —
+2. **Numba fused kernel** (optional, ``numba`` must be installed)
    walks the CSR structure once per target row and computes the weighted
    sum, NaN mask, and renormalization support in a single pass.  Halves
    memory traffic compared to two separate sparse matmuls.  Auto-threads
    across target rows with ``parallel=True``.
 
-3. **CuPy / GPU** (optional, ``cupy`` must be installed) — transfers
+3. **CuPy / GPU** (optional, ``cupy`` must be installed) transfers
    the weight matrix and field to the GPU and uses cuSPARSE for the
    batched matmul.  Worthwhile for large target grids (HEALPix level
    10+) with many time steps.
@@ -219,7 +219,7 @@ def _compile(func: _Kernel, *, parallel: bool) -> _Kernel:
     return numba.njit(nogil=True, cache=True)(variant)
 
 
-# Lazy singleton — compiled on first call.
+# Lazy singleton, compiled on first call.
 _NUMBA_KERNELS: dict[tuple[str, bool], _Kernel] | None | Literal[False] = False
 
 
@@ -296,7 +296,7 @@ def _apply_scipy_batched(
         weighted[missing > 0.0] = np.nan
         return weighted
 
-    # Renormalize — try to detect a static NaN mask.
+    # Renormalize: try to detect a static NaN mask.
     n_batch = values_2d.shape[0]
     if n_batch > 1 and np.array_equal(valid[0], valid[-1]):
         # Heuristic: if first and last slices share the same mask,
@@ -393,7 +393,7 @@ def _apply_cupy_batched(
         weighted_gpu[missing_gpu > 0.0] = cp.nan
         return cast(FloatArray, cp.asnumpy(weighted_gpu).astype(np.float64))
 
-    # Renormalize — same static-mask optimisation as SciPy path.
+    # Renormalize: same static-mask optimisation as SciPy path.
     n_batch = values_2d.shape[0]
     if n_batch > 1 and cp.array_equal(valid_gpu[0], valid_gpu[-1]):
         support_1d = gpu_matrix @ valid_gpu[0].astype(cp.float64)
@@ -429,11 +429,11 @@ def apply_weights_nd(
 
     Backend selection (``"auto"``):
 
-    - ``"cupy"`` when CuPy is installed — uses cuSPARSE on the GPU
+    - ``"cupy"`` when CuPy is installed: cuSPARSE on the GPU
       with a cached device-side weight matrix.
-    - ``"numba"`` for a single slice when Numba is installed — fused
+    - ``"numba"`` for a single slice when Numba is installed: fused
       CSR kernel with zero intermediate arrays.
-    - ``"scipy"`` otherwise — batched sparse matmul via BLAS.
+    - ``"scipy"`` otherwise: batched sparse matmul via BLAS.
 
     Args:
         values: Source data with shape

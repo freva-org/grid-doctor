@@ -1,101 +1,70 @@
-# Unstructured Grids (ICON)
+# Unstructured grids (ICON)
 
-This recipe converts ICON model output on a triangular mesh to a
-HEALPix pyramid.  ICON data is detected automatically and a weights file
-for conservative remapping can be generated.
+This recipe converts ICON model output on a triangular mesh to a HEALPix
+pyramid. Unstructured grids are detected automatically; the weights are
+computed from the grid file and reused for every variable and time step.
 
-## Key Difference: Use a grid file
+## Weights from the grid file
 
-Remapping from unstructured grids is expensive.  For ICON
-you should **compute and cache weights once**, then reuse them across
-all variables and time steps:
+Remapping from an unstructured grid needs the vertices of every cell,
+which ICON keeps in its grid file (`clon_vertices`, `clat_vertices`) and
+usually not in the data files. Compute the weights from the grid file:
 
 ```python
-from getpass import getuser
 import xarray as xr
 
 import grid_doctor as gd
 
-# The grid file contains clat/clon but no data variables.
-grid_ds = xr.open_dataset("ICON-DREAM-Global_grid.nc")
+# The grid file has the cell centres and vertices, but no data variables.
+grid_ds = xr.open_dataset("icon_grid_R02B07.nc")
 
-# Derive the HEALPix level from the grid resolution.
-level =  gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
-weights_file = gd.cached_weights(
-    grid_ds,
-    level=level,
-    store="/scratch/{user[0]}/{user}/healpix-weights".format(user=getuser()),
-)
+level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(grid_ds))
+weights_file = gd.cached_weights(grid_ds, level=level, store="/path/to/weights")
 ```
 
-The weights are stored as a NetCDF file in the weights store (see
-[Weights store](../api/weights.md)). On subsequent runs with the same
-grid the stored file is loaded instantly; point `store` at a shared
-directory or S3 bucket to share the weights with others.
+The weight file is stored in the [weights store](../api/weights.md). Later
+runs with the same grid, by you or by anyone using the same store, take
+it from there instead of computing it again.
 
 ## Conversion
 
-Once you have the weights, conversion works just like for structured
-grids:
+With the weights, the data files are converted like structured grids:
 
 ```python
-ds = xr.open_mfdataset("icon_dream_hourly_*.grb")
+ds = xr.open_mfdataset("icon_output_*.nc")
 
-# ICON GRIB files may use "values" instead of "cell" — rename:
-ds = ds.rename_dims({"values": "cell"}).chunk({"cell": -1})
-
-pyramid = gd.create_healpix_pyramid(
-    ds, max_level=max_level, weights_path=weights_file,
-)
+pyramid = gd.create_healpix_pyramid(ds, max_level=level, weights_path=weights_file)
 
 gd.save_pyramid(
     pyramid,
-    "s3://my-bucket/healpix/icon-dream/hourly",
-    s3_options=gd.get_s3_options(
-        "https://s3.eu-dkrz-3.dkrz.cloud",
-        "~/.s3-credentials.json",
-    ),
+    "s3://my-bucket/icon/hourly",
+    s3_options=gd.get_s3_options("https://s3.example.org", "~/.s3-credentials.json"),
 )
 ```
 
-## Running on Levante with Dask + SLURM
+The cells of the data must be in the order of the grid file. ICON GRIB
+files read with cfgrib name the cell dimension `values`; rename it so the
+dimension is recognised:
 
-The ICON-DREAM script under `scripts/icon-dream/convert.py`
-demonstrates a full production workflow using
-[`reflow`](https://reflow-docs.org):
-
-1. **Download** GRIB files from DWD's open-data server in parallel
-   using `dask.distributed` with a concurrency-limited semaphore.
-2. **Compute** Delaunay weights once from the grid file.
-3. **Regrid** to a HEALPix pyramid.
-4. **Rechunk** with `ChunkOptimizer` for optimal Zarr layout.
-5. **Upload** to S3.
-
-The script auto-detects whether it is running inside a SLURM allocation
-(`$SLURM_JOB_ID` is set) or falls back to a local Dask client for
-debugging:
-
-```console
-# Submit via reflow
-python scripts/icon-dream/convert.py submit --s3-bucket my-bucket \
-    --variables t_2m tot_prec \
-    --freq hourly \
-    --time 2020-01 2020-12 \
-    -vv
-
-# Or run locally for testing
-python scripts/icon-dream/convert.py --s3-bucket my-bucket \
-    --variables t_2m --time 2024-01 2024-01 -vvv
+```python
+ds = ds.rename_dims({"values": "cell"})
 ```
 
-## How Grid Detection Works
+## How grid detection works
 
-grid-doctor recognises unstructured grids when any of these conditions
-are met:
+A dataset is treated as unstructured when
 
-- A dimension named `cell`, `ncells`, `ncell`, or `nCells` exists.
-- A variable has the attribute `CDI_grid_type = "unstructured"`.
+- it has a dimension named `cell`, `ncells`, `ncell` or `nCells`, or
+- a data variable has the attribute `CDI_grid_type = "unstructured"`.
 
-The coordinate arrays `clat` / `clon` (or `lat` / `lon`) on the cell
-dimension are used directly as the point cloud — no meshgrid or 2-D reshaping
-is needed.
+The cell vertices are taken from `clon_vertices`/`clat_vertices`,
+`lon_vertices`/`lat_vertices`, `lon_bnds`/`lat_bnds`, or the CF `bounds`
+variables of the cell-centre coordinates.
+
+## Production runs
+
+For a whole reanalysis or simulation, split the conversion into
+independent tasks for an HPC array job, see
+[Parallel writes](parallel-writes.md). The repository's
+`scripts/icon-dream/` folder holds a complete conversion of the DWD
+ICON-DREAM reanalysis with [reflow](https://reflow-hpc.org).

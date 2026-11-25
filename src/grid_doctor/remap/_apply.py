@@ -415,7 +415,7 @@ def apply_weight_file(
 
         ``"propagate"``
             If **any** contributing source cell is NaN, the target
-            cell is set to NaN — no partial averages.  Use this
+            cell is set to NaN: no partial averages.  Use this
             when completeness of the source coverage matters more
             than spatial coverage of the output, for example when
             computing area-integrated flux budgets where a partial

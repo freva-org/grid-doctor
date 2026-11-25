@@ -1,31 +1,25 @@
 # Pyramids
 
-This section contains the main functionality for creating and working with
-HEALPix-based dataset representations, including pyramid construction and
-resolution handling.
+Build multi-resolution HEALPix pyramids (`grid_doctor.pyramid`).
+[`create_healpix_pyramid`][grid_doctor.create_healpix_pyramid] remaps the
+finest level and coarsens it down to the coarsest;
+[`coarsen_healpix`][grid_doctor.coarsen_healpix] coarsens any HEALPix
+dataset, for example binned point data.  How coarsening treats missing
+values is described in the
+[technical decisions](../technical-decisions.md#pyramid-construction-and-coarsening).
 
 ## Pyramid creation
 
-These functions build HEALPix pyramids from gridded source data and
-provide the main higher-level workflow for preparing multi-resolution
-outputs.
-
 ::: grid_doctor.create_healpix_pyramid
-    options:
-      show_root_heading: true
-      show_root_full_path: false
+
+## Coarsening
+
+::: grid_doctor.coarsen_healpix
 
 ## Resolution helpers
 
-These utilities help translate between source grid resolution and the
-corresponding HEALPix level used for remapping and pyramid generation.
+Choose the HEALPix level that matches the resolution of a source grid.
 
 ::: grid_doctor.get_latlon_resolution
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.resolution_to_healpix_level
-    options:
-      show_root_heading: true
-      show_root_full_path: false

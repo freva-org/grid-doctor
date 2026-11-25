@@ -2,8 +2,8 @@
 
 Every HEALPix cell has the same area, so a **complete** field needs no
 area weights: its global mean is the plain mean over cells. This recipe
-is for fields that represent only part of a cell—because data is
-missing, or because the field is ocean- or land-only.
+is for fields that represent only part of a cell, because data is
+missing or because the field is ocean- or land-only.
 
 It explains how to:
 
@@ -23,7 +23,8 @@ Fractions are written when the pyramid is created:
 ```python
 import grid_doctor as gd
 
-# ds, level and weights_file as in the structured-grid recipe
+# ds, level and weights_file as in the structured-grid recipe;
+# store is the output directory or s3:// URL
 pyramid = gd.create_healpix_pyramid(
     ds,
     max_level=level,
@@ -75,7 +76,8 @@ fields, but it does not infer a physical ocean or land fraction. Build
 and coarsen a numerator and its coverage explicitly when both concepts
 matter. The [EasyGEMS ocean-averaging example](https://easy.gems.dkrz.de/Processing/healpix/ocean_averaging.html)
 uses the same distinction between an ocean-only value and its physical
-coverage. For a surface-ocean velocity `ice_u` $v$:
+coverage. The example below uses a sea-ice velocity `ice_u`, written
+$v$ in the formulas:
 
 Let $v_i$ be the value in a finest-level child cell, $f_i$ its physical
 ocean fraction, and $w_i$ its valid-ocean fraction:
@@ -111,8 +113,13 @@ $$
 \frac{\sum_p v_p C_p}{\sum_p C_p}.
 $$
 
+In the code, `finest` is the finest HEALPix level (for example the
+output of `regrid_to_healpix`), at level `max_level`; the loop builds the
+levels down to `min_level`.
+
 ```python
 import xarray as xr
+
 import grid_doctor as gd
 
 ice = finest.ice_u
@@ -131,9 +138,13 @@ state = xr.Dataset(
 
 def public_level(state: xr.Dataset) -> xr.Dataset:
     coverage = state.ice_u_coverage
+    ice_u = state.ice_u_numerator / coverage.where(coverage > 0)
+    # Link the value to its weights, so tools (and the helper further
+    # below) find them.
+    ice_u.attrs["ancillary_variables"] = "ice_u_valid_fraction"
     return xr.Dataset(
         {
-            "ice_u": state.ice_u_numerator / coverage.where(coverage > 0),
+            "ice_u": ice_u,
             "ice_u_valid_fraction": coverage,
             "ocean_fraction_surface": state.ocean_fraction_surface,
         },
@@ -186,7 +197,7 @@ Coarsen and reconstruct it exactly as for `ice_u`. Store the public
 value, `land_fraction_surface`, and `v_valid_fraction`; weight a global
 mean by the latter, or by `land_fraction_surface` when data is valid
 everywhere on land. Do not infer physical land coverage from non-null
-values—they also reflect missing data.
+values: they also reflect missing data.
 
 ### Vertical dimensions
 

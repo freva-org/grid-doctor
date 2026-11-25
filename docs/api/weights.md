@@ -145,46 +145,21 @@ cells and need no shared node numbering between tools.
 ## API
 
 ::: grid_doctor.cached_weights
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.weights.WeightsStore
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.weights.WeightsDescription
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.weights.describe_source
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.weights.SourceDescription
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.weights.WeightsRef
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.weights.nested_to_ring
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.weights.ring_to_nested
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ::: grid_doctor.weights.local_weights_dir
-    options:
-      show_root_heading: true
-      show_root_full_path: false
+
+::: grid_doctor.weights.check_coverage

@@ -1,16 +1,14 @@
-# Structured Grids (ERA5, CMIP)
+# Structured grids (ERA5, CMIP)
 
-This recipe converts a regular lat/lon dataset (e.g., ERA5 or CMIP6
-output) to a HEALPix pyramid and uploads it to S3.
+This recipe converts data on a regular or curvilinear lat/lon grid, such
+as ERA5 or CMIP6 output, to a HEALPix pyramid and writes it to S3.
 
-## Minimal Example
+## Minimal example
 
-A minimal example involves opening the data, creating the weights file for this
-data and applying *conservative* remapping:
+Open the data, get the weights for its grid and build the pyramid with
+*conservative* remapping, the default:
 
 ```python
-from getpass import getuser
-
 import xarray as xr
 
 import grid_doctor as gd
@@ -18,39 +16,34 @@ import grid_doctor as gd
 # 1. Open
 ds = xr.open_mfdataset("era5_2m_temperature_*.nc")
 
-# 2. Weights file (computed once, then reused from the weights store)
-weights_store = "/scratch/{user[0]}/{user}/healpix-weights".format(user=getuser())
+# 2. Weights: computed once, then taken from the weights store
 level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
 weights_file = gd.cached_weights(
     ds,
     level=level,
-    store=weights_store,
+    store="/path/to/weights",
     nproc=4,
     prefer_offline=True,
 )
 
 # 3. Convert
-pyramid = gd.create_healpix_pyramid(
-    ds, max_level=level, weights_path=weights_file
-)
+pyramid = gd.create_healpix_pyramid(ds, max_level=level, weights_path=weights_file)
 
-# 4. Upload
+# 4. Write
 gd.save_pyramid(
     pyramid,
     "s3://my-bucket/era5/2t",
-    s3_options=gd.get_s3_options(
-        "https://s3.eu-dkrz-3.dkrz.cloud",
-        "~/.s3-credentials.json",
-    ),
+    s3_options=gd.get_s3_options("https://s3.example.org", "~/.s3-credentials.json"),
 )
 ```
 
-grid-doctor automatically detects the grid resolution and picks a
-matching HEALPix level.  To override:
-
-```python
-pyramid = gd.create_healpix_pyramid(ds, max_level=7)
-```
+- `level` is the HEALPix level whose cell spacing matches the grid; pass
+  another value to `max_level` (and `level`) to choose it yourself.
+- `store` is a local directory, possibly shared with others. Without it,
+  the default store is used, see [Weights store](../api/weights.md).
+- `prefer_offline=True` computes large conservative weights with the
+  parallel `ESMF_RegridWeightGen` (with `nproc` MPI processes) instead
+  of in memory.
 
 ## Masked fields (ocean, sea ice)
 
@@ -71,13 +64,12 @@ pyramid = gd.create_healpix_pyramid(
 
 Variables without missing values do not need fractions.
 
-## Full CLI Script
+## Command-line script
 
-Scripts under `scripts/<name>/convert.py` use the shared CLI parser:
+The same conversion as a script, using the parser from
+[`grid_doctor.cli`](../api/cli.md):
 
 ```python
-from getpass import getuser
-
 import xarray as xr
 
 import grid_doctor as gd
@@ -85,21 +77,12 @@ import grid_doctor.cli as gd_cli
 
 parser = gd_cli.get_parser("era5", "Convert ERA5 to HEALPix.")
 parser.add_argument("files", nargs="+")
-parser.add_argument(
-    "--weights-store",
-    help="Weights store: local directory or fsspec URL (e.g. s3://bucket/weights).",
-    default="/scratch/{user[0]}/{user}/healpix-weights".format(user=getuser()),
-)
+parser.add_argument("--weights-store", help="Local directory of the weights store.")
 args = parser.parse_args()
 gd_cli.setup_logging_from_args(args)
 
 ds = xr.open_mfdataset(args.files)
-weights_file = gd.cached_weights(
-    ds,
-    store=args.weights_store,
-    nproc=4,
-    prefer_offline=True,
-)
+weights_file = gd.cached_weights(ds, store=args.weights_store, nproc=4, prefer_offline=True)
 pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_file)
 gd.save_pyramid(
     pyramid,
@@ -108,8 +91,7 @@ gd.save_pyramid(
 )
 ```
 
-Run it:
-
 ```console
-python scripts/era5/convert.py my-bucket /pool/data/era5/*.nc -vv
+python convert.py --s3-bucket my-bucket --s3-endpoint https://s3.example.org \
+    --weights-store /path/to/weights era5_*.nc -vv
 ```

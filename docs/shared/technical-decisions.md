@@ -1,7 +1,8 @@
 This document records the design rationale behind the significant
-technical choices in the remapping process that is applied to create all
-datasets[^1].  It is intended as a reference for
-contributors, reviewers, and downstream consumers of the produced
+technical choices in grid-doctor[^1], the software that produces the
+HEALPix datasets: how data is remapped or binned to HEALPix, how
+pyramids are coarsened and what metadata the stores carry.  It is
+intended as a reference for contributors, reviewers, and users of the
 HEALPix pyramids.
 
 ---
@@ -84,7 +85,9 @@ HEALPix can be defined on a perfect sphere, the original
 construction[^gorski], or on the WGS84 ellipsoid[^wgs84], where the cell
 boundaries are laid out in authalic latitude so that cells stay
 equal-area on the ellipsoid[^gibb][^hpgeo].  grid-doctor uses the sphere
-by default.
+by default; set `grid_doctor.config.ellipsoid = "WGS84"` (or pass
+`ellipsoid="WGS84"`) to remap and bin onto the ellipsoid instead.  The
+output records the definition it uses.
 
 Both definitions give the same results with
 [ESMF](https://earthsystemmodeling.org/regrid/), even though ESMF
@@ -289,7 +292,7 @@ will be NaN.
 ## Point binning (swath and station data)
 
 Gridded datasets are remapped with ESMF as described above.  *Point-sampled*
-data — satellite Level-2 swaths, station records, trajectories — cannot use
+data (satellite Level-2 swaths, station records, trajectories) cannot use
 that path for two structural reasons: every granule has unique geometry, so
 the precomputed weight matrix can never be reused, and ESMF's
 nearest source-to-destination method assigns a value to **every**
@@ -299,8 +302,8 @@ Point data is therefore **binned**: each sample is assigned to the HEALPix
 cell containing its coordinates and all samples per cell are reduced.  The
 available reductions mirror the two remapping methods:
 
-- **Mean binning (continuous fields).**  In the oversampled limit — sample
-  spacing much finer than the target cell spacing — the per-cell sample
+- **Mean binning (continuous fields).**  In the oversampled limit, with
+  sample spacing much finer than the target cell spacing, the per-cell sample
   mean converges to the area-weighted mean, making it a first-order
   approximation of conservative remapping.  This validity condition is
   enforced by choosing the target level from the sample spacing with the
@@ -322,15 +325,16 @@ excluded because they do not commute with mean coarsening in the pyramid;
 if an RMS quantity is required, bin the *squared* field with the mean and
 apply the square root at read time.
 
-### Sphere, also for satellite data
+### Sphere or ellipsoid for satellite data
 
-Satellite geolocation is geodetic (WGS84).  Binning indexes cells on the
-**perfect sphere**, like remapping, by assigning each geodetic position
-to the cell that contains it; this is as accurate as binning on the
-ellipsoid (see [Sphere or ellipsoid](#sphere-or-ellipsoid)).  Data
-binned on one definition is not comparable cell by cell with data on the
-other: the cells are displaced by up to ~0.13° (~14 km) at 45° latitude,
-several to dozens of pixels at typical swath target levels.
+Satellite geolocation is geodetic (WGS84).  Binning assigns each
+geodetic position to the cell that contains it, on the same definition
+as remapping: the sphere by default, the ellipsoid when configured.
+Binning on the sphere is as accurate as binning on the ellipsoid (see
+[Sphere or ellipsoid](#sphere-or-ellipsoid)).  Data binned on one
+definition is not comparable cell by cell with data on the other: the
+cells are displaced by up to ~0.13° (~14 km) at 45° latitude, several to
+dozens of pixels at typical swath target levels.
 
 ### Minimum sample count and coverage tracking
 
@@ -615,8 +619,11 @@ CF metadata.
 
 ## Storage format
 
-Pyramids are written as Zarr v2 stores with consolidated metadata, one
-store per level (`level_0.zarr`, `level_1.zarr`, …).  Zarr v2 is used
+Pyramids are written as Zarr stores with consolidated metadata, by
+default one store per level (`level_0.zarr`, `level_1.zarr`, …), or all
+levels in one store with `structure="multiscales"` (see
+[Pyramids in one store](#pyramids-in-one-store)).  The default format is
+Zarr v2, and `zarr_format=3` writes v3.  Zarr v2 is the default
 because ecosystem support for v3 is still maturing: client libraries
 such as `zarr-python`, `zarr-js` (used by gridlook and similar web
 viewers), `xarray`, and `zarrita` have stable, well-tested v2
@@ -633,7 +640,7 @@ level needs to be fetched.
 ## High-level regional datasets: implicit coordinates
 
 Small-area datasets at very high levels (16 and beyond) keep the dense
-global convention — cell position equals cell index — but stop
+global convention (cell position equals cell index) but stop
 materialising what the index already implies.  Above level
 10 (`WRITE_COORDS_MAX_LEVEL`), stores are written **without**
 `cell`/`latitude`/`longitude` coordinate arrays: at level 16 those two
@@ -716,7 +723,7 @@ interactively.
 ## References
 
 [^1]: Remapping is realised with a uniform remapping software
-    [grid-doctor](https://freva-org.github.io/grid-doctor)
+    [grid-doctor](https://grid-doctor.org)
 [^gorski]: Górski, K. M., et al. (2005). *HEALPix: A Framework for
     High-Resolution Discretization and Fast Analysis of Data
     Distributed on the Sphere*. The Astrophysical Journal, 622(2),

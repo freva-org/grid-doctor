@@ -1,29 +1,78 @@
-![logo](assets/apple-touch-icon.png)
-#grid-doctor
+---
+title: grid-doctor
+template: home.html
+hide:
+  - navigation
+  - toc
+  - path
+---
 
-> Your lat/lon data goes to rehab and comes out HEALed.
+## What it does
 
-**grid-doctor** converts climate and Earth-system datasets from regular,
-curvilinear, or unstructured grids to multi-resolution
-[HEALPix](https://healpix.jpl.nasa.gov/) pyramids stored as
-[Zarr](https://zarr.dev/) on S3.
+<div class="grid cards" markdown>
 
+-   **Automatic grid detection**
 
-## Features
+    ---
 
-- **Automatic grid detection** — regular (ERA5, CMIP), curvilinear (NEMO,
-  ROMS, WRF), and unstructured (ICON) grids are identified and handled
-  transparently.
-- **HEALPix pyramid creation** — from the finest level down to level 0 in
-  a single call.
-- **Weight caching** — expensive triangulation is computed once
-  and cached as NetCDF for subsequent runs.
-- **S3 upload** — pyramids are written directly to S3 compatible stores
-  as Zarr.
-- **Dask integration** — regridding and coarsening are lazy and
-  parallelised via `xarray.apply_ufunc`.
+    Regular (ERA5, CMIP), curvilinear and rotated-pole (NEMO, CORDEX, WRF)
+    and unstructured (ICON) grids are recognised from the dataset itself.
 
-## Quick Example
+-   **Conservative remapping**
+
+    ---
+
+    Conservative and nearest-neighbour remapping with
+    [ESMF](https://earthsystemmodeling.org/regrid/) weights, on the sphere
+    or the WGS84 ellipsoid.
+
+-   **A shared weights store**
+
+    ---
+
+    Weights are computed once per source grid, HEALPix level and method,
+    and reused by everyone pointing at the same directory.
+
+-   **Point binning**
+
+    ---
+
+    Swaths, stations and trajectories, where every sample has its own
+    position, are binned into HEALPix cells.
+
+-   **Pyramids**
+
+    ---
+
+    From the finest level down to level 0, with mean or mode coarsening
+    and valid fractions for masked fields.
+
+-   **Parallel writes**
+
+    ---
+
+    Zarr stores in one call, or split into independent tasks for HPC
+    array jobs.
+
+-   **Region selection**
+
+    ---
+
+    By bounding box, cone or cell list, also for stores without
+    coordinate arrays.
+
+-   **CF metadata**
+
+    ---
+
+    The CF `healpix` grid mapping and a record of how every level was
+    built.
+
+</div>
+
+Regridding and coarsening run lazily on dask arrays.
+
+## Quick example
 
 ```python
 import xarray as xr
@@ -31,19 +80,19 @@ import xarray as xr
 import grid_doctor as gd
 
 ds = xr.open_mfdataset("data/*.nc")
-weights_file = gd.cached_weights(ds, store="/path/to/weights", nproc=4)
-pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_file)
-gd.save_pyramid(
-    pyramid,
-    "s3://my-bucket/era5",
-    s3_options=gd.get_s3_options(
-        "https://s3.eu-dkrz-3.dkrz.cloud",
-        "~/.s3-credentials.json",
-    ),
-)
+pyramid = gd.create_healpix_pyramid(ds)  # finest level from the grid resolution
+gd.save_pyramid(pyramid, "/path/to/output", mode="w")
 ```
 
-See  [Technical Decisions](technical-decisions.md) section for a comprehensive
-description on the remapping procedures, the [Getting Started](getting-started.md)
-for installation instructions and [Recipes](recipes/index.md)
-for full worked examples.
+`create_healpix_pyramid` computes the remapping weights on the first run
+and takes them from the [weights store](api/weights.md) afterwards.
+
+## Where to go next
+
+- [Getting started](getting-started.md): installation, writing to S3 and
+  logging.
+- [Recipes](recipes/index.md): worked examples for each kind of source
+  data.
+- [Technical decisions](technical-decisions.md): why HEALPix, and how
+  remapping, binning, coarsening and the stored metadata work.
+- [API reference](api/index.md): every public function and class.

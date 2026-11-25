@@ -1,7 +1,7 @@
 # Grid Doctor HEALs your Grids
 <p align="center">
   <img src="docs/assets/logo-512.png" alt="Logo" width="200"><br>
-  <a href="https://freva-org.github.io/grid-doctor/">
+  <a href="https://grid-doctor.org/">
   <img
     src="https://img.shields.io/badge/grid--doctor-Documentation-green?logo=readthedocs&logoColor=white"
     alt="Documentation"
@@ -11,7 +11,7 @@
 
 This repository contains the code for regridding data onto HEALPix grids.
 Example scripts can be found in the `scripts/` directory.
-For full documentation, see https://freva-org.github.io/grid-doctor/.
+For full documentation, see https://grid-doctor.org/.
 
 ## Installation
 
@@ -27,8 +27,9 @@ python -m pip install -e .[gpu]
 ```
 
 
-For remapping of large grids you should install
-[ESMF](https://earthsystemmodeling.org/regrid/) through conda-forge.
+Generating remapping weights needs
+[ESMF](https://earthsystemmodeling.org/regrid/), which is installed
+through conda-forge.
 
 ```console
 mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
@@ -36,181 +37,52 @@ mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
 
 ## Developing the documentation
 
-This repository builds *two* documentation sites from the same `docs/` source tree:
-
-* **Technical documentation**: built with `mkdocs.tech.yml`
-* **Waterpark/data documentation**: built with `mkdocs.data.yml`
-
-Both sites share common assets and selected shared Markdown files, but are published independently.
-
-### Documentation layout
-
-The documentation sources are organised as follows:
-
-```text
-docs/
-├── technical/   # technical Grid Doctor documentation
-├── data/        # Waterpark/data-oriented documentation
-├── shared/      # pages shared by both documentation sites
-└── assets/      # images, CSS, JavaScript, logos, etc.
-```
-
-During the build, the relevant documentation tree is staged into `.build/`:
-
-```text
-.build/
-├── tech/
-└── data/
-```
-
-This allows both documentation sites to behave as if their own content starts at the web root `/`.
-
-### Building the documentation
-
-The default documentation target builds the technical documentation:
+The documentation is built with [Zensical](https://zensical.org) from the
+`docs/` directory and configured in `mkdocs.yml`.
 
 ```console
-tox -e docs
+tox -e docs        # spell check and strict build into site/
+tox -e docs-serve  # serve on http://localhost:8000 with live reload
 ```
 
-This is equivalent to:
+Add a page as a Markdown file under `docs/` and list it in the `nav` of
+`mkdocs.yml`. Images and other static files go under `docs/assets/`.
+API reference pages render docstrings with
+[mkdocstrings](https://mkdocstrings.github.io/): a line such as
+`::: grid_doctor.save_pyramid` inserts the documentation of that object.
+
+### Pages shared with the Waterpark docs
+
+`docs/shared/technical-decisions.md` and `docs/shared/high-level-access.md`
+are also published in the Waterpark documentation, which vendors
+`docs/shared/` at a pinned commit. Here they are included by the short
+pages `docs/technical-decisions.md` and `docs/high-level-access.md`. Edit
+the files in `docs/shared/`, and keep them self-contained: no mkdocstrings
+cross-references, and absolute `https://grid-doctor.org/...` links for
+pages that only exist in this site.
+
+### Publishing
+
+The documentation at <https://grid-doctor.org> is versioned with
+[Zensical's fork of mike](https://github.com/squidfunk/mike) and served by GitHub Pages from
+the `gh-pages` branch (`.github/workflows/docs.yaml`):
+
+* every push to `main` updates the version `dev`,
+* a release tag `vX.Y.Z` deploys the version `X.Y` with the alias
+  `latest`; the site root redirects there.  Until the first release,
+  `dev` carries the alias `latest`.
+
+To preview the versioned site locally, deploy into your local `gh-pages`
+branch without pushing and serve it:
 
 ```console
-tox -e docs -- tech
-```
-
-To build the Waterpark/data documentation:
-
-```console
-tox -e docs -- data
-```
-
-The generated output directories are:
-
-```text
-site-tech/   # technical documentation
-site-data/   # Waterpark/data documentation
-```
-
-### Serving the documentation locally for easy and quick development
-
-To serve the technical documentation locally:
-
-```console
-tox -e docs-serve
-```
-
-or explicitly:
-
-```console
-tox -e docs-serve -- tech
-```
-
-To serve the Waterpark/data documentation locally:
-
-```console
-tox -e docs-serve -- data
-```
-
-The documentation is then served at:
-
-```text
-http://localhost:8000
-```
-
-The local serve target uses symlinks in `.build/`, so changes made under `docs/technical/`, `docs/data/`, `docs/shared/`, or `docs/assets/` can be picked up while developing.
-
-### Adding new pages
-
-Add technical documentation pages under:
-
-```text
-docs/technical/
-```
-
-Add Waterpark/data documentation pages under:
-
-```text
-docs/data/
-```
-
-Add pages that should be available to both sites under:
-
-```text
-docs/shared/
-```
-
-After adding a page, include it in the appropriate MkDocs navigation file:
-
-```text
-mkdocs.tech.yml
-mkdocs.data.yml
-```
-
-For example:
-
-```yaml
-nav:
-  - Overview: index.md
-  - Getting started: getting-started.md
-```
-
-### Adding images and other assets
-
-Shared images, CSS, JavaScript, logos, and other static assets should go under:
-
-```text
-docs/assets/
-```
-
-You can reference them from Markdown like this:
-
-```markdown
-![Example image](assets/example.png)
-```
-
-or, when a root-relative link is more appropriate:
-
-```markdown
-![Example image](/assets/example.png)
-```
-
-### Shared pages
-
-Files in `docs/shared/` are staged into both documentation builds. This is useful for pages such as common concepts, terminology, license notes, or explanations that apply to both the technical and data-facing documentation.
-
-For example, a shared file:
-
-```text
-docs/shared/technical-decisions.md
-```
-
-can be referenced in either MkDocs config as:
-
-```yaml
-nav:
-  - Technical decisions: technical-decisions.md
-```
-
-### Deployment overview
-
-The two documentation sites are deployed differently:
-
-* `site-tech/` is deployed via the GitHub Pages action.
-* `site-data/` is pushed to the `gh-pages` branch and served independently from the custom Waterpark web server.
-
-This allows both sites to use `/` as their root URL while still keeping all documentation sources in a single repository.
-
-
-```console
-pip install tox
-tox -e docs          # build to site/
-tox -e docs-serve    # live preview at http://127.0.0.1:8000
+tox -e docs-deploy -- deploy dev
+tox -e docs-deploy -- serve
 ```
 
 
 ## Quick Start
-Running the example will likely require ESMF to be installed, see above.
+Running the example requires ESMF to be installed, see above.
 ```python
 import xarray as xr
 
@@ -227,10 +99,7 @@ pyramid = gd.create_healpix_pyramid(
 gd.save_pyramid(
     pyramid,
     "s3://my-bucket/dataset.zarr",
-    s3_options=gd.get_s3_options(
-        "https://s3.eu-dkrz-3.dkrz.cloud",
-        "~/.s3-credentials.json",
-    ),
+    s3_options=gd.get_s3_options("https://s3.example.org", "~/.s3-credentials.json"),
 )
 ```
 
@@ -239,7 +108,7 @@ gd.save_pyramid(
 Satellite Level-2 swaths, station records, and trajectories don't live on a
 fixed grid, so the ESMF weight path doesn't apply (no weight reuse, and
 nearest-neighbour would smear a swath over the whole globe).  Use point
-binning instead — the output carries the standard metadata, so coarsening
+binning instead.  The output carries the standard metadata, so coarsening
 and uploading work exactly as above:
 
 ```python
@@ -258,15 +127,16 @@ gd.save_pyramid(pyramid, "s3://my-bucket/my-l2-product.zarr", ...)
 
 `mean` is the binning analogue of conservative remapping (valid when the
 samples oversample the target cells), `mode` the analogue of
-nearest-neighbour for categorical fields.  Cell geometry uses the perfect
-sphere, like remapping.  Indexing on the WGS84 ellipsoid is equally
-accurate but produces a different grid, displaced by up to ~14 km, so
-only compare data that uses the same definition.  See the point-data
+nearest-neighbour for categorical fields.  Cells are defined on the
+sphere by default, like remapping, or on the WGS84 ellipsoid
+(`ellipsoid="WGS84"`).  Both are equally accurate but they are different
+grids, displaced by up to ~14 km, so only compare data that uses the
+same definition.  See the point-data
 recipe in the documentation for details.
 
 ## 🏥 Grid Rehab Progress
 How are our patients doing? Every dataset starts broken and leaves HEALed.
-If your dataset is still 😢, it needs a doctor — that could be you.
+If your dataset is still 😢, it needs a doctor, and that could be you.
 Claim a patient, write a script, and turn that frown into 😎.
 
 | | Meaning |
@@ -358,7 +228,7 @@ This installs two hooks (see `.pre-commit-config.yaml`):
 To run the envs by hand:
 
 ```console
-tox -e lint      # isort, flake8, codespell, pydocstyle, bandit
+tox -e lint      # ruff and codespell
 tox -e types     # mypy (strict)
 tox -e docs      # spelling + mkdocs build --strict
 tox -e test      # pytest with coverage
@@ -369,7 +239,6 @@ tox -e test      # pytest with coverage
 
 As this is still very much work in progress it is very likely that you will
 run into problems. Please note any problems in the `README.md` file
-for your dataset folder. Feel free to submit PRs if there are any issues
-with the `DatasetAggregator` or `ChunkOptimizer` classes. If you don't feel
-comfortable with submitting PRs you can file an issue report
-[here](https://github.com/freva-org/freva-nextgen/issues).
+for your dataset folder. Pull requests are welcome; if you would rather
+not submit one, file an issue report
+[here](https://github.com/freva-org/grid-doctor/issues).

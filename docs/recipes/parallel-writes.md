@@ -1,4 +1,4 @@
-# Parallel Writes with a Manifest
+# Parallel writes with a manifest
 
 [`save_pyramid`][grid_doctor.save_pyramid] writes a whole pyramid in one
 dask computation on one machine.  That stops working when the source is
@@ -52,7 +52,7 @@ each loop iteration would be one array-job element.
 import xarray as xr
 import grid_doctor as gd
 
-source = xr.open_mfdataset("/pool/data/ERA5/.../tas_*.nc", chunks={"time": 24})
+source = xr.open_mfdataset("era5/tas_*.nc", chunks={"time": 24})
 pyramid = gd.create_healpix_pyramid(source, max_level=9)  # lazy
 
 # 1. Empty stores + plan: tasks of 72 time steps each.
@@ -524,7 +524,7 @@ Pass the credentials to every call with `s3_options`, exactly as for
 tasks or the markers:
 
 ```python
-s3_options = gd.get_s3_options("https://s3.eu-dkrz-3.dkrz.cloud", "~/.s3-credentials.json")
+s3_options = gd.get_s3_options("https://s3.example.org", "~/.s3-credentials.json")
 manifest = gd.init_pyramid_store(pyramid, "s3://bucket/era5", s3_options, split={"time": 72})
 gd.write_pyramid_task(pyramid, task, s3_options)
 gd.check_pyramid_store(manifest, s3_options)
@@ -669,7 +669,7 @@ Submit and follow it like any reflow workflow:
 
 ```console
 $ python convert_era5.py submit --run-dir /scratch/project/runs \
-      --source '/pool/data/ERA5/E5/sf/an/1H/167/*.nc' \
+      --source 'era5/t2m/*.nc' \
       --target /scratch/project/era5_t2m --max-level 10 --time-per-task 168
 $ python convert_era5.py status <run-id>
 $ python convert_era5.py retry <run-id> --task write   # only the failed elements

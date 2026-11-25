@@ -5,8 +5,8 @@ writes a reusable ESMF weight file;
 [`regrid_to_healpix`][grid_doctor.remap.regrid_to_healpix] computes or
 reuses one and applies it.  Two methods are supported:
 
-- ``"nearest"`` — source-to-destination nearest-neighbour mapping.
-- ``"conservative"`` — first-order area-weighted conservative remapping.
+- ``"nearest"``: source-to-destination nearest-neighbour mapping.
+- ``"conservative"``: first-order area-weighted conservative remapping.
 """
 
 from __future__ import annotations
@@ -206,10 +206,10 @@ def regrid_to_healpix(
         How NaN values in the source grid are treated.
         ``"renormalize"`` (default) excludes NaN source cells and
         rescales the remaining weights so that a target cell is valid
-        whenever at least one source cell contributes — appropriate
-        for most continuous fields.  ``"propagate"`` sets a target
-        cell to NaN if any contributing source cell is NaN — useful
-        for strict budget-closure checks but very aggressive along
+        whenever at least one source cell contributes, which suits
+        most continuous fields.  ``"propagate"`` sets a target
+        cell to NaN if any contributing source cell is NaN, which is
+        useful for strict budget-closure checks but very aggressive along
         coastlines and data edges.  See
         [`apply_weight_file`][grid_doctor.remap.apply_weight_file]
         for a detailed description.

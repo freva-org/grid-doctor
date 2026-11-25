@@ -1,24 +1,20 @@
-# Point Binning API
+# Point binning
 
-This section contains the functionality for mapping *point-sampled* data
-— satellite Level-2 swaths, station records, trajectories — onto the
-standard grid-doctor HEALPix representation.  Point data cannot use the
-ESMF weight path: every granule has unique geometry (no weight reuse) and
-nearest source-to-destination would smear a narrow swath over the entire
-globe.  Binning assigns each sample to its containing HEALPix cell and
-reduces per cell instead.
+Map *point-sampled* data (satellite Level-2 swaths, station records,
+trajectories) onto HEALPix (`grid_doctor.swath`).  Point data cannot use
+the ESMF weight path: every granule has its own geometry, so weights
+could never be reused, and nearest-neighbour remapping would spread a
+narrow swath over the entire globe.  Binning assigns each sample to the
+HEALPix cell that contains it and reduces the samples per cell instead.
 
 See the [point data recipe](../recipes/point-data.md) for an end-to-end
-workflow and the shared
-[technical decisions](../technical-decisions.md) document for the design
-rationale.
+workflow and the
+[technical decisions](../technical-decisions.md#point-binning-swath-and-station-data)
+for the design rationale.
 
 ## Binning
 
 ::: grid_doctor.bin_to_healpix
-    options:
-      show_root_heading: true
-      show_root_full_path: false
 
 ## Sparse intermediates
 
@@ -28,6 +24,3 @@ per-granule dataset that can be accumulated cheaply and expanded once
 before publishing.
 
 ::: grid_doctor.sparse_to_dense
-    options:
-      show_root_heading: true
-      show_root_full_path: false

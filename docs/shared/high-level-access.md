@@ -1,238 +1,150 @@
-# Accessing High-Resolution Regional Data
+# Working with the data
 
-Some datasets cover a small area (a city, an island, a
-catchment) at very high HEALPix levels (16 is roughly 100 m, 20 roughly
-6 m cells).  These stores look different from the global pyramids in
-two ways, and both change how you load them:
+A HEALPix pyramid written by [grid-doctor](https://grid-doctor.org) is a
+set of ordinary Zarr stores, one per level.
+Global levels up to the coordinate threshold (level 10 by default) carry
+`latitude`/`longitude` arrays and work with any xarray or HEALPix-aware
+tool. This page covers what is different about the rest: regions,
+very high levels and stores without coordinate arrays.
 
-1. **No coordinate arrays.**  The global cell dimension at level 16 has
-   about 5.2 × 10¹⁰ entries; materialised `latitude`/`longitude` arrays
-   would cost hundreds of gigabytes while carrying no information,
-   because HEALPix coordinates are a pure function of the cell index.
-   These stores carry only the `crs` grid mapping variable
-   (`grid_doctor_implicit_coords = 1` marks them), and
-   coordinates are computed on the fly for whatever cells you actually
-   read.
-2. **All access is region-driven.**  Nobody loads the full cell
-   dimension, the same way nobody downloads a complete XYZ tile set.
-   You select a region; the selection is small by construction.
-
-!!! note "Status"
-    A dedicated client package with one-call region selection is in
-    preparation and will be announced here.  Until then, this page
-    shows how to do everything with tools that exist today: `xarray`,
-    `numpy`, and [healpix-geo](https://github.com/GRID4EARTH/healpix-geo)
-    (`pip install healpix-geo`).  The workflow is a few lines longer
-    but uses the exact mechanics the client package will wrap.
-
-## Opening: always `chunks=None`
+## Opening a level
 
 ```python
 import xarray as xr
 
 ds = xr.open_zarr(
-    "s3://data/city-example.zarr/level_16.zarr",
-    storage_options={"anon": True, "endpoint_url": "https://s3.waterpark.dkrz.de"},
-    chunks=None,          # <- essential at high levels
+    "s3://my-bucket/my-dataset/level_9.zarr",
+    storage_options={"anon": True, "endpoint_url": "https://s3.example.org"},
+    chunks=None,
 )
 ```
 
-`chunks=None` gives you plain lazy Zarr-backed arrays that slice in
-O(selection).  With the default dask chunking, xarray eagerly builds a
-chunk-grid description proportional to the **global** chunk count:
-millions of entries at level 16, nearly a billion at level 20.  Opening
-would hang long before any data moves.
+`chunks=None` gives plain lazy Zarr-backed arrays that are sliced in
+proportion to what you select. With the default dask chunking, xarray
+builds a description of the *global* chunk grid when opening: harmless
+at low levels, millions of entries at level 16 and nearly a billion at
+level 20, where opening hangs before any data moves. Open high levels
+with `chunks=None` and select a region before loading anything.
 
-The opened dataset has an enormous nominal shape and no coordinates.
-That is fine.  Do not call `.load()`, do not print `.values`.  Select
-first.
-
-## Selecting a region by hand
-
-The key property is the nested ordering: every cell at a coarse level
-corresponds to one *contiguous* index range at the fine level.  A
-region selection therefore has three steps: find the coarse cells that
-cover your region, expand each to its contiguous fine-level slice, and
-compute coordinates for exactly those cells.
-
-### 1. Cover the region at a coarse level
-
-Rasterise the bounding box by sampling points and indexing them at a
-coarse level (level 10 cells are about 6 km, a good default for
-city-sized boxes):
+The cells are equal-area, so a global or domain mean is a plain mean
+over cells, with no latitude weighting:
 
 ```python
-import numpy as np
-from healpix_geo import nested
-
-level, coarse = 16, 10
-lon_min, lon_max, lat_min, lat_max = 13.1, 13.8, 52.3, 52.7
-
-lon_s, lat_s = np.meshgrid(
-    np.linspace(lon_min, lon_max, 256),
-    np.linspace(lat_min, lat_max, 256),
-)
-parents = np.unique(
-    nested.lonlat_to_healpix(lon_s.ravel(), lat_s.ravel(), coarse)
-)
-```
-
-Make the sampling comfortably denser than the coarse cell size so no
-cell inside the box is missed.
-
-### 2. Expand parents to contiguous fine-level slices
-
-Each coarse parent covers `4**(level - coarse)` consecutive fine cells,
-so a parent `p` becomes the slice `[p << shift, (p + 1) << shift)` with
-`shift = 2 * (level - coarse)`.  Merging runs of adjacent parents keeps
-the number of reads minimal:
-
-```python
-shift = 2 * (level - coarse)
-
-def merge_ranges(parents, shift):
-    starts, stops = [], []
-    for p in np.sort(parents):
-        lo, hi = int(p) << shift, (int(p) + 1) << shift
-        if stops and lo == stops[-1]:
-            stops[-1] = hi          # extend the previous run
-        else:
-            starts.append(lo)
-            stops.append(hi)
-    return list(zip(starts, stops))
-
-ranges = merge_ranges(parents, shift)
-region = xr.concat(
-    [ds.isel(cell=slice(a, b)) for a, b in ranges], dim="cell"
-)
-```
-
-Because the store's cell dimension is the plain nested index,
-positional `isel` slices and cell IDs coincide, and each slice maps to
-a handful of contiguous byte-range reads from S3.
-
-### 3. Attach coordinates and cut the exact region
-
-```python
-cell_ids = np.concatenate(
-    [np.arange(a, b, dtype="uint64") for a, b in ranges]
-)
-lon_c, lat_c = nested.healpix_to_lonlat(cell_ids, level)
-
-region = region.assign_coords(
-    cell=("cell", cell_ids),
-    longitude=("cell", lon_c),
-    latitude=("cell", lat_c),
-)
-
-inside = (
-    (lon_c >= lon_min) & (lon_c <= lon_max)
-    & (lat_c >= lat_min) & (lat_c <= lat_max)
-)
-berlin = region.isel(cell=np.flatnonzero(inside)).load()
-```
-
-`berlin` is now a small, fully loaded dataset with per-cell
-coordinates and the global HEALPix indices in `berlin["cell"]`:
-
-```python
-berlin["t2m"].mean()
+ds["tas"].mean("cell")
 ```
 
 !!! note "Fields with missing values"
-    For variables with NaNs (ocean-only fields, observation gaps), cells
-    on coarser levels can be only partly valid, and a plain mean over
-    cells is biased.  If the store has a `<name>_valid_fraction`
-    variable, use it as the weight:
+    For variables with missing values (ocean-only fields, observation
+    gaps), cells on coarser levels can be only partly valid, and a plain
+    mean over cells is biased. If the store has a `<name>_valid_fraction`
+    variable, use it as the weight, see
+    [Coarsening and averaging masked fields](https://grid-doctor.org/latest/recipes/averaging/):
 
     ```python
     ds.sst.weighted(ds.sst_valid_fraction.fillna(0)).mean("cell")
     ```
 
+## Selecting a region
 
-### Circular regions
-
-Select a bounding box around the centre as above, then mask by
-great-circle distance instead of the box test:
+grid-doctor's [`select_bbox`](https://grid-doctor.org/latest/api/select/#grid_doctor.select_bbox) and
+[`select_cone`](https://grid-doctor.org/latest/api/select/#grid_doctor.select_cone) read only the chunks a region
+touches and return a small, loaded dataset:
 
 ```python
-def gc_distance_deg(lon, lat, lon0, lat0):
-    lam, phi = np.radians(lon), np.radians(lat)
-    lam0, phi0 = np.radians(lon0), np.radians(lat0)
-    s = (
-        np.sin((phi - phi0) / 2) ** 2
-        + np.cos(phi) * np.cos(phi0) * np.sin((lam - lam0) / 2) ** 2
-    )
-    return np.degrees(2 * np.arcsin(np.sqrt(s)))
+import grid_doctor as gd
 
-inside = gc_distance_deg(lon_c, lat_c, 13.41, 52.52) <= 0.05
-station = region.isel(cell=np.flatnonzero(inside)).load()
+berlin = gd.select_bbox(ds, lon=(13.1, 13.8), lat=(52.3, 52.7))
+station = gd.select_cone(ds, lon=13.41, lat=52.52, radius=0.05)  # degrees
 ```
 
-### Why this is fast
+The result is a compact subset: its `cell` coordinate holds the global
+HEALPix indices, and `latitude`/`longitude` are computed for the
+selected cells. It *covers* the region, so cells straddling the edge are
+included; cut the exact box with the coordinates if you need to:
 
-In nested ordering, a coarse parent is exactly one contiguous slice at
-the fine level, which is exactly one Zarr chunk when the store is
-chunked at a power of four.  A city-sized box resolves to a handful of
-contiguous byte-range reads from S3, with nothing wasted.  Choosing the
-coarse cover level so that `level - coarse` matches the store's chunk
-exponent gives zero-waste reads; a coarser cover reads whole aligned
-blocks, a finer one reads partial chunks.
+```python
+inside = (
+    (berlin.longitude >= 13.1) & (berlin.longitude <= 13.8)
+    & (berlin.latitude >= 52.3) & (berlin.latitude <= 52.7)
+)
+berlin = berlin.isel(cell=inside.values.nonzero()[0])
+```
+
+[`select_cells`](https://grid-doctor.org/latest/api/select/#grid_doctor.select_cells) extracts a list of cell
+indices, for example the same cells from another dataset.
+
+## Stores without coordinate arrays
+
+At high levels a global coordinate array is useless: level 16 has about
+5.2 × 10¹⁰ cells, and `latitude`/`longitude` would take hundreds of
+gigabytes while carrying no information, because HEALPix coordinates are
+a function of the cell index. Levels above the threshold are therefore
+written without them (`save_pyramid(write_coords=...)` controls this).
+Such stores carry only the `crs` grid mapping and the attribute
+`grid_doctor_implicit_coords = 1`.
+
+Nothing changes for the selection functions: they compute the
+coordinates of exactly the cells they return. For cells you sliced
+yourself, [`attach_cell_coords`](https://grid-doctor.org/latest/api/select/#grid_doctor.attach_cell_coords) adds
+them:
+
+```python
+import numpy as np
+
+part = ds.isel(cell=slice(start, stop))
+part = gd.attach_cell_coords(part, np.arange(start, stop), level=16)
+```
+
+## Comparing levels and datasets
+
+In nested ordering the parent of a cell is a bit shift away: the
+level-9 parent of a level-16 cell is `cell >> 14`, two bits per level.
+To put a high-resolution selection next to a coarser dataset, select the
+parents there, no interpolation needed:
+
+```python
+parents = np.unique(berlin["cell"].values >> (2 * (16 - 9)))
+era5_berlin = gd.select_cells(era5_level9, parents)
+```
+
+Datasets at the same level and with the same definition (sphere or
+ellipsoid, see the
+[technical decisions](technical-decisions.md#sphere-or-ellipsoid)) can
+be compared cell by cell directly.
 
 ## Plotting
 
-The selection is a normal xarray dataset with per-cell coordinates:
+The selection is a normal dataset with per-cell coordinates:
 
 ```python
 import matplotlib.pyplot as plt
 
-plt.scatter(
-    berlin["longitude"], berlin["latitude"],
-    c=berlin["t2m"], s=1, cmap="viridis",
-)
+plt.scatter(berlin["longitude"], berlin["latitude"], c=berlin["t2m"], s=1)
 plt.colorbar(label="t2m")
 ```
 
-For publication-quality regional maps, bin the cells into a local
-raster or use any HEALPix-aware plotting path.  At level 16 a scatter
-of cell centres is visually indistinguishable from a raster at typical
-figure sizes.
+At high levels a scatter of cell centres looks like a raster at typical
+figure sizes. For a quick overview, open a coarse level of the same
+pyramid, which carries coordinates and works in any HEALPix viewer.
 
-## Comparing across levels and datasets
+## How the selection works
 
-Nested cell IDs make cross-level alignment a bit shift: the level-9
-parent of a level-16 cell is `cell_id >> 14` (two bits per level).  To
-place your high-resolution selection onto, say, an ERA5 pyramid level,
-reuse the slice expansion from above at the coarser level:
-
-```python
-parents_l9 = np.unique(berlin["cell"].values >> (2 * (16 - 9)))
-era5_region = era5_level9.isel(
-    cell=np.concatenate([np.arange(p, p + 1) for p in parents_l9])
-)
-```
-
-No interpolation, no index join.  The hierarchies coincide by
-construction, which is one of the reasons to use nested ordering
-everywhere.
-
-## Coarser overview levels
-
-High-level stores are still pyramids.  For a quick overview, open a
-coarse level of the *same* store.  Levels at or below the coordinate
-threshold are written with materialised coordinates and behave exactly
-like every other global pyramid, including in the browser viewer:
-
-```python
-overview = xr.open_zarr(".../city-example.zarr/level_8.zarr", chunks=None)
-```
+Every cell at a coarse level corresponds to one *contiguous* range of
+cells at a fine level: parent `p` at level `L - Δ` is the range
+`[p · 4^Δ, (p + 1) · 4^Δ)` at level `L`. The selection functions find the
+coarse cells that cover the region (at `level - query_delta`, eight
+levels coarser by default), merge neighbouring ranges, and read each as
+one slice. When the store is chunked at a power of four, each range is
+whole chunks: a city-sized box at level 16 is a handful of contiguous
+reads. Setting `query_delta` to the store's chunk exponent reads no
+data outside the covering cells.
 
 ## Common mistakes
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Opening hangs or eats memory | default dask chunking at high level | `chunks=None` |
-| `MemoryError` on `.load()` / `.values` | loading the global dimension | select a region first |
-| "no latitude coordinate" | store has implicit coordinates | compute coordinates from cell IDs (step 3 above) |
-| Slow S3 reads for a small box | cover level misaligned with store chunks | match `level - coarse` to the chunk exponent |
-| Cells missing at the box edge | sampling grid too sparse in step 1 | sample denser than the coarse cell size |
+| Opening hangs or uses a lot of memory | default dask chunking at a high level | `chunks=None` |
+| `MemoryError` on `.load()` or `.values` | loading the global cell dimension | select a region first |
+| No `latitude`/`longitude` | store without coordinate arrays | use the selection functions or `attach_cell_coords` |
+| Slow reads for a small region | `query_delta` not aligned with the store chunks | set `query_delta` to the chunk exponent |
+| Fields shifted by up to ~14 km | comparing sphere and ellipsoid data | use data on the same definition |

@@ -1,3 +1,44 @@
+/* Colours: navy and gold in dark mode, white and violet in light mode.
+   The dark scheme takes its blue-grey tones from the navy of the logo. */
+[data-md-color-scheme="slate"] {
+  --md-hue: 216deg;
+  --md-default-bg-color: #0f1b2d;
+  --md-default-bg-color--light: #0f1b2d8a;
+  --md-default-bg-color--lighter: #0f1b2d42;
+  --md-default-bg-color--lightest: #0f1b2d12;
+  --md-code-bg-color: #13223a;
+  --md-code-bg-color--light: #13223ae6;
+  --md-code-bg-color--lighter: #13223a8a;
+  --md-footer-bg-color: #0b1524de;
+  --md-footer-bg-color--dark: #0a1320;
+  --color-background: 15 27 45;
+  --color-background-subtle: 19 34 58;
+  --color-backdrop: 10 19 32;
+  --md-primary-fg-color: #fbbf24;
+  --md-primary-fg-color--light: #fcd34d;
+  --md-primary-fg-color--dark: #d97706;
+  --md-primary-bg-color: #0f1b2d;
+  --md-primary-bg-color--light: #0f1b2db3;
+  --md-accent-fg-color: #fcd34d;
+  --md-accent-fg-color--transparent: #fbbf241a;
+  --md-accent-bg-color: #0f1b2d;
+  --md-accent-bg-color--light: #0f1b2db3;
+  --md-typeset-a-color: #fbbf24;
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #7c3aed;
+  --md-primary-fg-color--light: #a78bfa;
+  --md-primary-fg-color--dark: #5b21b6;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: #ffffffb3;
+  --md-accent-fg-color: #6d28d9;
+  --md-accent-fg-color--transparent: #7c3aed1a;
+  --md-accent-bg-color: #ffffff;
+  --md-accent-bg-color--light: #ffffffb3;
+  --md-typeset-a-color: #7c3aed;
+}
+
 .fig-center {
   text-align: center;
 }
@@ -25,4 +66,155 @@
 .mermaid-center .mermaid {
   width: fit-content;
   max-width: 100%;
+}
+
+/* Landing page hero (overrides/home.html). */
+.gd-hero {
+  border-bottom: 0.05rem solid var(--md-default-fg-color--lightest);
+}
+
+.gd-hero__inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 2.4rem;
+  align-items: center;
+  padding: 2.4rem 0.8rem 2rem;
+}
+
+.gd-hero__text h1 {
+  margin: 0 0 0.6rem;
+  font-size: 2.6rem;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: #111827;
+}
+
+[data-md-color-scheme="slate"] .gd-hero__text h1 {
+  color: #ffffff;
+}
+
+.gd-hero__tag {
+  margin: 0 0 0.8rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--md-primary-fg-color);
+}
+
+.gd-hero__lede {
+  margin: 0 0 1.4rem;
+  max-width: 32em;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--md-default-fg-color--light);
+}
+
+.gd-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.gd-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.2rem;
+  padding: 0 1rem;
+  border: 0.1rem solid var(--md-primary-fg-color);
+  border-radius: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--md-primary-fg-color);
+  transition: opacity 125ms;
+}
+
+.gd-button:hover,
+.gd-button:focus {
+  color: var(--md-primary-fg-color);
+  opacity: 0.8;
+}
+
+.gd-button--primary,
+.gd-button--primary:hover,
+.gd-button--primary:focus {
+  background-color: var(--md-primary-fg-color);
+  color: var(--md-primary-bg-color);
+}
+
+.gd-hero__picture {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  width: 100%;
+  max-width: 28rem;
+  justify-self: center;
+}
+
+.gd-hero__picture canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.gd-hero__install {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  max-width: 30rem;
+  margin-top: 1.2rem;
+  padding: 0.35rem 0.4rem 0.35rem 0.8rem;
+  border-radius: 0.4rem;
+  background-color: var(--md-code-bg-color);
+}
+
+.gd-hero__install code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-family: var(--md-code-font-family);
+  font-size: 0.65rem;
+  color: var(--md-code-fg-color);
+  background: none;
+}
+
+.gd-hero__copy {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 0.3rem;
+  color: var(--md-default-fg-color--light);
+  cursor: pointer;
+}
+
+.gd-hero__copy:hover,
+.gd-hero__copy:focus-visible,
+.gd-hero__copy--done {
+  color: var(--md-primary-fg-color);
+}
+
+@media screen and (max-width: 44.984375em) {
+  .gd-hero__inner {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.2rem;
+    padding-top: 1.2rem;
+  }
+
+  .gd-hero__picture {
+    order: -1;
+    max-width: 20rem;
+  }
+
+  .gd-hero__text h1 {
+    font-size: 2rem;
+  }
+}
+
+/* Feature cards on the landing page: four per row on wide screens. */
+.md-typeset .grid.cards {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12.5rem), 1fr));
 }
