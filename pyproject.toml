@@ -216,11 +216,6 @@ commands =
 
 [testenv:docs]
 description = Build docs. Usage: tox -e docs
-allowlist_externals =
-    rm
-    cp
-    ln
-    mkdir
 deps =
     -e .[docs]
     codespell
@@ -237,15 +232,9 @@ commands =
 
 [testenv:docs-serve]
 description = Serve docs locally. Usage: tox -e docs-serve
-allowlist_externals =
-    rm
-    cp
-    ln
-    mkdir
 deps =
     {[testenv:docs]deps}
 commands =
-    python docs/scripts/build_stac_browser_docs.py tech
     codespell --quiet-level=2 docs
     mkdocs serve -f mkdocs.yml --strict -a localhost:8000 --watch docs
 

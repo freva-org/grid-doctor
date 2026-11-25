@@ -6,9 +6,6 @@ repo_name: freva-org/grid-doctor
 site_dir: site
 docs_dir: docs
 
-hooks:
-  - docs/scripts/flatten.py
-
 nav:
   - Overview: index.md
   - Technical decisions: technical-decisions.md
@@ -37,7 +34,6 @@ nav:
 
 
 exclude_docs: |
-  scripts/**
   shared/**
 theme:
   name: material
@@ -116,7 +112,11 @@ markdown_extensions:
   - tables
   - attr_list
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      # docs/technical-decisions.md and docs/high-level-access.md include
+      # their pages from docs/shared/; fail if an included file is missing.
+      base_path: [.]
+      check_paths: true
   - pymdownx.blocks.caption
   - toc:
       permalink: true

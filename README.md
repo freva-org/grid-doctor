@@ -36,177 +36,29 @@ mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
 
 ## Developing the documentation
 
-This repository builds *two* documentation sites from the same `docs/` source tree:
-
-* **Technical documentation**: built with `mkdocs.tech.yml`
-* **Waterpark/data documentation**: built with `mkdocs.data.yml`
-
-Both sites share common assets and selected shared Markdown files, but are published independently.
-
-### Documentation layout
-
-The documentation sources are organised as follows:
-
-```text
-docs/
-├── technical/   # technical Grid Doctor documentation
-├── data/        # Waterpark/data-oriented documentation
-├── shared/      # pages shared by both documentation sites
-└── assets/      # images, CSS, JavaScript, logos, etc.
-```
-
-During the build, the relevant documentation tree is staged into `.build/`:
-
-```text
-.build/
-├── tech/
-└── data/
-```
-
-This allows both documentation sites to behave as if their own content starts at the web root `/`.
-
-### Building the documentation
-
-The default documentation target builds the technical documentation:
+The documentation is built from the `docs/` directory and configured in
+`mkdocs.yml`.
 
 ```console
-tox -e docs
+tox -e docs        # spell check and strict build into site/
+tox -e docs-serve  # serve on http://localhost:8000 with live reload
 ```
 
-This is equivalent to:
+Add a page as a Markdown file under `docs/` and list it in the `nav` of
+`mkdocs.yml`. Images and other static files go under `docs/assets/`.
+API reference pages render docstrings with
+[mkdocstrings](https://mkdocstrings.github.io/): a line such as
+`::: grid_doctor.save_pyramid` inserts the documentation of that object.
 
-```console
-tox -e docs -- tech
-```
+### Pages shared with the Waterpark docs
 
-To build the Waterpark/data documentation:
-
-```console
-tox -e docs -- data
-```
-
-The generated output directories are:
-
-```text
-site-tech/   # technical documentation
-site-data/   # Waterpark/data documentation
-```
-
-### Serving the documentation locally for easy and quick development
-
-To serve the technical documentation locally:
-
-```console
-tox -e docs-serve
-```
-
-or explicitly:
-
-```console
-tox -e docs-serve -- tech
-```
-
-To serve the Waterpark/data documentation locally:
-
-```console
-tox -e docs-serve -- data
-```
-
-The documentation is then served at:
-
-```text
-http://localhost:8000
-```
-
-The local serve target uses symlinks in `.build/`, so changes made under `docs/technical/`, `docs/data/`, `docs/shared/`, or `docs/assets/` can be picked up while developing.
-
-### Adding new pages
-
-Add technical documentation pages under:
-
-```text
-docs/technical/
-```
-
-Add Waterpark/data documentation pages under:
-
-```text
-docs/data/
-```
-
-Add pages that should be available to both sites under:
-
-```text
-docs/shared/
-```
-
-After adding a page, include it in the appropriate MkDocs navigation file:
-
-```text
-mkdocs.tech.yml
-mkdocs.data.yml
-```
-
-For example:
-
-```yaml
-nav:
-  - Overview: index.md
-  - Getting started: getting-started.md
-```
-
-### Adding images and other assets
-
-Shared images, CSS, JavaScript, logos, and other static assets should go under:
-
-```text
-docs/assets/
-```
-
-You can reference them from Markdown like this:
-
-```markdown
-![Example image](assets/example.png)
-```
-
-or, when a root-relative link is more appropriate:
-
-```markdown
-![Example image](/assets/example.png)
-```
-
-### Shared pages
-
-Files in `docs/shared/` are staged into both documentation builds. This is useful for pages such as common concepts, terminology, license notes, or explanations that apply to both the technical and data-facing documentation.
-
-For example, a shared file:
-
-```text
-docs/shared/technical-decisions.md
-```
-
-can be referenced in either MkDocs config as:
-
-```yaml
-nav:
-  - Technical decisions: technical-decisions.md
-```
-
-### Deployment overview
-
-The two documentation sites are deployed differently:
-
-* `site-tech/` is deployed via the GitHub Pages action.
-* `site-data/` is pushed to the `gh-pages` branch and served independently from the custom Waterpark web server.
-
-This allows both sites to use `/` as their root URL while still keeping all documentation sources in a single repository.
-
-
-```console
-pip install tox
-tox -e docs          # build to site/
-tox -e docs-serve    # live preview at http://127.0.0.1:8000
-```
+`docs/shared/technical-decisions.md` and `docs/shared/high-level-access.md`
+are also published in the Waterpark documentation, which vendors
+`docs/shared/` at a pinned commit. Here they are included by the short
+pages `docs/technical-decisions.md` and `docs/high-level-access.md`. Edit
+the files in `docs/shared/`, and keep them self-contained: no mkdocstrings
+cross-references, and absolute `https://grid-doctor.org/...` links for
+pages that only exist in this site.
 
 
 ## Quick Start
