@@ -27,8 +27,9 @@ python -m pip install -e .[gpu]
 ```
 
 
-For remapping of large grids you should install
-[ESMF](https://earthsystemmodeling.org/regrid/) through conda-forge.
+Generating remapping weights needs
+[ESMF](https://earthsystemmodeling.org/regrid/), which is installed
+through conda-forge.
 
 ```console
 mamba install -c conda-forge -y "esmf=*=mpi_openmpi_*" esmpy
@@ -81,7 +82,7 @@ tox -e docs-deploy -- serve
 
 
 ## Quick Start
-Running the example will likely require ESMF to be installed, see above.
+Running the example requires ESMF to be installed, see above.
 ```python
 import xarray as xr
 
@@ -98,10 +99,7 @@ pyramid = gd.create_healpix_pyramid(
 gd.save_pyramid(
     pyramid,
     "s3://my-bucket/dataset.zarr",
-    s3_options=gd.get_s3_options(
-        "https://s3.eu-dkrz-3.dkrz.cloud",
-        "~/.s3-credentials.json",
-    ),
+    s3_options=gd.get_s3_options("https://s3.example.org", "~/.s3-credentials.json"),
 )
 ```
 
@@ -129,10 +127,11 @@ gd.save_pyramid(pyramid, "s3://my-bucket/my-l2-product.zarr", ...)
 
 `mean` is the binning analogue of conservative remapping (valid when the
 samples oversample the target cells), `mode` the analogue of
-nearest-neighbour for categorical fields.  Cell geometry uses the perfect
-sphere, like remapping.  Indexing on the WGS84 ellipsoid is equally
-accurate but produces a different grid, displaced by up to ~14 km, so
-only compare data that uses the same definition.  See the point-data
+nearest-neighbour for categorical fields.  Cells are defined on the
+sphere by default, like remapping, or on the WGS84 ellipsoid
+(`ellipsoid="WGS84"`).  Both are equally accurate but they are different
+grids, displaced by up to ~14 km, so only compare data that uses the
+same definition.  See the point-data
 recipe in the documentation for details.
 
 ## 🏥 Grid Rehab Progress
@@ -229,7 +228,7 @@ This installs two hooks (see `.pre-commit-config.yaml`):
 To run the envs by hand:
 
 ```console
-tox -e lint      # isort, flake8, codespell, pydocstyle, bandit
+tox -e lint      # ruff and codespell
 tox -e types     # mypy (strict)
 tox -e docs      # spelling + mkdocs build --strict
 tox -e test      # pytest with coverage
@@ -240,7 +239,6 @@ tox -e test      # pytest with coverage
 
 As this is still very much work in progress it is very likely that you will
 run into problems. Please note any problems in the `README.md` file
-for your dataset folder. Feel free to submit PRs if there are any issues
-with the `DatasetAggregator` or `ChunkOptimizer` classes. If you don't feel
-comfortable with submitting PRs you can file an issue report
-[here](https://github.com/freva-org/freva-nextgen/issues).
+for your dataset folder. Pull requests are welcome; if you would rather
+not submit one, file an issue report
+[here](https://github.com/freva-org/grid-doctor/issues).

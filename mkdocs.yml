@@ -9,7 +9,7 @@ docs_dir: docs
 nav:
   - Overview: index.md
   - Technical decisions: technical-decisions.md
-  - Grid-doctor software: getting-started.md
+  - Getting started: getting-started.md
   - API Reference:
       - Pyramids: api/pyramid.md
       - Regridding: api/remap.md
@@ -24,12 +24,12 @@ nav:
       - Types: api/types.md
   - Recipes:
       - Overview: recipes/index.md
-      - Structured Grids (ERA5, CMIP): recipes/structured.md
-      - Unstructured Grids (ICON): recipes/icon.md
-      - Limited Area/Regional grids: recipes/regional.md
-      - Point Data: recipes/point-data.md
+      - Structured grids (ERA5, CMIP): recipes/structured.md
+      - Unstructured grids (ICON): recipes/icon.md
+      - Regional grids (CORDEX): recipes/regional.md
+      - Point data: recipes/point-data.md
       - Coarsening and averaging masked fields: recipes/averaging.md
-      - Parallel writes (reflow, array jobs): recipes/parallel-writes.md
+      - Parallel writes: recipes/parallel-writes.md
       - Working with the data: high-level-access.md
 
 exclude_docs: |

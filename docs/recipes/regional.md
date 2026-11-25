@@ -1,4 +1,4 @@
-# Regional Datasets (CORDEX)
+# Regional grids (CORDEX)
 
 This recipe converts regional model output — CORDEX rotated-pole domains
 being the canonical case — to a HEALPix pyramid, and shows how to access
@@ -19,7 +19,7 @@ import numpy as np
 import xarray as xr
 import grid_doctor as gd
 
-ds = xr.open_mfdataset("/pool/data/CORDEX/EUR-11/.../tas_*.nc")
+ds = xr.open_mfdataset("CORDEX/EUR-11/.../tas_*.nc")
 
 # EUR-11: 0.11 deg -> level 9 (~0.115 deg cell spacing)
 level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))

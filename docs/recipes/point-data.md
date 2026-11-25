@@ -1,4 +1,4 @@
-# Point Data (Satellite Swaths, Stations, Trajectories)
+# Point data (satellite swaths, stations, trajectories)
 
 This recipe converts *point-sampled* data — anything where every sample
 carries its own latitude/longitude rather than living on a fixed grid —
@@ -64,10 +64,7 @@ for level in range(10, -1, -1):
 gd.save_pyramid(
     pyramid,
     "s3://my-bucket/my-l2-product.zarr",
-    s3_options=gd.get_s3_options(
-        "https://s3.eu-dkrz-3.dkrz.cloud",
-        "~/.s3-credentials.json",
-    ),
+    s3_options=gd.get_s3_options("https://s3.example.org", "~/.s3-credentials.json"),
 )
 ```
 
@@ -125,11 +122,13 @@ type) binned with ``mode``.  Nothing in the workflow above is
 EarthCARE-specific — the same calls handle any L2 swath product.
 
 !!! warning "Sphere and ellipsoid are different grids"
-    Satellite geolocation is geodetic (WGS84), and ``healpix_geo`` can
-    index on the sphere or on the ellipsoid.  Both are equally accurate,
-    but they are different grids: data indexed on the ellipsoid is
-    shifted by up to ~0.13° (~14 km) relative to data on the sphere,
-    several to dozens of pixels at swath resolutions.  grid-doctor uses
-    the sphere; only compare data that uses the same definition.  See
+    Satellite geolocation is geodetic (WGS84). Binning assigns each
+    position to the HEALPix cell that contains it, on the sphere by
+    default or on the WGS84 ellipsoid with ``ellipsoid="WGS84"`` (or
+    ``gd.config.ellipsoid``). Both are equally accurate, but they are
+    different grids: cells on the ellipsoid are shifted by up to ~0.13°
+    (~14 km) relative to cells on the sphere, several to dozens of
+    pixels at swath resolutions. Only compare data that uses the same
+    definition; the output records which one it uses. See
     [Sphere or ellipsoid](../technical-decisions.md#sphere-or-ellipsoid)
     in the technical decisions.

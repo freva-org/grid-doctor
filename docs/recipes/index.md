@@ -1,24 +1,24 @@
 # Recipes
 
-These recipes show end-to-end conversion workflows for different grid
-types.  Each one follows the same three-step pattern:
+Worked examples from source data to a published HEALPix pyramid. The
+conversion recipes follow the same steps: open the data, get the weights
+(or bin the samples), build the pyramid and write it.
 
-1. **Open** the dataset (with caching).
-2. **Convert** to a HEALPix pyramid.
-3. **Upload** to S3.
+| Recipe | Source data | Examples |
+|--------|-------------|----------|
+| [Structured grids](structured.md) | Regular and curvilinear lat/lon grids | ERA5, CMIP6 |
+| [Unstructured grids](icon.md) | Triangular meshes | ICON |
+| [Regional grids](regional.md) | Limited-area and rotated-pole domains | CORDEX |
+| [Point data](point-data.md) | Swaths, stations, trajectories | EarthCARE MSI, station networks |
 
-| Recipe | Grid type | Source example |
-|--------|-----------|----------------|
-| [Structured Grids](structured.md) | Regular / curvilinear lat/lon | ERA5, CMIP6 |
-| [Unstructured Grids (ICON)](icon.md) | Triangular mesh | ICON-DREAM |
-| [Point Data](point-data.md) | Swaths, stations, trajectories | EarthCARE MSI, surface networks |
+Two recipes cover what comes after or around the conversion:
 
-For coarsening and working with masked or partial-coverage data,
-[Coarsening and averaging masked fields](averaging.md)
-shows how to compute means and area integrals of fields with missing
-values consistently across pyramid levels.
+- [Coarsening and averaging masked fields](averaging.md) computes
+  means and area integrals of fields with missing values consistently
+  across pyramid levels.
+- [Parallel writes](parallel-writes.md) splits the conversion of a large
+  source into independent array-job tasks driven by a manifest, with a
+  complete [reflow](https://reflow-hpc.org) workflow.
 
-For sources too large for a single job,
-[Parallel writes](parallel-writes.md) splits the conversion into
-independent array-job elements driven by a serialisable manifest, with
-a complete [reflow](https://reflow-hpc.org) workflow.
+To read the published data, including stores without coordinate arrays,
+see [Working with the data](../high-level-access.md).
