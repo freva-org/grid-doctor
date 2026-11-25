@@ -9,8 +9,16 @@ docs_dir: docs
 
 nav:
   - Overview: index.md
-  - Technical decisions: technical-decisions.md
   - Getting started: getting-started.md
+  - Recipes:
+      - Overview: recipes/index.md
+      - Structured grids (ERA5, CMIP): recipes/structured.md
+      - Unstructured grids (ICON): recipes/icon.md
+      - Regional grids (CORDEX): recipes/regional.md
+      - Point data: recipes/point-data.md
+      - Coarsening and averaging masked fields: recipes/averaging.md
+      - Parallel writes: recipes/parallel-writes.md
+      - Working with the data: high-level-access.md
   - API reference:
       - Overview: api/index.md
       - Remapping: api/remap.md
@@ -24,16 +32,7 @@ nav:
       - Configuration: api/config.md
       - Types: api/types.md
       - Command line: api/cli.md
-  - Recipes:
-      - Overview: recipes/index.md
-      - Structured grids (ERA5, CMIP): recipes/structured.md
-      - Unstructured grids (ICON): recipes/icon.md
-      - Regional grids (CORDEX): recipes/regional.md
-      - Point data: recipes/point-data.md
-      - Coarsening and averaging masked fields: recipes/averaging.md
-      - Parallel writes: recipes/parallel-writes.md
-      - Working with the data: high-level-access.md
-
+  - Technical decisions: technical-decisions.md
 exclude_docs: |
   shared/**
   overrides/
@@ -41,7 +40,7 @@ exclude_docs: |
 theme:
   name: material
   custom_dir: docs/overrides
-  logo: assets/logo-512.png
+  logo: assets/logo-mark.svg
   favicon: assets/favicon.ico
   icon:
     admonition:
@@ -49,28 +48,36 @@ theme:
     previous: fontawesome/solid/angle-left
     next: fontawesome/solid/angle-right
 
+  # Three-way switcher: system preference (the default), light, dark.
+  # The colours themselves are set in assets/styles.css.
   palette:
+    - media: "(prefers-color-scheme)"
+      primary: custom
+      accent: custom
+      toggle:
+        icon: lucide/sun-moon
+        name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: teal
-      accent: amber
+      primary: custom
+      accent: custom
       toggle:
-        icon: material/brightness-7
+        icon: lucide/sun
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: teal
-      accent: amber
+      primary: custom
+      accent: custom
       toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
+        icon: lucide/moon
+        name: Switch to system preference
   features:
     - content.code.copy
     - navigation.tabs
     - navigation.tabs.sticky
     - navigation.sections
     - navigation.footer
-    - toc.integrate
+    - navigation.path
     - search.highlight
     - search.suggest
 

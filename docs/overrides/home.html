@@ -1,0 +1,62 @@
+{% extends "main.html" %}
+
+{#-
+  Landing page (docs/index.md, `template: home.html`): a hero with the
+  "cure" animation under the header tabs.  The page's Markdown follows
+  below the hero.
+-#}
+{% block tabs %}
+  {{ super() }}
+  <section class="gd-hero">
+    <div class="gd-hero__inner md-grid">
+      <div class="gd-hero__text">
+        <h1>grid-doctor</h1>
+        <p class="gd-hero__tag">Your lat/lon data goes to rehab and comes out HEALed.</p>
+        <p class="gd-hero__lede">
+          Converts climate and Earth-system data from regular, curvilinear
+          and unstructured grids, and from satellite swaths, to
+          multi-resolution HEALPix pyramids in Zarr, on local disk or S3.
+        </p>
+        <p class="gd-hero__actions">
+          <a href="{{ 'getting-started/' | url }}" class="gd-button gd-button--primary">Get started</a>
+          <a href="{{ 'recipes/' | url }}" class="gd-button">Recipes</a>
+        </p>
+        <div class="gd-hero__install">
+          <code id="gd-install">pip install git+https://github.com/freva-org/grid-doctor.git</code>
+          <button type="button" class="gd-hero__copy" data-copy="gd-install" title="Copy to clipboard" aria-label="Copy the install command">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="gd-hero__picture">
+        <canvas data-gd-cure role="img"
+          aria-label="Animation: a spinning globe whose lat/lon grid crowds at feverish poles heals, cell by cell, into the twelve HEALPix base cells, which then split into finer levels."></canvas>
+      </div>
+    </div>
+  </section>
+{% endblock %}
+
+{#- The hero carries the page title, so no automatic <h1> here. -#}
+{% block content %}
+  {{ page.content }}
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ 'assets/javascripts/cure.js' | url }}"></script>
+  <script>
+    document.addEventListener("click", function (event) {
+      var button = event.target.closest(".gd-hero__copy");
+      if (!button || !navigator.clipboard) return;
+      var text = document.getElementById(button.dataset.copy).textContent;
+      navigator.clipboard.writeText(text).then(function () {
+        button.classList.add("gd-hero__copy--done");
+        button.setAttribute("aria-label", "Copied");
+        setTimeout(function () {
+          button.classList.remove("gd-hero__copy--done");
+          button.setAttribute("aria-label", "Copy the install command");
+        }, 1500);
+      });
+    });
+  </script>
+{% endblock %}
