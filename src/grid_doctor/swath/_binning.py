@@ -210,7 +210,7 @@ def masked_float64(
     Args:
         da: Data variable.
         fill_value: Explicit fill value overriding declared attributes.
-            Note that ``0`` is a perfectly valid fill value here — the
+            Note that ``0`` is a perfectly valid fill value here: the
             check is ``is None``, never truthiness.
 
     Returns:

@@ -1,8 +1,8 @@
 # Point data (satellite swaths, stations, trajectories)
 
-This recipe converts *point-sampled* data — anything where every sample
-carries its own latitude/longitude rather than living on a fixed grid —
-to a HEALPix pyramid.  Typical sources are satellite Level-2 swath
+This recipe converts *point-sampled* data to a HEALPix pyramid: anything
+where every sample carries its own latitude and longitude instead of
+sitting on a fixed grid. Typical sources are satellite Level-2 swath
 products (imager or radar granules), in-situ station records, and ship
 or aircraft trajectories.
 
@@ -14,8 +14,8 @@ The ESMF weight path assumes a *fixed* source geometry:
   the expensive weight-generation step could never be amortised.
 - **Nearest smears globally.**  ESMF's nearest source-to-destination
   method assigns a value to *every* destination cell.  With a global
-  HEALPix target and a narrow swath as source, the whole sphere —
-  antipodal ocean included — would receive swath values.
+  HEALPix target and a narrow swath as source, the whole sphere,
+  antipodal ocean included, would receive swath values.
 
 [`bin_to_healpix`][grid_doctor.bin_to_healpix] instead assigns each
 sample to the HEALPix cell containing it and reduces all samples per
@@ -25,23 +25,23 @@ area-weighted mean, making it the binning analogue of conservative
 remapping; the per-cell **mode** is the analogue of nearest-neighbour
 for categorical fields.
 
-!!! important "Choose the level from the sample spacing"
-    Pick the target level so the HEALPix cell spacing
-    (``58.6° / 2**level``) is *coarser* than the sample spacing —
-    the same rule
+!!! tip "Choose the level from the sample spacing"
+    Pick the target level so that the HEALPix cell spacing
+    (``58.6° / 2**level``) is *coarser* than the sample spacing, the
+    same rule
     [`resolution_to_healpix_level`][grid_doctor.resolution_to_healpix_level]
-    applies to gridded data.  A 1 km-resolution imager swath maps
-    comfortably to level 12 (~0.9 km); binning it to level 14 would
-    leave most cells empty and fabricate detail the samples cannot
-    support.
+    applies to gridded data.  A 1 km imager swath maps comfortably to
+    level 12 (~1.6 km); binning it to level 14 (~0.4 km) would leave
+    most cells empty and fabricate detail the samples cannot support.
 
-## Minimal Example
+## Minimal example
 
 ```python
-import grid_doctor as gd
 import xarray as xr
 
-# 1. Open — geolocation may be a data variable rather than a coordinate
+import grid_doctor as gd
+
+# 1. Open: geolocation may be a data variable rather than a coordinate
 ds = xr.open_dataset("granule.h5", group="ScienceData")
 
 # 2. Bin to the finest level
@@ -55,10 +55,17 @@ finest = gd.bin_to_healpix(
     with_counts=True,             # coverage becomes auditable downstream
 )
 
-# 3. Coarsen — the standard pyramid machinery applies unchanged
+# 3. Coarsen: continuous variables by mean, categorical ones by mode
+categorical = ["cloud_type"]
 pyramid = {11: finest}
 for level in range(10, -1, -1):
-    pyramid[level] = gd.coarsen_healpix(pyramid[level + 1], level)
+    pyramid[level] = xr.merge(
+        [
+            gd.coarsen_healpix(finest.drop_vars(categorical), level, coarsen_mode="mean"),
+            gd.coarsen_healpix(finest[categorical], level, coarsen_mode="mode"),
+        ],
+        combine_attrs="override",
+    )
 
 # 4. Upload
 gd.save_pyramid(
@@ -68,17 +75,18 @@ gd.save_pyramid(
 )
 ```
 
-Mixed continuous/categorical products work in one call: pass a mapping
-for ``agg``.  Each variable records its own ``grid_doctor_method``
-(``binned-mean`` / ``binned-mode``), and
-[`coarsen_healpix`][grid_doctor.coarsen_healpix] infers mean vs. mode
-coarsening automatically when *all* variables share one method — for
-mixed datasets, coarsen the categorical variables separately or pass an
-explicit ``coarsen_mode``.
+Mixed continuous and categorical products are binned in one call: pass
+a mapping for ``agg``.  Each variable records its own
+``grid_doctor_method`` (``binned-mean`` or ``binned-mode``).
+[`coarsen_healpix`][grid_doctor.coarsen_healpix], however, chooses one
+mode for the whole dataset: with ``coarsen_mode="auto"`` it would
+average ``cloud_type`` as well.  Coarsen the two groups separately, as
+above, and merge them.  For a product with a single method, one
+``coarsen_healpix`` call per level is enough.
 
 ## Fill values
 
-Declared ``_FillValue`` / ``missing_value`` attributes are honoured
+Declared ``_FillValue`` and ``missing_value`` attributes are honoured
 automatically, and floating-point non-finite values are always treated
 as invalid.  For products that do not declare their fills, pass them
 explicitly:
@@ -87,39 +95,52 @@ explicitly:
 gd.bin_to_healpix(ds, 11, fill_values={"quality_flag": 0})
 ```
 
-``0`` is accepted as a fill value — the check is ``is None``, never
+``0`` is accepted as a fill value: the check is ``is None``, never
 truthiness.  Do **not** rely on dtype conventions ("int16 means
 -32768"): products that break the convention will silently pass fill
 values into your means.
 
 ## Accumulating many granules
 
-At level 12+ the dense global array is large (~50 M cells and beyond)
-while a single granule touches only a sliver of it.  Use the sparse
-intermediate to keep per-granule memory proportional to the swath:
+At level 12 the dense global array has about 200 million cells, while a
+single granule touches only a sliver of it.  Bin each granule to the
+compact (sparse) form, which holds only the cells the granule covers:
 
 ```python
+# granule_paths: your list of files; open each like ds above
 sparse_granules = [
-    gd.bin_to_healpix(open_granule(path), level=12, dense=False)
+    gd.bin_to_healpix(xr.open_dataset(path), level=12, agg="mean", dense=False, with_counts=True)
     for path in granule_paths
 ]
 ```
 
-For composites over overlapping orbits, bin with ``agg="mean"`` and
-``with_counts=True`` and merge with count-weighted averages, so that a
-cell seen by three orbits is not biased toward the last one written.
+Where orbits overlap, merge the granules with count-weighted means, so
+that a cell seen by three orbits is not biased toward the last one
+written.  The result equals binning all samples at once:
+
+```python
+stacked = xr.concat(sparse_granules, dim="granule", join="outer")
+counts = stacked["radiance_count"].fillna(0)
+composite = xr.Dataset(
+    {
+        "radiance": (stacked["radiance"] * counts).sum("granule") / counts.sum("granule"),
+        "radiance_count": counts.sum("granule"),
+    },
+    attrs=sparse_granules[0].attrs,
+)
+```
+
 Expand to the dense representation once, right before coarsening and
-publishing, with
-[`sparse_to_dense`][grid_doctor.sparse_to_dense].
+publishing, with [`sparse_to_dense`][grid_doctor.sparse_to_dense].
 
 ## Worked example: EarthCARE MSI
 
 EarthCARE MSI Level-2 frames are one concrete instance of this recipe:
 2-D swath geolocation (``along_track`` × ``across_track``), ~500 m pixel
-spacing (→ level 13 at most, level 12 in practice), continuous radiances
-binned with ``mean`` and classification products (cloud mask, cloud
-type) binned with ``mode``.  Nothing in the workflow above is
-EarthCARE-specific — the same calls handle any L2 swath product.
+spacing (level 13, ~0.8 km, at most; level 12 in practice), continuous
+radiances binned with ``mean`` and classification products (cloud mask,
+cloud type) binned with ``mode``.  Nothing in the workflow above is
+specific to EarthCARE: the same calls handle any L2 swath product.
 
 !!! warning "Sphere and ellipsoid are different grids"
     Satellite geolocation is geodetic (WGS84). Binning assigns each

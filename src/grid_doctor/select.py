@@ -2,7 +2,7 @@ r"""Region selection for (high-level) HEALPix datasets.
 
 At high HEALPix levels the global cell dimension becomes enormous
 (``12 * 4**16`` ≈ 5.2e10 cells at ~100 m resolution) while regional
-datasets — a city, an island, a catchment — occupy a vanishing fraction
+datasets (a city, an island, a catchment) occupy a vanishing fraction
 of it.  Such stores are written without materialised coordinate arrays
 (see the ``write_coords`` parameter of
 [`save_pyramid`][grid_doctor.save_pyramid]), and *all* access is
@@ -14,8 +14,8 @@ property: every cell at query level :math:`L - \\Delta` corresponds to
 exactly one *contiguous* index range :math:`[p \\cdot 4^\\Delta,
 (p+1) \\cdot 4^\\Delta)` at level :math:`L`.  A bounding-box query is
 answered at the coarse level (via ``healpix_geo``'s coverage searches),
-merged into contiguous runs, and read as a handful of contiguous slices
-— which map one-to-one onto Zarr chunks when the store is chunked at a
+merged into contiguous runs, and read as a handful of contiguous slices,
+which map one-to-one onto Zarr chunks when the store is chunked at a
 power of four.
 
 The returned subset is the compact ("sparse") representation also
@@ -146,7 +146,7 @@ def select_cells(
         mapping.
     load:
         Load the selected data into memory (default).  The selection is
-        small by construction — that is the point of selecting.
+        small by construction; that is the point of selecting.
 
     Returns
     -------
@@ -203,7 +203,7 @@ def select_bbox(
     every coarse parent expands to one contiguous fine-level range of
     ``4**query_delta`` cells.  The result therefore *covers* the box
     (cells straddling the edge are included) with read granularity set
-    by *query_delta* — align it with the store's chunk exponent for
+    by *query_delta*; align it with the store's chunk exponent for
     reads with zero waste.
 
     Parameters

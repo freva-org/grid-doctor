@@ -1,3 +1,4 @@
+---
 site_name: Grid Doctor
 site_description: Convert lat/lon xarray datasets to HEALPix pyramids.
 site_url: https://grid-doctor.org/
@@ -109,8 +110,8 @@ markdown_extensions:
   - pymdownx.tasklist:
       custom_checkbox: true  # clickable checkboxes in roadmap
   - pymdownx.emoji:
-      emoji_index: !!python/name:material.extensions.emoji.twemoji
-      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: !!python/name:zensical.extensions.emoji.twemoji
+      emoji_generator: !!python/name:zensical.extensions.emoji.to_svg
   - pymdownx.arithmatex:
       generic: true
   - tables

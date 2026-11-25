@@ -108,7 +108,7 @@ gd.save_pyramid(
 Satellite Level-2 swaths, station records, and trajectories don't live on a
 fixed grid, so the ESMF weight path doesn't apply (no weight reuse, and
 nearest-neighbour would smear a swath over the whole globe).  Use point
-binning instead — the output carries the standard metadata, so coarsening
+binning instead.  The output carries the standard metadata, so coarsening
 and uploading work exactly as above:
 
 ```python
@@ -136,7 +136,7 @@ recipe in the documentation for details.
 
 ## 🏥 Grid Rehab Progress
 How are our patients doing? Every dataset starts broken and leaves HEALed.
-If your dataset is still 😢, it needs a doctor — that could be you.
+If your dataset is still 😢, it needs a doctor, and that could be you.
 Claim a patient, write a script, and turn that frown into 😎.
 
 | | Meaning |

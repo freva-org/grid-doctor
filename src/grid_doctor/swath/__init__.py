@@ -1,8 +1,8 @@
 """Point-binning for swath and other point-sampled data.
 
-This module maps *point-sampled* data — satellite Level-2 swaths, station
+This module maps *point-sampled* data (satellite Level-2 swaths, station
 records, trajectories, or any dataset where every sample carries its own
-latitude/longitude — onto the standard grid-doctor HEALPix representation.
+latitude/longitude) onto the standard grid-doctor HEALPix representation.
 
 Point data cannot go through the ESMF weight path in
 [`grid_doctor.remap`][grid_doctor.remap]:
@@ -15,8 +15,8 @@ Point data cannot go through the ESMF weight path in
 
 Instead, [`bin_to_healpix`][grid_doctor.swath.bin_to_healpix] assigns each
 sample to the HEALPix cell containing it and reduces all samples per cell.
-In the oversampled limit — source pixel spacing much finer than the target
-cell spacing — the per-cell sample **mean** converges to the area-weighted
+In the oversampled limit, with source pixel spacing much finer than the
+target cell spacing, the per-cell sample **mean** converges to the area-weighted
 mean and is therefore the binning analogue of conservative remapping,
 while the per-cell **mode** is the analogue of nearest-neighbour remapping
 for categorical fields.  Choose the target level accordingly: the HEALPix
@@ -41,9 +41,9 @@ work unchanged.
 
 Acknowledgments
 ---------------
-The binning approach — direct cell assignment via ``healpix_geo`` plus
+The binning approach (direct cell assignment via ``healpix_geo`` plus
 grouped reduction with ``numpy_groupies``, including mode aggregation
-through per-class counting — was informed by earlier EarthCARE-to-HEALPix
+through per-class counting) was informed by earlier EarthCARE-to-HEALPix
 conversion work by Anne Fouilloux
 (https://github.com/annefou/earthcare-dggs, MIT licensed).  This module
 is an independent implementation and deliberately diverges on cell
@@ -138,7 +138,7 @@ def bin_to_healpix(
         as batch dimensions.
     level:
         Target HEALPix level.  Choose it so the cell spacing
-        (``58.6° / 2**level``) is coarser than the sample spacing —
+        (``58.6° / 2**level``) is coarser than the sample spacing:
         only then is the per-cell mean a faithful stand-in for
         conservative remapping.
     agg:
@@ -175,12 +175,12 @@ def bin_to_healpix(
     dense:
         When *True* (default), return the full ``12 * 4**level`` cell
         array with standard grid-doctor coordinates, CRS variable, and
-        attributes — directly consumable by
+        attributes, directly consumable by
         [`coarsen_healpix`][grid_doctor.coarsen_healpix] and
         [`save_pyramid`][grid_doctor.save_pyramid].  When
         *False*, return a compact dataset containing only the touched
         cells (the ``cell`` coordinate holds the actual HEALPix
-        indices) — useful as a per-granule intermediate at high levels;
+        indices), useful as a per-granule intermediate at high levels;
         convert with
         [`sparse_to_dense`][grid_doctor.swath.sparse_to_dense] before
         coarsening or publishing.

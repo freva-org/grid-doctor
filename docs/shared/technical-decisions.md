@@ -292,7 +292,7 @@ will be NaN.
 ## Point binning (swath and station data)
 
 Gridded datasets are remapped with ESMF as described above.  *Point-sampled*
-data — satellite Level-2 swaths, station records, trajectories — cannot use
+data (satellite Level-2 swaths, station records, trajectories) cannot use
 that path for two structural reasons: every granule has unique geometry, so
 the precomputed weight matrix can never be reused, and ESMF's
 nearest source-to-destination method assigns a value to **every**
@@ -302,8 +302,8 @@ Point data is therefore **binned**: each sample is assigned to the HEALPix
 cell containing its coordinates and all samples per cell are reduced.  The
 available reductions mirror the two remapping methods:
 
-- **Mean binning (continuous fields).**  In the oversampled limit — sample
-  spacing much finer than the target cell spacing — the per-cell sample
+- **Mean binning (continuous fields).**  In the oversampled limit, with
+  sample spacing much finer than the target cell spacing, the per-cell sample
   mean converges to the area-weighted mean, making it a first-order
   approximation of conservative remapping.  This validity condition is
   enforced by choosing the target level from the sample spacing with the
@@ -640,7 +640,7 @@ level needs to be fetched.
 ## High-level regional datasets: implicit coordinates
 
 Small-area datasets at very high levels (16 and beyond) keep the dense
-global convention — cell position equals cell index — but stop
+global convention (cell position equals cell index) but stop
 materialising what the index already implies.  Above level
 10 (`WRITE_COORDS_MAX_LEVEL`), stores are written **without**
 `cell`/`latitude`/`longitude` coordinate arrays: at level 16 those two

@@ -1,6 +1,6 @@
 """Logging configuration for grid-doctor (private).
 
-Provides a single knob that controls the log level of **all** loggers —
+Provides a single knob that controls the log level of **all** loggers,
 those that already exist and those created later.  The public entry point
 is [`grid_doctor.setup_logging`][grid_doctor.setup_logging]::
 
@@ -139,7 +139,7 @@ def setup_logging(
         Number of ``-v`` flags.  Each step moves one rung towards
         ``DEBUG`` on the verbosity ladder.
     level : int, str, or None, optional
-        Explicit level — overrides *verbosity* when given.
+        Explicit level; overrides *verbosity* when given.
     fmt : str, optional
         :mod:`logging` format string.
     datefmt : str, optional

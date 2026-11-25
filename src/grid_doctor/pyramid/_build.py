@@ -38,7 +38,7 @@ def coarsen_healpix(
     """Coarsen a HEALPix dataset to a lower-resolution level.
 
     The coarsening is performed as a single reshape + reduction over
-    all batch dimensions simultaneously — no per-slice Python loops.
+    all batch dimensions simultaneously, without per-slice Python loops.
 
     Parameters
     ----------
@@ -48,10 +48,14 @@ def coarsen_healpix(
     target_level:
         Target HEALPix level (must be lower than the current level).
     coarsen_mode:
-        ``"mean"`` — NaN-aware averaging for continuous fields.
-        ``"mode"`` — most-frequent-value for categorical fields.
-        ``"auto"`` — infer from the recorded production method:
-        ``"nearest"`` → mode, everything else → mean.
+        ``"mean"``: NaN-aware averaging for continuous fields.
+        ``"mode"``: most frequent value for categorical fields.
+        ``"auto"``: infer from the production method recorded for the
+        dataset: ``"nearest"`` and ``"binned-mode"`` give mode,
+        everything else mean.  The mode is chosen once for the whole
+        dataset; coarsen continuous and categorical variables in
+        separate calls when a dataset mixes both, for example after
+        binning with ``agg={"radiance": "mean", "cloud_type": "mode"}``.
     min_valid_fraction:
         Minimum fraction of valid (non-NaN) children required to
         produce a valid parent cell.  Parents with fewer valid
