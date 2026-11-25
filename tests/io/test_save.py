@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Literal
 from unittest import mock
 
 import numpy as np
 import pytest
 import xarray as xr
+import zarr
 
+import grid_doctor as gd
 from grid_doctor.io._save import (
     init_pyramid_store,
     save_pyramid,
 )
-from grid_doctor.metadata import PyramidMetadata
+from grid_doctor.io._xarray import omit_coordinates_attribute
+from grid_doctor.metadata import CRS_VAR, LAT_VAR, LON_VAR, PyramidMetadata
 
-from ..helpers import with_healpix_metadata
+from ..helpers import _weight_file, with_healpix_metadata
+from .fanout_helpers import MAX_LEVEL, _source
 
 
 class TestSavePyramid:
@@ -605,6 +611,10 @@ class TestSavePyramidToS3Remote:
         class _FakeDataset:
             store: object = None
             variables: dict[str, object] = {}
+            data_vars: dict[str, object] = {}
+
+            def copy(self, deep: bool = True) -> _FakeDataset:
+                return self
 
             def to_zarr(self, store: object, **kwargs: object) -> None:
                 self.store = store
@@ -626,3 +636,174 @@ class TestSavePyramidToS3Remote:
         s3_map.assert_called_once()
         assert s3_map.call_args.kwargs["root"] == "s3://bucket/pyr/level_0.zarr"
         assert dataset.store == "s3-store"
+
+
+def _coords_pyramid(tmp_path: Path) -> dict[int, xr.Dataset]:
+    return gd.create_healpix_pyramid(
+        _source(),
+        max_level=MAX_LEVEL,
+        min_level=0,
+        weights_path=_weight_file(tmp_path / "weights.nc"),
+        cell_chunks=192,
+    )
+
+
+def _array_attrs(store: Path) -> dict[str, dict[str, object]]:
+    """Attributes of every array below *store*, keyed by relative path."""
+    found: dict[str, dict[str, object]] = {}
+    for meta in store.rglob("zarr.json"):
+        doc = json.loads(meta.read_text())
+        if doc.get("node_type") == "array":
+            found[str(meta.parent.relative_to(store))] = doc.get("attributes", {})
+    for meta in store.rglob(".zarray"):
+        attrs = meta.with_name(".zattrs")
+        found[str(meta.parent.relative_to(store))] = json.loads(attrs.read_text()) if attrs.exists() else {}
+    return found
+
+
+class TestCoordinatesAttribute:
+    """Data variables do not list the HEALPix coordinates in ``coordinates`` (#121).
+
+    ``latitude``, ``longitude`` and ``crs`` follow from the cell index and
+    the grid mapping.  Listing them on every data variable makes CF tools
+    such as CDO read them along with each variable.  They are listed once,
+    in the dataset-level ``coordinates`` attribute, so xarray still reads
+    them back as coordinates.
+    """
+
+    HEALPIX_COORDS = {CRS_VAR, LAT_VAR, LON_VAR}
+
+    def _assert_no_coordinates_attribute(self, store: Path) -> None:
+        arrays = _array_attrs(store)
+        assert arrays, f"no arrays found below {store}"
+        listed = {name: attrs["coordinates"] for name, attrs in arrays.items() if "coordinates" in attrs}
+        assert not listed, f"arrays list coordinates: {listed}"
+        data_vars = [attrs for name, attrs in arrays.items() if Path(name).name in {"ta", "pr", "lsm"}]
+        assert data_vars and all(attrs.get("grid_mapping") == CRS_VAR for attrs in data_vars)
+
+    def _assert_coords_round_trip(self, store: Path, structure: Literal["flat", "multiscales"]) -> None:
+        if structure == "flat":
+            ds = xr.open_zarr(store / "level_2.zarr")
+        else:
+            ds = xr.open_datatree(store, engine="zarr")["level_2"].to_dataset()
+        assert self.HEALPIX_COORDS <= set(map(str, ds.coords))
+        assert self.HEALPIX_COORDS.isdisjoint(map(str, ds.data_vars))
+
+    @pytest.mark.parametrize("zarr_format", [2, 3])
+    @pytest.mark.parametrize("structure", ["flat", "multiscales"])
+    def test_save_pyramid(
+        self, tmp_path: Path, zarr_format: Literal[2, 3], structure: Literal["flat", "multiscales"]
+    ) -> None:
+        """Full writes, flat and multiscales, Zarr v2 and v3."""
+        store = tmp_path / "store"
+        save_pyramid(
+            _coords_pyramid(tmp_path),
+            str(store),
+            mode="w",
+            zarr_format=zarr_format,
+            structure=structure,
+        )
+        self._assert_no_coordinates_attribute(store)
+        self._assert_coords_round_trip(store, structure)
+
+    @pytest.mark.parametrize("mode", ["a", "r+"])
+    @pytest.mark.parametrize("structure", ["flat", "multiscales"])
+    def test_region_write(
+        self, tmp_path: Path, mode: Literal["a", "r+"], structure: Literal["flat", "multiscales"]
+    ) -> None:
+        """In mode 'a' xarray rewrites the store attributes from the region."""
+        store = tmp_path / "store"
+        pyramid = _coords_pyramid(tmp_path)
+        init_pyramid_store(pyramid, str(store), structure=structure)
+        save_pyramid(
+            pyramid,
+            str(store),
+            mode=mode,
+            region={"time": slice(2, 4)},
+            structure=structure,
+        )
+        self._assert_no_coordinates_attribute(store)
+        self._assert_coords_round_trip(store, structure)
+
+    @pytest.mark.parametrize("zarr_format", [2, 3])
+    def test_fanout(self, tmp_path: Path, zarr_format: Literal[2, 3]) -> None:
+        """Init plus worker tasks write the same attributes as a full write."""
+        store = tmp_path / "store"
+        pyramid = _coords_pyramid(tmp_path)
+        manifest = gd.init_pyramid_store(
+            pyramid,
+            str(store),
+            zarr_format=zarr_format,
+            split={"time": 4},
+        )
+        assert manifest is not None
+        for task in manifest.tasks:
+            gd.write_pyramid_task(pyramid, task)
+        assert gd.check_pyramid_store(manifest).complete
+        self._assert_no_coordinates_attribute(store)
+        self._assert_coords_round_trip(store, "flat")
+
+    def test_input_dataset_is_not_modified(self, tmp_path: Path) -> None:
+        """The encoding change happens on a copy."""
+        ds = _coords_pyramid(tmp_path)[1]
+        before = {name: dict(var.encoding) for name, var in ds.data_vars.items()}
+        out = omit_coordinates_attribute(ds)
+        assert all(var.encoding.get("coordinates", "") is None for var in out.data_vars.values())
+        assert {name: dict(var.encoding) for name, var in ds.data_vars.items()} == before
+
+    def test_other_coordinates_stay_listed(self, tmp_path: Path) -> None:
+        """Reviewer's example: a scalar ``height`` stays on ``tas``."""
+        ds = xr.Dataset({"tas": ("cell", [280.0] * 12)}, coords={"height": ((), 2.0, {"units": "m"})})
+        save_pyramid({0: ds}, str(tmp_path), mode="w")
+        group = zarr.open_group(f"{tmp_path}/level_0.zarr", mode="r")
+        assert group["tas"].attrs.get("coordinates") == "height"
+        assert "height" not in str(group.attrs.get("coordinates", ""))
+        assert "height" in xr.open_zarr(f"{tmp_path}/level_0.zarr").coords
+
+    @pytest.mark.parametrize("where", ["attrs", "encoding"])
+    @pytest.mark.parametrize(
+        ("given", "expected"),
+        [
+            ("height latitude longitude", "height"),  # explicit HEALPix names are stripped
+            ("crs latitude longitude", None),  # nothing left: no attribute
+            ("clat clon", None),  # source grid names that do not exist any more
+            ("clat clon height", "height"),
+            ("level height", "level height"),  # other names keep their order
+        ],
+    )
+    def test_given_coordinates_are_filtered(
+        self, tmp_path: Path, where: Literal["attrs", "encoding"], given: str, expected: str | None
+    ) -> None:
+        """An existing value keeps its names, minus HEALPix and missing ones.
+
+        ``xr.open_dataset`` moves a source file's ``coordinates`` into
+        ``encoding``, where it survives e.g. a rename.
+        """
+        level = _coords_pyramid(tmp_path)[2].assign_coords(height=2.0, level=0)
+        getattr(level["ta"], where)["coordinates"] = given
+        store = tmp_path / "store"
+        save_pyramid({2: level}, str(store), mode="w")
+        group = zarr.open_group(f"{store}/level_2.zarr", mode="r")
+        assert group["ta"].attrs.get("coordinates") == expected
+        self._assert_coords_round_trip(store, "flat")
+
+    def test_given_coordinates_survive_region_writes(self, tmp_path: Path) -> None:
+        """Region writes in mode 'a' keep the per-variable value of the init."""
+        pyramid = {
+            level: ds.assign_coords(height=2.0) for level, ds in _coords_pyramid(tmp_path).items()
+        }
+        pyramid[2]["ta"].attrs["coordinates"] = "height latitude longitude"
+        store = tmp_path / "store"
+        init_pyramid_store(pyramid, str(store))
+        save_pyramid(pyramid, str(store), mode="a", region={"time": slice(2, 4)})
+        group = zarr.open_group(f"{store}/level_2.zarr", mode="r")
+        assert group["ta"].attrs.get("coordinates") == "height"
+        assert group["pr"].attrs.get("coordinates") == "height"
+
+    def test_given_attribute_is_not_removed_from_input(self, tmp_path: Path) -> None:
+        """Moving ``coordinates`` from attrs to encoding happens on a copy."""
+        ds = _coords_pyramid(tmp_path)[1]
+        ds["ta"].attrs["coordinates"] = "latitude longitude"
+        out = omit_coordinates_attribute(ds)
+        assert ds["ta"].attrs["coordinates"] == "latitude longitude"
+        assert "coordinates" not in out["ta"].attrs

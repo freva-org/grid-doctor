@@ -35,15 +35,53 @@ def maybe_drop_coordinates(
     """
     include_coords = write_coords if isinstance(write_coords, bool) else level <= max_level_to_auto_write
     if include_coords:
-        return dataset
+        return omit_coordinates_attribute(dataset)
     coords = [CELL_DIM, LAT_VAR, LON_VAR]
     if not has_healpix_metadata(dataset):
-        return dataset.drop_vars(coords, errors="ignore")
+        return omit_coordinates_attribute(dataset.drop_vars(coords, errors="ignore"))
     metadata = HealpixMetadata.from_dataset(dataset)
     if metadata.sparse:
-        return dataset
+        return omit_coordinates_attribute(dataset)
     dataset = dataset.drop_vars(coords, errors="ignore")
-    return metadata.replace(implicit_coords=True).apply(dataset)
+    return omit_coordinates_attribute(metadata.replace(implicit_coords=True).apply(dataset))
+
+
+HEALPIX_COORDS = frozenset({CRS_VAR, LAT_VAR, LON_VAR})
+
+
+def omit_coordinates_attribute(dataset: xr.Dataset) -> xr.Dataset:
+    """Keep the HEALPix coordinates out of each data variable's ``coordinates``.
+
+    xarray lists every non-index coordinate a data variable spans in that
+    variable's CF ``coordinates`` attribute.  For HEALPix data this names
+    ``latitude``, ``longitude`` and ``crs`` on every variable, so CF tools
+    such as CDO read latitude and longitude with each variable, although
+    both follow from the cell index and ``crs``, and ``crs`` is already
+    referenced through ``grid_mapping``.
+
+    Only those three are removed.  A ``coordinates`` value that is already
+    set (in ``attrs``, or in ``encoding`` as ``xr.open_dataset`` leaves it)
+    keeps its other names in their order; without one, the variable lists
+    what xarray would list.  Names that are not a variable of *dataset*,
+    such as the source grid's ``clat clon``, are dropped as well, because
+    they would point at nothing.  xarray lists the HEALPix coordinates once
+    in the dataset-level ``coordinates`` attribute, so they still come back
+    as coordinates on read.  The input dataset is not modified.
+    """
+    dataset = dataset.copy(deep=False)
+    for var in dataset.data_vars.values():
+        given = var.attrs.pop("coordinates", None) or var.encoding.get("coordinates")
+        if given is None:
+            names = [
+                str(name)
+                for name, coord in dataset.coords.items()
+                if name not in dataset.dims and set(coord.dims) <= set(var.dims)
+            ]
+        else:
+            names = str(given).split()
+        keep = [name for name in names if name in dataset.variables and name not in HEALPIX_COORDS]
+        var.encoding["coordinates"] = " ".join(keep) or None
+    return dataset
 
 
 def _raise_template_error() -> None:
@@ -147,7 +185,11 @@ def prepare_template(
 def prepare_region_dataset(dataset: xr.Dataset, region: dict[str, IndexSlice]) -> xr.Dataset:
     """Select given reqion from dataset.
 
-    Variables that do not depend on the region keys are dropped.
+    Variables that do not depend on the region keys are dropped.  The
+    dataset-level ``coordinates`` attribute still names the dropped
+    coordinates: in ``mode="a"`` xarray replaces the store's attributes
+    with the region's, and this keeps the attribute the full write left
+    there (see :func:`omit_coordinates_attribute`).
     """
     region_keys = set(region)
     to_drop = (
@@ -155,5 +197,8 @@ def prepare_region_dataset(dataset: xr.Dataset, region: dict[str, IndexSlice]) -
         | {str(dim) for dim in dataset.dims if str(dim) not in region_keys}
         | {str(coord) for coord in dataset.coords if str(coord) not in region_keys}
     )
-
-    return dataset.drop_vars(to_drop, errors="ignore").isel(region)
+    coordinates = sorted(str(name) for name in dataset.coords if name not in dataset.dims and name in to_drop)
+    result = dataset.drop_vars(to_drop, errors="ignore").isel(region)
+    if coordinates:
+        result.attrs["coordinates"] = " ".join(coordinates)
+    return result

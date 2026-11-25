@@ -495,7 +495,7 @@ def _save_multiscale(
     else:
         # Fill in the region of data.
         templates = {}
-        for level, dataset in pyramid.items():
+        for level, dataset in dropped_pyramid.items():
             templates[level] = prepare_region_dataset(dataset, region)
 
         template = pyramid_to_multiscales_tree(templates, common_coords=list(region.keys()))
