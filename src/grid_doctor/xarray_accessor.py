@@ -12,12 +12,15 @@ reuses one and applies it.  Two methods are supported:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Unpack
+from typing import TYPE_CHECKING, Literal, Unpack
 
 import xarray as xr
 
+if TYPE_CHECKING:
+    from .weights import SourceDescription
+
 from .pyramid import create_healpix_pyramid
-from .remap import regrid_to_healpix
+from .remap import compute_healpix_weights, regrid_to_healpix
 from .types import (
     ApplyBackend,
     CoarsenMode,
@@ -230,6 +233,106 @@ class DatasetAccessor:
             min_valid_fraction=min_valid_fraction,
             valid_fraction=valid_fraction,
             **kwargs,
+        )
+
+    def compute_healpix_weights(
+        self,
+        level: int,
+        *,
+        method: RemapMethod = "conservative",
+        nest: bool = True,
+        source_units: SourceUnits = "auto",
+        weights_path: str | Path | None = None,
+        grid: xr.Dataset | None = None,
+        source_kind: SourceKind = "auto",
+        ignore_unmapped: bool | None = None,
+        large_file: bool = True,
+        prefer_offline: bool | None = None,
+        nproc: int = 1,
+        esmf_regrid_weightgen: str = "ESMF_RegridWeightGen",
+        keep_intermediates: bool = False,
+        workdir: str | Path | None = None,
+        spectral_transform_command: list[str] | tuple[str, ...] | None = None,
+        ellipsoid: Ellipsoid | None = None,
+        source_description: SourceDescription | None = None,
+    ) -> Path:
+        """Generate a reusable NetCDF weight file for HEALPix remapping.
+
+            Parameters
+        ----------
+        ds:
+            Source dataset or a source path.
+        level:
+            HEALPix refinement level.  ``nside = 2**level``.
+        method:
+            ``"nearest"`` or ``"conservative"``.
+        nest:
+            Use nested HEALPix ordering when `True`.
+        source_units:
+            Unit convention of the source coordinates.
+        weights_path:
+            Output NetCDF file. Defaults to the local weights directory in the
+            [`WeightsRef`][grid_doctor.weights.WeightsRef] layout (see
+            [`local_weights_dir`][grid_doctor.weights.local_weights_dir]), so
+            the same weights always land at the same path.
+        grid:
+            Optional external geometry dataset.
+        source_kind:
+            Explicit source representation or ``"auto"``.
+        ignore_unmapped:
+            Ignore unmapped destination cells.
+        large_file:
+            Forwarded to the in-memory ESMPy workflow.
+        prefer_offline:
+            Force or disable the offline ESMF path.
+        nproc:
+            Number of MPI ranks for the offline path.
+        esmf_regrid_weightgen:
+            Name or path of the offline ESMF executable.
+        keep_intermediates:
+            Keep intermediate mesh files.
+        workdir:
+            Working directory for offline intermediate files.
+        spectral_transform_command:
+            External command for ``source_kind="spectral"``.
+        ellipsoid:
+            Ellipsoid of the HEALPix geometry, ``"sphere"`` or
+            ``"WGS84"``.  Defaults to ``grid_doctor.config.ellipsoid``.
+        source_description:
+            Description of *ds* from
+            [`describe_source`][grid_doctor.weights.describe_source],
+            e.g. when the caller already built one to look the weights up;
+            skips describing the source again.
+
+        Returns
+        -------
+        pathlib.Path
+            Path to the generated NetCDF weight file.
+
+        See Also
+        --------
+        [`apply_weight_file`][grid_doctor.remap.apply_weight_file]:
+            Apply a previously generated weight file.
+        """
+        return compute_healpix_weights(
+            self._ds,
+            level,
+            method=method,
+            nest=nest,
+            source_units=source_units,
+            weights_path=weights_path,
+            grid=grid,
+            source_kind=source_kind,
+            ignore_unmapped=ignore_unmapped,
+            large_file=large_file,
+            prefer_offline=prefer_offline,
+            nproc=nproc,
+            esmf_regrid_weightgen=esmf_regrid_weightgen,
+            keep_intermediates=keep_intermediates,
+            workdir=workdir,
+            spectral_transform_command=spectral_transform_command,
+            ellipsoid=ellipsoid,
+            source_description=source_description,
         )
 
 

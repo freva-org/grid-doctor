@@ -10,6 +10,7 @@ from unittest import mock
 import pytest
 import xarray as xr
 
+
 import grid_doctor as gd
 from grid_doctor import xarray_accessor
 from grid_doctor.xarray_accessor import DatasetAccessor, DataTreeAccessor
@@ -90,4 +91,35 @@ def create_healpix_pyramid_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> 
         min_valid_fraction=0.5,
         valid_fraction=False,
         kwargs=kwargs,
+    )
+
+
+def test_compute_healpix_weights_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    level = 1
+    ds = xr.Dataset()
+    fake_compute = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "compute_healpix_weights", fake_compute)
+
+    ds.gd.compute_healpix_weights(level)
+
+    # Confirm all the default values are passed through.
+    fake_compute.assert_called_with(
+        ds,
+        1,
+        method="conservative",
+        nest=True,
+        source_units="auto",
+        weights_path=None,
+        grid=None,
+        source_kind="auto",
+        ignore_unmapped=None,
+        large_file=True,
+        prefer_offline=None,
+        nproc=1,
+        esmf_regrid_weightgen="ESMF_RegridWeightGen",
+        keep_intermediates=False,
+        workdir=None,
+        spectral_transform_command=None,
+        ellipsoid=None,
+        source_description=None,
     )
