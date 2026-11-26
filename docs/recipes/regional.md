@@ -25,7 +25,7 @@ ds = xr.open_mfdataset("CORDEX/EUR-11/.../tas_*.nc")
 # EUR-11: 0.11 deg -> level 9 (~0.115 deg cell spacing)
 level = gd.resolution_to_healpix_level(gd.get_latlon_resolution(ds))
 
-hpx = gd.regrid_to_healpix(ds, level, method="conservative")
+hpx = ds.gd.regrid_to_healpix(level, method="conservative")
 ```
 
 ### Domain-edge cells: mask by coverage
@@ -50,7 +50,7 @@ ones = xr.Dataset(
     {"coverage_fraction": xr.ones_like(ds["tas"].isel(time=0, drop=True))},
     coords=ds.coords,
 )
-coverage = gd.regrid_to_healpix(ones, level, method="conservative")[
+coverage = ones.gd.regrid_to_healpix(level, method="conservative")[
     "coverage_fraction"
 ]
 
@@ -75,7 +75,7 @@ classes over the Pacific.  The coverage mask from above is therefore
 not a refinement but a requirement:
 
 ```python
-landuse = gd.regrid_to_healpix(ds_categorical, level, method="nearest")
+landuse = ds_categorical.gd.regrid_to_healpix(level, method="nearest")
 landuse = landuse.where(coverage >= 0.5)
 ```
 
