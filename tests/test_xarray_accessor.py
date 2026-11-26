@@ -70,12 +70,11 @@ def test_regrid_to_healpix_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
 
-def create_healpix_pyramid_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_healpix_pyramid_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     min_level = 1
-    kwargs = {"arg1": "val1", "arg2": "val2"}
     ds = xr.Dataset()
     fake_create = mock.MagicMock()
-    monkeypatch.setattr(xarray_accessor, "regrid_to_healpix", fake_create)
+    monkeypatch.setattr(xarray_accessor, "create_healpix_pyramid", fake_create)
 
     ds.gd.create_healpix_pyramid(
         max_level=None,
@@ -85,12 +84,11 @@ def create_healpix_pyramid_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> 
     # Confirm all the default values are passed through.
     fake_create.assert_called_with(
         ds,
-        None,
-        min_level,
+        max_level=None,
+        min_level=min_level,
         coarsen_mode="auto",
         min_valid_fraction=0.5,
         valid_fraction=False,
-        kwargs=kwargs,
     )
 
 
@@ -122,4 +120,27 @@ def test_compute_healpix_weights_passes_arguments(monkeypatch: pytest.MonkeyPatc
         spectral_transform_command=None,
         ellipsoid=None,
         source_description=None,
+    )
+
+
+def test_apply_weight_file_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    weights_path = "no/where"
+    ds = xr.Dataset()
+    fake_apply = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "apply_weight_file", fake_apply)
+
+    ds.gd.apply_weight_file(weights_path)
+
+    # Confirm all the default values are passed through.
+    fake_apply.assert_called_with(
+        ds,
+        weights_path=weights_path,
+        missing_policy="renormalize",
+        grid=None,
+        source_dims=None,
+        source_units="auto",
+        backend="auto",
+        cell_chunks="auto",
+        ellipsoid=None,
+        nest=None,
     )
