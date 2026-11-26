@@ -40,7 +40,7 @@ import xarray as xr
 import grid_doctor as gd
 
 ds = xr.open_mfdataset("path/to/*.nc")
-pyramid = gd.create_healpix_pyramid(ds)
+pyramid = ds.gd.create_healpix_pyramid()
 gd.save_pyramid(pyramid, "/path/to/output", mode="w")
 ```
 
@@ -87,7 +87,7 @@ args = parser.parse_args()
 gd_cli.setup_logging_from_args(args)
 
 ds = xr.open_mfdataset(args.files)
-pyramid = gd.create_healpix_pyramid(ds)
+pyramid = ds.gd.create_healpix_pyramid()
 gd.save_pyramid(
     pyramid,
     f"s3://{args.s3_bucket}/my-dataset",

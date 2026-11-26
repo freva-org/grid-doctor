@@ -33,7 +33,7 @@ With the weights, the data files are converted like structured grids:
 ```python
 ds = xr.open_mfdataset("icon_output_*.nc")
 
-pyramid = gd.create_healpix_pyramid(ds, max_level=level, weights_path=weights_file)
+pyramid = ds.gd.create_healpix_pyramid(max_level=level, weights_path=weights_file)
 
 gd.save_pyramid(
     pyramid,

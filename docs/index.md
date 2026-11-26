@@ -80,7 +80,7 @@ import xarray as xr
 import grid_doctor as gd
 
 ds = xr.open_mfdataset("data/*.nc")
-pyramid = gd.create_healpix_pyramid(ds)  # finest level from the grid resolution
+pyramid = ds.gd.create_healpix_pyramid()  # finest level from the grid resolution
 gd.save_pyramid(pyramid, "/path/to/output", mode="w")
 ```
 

@@ -53,7 +53,7 @@ import xarray as xr
 import grid_doctor as gd
 
 source = xr.open_mfdataset("era5/tas_*.nc", chunks={"time": 24})
-pyramid = gd.create_healpix_pyramid(source, max_level=9)  # lazy
+pyramid = source.gd.create_healpix_pyramid(max_level=9)  # lazy
 
 # 1. Empty stores + plan: tasks of 72 time steps each.
 manifest = gd.init_pyramid_store(pyramid, "/scratch/project/era5", split={"time": 72})
@@ -448,7 +448,7 @@ dimensions:
 
 ```python
 source = xr.open_mfdataset(files, chunks={"time": 24})
-pyramid = gd.create_healpix_pyramid(source.isel(task.isel()), max_level=9)
+pyramid = source.isel(task.isel()).gd.create_healpix_pyramid(max_level=9)
 gd.write_pyramid_task(pyramid, task)
 ```
 
@@ -612,7 +612,7 @@ def build_pyramid(
     ds = xr.open_mfdataset(source, chunks={"time": 24}, parallel=True)
     if region:
         ds = ds.isel(region)
-    return gd.create_healpix_pyramid(ds, max_level=max_level, method="conservative")
+    return ds.gd.create_healpix_pyramid(max_level=max_level, method="conservative")
 
 
 # Not cached: see "Caching" below.

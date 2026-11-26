@@ -67,3 +67,27 @@ def test_regrid_to_healpix_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> 
         cell_chunks="auto",
         ellipsoid=None,
     )
+
+
+def create_healpix_pyramid_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    min_level = 1
+    kwargs = {"arg1": "val1", "arg2": "val2"}
+    ds = xr.Dataset()
+    fake_create = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "regrid_to_healpix", fake_create)
+
+    ds.gd.create_healpix_pyramid(
+        max_level=None,
+        min_level=min_level,
+    )
+
+    # Confirm all the default values are passed through.
+    fake_create.assert_called_with(
+        ds,
+        None,
+        min_level,
+        coarsen_mode="auto",
+        min_valid_fraction=0.5,
+        valid_fraction=False,
+        kwargs=kwargs,
+    )
