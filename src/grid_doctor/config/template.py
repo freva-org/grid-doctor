@@ -21,18 +21,21 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 
 import tomlkit
+import tomlkit.exceptions
 
 from . import (
     SETTINGS,
     _check,
     _clean,
-    _read_file,
+    _settings_from,
     config_files,
     env_var,
+    loaded_files,
     user_config_file,
 )
 
@@ -193,18 +196,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        text = update(path.read_text(encoding="utf-8"), values)
+        try:
+            text = update(path.read_text(encoding="utf-8"), values)
+            data = tomllib.loads(text)
+        except (tomlkit.exceptions.ParseError, tomllib.TOMLDecodeError) as error:
+            print(f"{path} is not valid TOML, left unchanged: {error}", file=sys.stderr)
+            return 1
+        # The settings given with --set are checked already.  Other keys
+        # the file holds stay as they are; problems in them are warnings
+        # (shown at import already if the file was read then).
+        if path.resolve() not in {file.resolve() for file in loaded_files}:
+            _settings_from(data, path, strict=False)
         action = "Updated"
     else:
         text = render(values)
         action = "Wrote"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
-    try:
-        _read_file(path)
-    except ValueError as error:  # an edited file that was broken before stays broken
-        print(f"{action} {path}, but it is not valid: {error}", file=sys.stderr)
-        return 1
     print(f"{action} {path}", file=sys.stderr)
     return 0
 

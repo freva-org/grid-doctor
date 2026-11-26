@@ -236,16 +236,88 @@ class TestSetGetRefresh:
         }
         assert gd.config.loaded_files[-1] == user_file
 
-    def test_invalid_refresh_changes_nothing(
+    def test_refresh_warns_and_skips_invalid_settings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        user_file = _write(tmp_path / "c.toml", 'scratch_dir = 1\nweights_store = "/w"\n')
+        monkeypatch.setenv("GRID_DOCTOR_CONFIG", str(user_file))
+        gd.config.set(scratch_dir="/dropped")
+        with pytest.warns(config.ConfigWarning, match="Invalid 'scratch_dir' in .*c.toml"):
+            gd.config.refresh()
+        assert (gd.config.scratch_dir, gd.config.weights_store) == (None, "/w")
+
+    def test_refresh_with_missing_named_file_changes_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         gd.config.set(scratch_dir="/keep")
-        monkeypatch.setenv(
-            "GRID_DOCTOR_CONFIG", str(_write(tmp_path / "c.toml", "scratch_dir = 1\n"))
-        )
-        with pytest.raises(ValueError):
+        monkeypatch.setenv("GRID_DOCTOR_CONFIG", str(tmp_path / "missing.toml"))
+        with pytest.raises(FileNotFoundError):
             gd.config.refresh()
         assert gd.config.scratch_dir == "/keep"
+
+
+class TestLenientLoading:
+    """At import and in ``refresh()`` config problems warn instead of failing."""
+
+    @pytest.fixture
+    def prefix(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """A fake ``sys.prefix`` without a config file."""
+        monkeypatch.setattr(sys, "prefix", str(tmp_path / "env"))
+        return tmp_path / "env"
+
+    def test_unknown_key_is_skipped_with_a_hint(self, prefix: Path, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.toml", 'weight_store = "/w"\nscratch_dir = "/s"\n')
+        with pytest.warns(config.ConfigWarning, match="did you mean 'weights_store'"):
+            values, read = config._load({"GRID_DOCTOR_CONFIG": str(path)})
+        assert (values, read) == ({"scratch_dir": "/s"}, (path,))
+
+    def test_unknown_key_without_close_match_lists_settings(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.toml", 'new_key = "hy"\n')
+        with pytest.warns(config.ConfigWarning, match=r"'new_key'.*settings are \('ellipsoid'"):
+            assert config._read_file(path, strict=False) == {}
+
+    def test_invalid_value_is_skipped(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.toml", 'ellipsoid = "GRS80"\nweights_store = "/w"\n')
+        with pytest.warns(config.ConfigWarning, match="Invalid 'ellipsoid'"):
+            assert config._read_file(path, strict=False) == {"weights_store": "/w"}
+
+    def test_invalid_toml_skips_the_file(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.toml", "ellipsoid = sphere\n")
+        with pytest.warns(config.ConfigWarning, match="Invalid config file .*c.toml, ignored"):
+            assert config._read_file(path, strict=False) == {}
+
+    def test_invalid_environment_variable_is_skipped(self) -> None:
+        env = {"GRID_DOCTOR_ELLIPSOID": "GRS80", "GRID_DOCTOR_SCRATCH_DIR": "/s"}
+        with pytest.warns(config.ConfigWarning, match="Invalid GRID_DOCTOR_ELLIPSOID"):
+            assert config._read_env(env) == {"scratch_dir": "/s"}
+        with pytest.raises(ValueError, match="Invalid GRID_DOCTOR_ELLIPSOID"):
+            config._read_env(env, strict=True)
+
+    def test_strict_by_default_for_explicit_files(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.toml", 'new_key = "hy"\n')
+        with pytest.raises(ValueError, match="Unknown setting 'new_key'"):
+            config._read_file(path)
+
+    def _import(self, user_file: Path, *flags: str) -> subprocess.CompletedProcess[str]:
+        src = str(Path(gd.__file__).parents[1])
+        env = {**os.environ, "GRID_DOCTOR_CONFIG": str(user_file), "PYTHONPATH": src}
+        script = "import grid_doctor as gd; print(gd.config.scratch_dir)"
+        return subprocess.run(
+            [sys.executable, *flags, "-c", script], env=env, capture_output=True, text=True
+        )
+
+    def test_import_works_with_a_broken_config(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.toml", 'new_key = "hy"\nscratch_dir = "/s"\n')
+        result = self._import(path)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "/s"
+        assert "ConfigWarning: Unknown setting 'new_key'" in result.stderr
+
+    def test_warning_can_be_made_an_error(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.toml", 'new_key = "hy"\n')
+        result = self._import(path, "-W", "error:::grid_doctor.config")
+        assert result.returncode != 0
+        assert "Unknown setting 'new_key'" in result.stderr
 
 
 class TestConfigFiles:
@@ -312,7 +384,7 @@ class TestConfigFiles:
         [
             (
                 'weight_store = "/w"\n',
-                r"Unknown setting\(s\) 'weight_store' in .*bad.toml",
+                r"Unknown setting 'weight_store' in .*bad.toml; did you mean 'weights_store'\?",
             ),
             (
                 'ellipsoid = "GRS80"\n',
@@ -322,7 +394,7 @@ class TestConfigFiles:
                 "scratch_dir = 1\n",
                 r"Invalid 'scratch_dir' in .*bad.toml: expected a string",
             ),
-            ("[weights]\nstore = '/w'\n", r"Unknown setting\(s\) 'weights'"),
+            ("[weights]\nstore = '/w'\n", r"Unknown setting 'weights'"),
             ("ellipsoid = sphere\n", r"Invalid config file .*bad.toml"),
         ],
         ids=["unknown-key", "bad-choice", "not-a-string", "table", "not-toml"],
@@ -452,12 +524,21 @@ class TestTemplate:
             '# my notes\nellipsoid = "WGS84"\n# scratch_dir = "/path"\nscratch_dir = "/scratch/x"\nweights_store = "/w"\n'
         )
 
-    def test_set_reports_a_broken_file(
+    def test_set_keeps_unknown_keys_and_warns(self, tmp_path: Path) -> None:
+        """An unknown key, e.g. from a newer version, does not block an update."""
+        target = _write(tmp_path / "config.toml", 'new_key = "hy"\n')
+        with pytest.warns(config.ConfigWarning, match="Unknown setting 'new_key'"):
+            assert template.main(["-o", str(target), "--set", "scratch_dir=/new"]) == 0
+        assert target.read_text() == 'new_key = "hy"\nscratch_dir = "/new"\n'
+
+    def test_set_leaves_invalid_toml_unchanged(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        target = _write(tmp_path / "config.toml", "weight_store = '/typo'\n")
-        assert template.main(["-o", str(target), "--set", "scratch_dir=/s"]) == 1
-        assert "weight_store" in capsys.readouterr().err
+        text = "scratch_dir = /not-quoted\n"
+        target = _write(tmp_path / "config.toml", text)
+        assert template.main(["-o", str(target), "--set", "ellipsoid=WGS84"]) == 1
+        assert "not valid TOML, left unchanged" in capsys.readouterr().err
+        assert target.read_text() == text
 
     def test_set_quotes_values(self, tmp_path: Path) -> None:
         assert (

@@ -22,7 +22,11 @@ with gd.config.set(scratch_dir="/tmp/gd"):  # restored after the block
 ```
 
 Files and environment variables are read when ``grid_doctor.config`` is
-imported, and again by ``refresh()``.  ``python -m grid_doctor.config.template``
+imported, and again by ``refresh()``.  A problem found then (an unknown or
+invalid setting, a file that is not valid TOML) never stops grid-doctor
+from loading: it is reported as a
+[`ConfigWarning`][grid_doctor.config.ConfigWarning] and the setting (or
+file) is ignored.  A file passed to ``set()`` is checked strictly instead.  ``python -m grid_doctor.config.template``
 writes a commented config file to start from.
 
 Settings are process-wide: a ``with gd.config.set(...)`` block also affects
@@ -31,9 +35,11 @@ other threads while it is open.
 
 from __future__ import annotations
 
+import difflib
 import os
 import sys
 import tomllib
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType, TracebackType
@@ -80,6 +86,20 @@ fine grids), used when the ``workdir=`` argument is not given.  Each run
 gets its own subdirectory, removed afterwards.  ``None`` uses the system's
 temporary directory (``$TMPDIR``, usually ``/tmp``).  Environment variable:
 ``GRID_DOCTOR_SCRATCH_DIR``."""
+
+
+class ConfigWarning(UserWarning):
+    """An unknown or invalid setting in a config file or variable; it is ignored.
+
+    Issued while reading the default config files and environment variables,
+    at import and by ``refresh()``.  To fail instead, turn warnings from
+    this module into errors when starting Python, e.g. in a batch job:
+    ``python -W "error:::grid_doctor.config" script.py`` (or
+    ``PYTHONWARNINGS="error:::grid_doctor.config"``).  The filter names the
+    module rather than this class: Python reads ``-W`` before grid-doctor is
+    imported, and ignores a filter whose class it cannot import yet.
+    """
+
 
 SETTINGS: tuple[str, ...] = (
     "ellipsoid",
@@ -172,15 +192,33 @@ def _clean(value: object) -> object:
     return os.path.expanduser(os.path.expandvars(text)) if text else None
 
 
-def _read_env(environ: Mapping[str, str]) -> dict[str, Any]:
-    """Return the settings given in *environ*, validated and stripped.
+def _problem(strict: bool, message: str) -> None:
+    """Raise *message* as ``ValueError`` if *strict*, else warn with ``ConfigWarning``."""
+    if strict:
+        raise ValueError(message)
+    warnings.warn(message, ConfigWarning, stacklevel=3)
+
+
+def _unknown(name: str, source: object) -> str:
+    """Return the message for the unknown setting *name* in *source*."""
+    hint = difflib.get_close_matches(name, SETTINGS, n=1)
+    suggestion = f"did you mean {hint[0]!r}?" if hint else f"settings are {SETTINGS}"
+    return f"Unknown setting {name!r} in {source}; {suggestion}"
+
+
+def _read_env(environ: Mapping[str, str], *, strict: bool = False) -> dict[str, Any]:
+    """Return the valid settings given in *environ*, cleaned.
 
     An empty variable unsets an optional setting (e.g. ``weights_store``).
+    An invalid value is reported (see ``strict``) and skipped.
 
-    Raises
-    ------
-    ValueError
-        If a variable holds an invalid value; the message names the variable.
+    Parameters
+    ----------
+    environ:
+        Environment variables.
+    strict:
+        Raise ``ValueError`` for an invalid value instead of warning with
+        ``ConfigWarning``.
     """
     values: dict[str, Any] = {}
     for name in SETTINGS:
@@ -191,52 +229,70 @@ def _read_env(environ: Mapping[str, str]) -> dict[str, Any]:
         try:
             _check(name, value)
         except ValueError as error:
-            ValueError(f"Invalid {var}: {error}")
+            _problem(strict, f"Invalid {var}: {error}")
+            continue
         values[name] = value
     return values
 
 
-def _read_file(path: Path) -> dict[str, Any]:
-    """Return the settings in the TOML file *path*, validated.
+def _settings_from(data: Mapping[str, Any], source: object, *, strict: bool) -> dict[str, Any]:
+    """Return the valid settings in the parsed config *data* from *source*.
+
+    An unknown key or invalid value is reported (see ``strict``) and
+    skipped; the other settings still apply.
+    """
+    values: dict[str, Any] = {}
+    for name, raw in data.items():
+        if name not in SETTINGS:
+            _problem(strict, _unknown(name, source))
+            continue
+        if not isinstance(raw, str):
+            _problem(strict, f"Invalid {name!r} in {source}: expected a string, got {raw!r}")
+            continue
+        value = _clean(raw)
+        try:
+            _check(name, value)
+        except ValueError as error:
+            _problem(strict, f"Invalid {name!r} in {source}: {error}")
+            continue
+        values[name] = value
+    return values
+
+
+def _read_file(path: Path, *, strict: bool = True) -> dict[str, Any]:
+    """Return the valid settings in the TOML file *path*.
 
     An empty string unsets an optional setting set by a file read before.
 
-    Raises
-    ------
-    ValueError
-        If the file is not valid TOML, has an unknown key or an invalid
-        value; the message names the file.
+    Parameters
+    ----------
+    path:
+        Config file.
+    strict:
+        Raise ``ValueError`` (naming the file) if it is not valid TOML, has
+        an unknown key or an invalid value.  Otherwise each problem is a
+        ``ConfigWarning``: an unknown or invalid setting is skipped, a file
+        that is not valid TOML is skipped entirely.
     """
     try:
         with path.open("rb") as stream:
             data = tomllib.load(stream)
     except tomllib.TOMLDecodeError as error:
-        raise ValueError(f"Invalid config file {path}: {error}") from None
-    unknown = sorted(data.keys() - frozenset(SETTINGS))  # "set" is this module's own
-    if unknown:
-        raise ValueError(f"Unknown setting(s) {', '.join(map(repr, unknown))} in {path}; settings are {SETTINGS}")
-    values: dict[str, Any] = {}
-    for name, raw in data.items():
-        if not isinstance(raw, str):
-            raise ValueError(f"Invalid {name!r} in {path}: expected a string, got {raw!r}")
-        value = _clean(raw)
-        try:
-            _check(name, value)
-        except ValueError as error:
-            raise ValueError(f"Invalid {name!r} in {path}: {error}") from None
-        values[name] = value
-    return values
+        _problem(strict, f"Invalid config file {path}, ignored: {error}")
+        return {}
+    return _settings_from(data, path, strict=strict)
 
 
 def _load(environ: Mapping[str, str]) -> tuple[dict[str, Any], tuple[Path, ...]]:
     """Return the settings from the config files and *environ*, and the files read.
 
+    Problems in the files or variables are ``ConfigWarning``s; the setting
+    concerned is ignored.
+
     Raises
     ------
     FileNotFoundError
         If ``GRID_DOCTOR_CONFIG`` names a file that does not exist.
-    ValueError
-        If a file or a variable holds an invalid setting.
     """
     values: dict[str, Any] = {}
     read: list[Path] = []
@@ -246,9 +302,9 @@ def _load(environ: Mapping[str, str]) -> tuple[dict[str, Any], tuple[Path, ...]]
             if path == files[-1] and environ.get(CONFIG_ENV_VAR, "").strip():
                 raise FileNotFoundError(f"{CONFIG_ENV_VAR} names {path}, which does not exist")
             continue
-        values.update(_read_file(path))
+        values.update(_read_file(path, strict=False))
         read.append(path)
-    values.update(_read_env(environ))
+    values.update(_read_env(environ, strict=False))
     return values, tuple(read)
 
 
@@ -352,13 +408,14 @@ def refresh() -> None:
     the same as at import: changes made at runtime and files loaded with
     ``set()`` are dropped.  Useful after editing a config file.
 
+    An unknown or invalid setting is a ``ConfigWarning`` and ignored, as at
+    import.
+
     Raises
     ------
     FileNotFoundError
-        If ``GRID_DOCTOR_CONFIG`` names a file that does not exist.
-    ValueError
-        If a file or a variable holds an invalid setting; no setting is
-        changed then.
+        If ``GRID_DOCTOR_CONFIG`` names a file that does not exist; no
+        setting is changed then.
     """
     global loaded_files
     values, files = _load(os.environ)
