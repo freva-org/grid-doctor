@@ -123,5 +123,5 @@ directory that is kept.
     options:
       show_root_full_path: true
       members_order: source
-      members: [ellipsoid, weights_store, esmf_regrid_weightgen, scratch_dir, set, get, refresh, loaded_files, user_config_file, environment_config_file, config_files, env_var, SETTINGS, CONFIG_ENV_VAR]
+      members: [ellipsoid, weights_store, esmf_regrid_weightgen, scratch_dir, set, get, refresh, loaded_files, user_config_file, environment_config_file, config_files, env_var, SETTINGS, CONFIG_ENV_VAR, ConfigWarning]
       filters: ["!^_"]
