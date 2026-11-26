@@ -38,6 +38,7 @@ _ATTRS: dict[str, str] = {
     "coarsen_healpix": ".pyramid",
     "compute_healpix_weights": ".remap",
     "create_healpix_pyramid": ".pyramid",
+    "DatasetAccessor": ".xarray_accessor",
     "get_latlon_resolution": "._geometry.coords",
     "get_s3_options": ".io",
     "init_pyramid_store": ".io",
