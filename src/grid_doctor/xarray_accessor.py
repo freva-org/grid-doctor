@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .weights import SourceDescription
 
 from .pyramid import create_healpix_pyramid
-from .remap import compute_healpix_weights, regrid_to_healpix
+from .remap import apply_weight_file, compute_healpix_weights, regrid_to_healpix
 from .types import (
     ApplyBackend,
     CoarsenMode,
@@ -260,8 +260,6 @@ class DatasetAccessor:
 
             Parameters
         ----------
-        ds:
-            Source dataset or a source path.
         level:
             HEALPix refinement level.  ``nside = 2**level``.
         method:
@@ -333,6 +331,109 @@ class DatasetAccessor:
             spectral_transform_command=spectral_transform_command,
             ellipsoid=ellipsoid,
             source_description=source_description,
+        )
+
+    def apply_weight_file(
+        self,
+        weights_path: str | Path,
+        *,
+        missing_policy: MissingPolicy = "renormalize",
+        grid: xr.Dataset | None = None,
+        source_dims: tuple[str, ...] | None = None,
+        source_units: SourceUnits = "auto",
+        backend: ApplyBackend = "auto",
+        cell_chunks: int | Literal["auto"] | None = "auto",
+        ellipsoid: Ellipsoid | None = None,
+        nest: bool | None = None,
+    ) -> xr.Dataset:
+        """Apply a previously generated ESMF weight file.
+
+            Uses the batched engine in
+        `grid_doctor.remap._sparse` which replaces per-slice
+        ``vectorize=True`` with a single batched sparse matmul for a
+        typical 10–50× speedup.
+
+        Parameters
+        ----------
+        weights_path:
+            Path to the NetCDF weight file.
+        missing_policy:
+            Strategy for handling NaN (missing) values in the source
+            grid during weight application.
+
+            ``"renormalize"`` (default)
+                Source cells that are NaN are excluded from the
+                weighted sum and the weights of the remaining valid
+                source cells are rescaled so they sum to 1.  A target
+                cell receives a valid value as long as **at least one**
+                contributing source cell is valid.  This is the right
+                choice for most climate fields: for instance, a
+                HEALPix cell on a coastline that partly overlaps land
+                (NaN) and partly ocean still receives a valid SST from
+                the ocean fraction.
+
+            ``"propagate"``
+                If **any** contributing source cell is NaN, the target
+                cell is set to NaN: no partial averages.  Use this
+                when completeness of the source coverage matters more
+                than spatial coverage of the output, for example when
+                computing area-integrated flux budgets where a partial
+                average would bias the integral.  Note that this is
+                very aggressive: a single NaN source cell at the edge
+                of a target cell's footprint is enough to discard it.
+                For conservative remapping where a HEALPix cell can
+                overlap dozens of source cells, large portions of the
+                output along coastlines, swath edges, and orbit gaps
+                will be NaN.
+        grid:
+            Optional grid dataset with source geometry.
+        source_dims:
+            Optional explicit source dimensions.
+        source_units:
+            Unit convention for geometry-based inference.
+        backend:
+            Application backend (``"auto"``, ``"scipy"``, ``"numba"``).
+
+        cell_chunks:
+            Chunk size of the output along ``cell`` for dask-backed input.
+            Each output chunk is computed from its own slice of weight-matrix
+            rows, so no task holds the whole HEALPix field.  ``"auto"`` uses
+            ``DEFAULT_CELL_CHUNK`` cells (rounded to a multiple of 4), ``None``
+            produces a single chunk.  NumPy-backed input is always computed
+            in one piece.
+        ellipsoid:
+            Ellipsoid the weights must have been generated on.  ``None``
+            (default) takes the one recorded in the weight file (a sphere
+            for files that record none); the HEALPix cell centres are
+            computed on it.
+        nest:
+            HEALPix order of the output: nested when ``True``, ring when
+            ``False``. ``None`` (default) keeps the order of the weight file.
+            Stored weight files are nested; their rows are renumbered for
+            ring output, so one file serves both orders.
+
+        Returns
+        -------
+        xarray.Dataset
+            Dataset on the HEALPix target grid with a ``cell`` dimension.
+
+        Examples
+        --------
+        ```python
+        ds_hp = ds_icon.gd.apply_weight_file("icon_to_healpix_d8.nc")
+        ```
+        """
+        return apply_weight_file(
+            self._ds,
+            weights_path=weights_path,
+            missing_policy=missing_policy,
+            grid=grid,
+            source_dims=source_dims,
+            source_units=source_units,
+            backend=backend,
+            cell_chunks=cell_chunks,
+            ellipsoid=ellipsoid,
+            nest=nest,
         )
 
 
