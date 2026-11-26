@@ -128,7 +128,7 @@ class DatasetAccessor:
         pathlib.Path
             Path to the generated NetCDF weight file.
         """
-        self._ds = regrid_to_healpix(
+        return regrid_to_healpix(
             self._ds,
             level,
             nest=nest,
@@ -150,8 +150,6 @@ class DatasetAccessor:
             cell_chunks=cell_chunks,
             ellipsoid=ellipsoid,
         )
-
-        return self._ds
 
 
 @xr.register_datatree_accessor(ACCESSOR_NAME)

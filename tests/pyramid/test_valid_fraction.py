@@ -15,7 +15,6 @@ from grid_doctor.pyramid._build import (
     coarsen_healpix,
     create_healpix_pyramid,
 )
-from grid_doctor.xarray_accessor import DatasetAccessor
 
 from ..helpers import with_healpix_metadata
 
@@ -48,7 +47,7 @@ def _pyramid(
     monkeypatch: pytest.MonkeyPatch, chunked: bool = True, **kwargs: Any
 ) -> dict[int, xr.Dataset]:
     finest = _finest(chunked)
-    monkeypatch.setattr(DatasetAccessor, "regrid_to_healpix", lambda self, level, **kw: finest)
+    monkeypatch.setattr(build_module, "regrid_to_healpix", lambda ds, level, **kw: finest)
     return create_healpix_pyramid(finest, max_level=LEVEL, min_level=0, **kwargs)
 
 

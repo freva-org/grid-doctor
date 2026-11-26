@@ -27,7 +27,6 @@ from grid_doctor._geometry.healpix import (
 from grid_doctor.metadata import ELLIPSOID_ATTR, HealpixGrid, HealpixMetadata
 from grid_doctor.pyramid._levels import assemble_coarse_level
 from grid_doctor.types import Ellipsoid
-from grid_doctor.xarray_accessor import DatasetAccessor
 
 LEVEL = 2
 NPIX = 12 * 4**LEVEL
@@ -103,7 +102,7 @@ class TestRecordedEllipsoid:
         self, ellipsoid: Ellipsoid, tmp_path: Path, regular_ds: xr.Dataset
     ) -> None:
         weights = _weight_file(tmp_path / "weights.nc", regular_ds, ellipsoid)
-        result = regular_ds.gd.regrid_to_healpix(LEVEL, method="nearest", weights_path=weights)
+        result = gd.regrid_to_healpix(regular_ds, LEVEL, method="nearest", weights_path=weights)
         assert _recorded(result) == ellipsoid
 
     def test_coarsening_keeps_the_ellipsoid(self, ellipsoid: Ellipsoid) -> None:

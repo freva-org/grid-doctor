@@ -10,6 +10,7 @@ import xarray as xr
 from .._geometry.coords import get_latlon_resolution
 from .._geometry.healpix import resolution_to_healpix_level
 from ..metadata import HealpixMetadata
+from ..remap import regrid_to_healpix
 from ..types import (
     CoarsenMode,
     RegridOptions,
@@ -199,7 +200,7 @@ def create_healpix_pyramid(
         raise ValueError("valid_fraction requires nested ordering (nest=True).")
 
     pyramid: dict[int, xr.Dataset] = {}
-    finest = ds.gd.regrid_to_healpix(max_level, **kwargs)
+    finest = regrid_to_healpix(ds, max_level, **kwargs)
     pyramid[max_level] = finest
 
     if is_nested:
@@ -219,5 +220,5 @@ def create_healpix_pyramid(
         return pyramid
 
     for level in range(max_level - 1, min_level - 1, -1):
-        pyramid[level] = ds.gd.regrid_to_healpix(level, **kwargs)
+        pyramid[level] = regrid_to_healpix(ds, level, **kwargs)
     return pyramid
