@@ -53,8 +53,8 @@ touches and return a small, loaded dataset:
 ```python
 import grid_doctor as gd
 
-berlin = gd.select_bbox(ds, lon=(13.1, 13.8), lat=(52.3, 52.7))
-station = gd.select_cone(ds, lon=13.41, lat=52.52, radius=0.05)  # degrees
+berlin = ds.gd.select_bbox(lon=(13.1, 13.8), lat=(52.3, 52.7))
+station = ds.gd.select_cone(lon=13.41, lat=52.52, radius=0.05)  # degrees
 ```
 
 The result is a compact subset: its `cell` coordinate holds the global
@@ -92,7 +92,7 @@ them:
 import numpy as np
 
 part = ds.isel(cell=slice(start, stop))
-part = gd.attach_cell_coords(part, np.arange(start, stop), level=16)
+part = part.gd.attach_cell_coords(np.arange(start, stop), level=16)
 ```
 
 ## Comparing levels and datasets
@@ -104,7 +104,7 @@ parents there, no interpolation needed:
 
 ```python
 parents = np.unique(berlin["cell"].values >> (2 * (16 - 9)))
-era5_berlin = gd.select_cells(era5_level9, parents)
+era5_berlin = era5_level9.gd.select_cells(parents)
 ```
 
 Datasets at the same level and with the same definition (sphere or

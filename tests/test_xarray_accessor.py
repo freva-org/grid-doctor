@@ -13,6 +13,7 @@ import xarray as xr
 
 import grid_doctor as gd
 from grid_doctor import xarray_accessor
+from grid_doctor.select import _DEFAULT_QUERY_DELTA
 from grid_doctor.xarray_accessor import DatasetAccessor, DataTreeAccessor
 
 
@@ -144,3 +145,63 @@ def test_apply_weight_file_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> 
         ellipsoid=None,
         nest=None,
     )
+
+
+def test_select_cells_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset()
+    fake_select = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "select_cells", fake_select)
+    cells = [
+        42,
+        137,
+    ]
+
+    ds.gd.select_cells(cells)
+
+    # Confirm all the default values are passed through.
+    fake_select.assert_called_with(ds, cells, level=None, load=True)
+
+
+def test_select_bbox_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset()
+    fake_select = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "select_bbox", fake_select)
+    lon = (8.5, 11.3)
+    lat = (52.8, 54.2)
+
+    ds.gd.select_bbox(lon=lon, lat=lat)
+
+    # Confirm all the default values are passed through.
+    fake_select.assert_called_with(ds, lon=lon, lat=lat, level=None, query_delta=_DEFAULT_QUERY_DELTA, load=True)
+
+
+def test_select_cone_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset()
+    fake_select = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "select_cone", fake_select)
+    lon = 10.0
+    lat = 53.5
+    radius = 0.3
+
+    ds.gd.select_cone(lon=lon, lat=lat, radius=radius)
+
+    # Confirm all the default values are passed through.
+    fake_select.assert_called_with(
+        ds, lon=lon, lat=lat, radius=radius, level=None, query_delta=_DEFAULT_QUERY_DELTA, load=True
+    )
+
+
+def test_attach_cell_coords_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset()
+    fake_attach = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "attach_cell_coords", fake_attach)
+    cells = [
+        42,
+        137,
+    ]
+    level = 7
+
+    ds.gd.attach_cell_coords(cells, level=level)
+
+    # Confirm all the default values are passed through.
+    fake_attach.assert_called_with(ds, cells, level=level, attrs=None)

@@ -11,6 +11,7 @@ reuses one and applies it.  Two methods are supported:
 
 from __future__ import annotations
 
+from collections.abc import Hashable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Unpack
 
@@ -21,10 +22,12 @@ if TYPE_CHECKING:
 
 from .pyramid import create_healpix_pyramid
 from .remap import apply_weight_file, compute_healpix_weights, regrid_to_healpix
+from .select import _DEFAULT_QUERY_DELTA, attach_cell_coords, select_bbox, select_cells, select_cone
 from .types import (
     ApplyBackend,
     CoarsenMode,
     Ellipsoid,
+    Int64Array,
     MissingPolicy,
     RegridOptions,
     RemapMethod,
@@ -435,6 +438,166 @@ class DatasetAccessor:
             ellipsoid=ellipsoid,
             nest=nest,
         )
+
+    def select_cells(
+        self,
+        cells: Int64Array | list[int],
+        *,
+        level: int | None = None,
+        load: bool = True,
+    ) -> xr.Dataset:
+        """Extract the given HEALPix cells from the dataset.
+
+            Works on dense datasets (positional index equals cell ID, with or
+        without materialised coordinates) and on compact subsets (``cell``
+        coordinate holds actual IDs).  Contiguous ID runs are read as
+        contiguous slices, so a spatially compact selection touches only
+        the chunks it needs.
+
+        Parameters
+        ----------
+        cells:
+            Global HEALPix cell IDs to extract (any order; duplicates are
+            dropped).
+        level:
+            HEALPix level override when the dataset has no HEALPix grid
+            mapping.
+        load:
+            Load the selected data into memory (default).  The selection is
+            small by construction; that is the point of selecting.
+
+        Returns
+        -------
+        xarray.Dataset
+            Compact subset: ``cell`` coordinate holds the requested IDs,
+            cell-centre ``latitude``/``longitude`` are attached, and the
+            subset is marked sparse.
+        """
+        return select_cells(
+            self._ds,
+            cells,
+            level=level,
+            load=load,
+        )
+
+    def select_bbox(
+        self,
+        *,
+        lon: tuple[float, float],
+        lat: tuple[float, float],
+        level: int | None = None,
+        query_delta: int = _DEFAULT_QUERY_DELTA,
+        load: bool = True,
+    ) -> xr.Dataset:
+        """Extract all cells covering a geographic bounding box.
+
+            The box is rasterised at the coarse level ``level - query_delta``;
+        every coarse parent expands to one contiguous fine-level range of
+        ``4**query_delta`` cells.  The result therefore *covers* the box
+        (cells straddling the edge are included) with read granularity set
+        by *query_delta*; align it with the store's chunk exponent for
+        reads with zero waste.
+
+        Parameters
+        ----------
+        lon:
+            ``(west, east)`` longitude bounds in degrees.
+        lat:
+            ``(south, north)`` latitude bounds in degrees.
+        level:
+            HEALPix level override.
+        query_delta:
+            Level offset for the coverage query.  Larger values mean fewer,
+            larger contiguous reads; smaller values follow the box outline
+            more tightly.
+        load:
+            Load the selection into memory (default).
+
+        Returns
+        -------
+        xarray.Dataset
+            Compact subset covering the box.
+        """
+        return select_bbox(
+            self._ds,
+            lon=lon,
+            lat=lat,
+            level=level,
+            query_delta=query_delta,
+            load=load,
+        )
+
+    def select_cone(
+        self,
+        *,
+        lon: float,
+        lat: float,
+        radius: float,
+        level: int | None = None,
+        query_delta: int = _DEFAULT_QUERY_DELTA,
+        load: bool = True,
+    ) -> xr.Dataset:
+        """Extract all cells within *radius* degrees of a centre point.
+
+            Parameters
+        ----------
+        lon, lat:
+            Centre coordinates in degrees.
+        radius:
+            Angular radius in degrees.
+        level:
+            HEALPix level override.
+        query_delta:
+            Level offset for the coverage query.
+        load:
+            Load the selection into memory (default).
+
+        Returns
+        -------
+        xarray.Dataset
+            Compact subset covering the cone.
+        """
+        return select_cone(
+            self._ds,
+            lon=lon,
+            lat=lat,
+            radius=radius,
+            level=level,
+            query_delta=query_delta,
+            load=load,
+        )
+
+    def attach_cell_coords(
+        self,
+        cells: Int64Array,
+        *,
+        level: int,
+        attrs: Mapping[Hashable, object] | None = None,
+    ) -> xr.Dataset:
+        """Attach computed cell coordinates to a compact subset.
+
+            HEALPix coordinates are a pure function of the cell index; stores
+        written with ``write_coords=False`` carry none, and this function
+        reconstructs them for exactly the cells at hand, on the ellipsoid
+        recorded in *ds* (the configured one if *ds* has no HEALPix metadata).
+
+        Parameters
+        ----------
+        cells:
+            Global HEALPix cell IDs, one per position along ``cell``.
+        level:
+            HEALPix level of the IDs.
+        attrs:
+            Optional attribute mapping to merge (e.g. the source store's
+            attributes).
+
+        Returns
+        -------
+        xarray.Dataset
+            Subset with ``cell``, ``latitude``, ``longitude``, and ``crs``
+            coordinates and grid-doctor metadata, marked sparse.
+        """
+        return attach_cell_coords(self._ds, cells, level=level, attrs=attrs)
 
 
 @xr.register_datatree_accessor(ACCESSOR_NAME)

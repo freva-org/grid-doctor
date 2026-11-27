@@ -167,7 +167,7 @@ which read only the chunks the box touches:
 ```python
 import grid_doctor as gd
 
-alps = gd.select_bbox(ds9, lon=(5.0, 16.0), lat=(43.0, 48.5))
+alps = ds9.gd.select_bbox(lon=(5.0, 16.0), lat=(43.0, 48.5))
 alps["tas"].mean("cell", skipna=True)                # Alpine-box mean
 ```
 
@@ -177,7 +177,7 @@ interpolation: select the same cells from both.
 
 ```python
 era5 = xr.open_zarr("s3://my-bucket/era5.zarr/level_9.zarr", chunks=None)
-era5_alps = gd.select_cells(era5, alps["cell"].values)
+era5_alps = era5.gd.select_cells(alps["cell"].values)
 bias = alps["tas"] - era5_alps["t2m"]                # cell by cell, exact
 ```
 

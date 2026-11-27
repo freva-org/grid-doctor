@@ -261,7 +261,7 @@ The region selectors keep all variables with a `cell` dimension, so the
 fractions are selected together with the data:
 
 ```python
-north_sea = gd.select_bbox(ds, lon=(-4.0, 9.0), lat=(51.0, 61.0))
+north_sea = ds.gd.select_bbox(lon=(-4.0, 9.0), lat=(51.0, 61.0))
 regional_sst = weighted_mean(north_sea, "sst")
 ```
 
