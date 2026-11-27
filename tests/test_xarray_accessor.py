@@ -13,6 +13,7 @@ import xarray as xr
 
 import grid_doctor as gd
 from grid_doctor import xarray_accessor
+from grid_doctor.select import _DEFAULT_QUERY_DELTA
 from grid_doctor.xarray_accessor import DatasetAccessor, DataTreeAccessor
 
 
@@ -171,7 +172,7 @@ def test_select_bbox_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     ds.gd.select_bbox(lon=lon, lat=lat)
 
     # Confirm all the default values are passed through.
-    fake_select.assert_called_with(ds, lon=lon, lat=lat, level=None, query_delta=8, load=True)
+    fake_select.assert_called_with(ds, lon=lon, lat=lat, level=None, query_delta=_DEFAULT_QUERY_DELTA, load=True)
 
 
 def test_select_cone_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,7 +186,9 @@ def test_select_cone_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     ds.gd.select_cone(lon=lon, lat=lat, radius=radius)
 
     # Confirm all the default values are passed through.
-    fake_select.assert_called_with(ds, lon=lon, lat=lat, radius=radius, level=None, query_delta=8, load=True)
+    fake_select.assert_called_with(
+        ds, lon=lon, lat=lat, radius=radius, level=None, query_delta=_DEFAULT_QUERY_DELTA, load=True
+    )
 
 
 def test_attach_cell_coords_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
