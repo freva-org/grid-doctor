@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
 import pytest
 import xarray as xr
-
 
 import grid_doctor as gd
 from grid_doctor import xarray_accessor
 from grid_doctor.select import _DEFAULT_QUERY_DELTA
 from grid_doctor.xarray_accessor import DatasetAccessor, DataTreeAccessor
+
+from .helpers import _weight_file, with_healpix_metadata
 
 
 def test_dataset_accessor_is_registered() -> None:
@@ -205,3 +208,54 @@ def test_attach_cell_coords_passes_arguments(monkeypatch: pytest.MonkeyPatch) ->
 
     # Confirm all the default values are passed through.
     fake_attach.assert_called_with(ds, cells, level=level, attrs=None)
+
+
+def test_get_latlon_resolution_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset()
+    fake_get = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "get_latlon_resolution", fake_get)
+
+    ds.gd.get_latlon_resolution()
+
+    # Confirm all the default values are passed through.
+    fake_get.assert_called_with(ds)
+
+
+@pytest.mark.parametrize("chunked", [True, False])
+def test_save_at_level(tmp_path, chunked):
+
+    def _create_dataset(level: int, chunked: bool) -> xr.Dataset:
+        ds = with_healpix_metadata(
+            xr.Dataset(
+                {"t": (("cell", "time"), np.random.randn(12 * (4**level), 100))},
+                coords={
+                    "cell": np.arange(12 * (4**level), dtype=np.int64),
+                    "time": np.arange(100, dtype=np.int64),
+                },
+            ),
+            level,
+        )
+        if chunked:
+            return ds.chunk({"time": 5})
+        return ds
+
+    level = 7
+    ds = _create_dataset(level, chunked)
+    kwargs = {
+        "mode": "w",
+    }
+
+    ds.gd.save_at_level(path=str(tmp_path), **kwargs)
+
+    out_path = tmp_path / "level_7.zarr"
+    assert os.path.isdir(str(out_path))
+
+    ds0 = xr.open_zarr(str(out_path))
+    xr.testing.assert_equal(ds0, ds)
+
+
+def test_save_at_level_no_metadata_raises(tmp_path):
+    ds = xr.Dataset()
+
+    with pytest.raises(ValueError, match="does not have required metadata"):
+        ds.gd.save_at_level(path="some/where")

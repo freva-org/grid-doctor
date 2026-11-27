@@ -13,13 +13,16 @@ from __future__ import annotations
 
 from collections.abc import Hashable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Unpack
+from typing import TYPE_CHECKING, Any, Literal, Unpack
 
 import xarray as xr
 
 if TYPE_CHECKING:
     from .weights import SourceDescription
 
+from ._geometry.coords import get_latlon_resolution
+from .io import save_pyramid
+from .metadata import HealpixMetadata, has_healpix_metadata
 from .pyramid import create_healpix_pyramid
 from .remap import apply_weight_file, compute_healpix_weights, regrid_to_healpix
 from .select import _DEFAULT_QUERY_DELTA, attach_cell_coords, select_bbox, select_cells, select_cone
@@ -598,6 +601,41 @@ class DatasetAccessor:
             coordinates and grid-doctor metadata, marked sparse.
         """
         return attach_cell_coords(self._ds, cells, level=level, attrs=attrs)
+
+    def get_latlon_resolution(self) -> float:
+        """Estimate the horizontal resolution of *ds* in degrees.
+
+        Returns
+        -------
+        float
+            Approximate grid spacing in degrees.
+
+        Examples
+        --------
+        ```python
+        resolution = get_latlon_resolution(ds)
+        level = resolution_to_healpix_level(resolution)
+        ```
+        """
+        return get_latlon_resolution(self._ds)
+
+    def save_at_level(self, path: str, **kwargs: Any) -> None:
+        """Save the dataset at the level it is.
+
+        Requires the dataset to be in healpix and have HealpixMetadata.
+
+        Parameters
+        ----------
+        path:
+            Target prefix.  An ``"s3://bucket/pyramid"`` URL writes to S3; any
+            other value is treated as a local directory path.
+        kwargs:
+            Other arguments to be passed to [`save_pyramid`][grid_doctor.save_pyramid].
+        """
+        if not has_healpix_metadata(self._ds):
+            raise ValueError("dataset does not have required metadata for save_at_level.")
+        level = HealpixMetadata.from_dataset(self._ds).grid.level
+        save_pyramid({level: self._ds}, path, **kwargs)
 
 
 @xr.register_datatree_accessor(ACCESSOR_NAME)
