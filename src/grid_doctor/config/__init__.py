@@ -136,7 +136,7 @@ def user_config_file() -> Path:
     """
     user_default_config = os.path.join(user_config_dir("grid-doctor", appauthor=False), "config.toml")
     user_env_config = os.environ.get(env_var("config"), "").strip()
-    return Path(user_env_config or user_default_config)
+    return Path(user_env_config or user_default_config).expanduser().absolute()
 
 
 def environment_config_file() -> Path:
@@ -169,7 +169,7 @@ def config_files(environ: Mapping[str, str] | None = None) -> tuple[Path, ...]:
     if user is None:
         files.append(user_config_file())
     elif user.strip():
-        files.append(Path(user.strip()).expanduser())
+        files.append(Path(user.strip()).expanduser().absolute())
     return tuple(files)
 
 
