@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 from .pyramid import create_healpix_pyramid
 from .remap import apply_weight_file, compute_healpix_weights, regrid_to_healpix
-from .select import _DEFAULT_QUERY_DELTA, select_bbox, select_cells
+from .select import _DEFAULT_QUERY_DELTA, select_bbox, select_cells, select_cone
 from .types import (
     ApplyBackend,
     CoarsenMode,
@@ -521,6 +521,48 @@ class DatasetAccessor:
             self._ds,
             lon=lon,
             lat=lat,
+            level=level,
+            query_delta=query_delta,
+            load=load,
+        )
+
+    def select_cone(
+        self,
+        *,
+        lon: float,
+        lat: float,
+        radius: float,
+        level: int | None = None,
+        query_delta: int = _DEFAULT_QUERY_DELTA,
+        load: bool = True,
+    ) -> xr.Dataset:
+        """Extract all cells within *radius* degrees of a centre point.
+
+            Parameters
+        ----------
+        ds:
+            HEALPix dataset (see [`select_cells`][grid_doctor.select_cells]).
+        lon, lat:
+            Centre coordinates in degrees.
+        radius:
+            Angular radius in degrees.
+        level:
+            HEALPix level override.
+        query_delta:
+            Level offset for the coverage query.
+        load:
+            Load the selection into memory (default).
+
+        Returns
+        -------
+        xarray.Dataset
+            Compact subset covering the cone.
+        """
+        return select_cone(
+            self._ds,
+            lon=lon,
+            lat=lat,
+            radius=radius,
             level=level,
             query_delta=query_delta,
             load=load,

@@ -168,7 +168,21 @@ def test_select_bbox_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     lon = (8.5, 11.3)
     lat = (52.8, 54.2)
 
-    ds.gd.select_bbox(lon=lon,lat=lat)
+    ds.gd.select_bbox(lon=lon, lat=lat)
 
     # Confirm all the default values are passed through.
     fake_select.assert_called_with(ds, lon=lon, lat=lat, level=None, query_delta=8, load=True)
+
+
+def test_select_cone_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset()
+    fake_select = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "select_cone", fake_select)
+    lon = 10.0
+    lat = 53.5
+    radius = 0.3
+
+    ds.gd.select_cone(lon=lon, lat=lat, radius=radius)
+
+    # Confirm all the default values are passed through.
+    fake_select.assert_called_with(ds, lon=lon, lat=lat, radius=radius, level=None, query_delta=8, load=True)

@@ -54,7 +54,7 @@ touches and return a small, loaded dataset:
 import grid_doctor as gd
 
 berlin = ds.gd.select_bbox(lon=(13.1, 13.8), lat=(52.3, 52.7))
-station = gd.select_cone(ds, lon=13.41, lat=52.52, radius=0.05)  # degrees
+station = ds.gd.select_cone(lon=13.41, lat=52.52, radius=0.05)  # degrees
 ```
 
 The result is a compact subset: its `cell` coordinate holds the global
