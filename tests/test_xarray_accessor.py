@@ -159,3 +159,16 @@ def test_select_cells_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Confirm all the default values are passed through.
     fake_select.assert_called_with(ds, cells, level=None, load=True)
+
+
+def test_select_bbox_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset()
+    fake_select = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "select_bbox", fake_select)
+    lon = (8.5, 11.3)
+    lat = (52.8, 54.2)
+
+    ds.gd.select_bbox(lon=lon,lat=lat)
+
+    # Confirm all the default values are passed through.
+    fake_select.assert_called_with(ds, lon=lon, lat=lat, level=None, query_delta=8, load=True)

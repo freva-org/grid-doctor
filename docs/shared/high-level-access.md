@@ -53,7 +53,7 @@ touches and return a small, loaded dataset:
 ```python
 import grid_doctor as gd
 
-berlin = gd.select_bbox(ds, lon=(13.1, 13.8), lat=(52.3, 52.7))
+berlin = ds.gd.select_bbox(lon=(13.1, 13.8), lat=(52.3, 52.7))
 station = gd.select_cone(ds, lon=13.41, lat=52.52, radius=0.05)  # degrees
 ```
 

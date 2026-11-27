@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 from .pyramid import create_healpix_pyramid
 from .remap import apply_weight_file, compute_healpix_weights, regrid_to_healpix
-from .select import select_cells
+from .select import _DEFAULT_QUERY_DELTA, select_bbox, select_cells
 from .types import (
     ApplyBackend,
     CoarsenMode,
@@ -476,6 +476,53 @@ class DatasetAccessor:
             self._ds,
             cells,
             level=level,
+            load=load,
+        )
+
+    def select_bbox(
+        self,
+        *,
+        lon: tuple[float, float],
+        lat: tuple[float, float],
+        level: int | None = None,
+        query_delta: int = _DEFAULT_QUERY_DELTA,
+        load: bool = True,
+    ) -> xr.Dataset:
+        """Extract all cells covering a geographic bounding box.
+
+            The box is rasterised at the coarse level ``level - query_delta``;
+        every coarse parent expands to one contiguous fine-level range of
+        ``4**query_delta`` cells.  The result therefore *covers* the box
+        (cells straddling the edge are included) with read granularity set
+        by *query_delta*; align it with the store's chunk exponent for
+        reads with zero waste.
+
+        Parameters
+        ----------
+        lon:
+            ``(west, east)`` longitude bounds in degrees.
+        lat:
+            ``(south, north)`` latitude bounds in degrees.
+        level:
+            HEALPix level override.
+        query_delta:
+            Level offset for the coverage query.  Larger values mean fewer,
+            larger contiguous reads; smaller values follow the box outline
+            more tightly.
+        load:
+            Load the selection into memory (default).
+
+        Returns
+        -------
+        xarray.Dataset
+            Compact subset covering the box.
+        """
+        return select_bbox(
+            self._ds,
+            lon=lon,
+            lat=lat,
+            level=level,
+            query_delta=query_delta,
             load=load,
         )
 

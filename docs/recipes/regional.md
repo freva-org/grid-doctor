@@ -167,7 +167,7 @@ which read only the chunks the box touches:
 ```python
 import grid_doctor as gd
 
-alps = gd.select_bbox(ds9, lon=(5.0, 16.0), lat=(43.0, 48.5))
+alps = ds9.gd.select_bbox(lon=(5.0, 16.0), lat=(43.0, 48.5))
 alps["tas"].mean("cell", skipna=True)                # Alpine-box mean
 ```
 
