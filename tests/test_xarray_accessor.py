@@ -144,3 +144,18 @@ def test_apply_weight_file_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> 
         ellipsoid=None,
         nest=None,
     )
+
+
+def test_select_cells_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset()
+    fake_select = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "select_cells", fake_select)
+    cells = [
+        42,
+        137,
+    ]
+
+    ds.gd.select_cells(cells)
+
+    # Confirm all the default values are passed through.
+    fake_select.assert_called_with(ds, cells, level=None, load=True)

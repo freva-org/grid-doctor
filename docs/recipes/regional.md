@@ -177,7 +177,7 @@ interpolation: select the same cells from both.
 
 ```python
 era5 = xr.open_zarr("s3://my-bucket/era5.zarr/level_9.zarr", chunks=None)
-era5_alps = gd.select_cells(era5, alps["cell"].values)
+era5_alps = era5.gd.select_cells(alps["cell"].values)
 bias = alps["tas"] - era5_alps["t2m"]                # cell by cell, exact
 ```
 

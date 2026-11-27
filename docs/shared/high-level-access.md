@@ -104,7 +104,7 @@ parents there, no interpolation needed:
 
 ```python
 parents = np.unique(berlin["cell"].values >> (2 * (16 - 9)))
-era5_berlin = gd.select_cells(era5_level9, parents)
+era5_berlin = era5_level9.gd.select_cells(parents)
 ```
 
 Datasets at the same level and with the same definition (sphere or

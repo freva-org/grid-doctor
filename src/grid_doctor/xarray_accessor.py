@@ -21,10 +21,12 @@ if TYPE_CHECKING:
 
 from .pyramid import create_healpix_pyramid
 from .remap import apply_weight_file, compute_healpix_weights, regrid_to_healpix
+from .select import select_cells
 from .types import (
     ApplyBackend,
     CoarsenMode,
     Ellipsoid,
+    Int64Array,
     MissingPolicy,
     RegridOptions,
     RemapMethod,
@@ -434,6 +436,47 @@ class DatasetAccessor:
             cell_chunks=cell_chunks,
             ellipsoid=ellipsoid,
             nest=nest,
+        )
+
+    def select_cells(
+        self,
+        cells: Int64Array | list[int],
+        *,
+        level: int | None = None,
+        load: bool = True,
+    ) -> xr.Dataset:
+        """Extract the given HEALPix cells from the dataset.
+
+            Works on dense datasets (positional index equals cell ID, with or
+        without materialised coordinates) and on compact subsets (``cell``
+        coordinate holds actual IDs).  Contiguous ID runs are read as
+        contiguous slices, so a spatially compact selection touches only
+        the chunks it needs.
+
+        Parameters
+        ----------
+        cells:
+            Global HEALPix cell IDs to extract (any order; duplicates are
+            dropped).
+        level:
+            HEALPix level override when the dataset has no HEALPix grid
+            mapping.
+        load:
+            Load the selected data into memory (default).  The selection is
+            small by construction; that is the point of selecting.
+
+        Returns
+        -------
+        xarray.Dataset
+            Compact subset: ``cell`` coordinate holds the requested IDs,
+            cell-centre ``latitude``/``longitude`` are attached, and the
+            subset is marked sparse.
+        """
+        return select_cells(
+            self._ds,
+            cells,
+            level=level,
+            load=load,
         )
 
 
