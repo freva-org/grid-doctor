@@ -92,7 +92,7 @@ them:
 import numpy as np
 
 part = ds.isel(cell=slice(start, stop))
-part = gd.attach_cell_coords(part, np.arange(start, stop), level=16)
+part = part.gd.attach_cell_coords(np.arange(start, stop), level=16)
 ```
 
 ## Comparing levels and datasets

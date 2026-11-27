@@ -11,6 +11,7 @@ reuses one and applies it.  Two methods are supported:
 
 from __future__ import annotations
 
+from collections.abc import Hashable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Unpack
 
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 
 from .pyramid import create_healpix_pyramid
 from .remap import apply_weight_file, compute_healpix_weights, regrid_to_healpix
-from .select import _DEFAULT_QUERY_DELTA, select_bbox, select_cells, select_cone
+from .select import _DEFAULT_QUERY_DELTA, attach_cell_coords, select_bbox, select_cells, select_cone
 from .types import (
     ApplyBackend,
     CoarsenMode,
@@ -540,8 +541,6 @@ class DatasetAccessor:
 
             Parameters
         ----------
-        ds:
-            HEALPix dataset (see [`select_cells`][grid_doctor.select_cells]).
         lon, lat:
             Centre coordinates in degrees.
         radius:
@@ -567,6 +566,38 @@ class DatasetAccessor:
             query_delta=query_delta,
             load=load,
         )
+
+    def attach_cell_coords(
+        self,
+        cells: Int64Array,
+        *,
+        level: int,
+        attrs: Mapping[Hashable, object] | None = None,
+    ) -> xr.Dataset:
+        """Attach computed cell coordinates to a compact subset.
+
+            HEALPix coordinates are a pure function of the cell index; stores
+        written with ``write_coords=False`` carry none, and this function
+        reconstructs them for exactly the cells at hand, on the ellipsoid
+        recorded in *ds* (the configured one if *ds* has no HEALPix metadata).
+
+        Parameters
+        ----------
+        cells:
+            Global HEALPix cell IDs, one per position along ``cell``.
+        level:
+            HEALPix level of the IDs.
+        attrs:
+            Optional attribute mapping to merge (e.g. the source store's
+            attributes).
+
+        Returns
+        -------
+        xarray.Dataset
+            Subset with ``cell``, ``latitude``, ``longitude``, and ``crs``
+            coordinates and grid-doctor metadata, marked sparse.
+        """
+        return attach_cell_coords(self._ds, cells, level=level, attrs=attrs)
 
 
 @xr.register_datatree_accessor(ACCESSOR_NAME)

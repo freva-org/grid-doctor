@@ -186,3 +186,19 @@ def test_select_cone_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Confirm all the default values are passed through.
     fake_select.assert_called_with(ds, lon=lon, lat=lat, radius=radius, level=None, query_delta=8, load=True)
+
+
+def test_attach_cell_coords_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset()
+    fake_attach = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "attach_cell_coords", fake_attach)
+    cells = [
+        42,
+        137,
+    ]
+    level = 7
+
+    ds.gd.attach_cell_coords(cells, level=level)
+
+    # Confirm all the default values are passed through.
+    fake_attach.assert_called_with(ds, cells, level=level, attrs=None)
