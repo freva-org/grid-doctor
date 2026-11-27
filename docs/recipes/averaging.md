@@ -25,8 +25,7 @@ import grid_doctor as gd
 
 # ds, level and weights_file as in the structured-grid recipe;
 # store is the output directory or s3:// URL
-pyramid = gd.create_healpix_pyramid(
-    ds,
+pyramid = ds.gd.create_healpix_pyramid(
     max_level=level,
     weights_path=weights_file,
     # land-sea masked SST: one cell-only fraction is enough;

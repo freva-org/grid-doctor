@@ -10,6 +10,7 @@ from unittest import mock
 import pytest
 import xarray as xr
 
+
 import grid_doctor as gd
 from grid_doctor import xarray_accessor
 from grid_doctor.xarray_accessor import DatasetAccessor, DataTreeAccessor
@@ -66,4 +67,80 @@ def test_regrid_to_healpix_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> 
         spectral_transform_command=None,
         cell_chunks="auto",
         ellipsoid=None,
+    )
+
+
+def test_create_healpix_pyramid_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    min_level = 1
+    ds = xr.Dataset()
+    fake_create = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "create_healpix_pyramid", fake_create)
+
+    ds.gd.create_healpix_pyramid(
+        max_level=None,
+        min_level=min_level,
+    )
+
+    # Confirm all the default values are passed through.
+    fake_create.assert_called_with(
+        ds,
+        max_level=None,
+        min_level=min_level,
+        coarsen_mode="auto",
+        min_valid_fraction=0.5,
+        valid_fraction=False,
+    )
+
+
+def test_compute_healpix_weights_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    level = 1
+    ds = xr.Dataset()
+    fake_compute = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "compute_healpix_weights", fake_compute)
+
+    ds.gd.compute_healpix_weights(level)
+
+    # Confirm all the default values are passed through.
+    fake_compute.assert_called_with(
+        ds,
+        1,
+        method="conservative",
+        nest=True,
+        source_units="auto",
+        weights_path=None,
+        grid=None,
+        source_kind="auto",
+        ignore_unmapped=None,
+        large_file=True,
+        prefer_offline=None,
+        nproc=1,
+        esmf_regrid_weightgen="ESMF_RegridWeightGen",
+        keep_intermediates=False,
+        workdir=None,
+        spectral_transform_command=None,
+        ellipsoid=None,
+        source_description=None,
+    )
+
+
+def test_apply_weight_file_passes_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    weights_path = "no/where"
+    ds = xr.Dataset()
+    fake_apply = mock.MagicMock()
+    monkeypatch.setattr(xarray_accessor, "apply_weight_file", fake_apply)
+
+    ds.gd.apply_weight_file(weights_path)
+
+    # Confirm all the default values are passed through.
+    fake_apply.assert_called_with(
+        ds,
+        weights_path=weights_path,
+        missing_policy="renormalize",
+        grid=None,
+        source_dims=None,
+        source_units="auto",
+        backend="auto",
+        cell_chunks="auto",
+        ellipsoid=None,
+        nest=None,
     )

@@ -27,7 +27,7 @@ weights_file = gd.cached_weights(
 )
 
 # 3. Convert
-pyramid = gd.create_healpix_pyramid(ds, max_level=level, weights_path=weights_file)
+pyramid = ds.gd.create_healpix_pyramid(max_level=level, weights_path=weights_file)
 
 # 4. Write
 gd.save_pyramid(
@@ -52,8 +52,7 @@ so that averages over coarse levels stay consistent with the finest one
 (see [Coarsening and averaging masked fields](averaging.md) for how to use them):
 
 ```python
-pyramid = gd.create_healpix_pyramid(
-    ds,
+pyramid = ds.gd.create_healpix_pyramid(
     max_level=level,
     weights_path=weights_file,
     # land-sea masked SST: one cell-only fraction is enough;
@@ -83,7 +82,7 @@ gd_cli.setup_logging_from_args(args)
 
 ds = xr.open_mfdataset(args.files)
 weights_file = gd.cached_weights(ds, store=args.weights_store, nproc=4, prefer_offline=True)
-pyramid = gd.create_healpix_pyramid(ds, weights_path=weights_file)
+pyramid = ds.gd.create_healpix_pyramid(weights_path=weights_file)
 gd.save_pyramid(
     pyramid,
     f"s3://{args.s3_bucket}/era5",
