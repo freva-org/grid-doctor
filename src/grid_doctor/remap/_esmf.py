@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from ..weights import SourceDescription
 
+from .. import config as _settings
 from .._geometry.healpix import _ellipsoid_or_config
 from .._geometry.mesh import (
     PolygonMesh,
@@ -90,6 +91,22 @@ class OfflineWeightConfig:
         if os.getenv("SLURM_JOB_ID") is not None:
             return "srun"
         return "mpirun"
+
+
+def resolve_esmf_regrid_weightgen(name: str | None) -> str:
+    """Return *name*, or the configured ``ESMF_RegridWeightGen`` if ``None``."""
+    if name is not None:
+        return name
+    return str(_settings.esmf_regrid_weightgen or "ESMF_RegridWeightGen")
+
+
+def _scratch_dir() -> str | None:
+    """Return ``grid_doctor.config.scratch_dir``, created if missing, or ``None``."""
+    if _settings.scratch_dir is None:
+        return None
+    scratch = Path(_settings.scratch_dir)
+    scratch.mkdir(parents=True, exist_ok=True)
+    return str(scratch)
 
 
 # ===================================================================
@@ -609,7 +626,8 @@ def _esmf_version(offline: bool, config: OfflineWeightConfig) -> str:
         except importlib.metadata.PackageNotFoundError:
             return "unknown"
     try:
-        with tempfile.TemporaryDirectory() as scratch:  # ESMF writes PET*.Log files into its working dir
+        # ESMF writes PET*.Log files into its working directory.
+        with tempfile.TemporaryDirectory(dir=_scratch_dir()) as scratch:
             out = subprocess.run(
                 [config.esmf_regrid_weightgen, "--version"], capture_output=True, text=True, timeout=60, cwd=scratch
             ).stdout
@@ -664,7 +682,7 @@ def _run_offline_esmf(
         raise FileNotFoundError(f"Could not find MPI launcher {config.mpirun!r} in PATH.")
 
     if config.workdir is None:
-        workdir = Path(tempfile.mkdtemp(prefix="grid_doctor_esmf_"))
+        workdir = Path(tempfile.mkdtemp(prefix="grid_doctor_esmf_", dir=_scratch_dir()))
     else:
         workdir = config.workdir
         workdir.mkdir(parents=True, exist_ok=True)

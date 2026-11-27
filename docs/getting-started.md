@@ -48,8 +48,59 @@ The finest level follows from the resolution of the source grid; pass
 `max_level=` to choose it yourself. `save_pyramid` writes one Zarr store
 per level, `level_0.zarr`, `level_1.zarr`, …, below `/path/to/output`. The weights are computed on
 the first run and reused from the [weights store](api/weights.md) on
-every later run with the same grid. Set `GRID_DOCTOR_WEIGHTS_STORE` to
-share them with others, see [Configuration](api/config.md).
+every later run with the same grid. To share them with others, point the
+`weights_store` setting at a common directory, see
+[Configuration](#configuration).
+
+## Configuration
+
+Some settings belong to your machine rather than to a single call: where
+weights are kept, which `ESMF_RegridWeightGen` to run, where temporary
+files go, and the ellipsoid of new grids. Set them once in a config file
+instead of passing them every time. Write your config file from a template
+that lists every setting, commented out at its default:
+
+```console
+python -m grid_doctor.config.template
+```
+
+It lands in your user config directory (`~/.config/grid-doctor/config.toml`
+on Linux). Uncomment and edit the lines you need, or set them from the
+command line. On an HPC system, where the home directory usually has a small
+quota, that could be:
+
+```console
+python -m grid_doctor.config.template \
+    --set weights_store=/work/ab1234/grid-doctor/weights \
+    --set scratch_dir=/scratch/a/ab1234/grid-doctor
+```
+
+A conda environment shared by a project can carry its own file, which
+applies to everyone using the environment. Your own file overrides it key by
+key:
+
+```console
+python -m grid_doctor.config.template -o "$CONDA_PREFIX/etc/grid-doctor"
+```
+
+For a single job, environment variables override both files, e.g.
+`GRID_DOCTOR_WEIGHTS_STORE=/tmp/weights python convert.py ...`. In Python,
+`gd.config.set` changes settings from a file or one by one, for the rest of
+the session or, with `with`, only for a block:
+
+```python
+import grid_doctor as gd
+
+gd.config.set("project.toml")            # until changed
+with gd.config.set(scratch_dir="/tmp/gd"):
+    ...                                  # restored after the block
+
+print(gd.config.get())                   # all settings in effect
+print(gd.config.loaded_files)            # the config files in effect
+```
+
+All settings and the full order in which they are resolved are listed on
+the [Configuration](api/config.md) page.
 
 ## Writing to S3
 

@@ -50,7 +50,7 @@ Region: TypeAlias = "dict[str, slice[int | None, int | None, int | None]]"
 ZarrStore: TypeAlias = str | MutableMapping[str, bytes]
 """Where a zarr store lives: a local path or an fsspec mapping (S3)."""
 
-ZarrArray: TypeAlias = zarr.Array[ArrayV2Metadata] | zarr.Array[ArrayV3Metadata]
+ZarrArray: TypeAlias = "zarr.Array[ArrayV2Metadata] | zarr.Array[ArrayV3Metadata]"
 """A zarr array of format 2 or 3."""
 
 # ---------------------------------------------------------------------
@@ -140,7 +140,7 @@ class WeightOptions(TypedDict, total=False):
     large_file: bool
     prefer_offline: bool | None
     nproc: int
-    esmf_regrid_weightgen: str
+    esmf_regrid_weightgen: str | None
     keep_intermediates: bool
     workdir: str | Path | None
     spectral_transform_command: list[str] | tuple[str, ...] | None
